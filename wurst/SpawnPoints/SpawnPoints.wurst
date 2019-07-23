@@ -1,0 +1,132 @@
+package SpawnPoints
+import public LinkedList
+import GroupUtils
+import WeightedSet
+
+@configurable constant int SPAWN_POINT_UNIT_ID = 'h00I'
+
+public SpawnPointManager g_spawnPointManager
+
+// ============================================================================
+// ISpawnPoint
+// ============================================================================
+public interface ISpawnPoint
+  function getName() returns string
+  function getPosition() returns vec2
+  function getIsEnabled() returns bool
+
+// ============================================================================
+// SpawnPoint
+// ============================================================================
+public class SpawnPoint implements ISpawnPoint
+  private vec2 pos
+  private string name
+  private bool isEnabled
+
+  construct(string name, vec2 pos)
+    this.name = name
+    this.pos = pos
+
+  override function getName() returns string
+    return this.name
+
+  override function getPosition() returns vec2
+    return this.pos
+
+  override function getIsEnabled() returns bool
+    return this.isEnabled
+
+// ============================================================================
+// SpawnPointList
+// ============================================================================
+public class SpawnPointList extends LinkedList<ISpawnPoint>
+
+// ============================================================================
+// ISpawnPointManager
+// ============================================================================
+public interface ISpawnPointManager
+  function iterator() returns LLIterator<ISpawnPoint>
+  function getRandomSpawnPointInRange(vec2 pos, real range) returns ISpawnPoint
+  function getRandomSpawnPointsInRange(vec2 pos, real range, int count) returns SpawnPointList
+
+// ============================================================================
+// SpawnPointManager
+// ============================================================================
+public class SpawnPointManager
+  private SpawnPointList spawnPoints
+
+  construct()
+    this.spawnPoints = new SpawnPointList()
+
+  function registerSpawnPointUnit(unit u)
+    let sp = new SpawnPoint(u.getName(), u.getPos())
+    this.spawnPoints.add(sp)
+    u.remove()
+
+  function iterator() returns LLIterator<ISpawnPoint>
+    return this.spawnPoints.iterator()
+
+  function getRandomSpawnPointInRange(vec2 pos, real range) returns ISpawnPoint
+    return getRandomSpawnPointInRangeFromList(spawnPoints, pos, range)
+
+  function getRandomSpawnPointsInRange(vec2 pos, real range, int count) returns SpawnPointList
+    return getRandomSpawnPointsInRangeFromList(spawnPoints, pos, range, count)
+
+  protected function size() returns int
+    return this.spawnPoints.size()
+
+/** Picks a random spawn point in range of a position from a given list */
+public function getRandomSpawnPointInRangeFromList(SpawnPointList list, vec2 pos, real range) returns ISpawnPoint
+  var weightedSet = new WeightedSet<ISpawnPoint>()
+  let rr = range * range
+
+  for sp in list
+    var dd = sp.getPosition().distanceToSq(pos)
+    if (dd < rr)
+      weightedSet.add(sp, (rr - dd) / rr)
+
+  ISpawnPoint pickedSp
+
+  if (weightedSet.isEmpty())
+    pickedSp = list.getFirst()
+  else
+    pickedSp = weightedSet.getRandom()
+
+  destroy weightedSet
+
+  return pickedSp
+
+/** Picks random N spawn points in range of a position from a given list */
+public function getRandomSpawnPointsInRangeFromList(SpawnPointList list, vec2 pos, real range, int count) returns SpawnPointList
+  var weightedSet = new WeightedSet<ISpawnPoint>()
+  let rr = range * range
+
+  for sp in list
+    var dd = sp.getPosition().distanceToSq(pos)
+    if (dd < rr)
+      weightedSet.add(sp, (rr - dd) / rr)
+
+  var pickedSpList = new SpawnPointList()
+
+  for i = 0 to count
+    pickedSpList.push(weightedSet.getRandom())
+
+  destroy weightedSet
+
+  return pickedSpList
+
+// ============================================================================
+// Registers all spawn points that exist at map startup
+// ============================================================================
+function registerAllSpawnPoints()
+  let ug = GetUnitsOfTypeIdAll(SPAWN_POINT_UNIT_ID)
+  for u in ug
+    if (u.getTypeId() == SPAWN_POINT_UNIT_ID)
+      g_spawnPointManager.registerSpawnPointUnit(u)
+
+  ug.destr()
+  print("Spawn points: " + I2S(g_spawnPointManager.size()))
+
+init
+  g_spawnPointManager = new SpawnPointManager()
+  registerAllSpawnPoints()

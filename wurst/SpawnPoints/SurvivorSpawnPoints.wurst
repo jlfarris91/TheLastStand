@@ -1,0 +1,61 @@
+package SurvivorSpawnPoints
+import SpawnPoints
+import GroupUtils
+import TimerUtils
+import GameConstants
+import HumanPlayers
+
+constant real SPAWN_POINT_UPDATE_INTERVAL = 2.0
+constant real TEST_RADIUS = 512.0
+
+public SurvivorSpawnPointManager g_survivorSpawnPointManager
+
+// ============================================================================
+// SurvivorSpawnPointManager
+// ============================================================================
+public class SurvivorSpawnPointManager
+  private SpawnPointManager sourceManager
+  private SpawnPointList spawnPoints
+
+  construct(SpawnPointManager sourceManager)
+    this.sourceManager = sourceManager
+    this.spawnPoints = new SpawnPointList()
+
+  function iterator() returns LLIterator<ISpawnPoint>
+    return this.spawnPoints.iterator()
+
+  function getRandomSpawnPointInRange(vec2 pos, real range) returns ISpawnPoint
+    return getRandomSpawnPointInRangeFromList(spawnPoints, pos, range)
+
+  function getRandomSpawnPointsInRange(vec2 pos, real range, int count) returns SpawnPointList
+    return getRandomSpawnPointsInRangeFromList(spawnPoints, pos, range, count)
+
+  protected function updateSpawnPoints()
+    this.spawnPoints.clear()
+    for sp in sourceManager
+      this.updateSpawnPoint(sp)
+    print("Survivor spawn points: " + I2S(this.spawnPoints.size()))
+
+  private function updateSpawnPoint(ISpawnPoint sp)
+    let ug = getGroup()
+    ug.enumUnitsInRange(sp.getPosition(), TEST_RADIUS)
+    
+    var isValidForUndead = true
+
+    for u in ug
+      if (u.isAlive() and (u.isEnemyOf(g_villagersPlayer) or g_HumanPlayers.containsPlayer(u.getOwner())))
+        isValidForUndead = false
+
+    if (isValidForUndead)
+      this.spawnPoints.add(sp)
+
+    ug.release()
+
+function updateSpawnPoints()
+  g_survivorSpawnPointManager.updateSpawnPoints()
+
+init
+  g_survivorSpawnPointManager = new SurvivorSpawnPointManager(g_spawnPointManager)
+
+  var t = getTimer()
+  t.startPeriodic(SPAWN_POINT_UPDATE_INTERVAL, function updateSpawnPoints)

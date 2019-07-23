@@ -1,0 +1,249 @@
+package WeightedSet
+
+/**
+*  A set containing elements with associated weights
+*/
+public class WeightedSet<T>
+  protected WeightedSetEntry<T> head = null
+  protected WeightedSetEntry<T> tail = null
+  private int size
+  private real totalWeight
+
+  construct()
+    head = null
+    tail = null
+    size = 0
+
+  function size() returns int
+    return this.size
+
+  /** Adds an element to the set */
+  function add(T elem, real weight)
+    this.addEntry(new WeightedSetEntry<T>(elem, weight))
+
+  /** Tries to remove an element from the set */
+  function remove(T elem) returns bool
+    if (this.head == null or this.tail == null)
+      return false
+    let entry = this.findEntry(elem)
+    return removeEntry(entry)
+
+  function clear()
+    var current = this.head
+    while current != null
+      var next = current.next
+      destroy current
+      current = next
+    this.head = null
+    this.tail = null
+    this.size = 0
+
+  function isEmpty() returns bool
+    return this.size == 0
+
+  function getRandom() returns T
+    var r = GetRandomReal(0, this.totalWeight)
+    var entry = this.head
+    while head != null
+      if (r >= 0.0 and r < entry.weight)
+        return entry.elem
+      entry = entry.next
+      r -= entry.weight
+    return null
+
+  /** Gets an iterator that can be used to iterate through the elements in the set */
+  function iterator() returns WeightedSetIterator<T>
+    return new WeightedSetIterator<T>(this)
+    
+  protected function findEntry(T elem) returns WeightedSetEntry<T>
+    var entry = this.head
+    while entry != null
+      if (entry.elem == elem)
+        return entry
+      entry = entry.next
+    return null
+
+  protected function addEntry(WeightedSetEntry<T> entry)
+    if (this.head == null)
+      this.head = entry
+      this.tail = this.head
+    else
+      let oldTail = this.tail
+      this.tail = entry
+      this.tail.prev = oldTail
+      oldTail.next = this.tail
+    
+    this.size++
+    this.totalWeight += entry.weight
+
+  protected function removeEntry(WeightedSetEntry<T> entry) returns bool
+    if (entry == null)
+      return false      
+
+    if (entry == this.head)
+      this.head = this.head.next
+      this.head.prev = null
+
+    if (entry == this.tail)
+      this.tail = this.tail.prev
+      this.tail.next = null
+
+    this.totalWeight -= entry.weight
+    this.size--
+    destroy entry
+
+    return true
+
+class WeightedSetEntry<T>
+  T elem
+  real weight
+  protected thistype prev
+  protected thistype next
+  
+  construct(T elem, real weight)
+    this.elem = elem
+    this.weight = weight
+
+public class WeightedSetIterator<T>
+  private WeightedSet<T> weightedSet
+  private WeightedSetEntry<T> current
+  private bool hasMovedOnce
+
+  construct(WeightedSet<T> weightedSet)
+    this.weightedSet = weightedSet
+    this.reset()
+
+  function reset()
+    this.current = this.weightedSet.head
+    this.hasMovedOnce = false
+
+  function hasNext() returns bool
+    return this.current != null and this.current.next != null
+  
+  function next() returns T
+    if (this.hasMovedOnce)
+      this.current = this.current.next
+    this.hasMovedOnce = true
+    return this.current.elem
+
+  function close()
+    destroy this
+
+// ============================================================================
+//
+// Tests
+//
+// ============================================================================
+
+@test public function add_SetsHeadAndTail()
+  // arrange
+  let weightedSet = new WeightedSet<int>()
+
+  // act
+  weightedSet.add(1, 1.0)
+
+  // assert
+  assertNotNull(weightedSet.head)
+  assertTrue(weightedSet.head.elem == 1)
+  assertTrue(weightedSet.head.weight == 1.0)
+  assertNotNull(weightedSet.tail)
+  assertTrue(weightedSet.tail.elem == 1)
+  assertTrue(weightedSet.tail.weight == 1.0)
+
+@test public function add_AddsEntryToEnd()
+  // arrange
+  let weightedSet = new WeightedSet<int>()
+  weightedSet.add(1, 1.0)
+  weightedSet.add(2, 2.0)
+
+  // act
+  weightedSet.add(3, 3.0)
+
+  // assert
+  assertNotNull(weightedSet.head)
+  assertTrue(weightedSet.head.elem == 1)
+  assertTrue(weightedSet.head.weight == 1.0)
+  assertNotNull(weightedSet.tail)
+  assertTrue(weightedSet.tail.elem == 3)
+  assertTrue(weightedSet.tail.weight == 3.0)
+
+@test public function add_IncreasesCount()
+  // arrange
+  let weightedSet = new WeightedSet<int>()
+
+  // act
+  weightedSet.add(1, 1.0)
+  weightedSet.add(2, 2.0)
+  weightedSet.add(3, 3.0)
+
+  // assert
+  assertTrue(weightedSet.size() == 3)
+
+@test public function remove_SetsHead()
+  // arrange
+  let weightedSet = new WeightedSet<int>()
+  weightedSet.add(1, 1.0)
+  weightedSet.add(2, 2.0)
+  weightedSet.add(3, 3.0)
+
+  // act
+  weightedSet.remove(1)
+  
+  // assert
+  assertNotNull(weightedSet.head)
+  assertTrue(weightedSet.head.elem == 2)
+  assertTrue(weightedSet.head.weight == 2.0)
+
+@test public function remove_SetsTail()
+  // arrange
+  let weightedSet = new WeightedSet<int>()
+  weightedSet.add(1, 1.0)
+  weightedSet.add(2, 2.0)
+  weightedSet.add(3, 3.0)
+
+  // act
+  weightedSet.remove(3)
+  
+  // assert
+  assertNotNull(weightedSet.tail)
+  assertTrue(weightedSet.tail.elem == 2)
+  assertTrue(weightedSet.tail.weight == 2.0)
+  
+@test public function remove_DecreasesCount()
+  // arrange
+  let weightedSet = new WeightedSet<int>()
+  weightedSet.add(1, 1.0)
+  weightedSet.add(2, 2.0)
+  weightedSet.add(3, 3.0)
+
+  // act
+  weightedSet.remove(2)
+  
+  // assert
+  assertTrue(weightedSet.size() == 2)
+
+@test public function iterator()
+  // arrange
+  let weightedSet = new WeightedSet<int>()
+  weightedSet.add(1, 1.0)
+  weightedSet.add(2, 2.0)
+  weightedSet.add(3, 3.0)
+
+  // act + assert
+  var i = 1
+  for elem in weightedSet
+    assertTrue(elem == i)
+    i++
+
+@test public function getRandom()
+  // arrange
+  let weightedSet = new WeightedSet<int>()
+  weightedSet.add(1, 1.0)
+  weightedSet.add(2, 2.0)
+  weightedSet.add(3, 3.0)
+
+  // act
+  var elem = weightedSet.getRandom()
+  
+  // assert
+  assertTrue(elem == 1 or elem == 2 or elem == 3)
