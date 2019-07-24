@@ -1,0 +1,50 @@
+package Heroes
+import HumanPlayers
+import SurvivorSpawnPoints
+import PlayerMetadata
+import ErrorHandling
+import GameConstants
+
+constant string MODEL_PATH_BACKPACK = "war3mapImported\\BackPack2.mdx"
+
+public function spawnHeroForPlayer(player p, vec2 pos)
+  unit hero = p.getHeroUnit()
+  
+  if (hero != null)
+    hero.remove()
+
+  p.setIsDeceased(false)
+  
+  hero = CreateUnit(p, UNIT_ID_HERO_SURVIVOR, pos.x, pos.y, GetRandomDirectionDeg())
+  p.setHeroUnit(hero)
+
+  // Create the effect that makes it look like the hero is wearing a backpack
+  AddSpecialEffectTarget(MODEL_PATH_BACKPACK, hero, "chest")
+
+  // FIXME: prevent hero xp gain
+  SuspendHeroXP(hero, true)
+  SetPlayerHandicapXP(p, 0.0)
+
+  // Reset player's camera to look at new hero
+  if (p == GetLocalPlayer())
+    PanCameraToTimedForPlayer(p, pos.x, pos.y, 0)
+  
+  SelectUnitForPlayerSingle(hero, p)
+
+  // TODO: reset player trackables, score, etc
+  // TriggerExecute( gg_trg_ResetPlayerScores )
+  // TriggerExecute( gg_trg_ResetTrackablesForPlayer )
+  // TriggerExecute( gg_trg_EnableTrackingForPlayer )
+  // ConditionalTriggerExecute( gg_trg_ShowPlayerStatsBoardForPlayer )
+
+public function spawnHeroForPlayerAtRandomPoint(player p)
+  var sp = g_SurvivorSpawnPointManager.getRandomSpawnPoint()
+  if (sp == null)
+    error("Could not find a safe spawn point to spawn hero for player " + p.getName())
+  spawnHeroForPlayer(p, sp.getPosition())
+
+public function spawnHeroesForPlayers()
+  print("spawning heroes for players")
+  g_SurvivorSpawnPointManager.updateSpawnPointsNow()
+  for p in g_PlayingHumanPlayers
+    spawnHeroForPlayerAtRandomPoint(p)

@@ -1,0 +1,122 @@
+package Day
+import GameConstants
+import GameInstance
+import SurvivorSpawnPoints
+import GroupUtils
+import Zombies
+import HumanPlayers
+import PlayerMetadata
+import GameSettings
+import Camp
+import UndeadSpawnPoints
+import Heroes
+
+trigger g_OnDayTrigger
+
+function spawnItemsNearPlayer(player p)
+  if (p.isHeroDead())
+    return
+  
+  var camp = p.getCamp()
+  var center = camp.getCenter()
+
+  for i = 0 to GameSettings.items_DaySpawnCountPerPlayer
+    var r = GetRandomDirectionDeg() * DEGTORAD
+    var l = GetRandomReal(GameSettings.items_DaySpawnMinRadius, GameSettings.items_DaySpawnMaxRadius)
+    var x = center.x + Cos(r) * l
+    var y = center.y + Sin(r) * l
+    // TODO: item library create random item
+
+
+function spawnItemsNearPlayers()
+  g_PlayingHumanPlayers.forEach() (player p) ->
+    spawnItemsNearPlayer(p)
+
+function spawnDayZombiesNearPlayer(player p)
+  if (p.isHeroDead())
+    return
+  
+  var camp = p.getCamp()
+  var center = camp.getCenter()
+
+  var spawnPoints = g_UndeadSpawnPointManager.getRandomSpawnPointsInRange(center, DAY_ZOMBIES_SPAWN_RANGE, GameSettings.zombies_DaySpawnCountPerPlayer)
+
+  for sp in spawnPoints
+    // TODO: unit recycler
+    CreateUnit(PLAYER_UNDEAD, UNIT_ID_DAY_ZOMBIE, sp.getPosition().x, sp.getPosition().y, GetRandomDirectionDeg())
+
+    if (GetRandomReal(0.0, 1.0) > SURVIVORS_ITEM_CHANCE)
+      // TODO: create random item and give to zombie
+      // UnitAddItemSwapped(bj_lastCreatedItem, zombie)
+
+  destroy spawnPoints
+
+function spawnDayZombiesNearPlayers()
+  g_PlayingHumanPlayers.forEach() (player p) ->
+    spawnDayZombiesNearPlayer(p)
+
+function spawnSurvivorsNearPlayer(player p)
+  if (p.isHeroDead())
+    return
+  
+  var camp = p.getCamp()
+  var center = camp.getCenter()
+
+  var spawnPoints = g_SurvivorSpawnPointManager.getRandomSpawnPointsInRange(center, SURVIVORS_SPAWN_RANGE, GameSettings.survivors_SpawnCountPerPlayer)
+
+  for sp in spawnPoints
+    CreateUnit(PLAYER_VILLAGERS, UNIT_ID_UNRESCUED_SURVIVOR, sp.getPosition().x, sp.getPosition().y, GetRandomDirectionDeg())
+
+    if (GetRandomReal(0.0, 1.0) > SURVIVORS_ITEM_CHANCE)
+      // TODO: create random item and give to survivor
+      // UnitAddItemSwapped(bj_lastCreatedItem, survivor)
+
+function spawnSurvivorsNearPlayers()
+  g_PlayingHumanPlayers.forEach() (player p) ->
+    spawnSurvivorsNearPlayer(p)
+
+function respawnDeadPlayers()
+  g_PlayingHumanPlayers.forEach() (player p) ->
+    if (p.isHeroDead())
+      spawnHeroForPlayerAtRandomPoint(p)
+
+  // TODO: set player name back to normal
+
+function killAllUndead()
+  var ug = getGroup()
+  ug.enumUnitsOfPlayer(PLAYER_UNDEAD, null)
+  for u in ug
+    u.kill()
+  ug.release()
+
+function onDayStart()
+  GameInstance.days++
+
+  PlaySoundBJ(gg_snd_QuestCompleted)
+
+  Zombies.stopSpawning()
+  killAllUndead()
+  spawnItemsNearPlayers()
+  spawnDayZombiesNearPlayers()
+
+  // Must be called before spawning survivors
+  g_SurvivorSpawnPointManager.updateSpawnPointsNow()
+
+  respawnDeadPlayers()
+  spawnSurvivorsNearPlayers()
+  
+  // TODO: g_LootablesManager.updateDaysUntilCanLoot()
+
+  // TODO: update player stats multiboard
+
+  if (GameInstance.days > 1)
+    GameInstance.nights++
+
+  // Have to wait for some reason
+  TriggerSleepAction(1.0)
+  SetTimeOfDayScalePercentBJ(GAME_SPEED_DAY)
+
+init
+  g_OnDayTrigger = CreateTrigger()
+  g_OnDayTrigger.registerGameStateEvent(GAME_STATE_TIME_OF_DAY, EQUAL, TIME_OF_DAY)
+  g_OnDayTrigger.addAction(function onDayStart)

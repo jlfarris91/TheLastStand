@@ -1,0 +1,115 @@
+package Camp
+import HashMap
+import HashList
+import HumanPlayers
+import RegisterEvents
+import UnitExtensions
+import GameConstants
+import ErrorHandling
+import PlayerMetadata
+
+HashMap<player, Camp> g_PlayerCamps
+
+public class Camp
+  player owner
+  HashList<unit> survivors
+  HashList<unit> structures
+  unit flag
+  int worth
+
+  construct(player owner)
+    this.owner = owner
+    this.survivors = new HashList<unit>()
+    this.structures = new HashList<unit>()
+    this.reset()
+
+  function reset()
+    this.survivors.clear()
+    this.structures.clear()
+    setCampUnit(null)
+
+  function getOwner() returns player
+    return this.owner
+
+  function getCampUnit() returns unit
+    return this.flag
+
+  function setCampUnit(unit flag)
+    if (flag != null and flag.getTypeId() != UNIT_ID_CAMP)
+      error("Tried to assign a camp unit that was the incorrect type")
+      return
+    if (this.flag != null)
+      this.flag.remove()
+    this.flag = flag
+
+  function getCenter() returns vec2
+    if (flag != null)
+      return flag.getPos()
+    else if (owner.getHeroUnit() != null)
+      return owner.getHeroUnit().getPos()
+    return ZERO2
+
+  function addSurvivor(unit survivor)
+    this.survivors.add(survivor)
+
+  function removeSurvivor(unit survivor)
+    this.survivors.remove(survivor)
+
+  function addStructure(unit structure)
+    this.structures.add(structure)
+
+  function removeStructure(unit structure)
+    this.structures.remove(structure)
+
+public function player.getCamp() returns Camp
+  return getPlayerCamp(this)
+
+function getPlayerCamp(player p) returns Camp
+  return g_PlayerCamps.get(p)
+
+function createCamp(player p)
+  var camp = new Camp(p)
+  g_PlayerCamps.put(p, camp)
+
+function onPlayerUnitDeath()
+  var dyingUnit = GetDyingUnit()
+  var owner = dyingUnit.getOwner()
+  var camp = owner.getCamp()
+  if (camp == null)
+    return
+  if (dyingUnit.isStructure())
+    camp.removeStructure(dyingUnit)
+  else if (not dyingUnit.isHero())
+    camp.removeSurvivor(dyingUnit)
+
+/** Registers a recently constructed structure to the player that built it */
+function onPlayerUnitConstructFinished()
+  var structure = GetConstructedStructure()
+  var camp = structure.getOwner().getCamp()
+  if (camp != null and structure.getTypeId() != UNIT_ID_CAMP_FLAG)
+    camp.addStructure(structure)
+
+/** Registers a recently rescued survivor to the player */
+function onPlayerUnitChangedOwner()
+  var u = GetChangingUnit()
+  var prevOwner = GetChangingUnitPrevOwner()
+  var currOwner = u.getOwner()
+  // Survivor was rescued
+  if (prevOwner == PLAYER_VILLAGERS and u.getTypeId() == UNIT_ID_UNRESCUED_SURVIVOR)
+    var camp = currOwner.getCamp()
+    if (camp != null)
+      camp.addSurvivor(u)
+
+function initializePlayerCamp(player p)
+  createCamp(p)
+  registerPlayerUnitEventForPlayer(EVENT_PLAYER_UNIT_CONSTRUCT_FINISH, function onPlayerUnitConstructFinished, p)
+  registerPlayerUnitEventForPlayer(EVENT_PLAYER_UNIT_DEATH, function onPlayerUnitDeath, p)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_CHANGE_OWNER, function onPlayerUnitChangedOwner)
+
+function initializePlayerCamps()
+  for p in g_PlayingHumanPlayers
+    initializePlayerCamp(p)
+
+init
+  g_PlayerCamps = new HashMap<player, Camp>()
+  initializePlayerCamps()
