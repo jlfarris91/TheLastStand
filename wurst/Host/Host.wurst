@@ -1,0 +1,44 @@
+package Host
+import GameConstants
+import PlayerExtensions
+import RegisterEvents
+import DisplayTextToPlayer
+
+public player g_HostPlayer
+public unit g_HostAdminUnit
+
+public function player.isHost() returns bool
+  return this == g_HostPlayer
+
+public function findHostPlayer()
+  let oldHostPlayer = g_HostPlayer
+  for i = 0 to MAX_NUMBER_OF_PLAYERS - 1
+    let p = Player(i)
+    if (p.isPlaying() and p.isControlledByUser())
+      g_HostPlayer = p
+      if (g_HostPlayer != oldHostPlayer)
+        initializeHostPlayer()
+      break
+
+function initializeHostPlayer()
+  if (g_HostPlayer == null)
+    findHostPlayer()
+  
+  if (g_HostAdminUnit == null)
+    var pos = gg_rct_BaseUnits.randomPoint()
+    g_HostAdminUnit = CreateUnit(g_HostPlayer, UNIT_ID_ADMIN, pos.x, pos.y, bj_UNIT_FACING)
+  else
+    g_HostAdminUnit.setOwner(g_HostPlayer, true)
+
+  displayTextToPlayer(g_HostPlayer, "You are the host")
+  displayTextToAllExceptPlayer(g_HostPlayer, g_HostPlayer.getNameColored() + " is the host")
+
+function onAnyPlayerLeaves()
+  let p = GetTriggerPlayer()
+  if (p == g_HostPlayer)
+    findHostPlayer()
+    initializeHostPlayer()
+
+init
+  findHostPlayer()
+  registerPlayerEvent(EVENT_PLAYER_LEAVE, function onAnyPlayerLeaves)

@@ -1,7 +1,141 @@
 package Zombies
+import GroupUtils
+import GameConstants
+import HumanPlayers
+import PlayerMetadata
+import UndeadSpawnPoints
+import Camp
+import GameSettings
+import HashMap
+import HashList
+import UnitExtensions
+import RegisterEvents
+import FX
+
+timer g_SpawnTimer
+HashMap<player, PlayerZombieMetadata> g_PlayerMetadata
+HashMap<unit, ZombieMetadata> g_ZombieMetadata
 
 public class Zombies
 
   static function stopSpawning()
+    g_SpawnTimer.pause()
 
   static function startSpawning()
+    g_SpawnTimer.startPeriodic(ZOMBIES_SPAWN_INTERVAL, function spawnZombiesNearPlayers)
+  
+  static function killAllUndead()
+    var ug = getGroup()
+    ug.enumUnitsOfPlayer(PLAYER_UNDEAD, null)
+    for u in ug
+      u.kill()
+    ug.release()
+
+function getClosestZombieTarget(player p, vec2 pos) returns unit
+  var distance = 100000000.0
+  var camp = p.getCamp()
+  var isSecure = camp.getIsSecure()
+  unit target = null
+
+  var ug = getGroup()
+  ug.enumUnitsOfPlayer(p, null)
+
+  for u in ug
+    if (((isSecure and u.isStructure()) or (not isSecure and not u.isStructure())) and not u.isInvulnerable())
+      var d = u.getPos().distanceToSq(pos)
+      if (d < distance)
+        target = u
+        distance = d    
+
+  if (target == null)
+    target = p.getHeroUnit()
+
+  return target
+
+function spawnZombieNearPlayer(player p, vec2 pos) returns unit
+  var zombie = CreateUnit(PLAYER_UNDEAD, UNIT_ID_NIGHT_ZOMBIE, pos.x, pos.y, GetRandomDirectionDeg())
+  zombie.setScale(GetRandomReal(80.0, 120.0))
+  zombie.setAnimation("birth")
+  zombie.setMoveSpeed(zombie.getMoveSpeed() * GetRandomReal(0.8, 1.2))
+
+  var metadata = createZombieMetadata(zombie)
+  metadata.targetPlayer = p
+
+  var target = getClosestZombieTarget(p, zombie.getPos())
+
+  if (target != null)
+    zombie.issueTargetOrder("attack", target)
+  else
+    BlzSetUnitRealField(zombie, UNIT_RF_ACQUISITION_RANGE, 99999.0)
+
+  return zombie
+
+function spawnZombiesNearPlayer(player p)
+  if (p.getIsDead())
+    return
+
+  var camp = p.getCamp()
+  var center = camp.getCenter()
+  var playerMetadata = g_PlayerMetadata.get(p)
+
+  var spawnPoints = g_UndeadSpawnPointManager.getRandomSpawnPointsInRange(center, ZOMBIES_SPAWN_RANGE, R2I(GameSettings.zombies_SpawnsPerTick))
+
+  int zombieCount = playerMetadata.zombies.size()
+
+  for sp in spawnPoints
+    if (zombieCount < GameSettings.zombies_SpawnsMaxPerPlayer)
+      var zombie = spawnZombieNearPlayer(p, sp.getPos())
+      playerMetadata.zombies.add(zombie)
+
+  destroy spawnPoints
+
+function spawnZombiesNearPlayers()
+  for p in g_PlayingHumanPlayers
+    spawnZombiesNearPlayer(p)
+
+function createZombieMetadata(unit u) returns ZombieMetadata
+  var m = new ZombieMetadata(u)
+  g_ZombieMetadata.put(u, m)
+  return m
+
+function destroyZombieMetadata(unit u)
+  g_ZombieMetadata.remove(u)
+
+function onZombieKilled()
+  var dyingUnit = GetDyingUnit()
+  var killingUnit = GetKillingUnit()
+
+  if (dyingUnit.getTypeId() != UNIT_ID_NIGHT_ZOMBIE)
+    return
+
+  destroyZombieMetadata(dyingUnit)
+
+  if (GetRandomReal(0.0, 1.0) > ZOMBIES_MATERIALS_DROP_CHANCE)
+    killingUnit.getOwner().giveMaterials(ZOMBIES_MATERIALS_DROP_AMOUNT)
+    FX.createGoldCreditEffect(dyingUnit.getX(), dyingUnit.getY())
+    FX.createMaterialsTag(dyingUnit.getX(), dyingUnit.getY(), ZOMBIES_MATERIALS_DROP_AMOUNT, killingUnit.getOwner())
+
+class PlayerZombieMetadata
+  player p
+  HashList<unit> zombies
+
+  construct(player p)
+    this.p = p
+    this.zombies = new HashList<unit>()
+
+class ZombieMetadata
+  unit zombie
+  player targetPlayer
+
+  construct(unit zombie)
+    this.zombie = zombie
+
+init
+  g_SpawnTimer = CreateTimer()
+  g_PlayerMetadata = new HashMap<player, PlayerZombieMetadata>()
+  g_ZombieMetadata = new HashMap<unit, ZombieMetadata>()
+
+  for p in g_HumanPlayers
+    g_PlayerMetadata.put(p, new PlayerZombieMetadata(p))
+
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_DEATH, function onZombieKilled)

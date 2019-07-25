@@ -1,0 +1,163 @@
+package ItemLibrary
+import WeightedSet
+import StringExtensions
+import ItemExtensions
+import HashMap
+
+public class WeightedItemTypeSet extends WeightedSet<ItemType>
+public class WeightedItemSetSet extends WeightedSet<ItemSet>
+
+public HashMap<int, ItemType> g_AllItemTypes
+
+public class ItemType
+  int id
+  string name
+  string tooltip
+  string description
+  string extendedTooltip
+  bool pawnable
+  bool droppable
+  bool dropOnDeath
+  int maxStacks
+
+  construct(int id)
+    this.id = id
+    this.name = ""
+    this.tooltip = ""
+    this.description = ""
+    this.extendedTooltip = ""
+    this.pawnable = false
+    this.droppable = true
+    this.dropOnDeath = true
+    this.maxStacks = 1
+
+public class ItemSet
+  private WeightedItemTypeSet itemTypes
+  private string name
+  private color color
+  private string itemRarityString
+
+  construct(string name, color color)
+    this.name = name
+    this.color = color
+    this.itemRarityString = (name + " Item").colorize(color) + "|n|n"
+    this.itemTypes = new WeightedItemTypeSet()
+
+  ondestroy
+    destroy this.itemTypes
+
+  function getName() returns string
+    return this.name
+
+  function add(ItemType itemType, real weight)
+    this.itemTypes.add(itemType, weight)
+    if (not g_AllItemTypes.has(itemType.id))
+      g_AllItemTypes.put(itemType.id, itemType)
+
+  function getItemType(int id) returns ItemType
+    for d in itemTypes
+      if (d.id == id)
+        return d
+    return null
+
+  function createRandomItem(vec2 pos) returns item
+    var itemType = getRandomItemType()
+    var i = CreateItem(itemType.id, pos.x, pos.y)
+    this.decorateItem(i)
+    return i
+
+  function getRandomItemType() returns ItemType
+    return itemTypes.getRandom()
+
+  function getRandomItemTypeId() returns int
+    return itemTypes.getRandom().id
+  
+  function getItemTypeChance(int id) returns real
+    var itemDef = getItemType(id)
+    return this.itemTypes.getChance(itemDef)
+
+  function iterator() returns WeightedSetIterator<ItemType>
+    return this.itemTypes.iterator()
+
+  private function decorateItem(item i)
+    var itemDef = getItemType(i.getTypeId())
+    if (itemDef == null)
+      return
+
+    var _name = itemDef.name
+    var _description = itemDef.description
+    var _extended = itemDef.extendedTooltip
+
+    if (_name == "")
+      _name = i.getName()
+
+    if (_description == "")
+      _description = i.getDescription()
+    
+    if (_extended == "")
+      _extended = i.getExtendedTooltip()
+  
+    _name = _name.colorize(this.color)
+    _description = this.itemRarityString + _description
+    _extended = this.itemRarityString + _extended
+
+    i.setName(_name)
+    i.setDescription(_description)
+    i.setExtendedTooltip(_extended)
+
+    if (itemDef.tooltip != "")
+      i.setTooltip(itemDef.tooltip)
+
+    i.setPawnable(itemDef.pawnable)
+    i.setDroppable(itemDef.droppable)
+    i.setDropOnDeath(itemDef.dropOnDeath)
+    i.setTintColor(this.color)
+
+public class ItemSetLibrary
+  protected WeightedItemSetSet itemSets
+
+  construct()
+    this.itemSets = new WeightedItemSetSet()
+
+  ondestroy
+    destroy this.itemSets
+
+  function add(ItemSet itemSet, real weight)
+    this.itemSets.add(itemSet, weight)
+  
+  function remove(ItemSet itemSet)
+    this.itemSets.remove(itemSet)
+
+  function getItemSetByName(string itemSetName) returns ItemSet
+    for i in this.itemSets
+      if (i.getName() == itemSetName)
+        return i
+    return null
+
+  function getRandomItemSet() returns ItemSet
+    return this.itemSets.getRandom()
+
+  function getRandomItemType() returns ItemType
+    var itemSet = this.getRandomItemSet()
+    return itemSet != null ? itemSet.getRandomItemType() : null
+
+  function createRandomItem(vec2 pos) returns item
+    var itemType = this.getRandomItemSet()
+    return itemType.createRandomItem(pos)
+
+  function getItemTypeChance(int id) returns real
+    for itemSet in this.itemSets
+      for itemType in itemSet
+        if (itemType.id == id)
+          return itemSet.getItemTypeChance(id)
+    return 0.0
+
+  function getOverallItemTypeChance(int id) returns real
+    for itemSet in this.itemSets
+      for itemType in itemSet
+        if (itemType.id == id)
+          return itemSet.getItemTypeChance(id) * this.itemSets.getChance(itemSet)
+    return 0.0
+
+  function iterator() returns WeightedSetIterator<ItemSet>
+    return this.itemSets.iterator()

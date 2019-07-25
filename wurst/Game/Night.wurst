@@ -1,2 +1,54 @@
 package Night
+import GameConstants
+import GameSettings
+import Zombies
+import GameInstance
+import GroupUtils
 
+constant real NEARBY_HUMAN_UNITS_RANGE = 1024.0
+
+trigger g_OnNightTrigger
+group g_NearbyHumanUnitsGroup
+
+function removeUnrescuedSurvivors()
+  var ug = getGroup()
+  ug.enumUnitsOfPlayer(PLAYER_VILLAGERS, null)
+  for u in ug
+    if (u.getTypeId() == UNIT_ID_UNRESCUED_SURVIVOR)
+      u.remove()
+  ug.release()
+
+function removeItemIfNotNearHumanUnits()
+  var i = GetEnumItem()
+  g_NearbyHumanUnitsGroup.enumUnitsInRange(i.getPos(), NEARBY_HUMAN_UNITS_RANGE)
+  if (g_NearbyHumanUnitsGroup.size() == 0)
+    i.remove()
+  g_NearbyHumanUnitsGroup.clear()
+
+function removeAllItemsNotNearHumanUnits()
+  EnumItemsInRect(GetPlayableMapRect(), null, function removeItemIfNotNearHumanUnits)
+
+function onNightStart()
+
+  GameSettings.zombies_SpawnsPerTick += GameSettings.zombies_SpawnsPerTickInc
+  GameSettings.zombies_SpawnsMaxPerPlayer += GameSettings.zombies_SpawnsMaxPerPlayerInc
+
+  removeUnrescuedSurvivors()
+  removeAllItemsNotNearHumanUnits()
+
+  Zombies.killAllUndead()
+  Zombies.startSpawning()
+
+  if (GameInstance.days > GameSettings.aboms_StartDay)
+    // TODO: Aboms.spawnAboms()
+
+  // Have to wait for some reason
+  TriggerSleepAction(1.0)
+  SetTimeOfDayScalePercentBJ(GAME_SPEED_NIGHT)
+
+init
+  g_OnNightTrigger = CreateTrigger()
+  g_OnNightTrigger.registerGameStateEvent(GAME_STATE_TIME_OF_DAY, EQUAL, TIME_OF_NIGHT)
+  g_OnNightTrigger.addAction(function onNightStart)
+
+  g_NearbyHumanUnitsGroup = CreateGroup()

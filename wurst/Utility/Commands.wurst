@@ -1,0 +1,59 @@
+package Commands
+import StringUtils
+import HashMap
+import TriggerExtensions
+import Host
+
+constant string COMMAND_PREFIX = "-"
+
+trigger g_ChatMessageTrigger
+HashMap<string, trigger> g_HostCommandTriggerMap
+HashMap<string, trigger> g_PlayerCommandTriggerMap
+
+function parseChatCommand()
+  var fullChatString = GetEventPlayerChatString()
+  var p = GetTriggerPlayer()
+  var commandStr = fullChatString.substring(1, fullChatString.length())
+  var args = commandStr.split(" ")
+
+  if (args.size() == 0)
+    return
+
+  var command = args.getFirst()
+  
+  trigger t = null
+
+  if (p.isHost())
+    t = g_HostCommandTriggerMap.get(command)
+
+  if (t == null)
+    t = g_PlayerCommandTriggerMap.get(command)
+
+  if (t == null)
+    return
+
+  t.evaluate()
+
+  destroy args
+  
+public function registerHostCommand(string command, code action)
+  var t = g_HostCommandTriggerMap.get(command)
+  if (t == null)
+    t = CreateTrigger()
+    g_HostCommandTriggerMap.put(command, t)
+  t.addCondition(Filter(action))
+
+public function registerPlayerCommand(string command, code action)
+  var t = g_PlayerCommandTriggerMap.get(command)
+  if (t == null)
+    t = CreateTrigger()
+    g_PlayerCommandTriggerMap.put(command, t)
+  t.addCondition(Filter(action))  
+
+init 
+  g_ChatMessageTrigger = CreateTrigger()
+  g_ChatMessageTrigger.registerAnyPlayerChatEvent(COMMAND_PREFIX, false)
+  g_ChatMessageTrigger.addAction(function parseChatCommand)
+
+  g_HostCommandTriggerMap = new HashMap<string, trigger>()
+  g_PlayerCommandTriggerMap = new HashMap<string, trigger>()
