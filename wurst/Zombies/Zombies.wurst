@@ -11,18 +11,22 @@ import HashList
 import UnitExtensions
 import RegisterEvents
 import FX
+import ErrorHandling
+import Math
 
 timer g_SpawnTimer
 HashMap<player, PlayerZombieMetadata> g_PlayerMetadata
-HashMap<unit, ZombieMetadata> g_ZombieMetadata
+HashMap<unit, Zombie> g_Zombies
 
 public class Zombies
 
   static function stopSpawning()
     g_SpawnTimer.pause()
+    print("Stopped spawning zombies")
 
   static function startSpawning()
     g_SpawnTimer.startPeriodic(ZOMBIES_SPAWN_INTERVAL, function spawnZombiesNearPlayers)
+    print("Started spawning zombies")
   
   static function killAllUndead()
     var ug = getGroup()
@@ -52,21 +56,16 @@ function getClosestZombieTarget(player p, vec2 pos) returns unit
 
   return target
 
-function spawnZombieNearPlayer(player p, vec2 pos) returns unit
-  var zombie = CreateUnit(PLAYER_UNDEAD, UNIT_ID_NIGHT_ZOMBIE, pos.x, pos.y, GetRandomDirectionDeg())
-  zombie.setScale(GetRandomReal(80.0, 120.0))
-  zombie.setAnimation("birth")
-  zombie.setMoveSpeed(zombie.getMoveSpeed() * GetRandomReal(0.8, 1.2))
-
-  var metadata = createZombieMetadata(zombie)
-  metadata.targetPlayer = p
+function spawnZombieNearPlayer(player p, vec2 pos) returns Zombie
+  var zombie = createZombie(pos.x, pos.y)
+  zombie.targetPlayer = p
 
   var target = getClosestZombieTarget(p, zombie.getPos())
 
   if (target != null)
-    zombie.issueTargetOrder("attack", target)
+    zombie.zombieUnit.issueTargetOrder("attack", target)
   else
-    BlzSetUnitRealField(zombie, UNIT_RF_ACQUISITION_RANGE, 99999.0)
+    BlzSetUnitRealField(zombie.zombieUnit, UNIT_RF_ACQUISITION_RANGE, 99999.0)
 
   return zombie
 
@@ -78,28 +77,55 @@ function spawnZombiesNearPlayer(player p)
   var center = camp.getCenter()
   var playerMetadata = g_PlayerMetadata.get(p)
 
-  var spawnPoints = g_UndeadSpawnPointManager.getRandomSpawnPointsInRange(center, ZOMBIES_SPAWN_RANGE, R2I(GameSettings.zombies_SpawnsPerTick))
-
   int zombieCount = playerMetadata.zombies.size()
+  int max = R2I(GameSettings.zombies_SpawnsMaxPerPlayer)
 
-  for sp in spawnPoints
-    if (zombieCount < GameSettings.zombies_SpawnsMaxPerPlayer)
-      var zombie = spawnZombieNearPlayer(p, sp.getPos())
-      playerMetadata.zombies.add(zombie)
+  if (zombieCount == max)
+    return
 
-  destroy spawnPoints
+  var numberOfSpawnPoints = R2I(GameSettings.zombies_SpawnsPerTick)
+  numberOfSpawnPoints = clamp(max - zombieCount, 1, numberOfSpawnPoints)
+
+  if (numberOfSpawnPoints == 1)
+    var sp = g_UndeadSpawnPointManager.getRandomSpawnPointInRange(center, ZOMBIES_SPAWN_RANGE)  
+    var zombie = spawnZombieNearPlayer(p, sp.getPos())
+    playerMetadata.zombies.add(zombie)
+  else
+    var spawnPoints = g_UndeadSpawnPointManager.getRandomSpawnPointsInRange(center, ZOMBIES_SPAWN_RANGE, numberOfSpawnPoints)
+    for sp in spawnPoints
+      if (zombieCount < max)
+        var zombie = spawnZombieNearPlayer(p, sp.getPos())
+        playerMetadata.zombies.add(zombie)
+        zombieCount++
+    destroy spawnPoints
 
 function spawnZombiesNearPlayers()
   for p in g_PlayingHumanPlayers
     spawnZombiesNearPlayer(p)
 
-function createZombieMetadata(unit u) returns ZombieMetadata
-  var m = new ZombieMetadata(u)
-  g_ZombieMetadata.put(u, m)
-  return m
+function createZombie(real x, real y) returns Zombie
+  var u = CreateUnit(PLAYER_UNDEAD, UNIT_ID_NIGHT_ZOMBIE, x, y, GetRandomDirectionDeg())
+  u.setScale(GetRandomReal(0.8, 1.2))
+  u.setAnimation("birth")
+  u.setMoveSpeed(u.getMoveSpeed() * GetRandomReal(0.8, 1.2))
+
+  var zombie = new Zombie(u)
+  g_Zombies.put(u, zombie)
+
+  return zombie
 
 function destroyZombieMetadata(unit u)
-  g_ZombieMetadata.remove(u)
+  var zombie = g_Zombies.get(u)
+  
+  var playerMetadata = g_PlayerMetadata.get(zombie.targetPlayer)
+  if (playerMetadata == null)
+    error("Couldn't find player metadata for zombie")
+  
+  playerMetadata.zombies.remove(zombie)
+
+  destroy zombie
+
+  g_Zombies.remove(u)
 
 function onZombieKilled()
   var dyingUnit = GetDyingUnit()
@@ -117,23 +143,26 @@ function onZombieKilled()
 
 class PlayerZombieMetadata
   player p
-  HashList<unit> zombies
+  HashList<Zombie> zombies
 
   construct(player p)
     this.p = p
-    this.zombies = new HashList<unit>()
+    this.zombies = new HashList<Zombie>()
 
-class ZombieMetadata
-  unit zombie
+class Zombie
+  unit zombieUnit
   player targetPlayer
 
   construct(unit zombie)
-    this.zombie = zombie
+    this.zombieUnit = zombie
+
+  function getPos() returns vec2
+    return zombieUnit.getPos()
 
 init
   g_SpawnTimer = CreateTimer()
   g_PlayerMetadata = new HashMap<player, PlayerZombieMetadata>()
-  g_ZombieMetadata = new HashMap<unit, ZombieMetadata>()
+  g_Zombies = new HashMap<unit, Zombie>()
 
   for p in g_HumanPlayers
     g_PlayerMetadata.put(p, new PlayerZombieMetadata(p))
