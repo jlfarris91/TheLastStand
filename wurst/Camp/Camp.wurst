@@ -3,25 +3,56 @@ import HashMap
 import HashList
 import HumanPlayers
 import RegisterEvents
-import UnitExtensions
 import GameConstants
 import ErrorHandling
 import PlayerMetadata
+import EventHelper
+import PlayerExtensions
+import UnitExtensions
 
 HashMap<player, Camp> g_PlayerCamps
+trigger g_UnitEnteredMapTrigger
+
+public class CampUnit
+  protected unit _unit
+  protected Camp _camp
+
+  construct(Camp camp, unit u)
+    this._camp = camp
+    this._unit = u
+
+  ondestroy
+    this._camp = null
+    if (this._unit != null)
+      this._unit.remove()
+    this._unit = null
+
+  function getUnit() returns unit
+    return this._unit
+
+  function getCamp() returns Camp
+    return this._camp
+
+public class CampSurvivor extends CampUnit
+  construct(Camp camp, unit u)
+    super(camp, u)
+
+public class CampStructure extends CampUnit
+  construct(Camp camp, unit u)
+    super(camp, u)
 
 public class Camp
   player owner
-  HashList<unit> survivors
-  HashList<unit> structures
+  HashList<CampSurvivor> survivors
+  HashList<CampStructure> structures
   unit flag
   int worth
   bool isSecure
 
   construct(player owner)
     this.owner = owner
-    this.survivors = new HashList<unit>()
-    this.structures = new HashList<unit>()
+    this.survivors = new HashList<CampSurvivor>()
+    this.structures = new HashList<CampStructure>()
     this.reset()
 
   function reset()
@@ -56,62 +87,124 @@ public class Camp
   function setIsSecure(bool isSecure)
     this.isSecure = isSecure
 
-  function addSurvivor(unit survivor)
-    this.survivors.add(survivor)
+  function addSurvivor(unit survivor) returns CampSurvivor
+    if (survivor == null)
+      error("Trying to add a null survivor to camp")
+      return null
+    var campSurvivor = getSurvivor(survivor)
+    if (campSurvivor != null)
+      error("Trying to register a survivor that is already registered")
+      return campSurvivor
+    campSurvivor = new CampSurvivor(this, survivor)
+    this.survivors.add(campSurvivor)
+    print("Added survivor {0} to camp {1}".format(survivor.getName(), this.owner.getName()))
+    return campSurvivor
 
   function removeSurvivor(unit survivor)
-    this.survivors.remove(survivor)
+    var campSurvivor = getSurvivor(survivor)
+    if (campSurvivor == null)
+      error("Trying to remove a survivor that does not belong to camp")
+    this.survivors.remove(campSurvivor)
+    print("Removed survivor {0} to camp {1}".format(survivor.getName(), this.owner.getName()))
 
-  function addStructure(unit structure)
-    this.structures.add(structure)
+  function getSurvivor(unit survivor) returns CampSurvivor
+    for u in this.survivors
+      if (u._unit == survivor)
+        return u
+    return null
+
+  function addStructure(unit structure) returns CampStructure
+    if (structure == null)
+      error("Trying to add a null structure to camp")
+      return null
+    var campStructure = getStructure(structure)
+    if (campStructure != null)
+      error("Trying to register a structure that is already registered")
+      return campStructure
+    campStructure = new CampStructure(this, structure)
+    this.structures.add(campStructure)
+    print("Added structure {0} to camp {1}".format(structure.getName(), this.owner.getName()))
+    return campStructure
 
   function removeStructure(unit structure)
-    this.structures.remove(structure)
+    var campStructure = getStructure(structure)
+    if (campStructure == null)
+      error("Trying to remove a structure that does not belong to camp")
+    this.structures.remove(campStructure)
+    print("Removed structure {0} to camp {1}".format(structure.getName(), this.owner.getName()))
+
+  function getStructure(unit structure) returns CampStructure
+    for u in this.structures
+      if (u._unit == structure)
+        return u
+    return null
 
 public function player.getCamp() returns Camp
   return getPlayerCamp(this)
 
 function getPlayerCamp(player p) returns Camp
+  if (not g_PlayerCamps.has(p))
+    return null
   return g_PlayerCamps.get(p)
 
 function createCamp(player p)
-  var camp = new Camp(p)
+  let camp = new Camp(p)
   g_PlayerCamps.put(p, camp)
 
+function isCampStructure(unit u) returns bool
+  let unitTypeId = u.getTypeId()
+  if (not u.isStructure())
+    return false
+  if (unitTypeId == UNIT_ID_CAMP_FLAG)
+    return false
+  return true
+
+function isCampSurvivor(unit u) returns bool
+  let unitTypeId = u.getTypeId()
+  if (u.isStructure())
+    return false
+  if (unitTypeId == UNIT_ID_CAMP or
+      unitTypeId == UNIT_ID_SURVIVOR_HERO or
+      unitTypeId == UNIT_ID_ADMIN or
+      unitTypeId == UNIT_ID_SKILLS)
+    return false
+  return true
+
 function onPlayerUnitDeath()
-  var dyingUnit = GetDyingUnit()
-  var owner = dyingUnit.getOwner()
-  var camp = owner.getCamp()
+  let dyingUnit = GetDyingUnit()
+  let owner = dyingUnit.getOwner()
+  let camp = owner.getCamp()
   if (camp == null)
     return
-  if (dyingUnit.isStructure())
+  if (isCampStructure(dyingUnit))
     camp.removeStructure(dyingUnit)
-  else if (not dyingUnit.isHero())
+  else if (isCampSurvivor(dyingUnit))
     camp.removeSurvivor(dyingUnit)
 
-/** Registers a recently constructed structure to the player that built it */
 function onPlayerUnitConstructFinished()
-  var structure = GetConstructedStructure()
-  var camp = structure.getOwner().getCamp()
+  let structure = GetConstructedStructure()
+  if (not isCampStructure(structure))
+    return
+  let owner = structure.getOwner()
+  let camp = owner.getCamp()
   if (camp != null and structure.getTypeId() != UNIT_ID_CAMP_FLAG)
     camp.addStructure(structure)
 
-/** Registers a recently rescued survivor to the player */
-function onPlayerUnitChangedOwner()
-  var u = GetChangingUnit()
-  var prevOwner = GetChangingUnitPrevOwner()
-  var currOwner = u.getOwner()
-  // Survivor was rescued
-  if (prevOwner == PLAYER_VILLAGERS and u.getTypeId() == UNIT_ID_UNRESCUED_SURVIVOR)
-    var camp = currOwner.getCamp()
-    if (camp != null)
-      camp.addSurvivor(u)
+function onUnitEnteredMap()
+  let u = GetEnteringUnit()
+  if (not isCampSurvivor(u))
+    return
+  let owner = u.getOwner()
+  if (not owner.isHumanPlayer())
+    return
+  let camp = owner.getCamp()
+  if (camp != null)
+    camp.addSurvivor(u)
 
 function initializePlayerCamp(player p)
   createCamp(p)
   registerPlayerUnitEventForPlayer(EVENT_PLAYER_UNIT_CONSTRUCT_FINISH, function onPlayerUnitConstructFinished, p)
   registerPlayerUnitEventForPlayer(EVENT_PLAYER_UNIT_DEATH, function onPlayerUnitDeath, p)
-  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_CHANGE_OWNER, function onPlayerUnitChangedOwner)
 
 function initializePlayerCamps()
   for p in g_PlayingHumanPlayers
@@ -120,3 +213,7 @@ function initializePlayerCamps()
 init
   g_PlayerCamps = new HashMap<player, Camp>()
   initializePlayerCamps()
+
+  g_UnitEnteredMapTrigger = CreateTrigger()
+  g_UnitEnteredMapTrigger.registerRectEnterEventSource(GetEntireMapRect())
+  g_UnitEnteredMapTrigger.addAction(function onUnitEnteredMap)

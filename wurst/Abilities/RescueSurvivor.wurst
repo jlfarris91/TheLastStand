@@ -1,0 +1,47 @@
+package RescueSurvivor
+import RegisterEvents
+import GameConstants
+
+constant int ABILITY_ID_RESCUE = 'A01H'
+constant string ABILITY_RESCUE_ORDERSTRING = "innerfire"
+
+function onRescueCast()
+  let caster = GetSpellAbilityUnit()
+  let target = GetSpellTargetUnit()
+
+  if (target.getTypeId() != UNIT_ID_SURVIVOR_UNRESCUED)
+    return
+
+  let owner = caster.getOwner()
+
+  if (owner.getCurrentSupply() >= owner.getMaxSupply())
+    return
+
+  let itm = target.itemInSlot(0)
+  UnitRemoveItemSwapped(itm, target)
+  target.setOwner(owner, true)
+  
+  let survivor = ReplaceUnitBJ(target, UNIT_ID_SURVIVOR, bj_UNIT_STATE_METHOD_RELATIVE)
+  
+  if (itm != null)
+    UnitAddItemSwapped(itm, survivor)
+
+  survivor.issueTargetOrder("move", caster)
+
+  owner.addLumber(1)
+
+function onRightClick()
+  let order = GetIssuedOrderId()
+  let orderedUnit = GetOrderedUnit()
+  let targetUnit = GetOrderTargetUnit()
+
+  if (order != String2OrderIdBJ("smart") or
+      orderedUnit.getTypeId() != UNIT_ID_SURVIVOR_HERO or
+      targetUnit.getTypeId() != UNIT_ID_SURVIVOR_UNRESCUED)
+    return
+
+  orderedUnit.issueTargetOrder(ABILITY_RESCUE_ORDERSTRING, targetUnit)
+
+init
+  registerSpellEffectEvent(ABILITY_ID_RESCUE, function onRescueCast)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ISSUED_UNIT_ORDER, function onRightClick)

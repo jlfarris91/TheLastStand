@@ -1,0 +1,55 @@
+package Survivors
+import GroupUtils
+import GameConstants
+import PlayerMetadata
+import Camp
+import Math
+import SurvivorSpawnPoints
+import GameSettings
+import MainItemLibrary
+import HumanPlayers
+
+public function removeUnrescuedSurvivors()
+  var ug = getGroup()
+  ug.enumUnitsOfPlayer(PLAYER_VILLAGERS, null)
+  for u in ug
+    if (u.getTypeId() == UNIT_ID_SURVIVOR_UNRESCUED)
+      u.remove()
+  ug.release()
+
+public function spawnUnrescuedSurvivorsNearPlayers()
+  g_PlayingHumanPlayers.forEach() (player p) ->
+    spawnUnrescuedSurvivorsNearPlayer(p)
+
+function spawnUnrescuedSurvivorsNearPlayer(player p)
+  if (p.getIsDead())
+    return
+  
+  var camp = p.getCamp()
+  var center = camp.getCenter()
+
+  // Clamp the spawn area to the world bounds
+  center = clampToWorldBounds(center, SURVIVORS_SPAWN_RANGE)
+
+  var spawnPoints = g_SurvivorSpawnPointManager.getRandomSpawnPointsInRange(
+    center,
+    SURVIVORS_SPAWN_RANGE,
+    GameSettings.survivors_SpawnCountPerPlayer)
+
+  for sp in spawnPoints
+    var survivor = CreateUnit(
+      PLAYER_VILLAGERS,
+      UNIT_ID_SURVIVOR_UNRESCUED,
+      sp.getPos().x,
+      sp.getPos().y,
+      GetRandomDirectionDeg())
+
+    // There's a chance to give an unrescued survivor an item
+    if (GetRandomReal(0.0, 1.0) > SURVIVORS_ITEM_CHANCE)
+      var itm = g_MainItemLibrary.createRandomItem(
+        survivor.getPos(),
+        SURVIVORS_ITEM_CHANCE_COMMON,
+        SURVIVORS_ITEM_CHANCE_RARE,
+        SURVIVORS_ITEM_CHANCE_EPIC,
+        SURVIVORS_ITEM_CHANCE_LEGENDARY)
+      UnitAddItemSwapped(itm, survivor)
