@@ -1,0 +1,156 @@
+package Alliances
+import Unit_Alliances
+import RegisterEvents
+import HumanPlayers
+import HashMap
+import DialogBox
+import ErrorHandling
+import DisplayTextToPlayer
+
+enum PlayerAlliances
+  Neutral
+  Ally
+  Enemy
+  Manual
+
+function PlayerAlliances.toString() returns string
+  switch (this)
+    case PlayerAlliances.Neutral
+      return "Nuetral"
+    case PlayerAlliances.Ally
+      return "Ally"
+    case PlayerAlliances.Enemy
+      return "Enemy"
+    case PlayerAlliances.Manual
+      return "Manual"
+
+function onUnitSelected()
+  let selectedUnit = GetTriggerUnit()
+  let p = GetTriggerPlayer()
+
+  if (selectedUnit.getTypeId() == UNIT_ID_ALLIANCES)
+    showAlliancesDialogToPlayer(p)
+
+function showAlliancesDialogToPlayer(player p)
+  let alliancesDialog = new DialogBox("Alliances")
+  let alliances = getAlliancesAll(p)
+
+  var nuetralText = alliances == PlayerAlliances.Neutral ? " > All Nuetral <" : "All Nuetral"
+  alliancesDialog.addButton(nuetralText, 'N') ->
+    setAlliancesAll(p, PlayerAlliances.Neutral)
+    destroy alliancesDialog
+
+  var alliesText = alliances == PlayerAlliances.Ally ? " > All Allies <" : "All Allies"
+  alliancesDialog.addButton(alliesText, 'A') ->
+    setAlliancesAll(p, PlayerAlliances.Ally)
+    destroy alliancesDialog
+
+  var enemiesText = alliances == PlayerAlliances.Enemy ? " > All Enemies <" : "All Enemies"
+  alliancesDialog.addButton(enemiesText, 'E') ->
+    setAlliancesAll(p, PlayerAlliances.Enemy)
+    destroy alliancesDialog
+
+  var manualText = alliances == PlayerAlliances.Manual ? " > Set Manually <" : "Set Manually"
+  alliancesDialog.addButton(manualText, 'M') ->
+    showManualAlliancesDialogToPlayer(p)
+    destroy alliancesDialog
+
+  alliancesDialog.addButton("Close", () -> destroy alliancesDialog)
+  alliancesDialog.display(p, true)
+
+function showManualAlliancesDialogToPlayer(player p)
+  let dialogBox = new DialogBox("Pick Player")
+
+  for otherPlayer in g_PlayingHumanPlayers
+    if (p != otherPlayer)
+      let alliance = getAlliance(p, otherPlayer)
+      let buttonText = otherPlayer.getNameColored() + " - |cffffcc00" + alliance.toString() + "|r"
+      dialogBox.addButton(buttonText) () ->
+        showSetAllianceForPlayerDialogToPlayer(p, otherPlayer)
+        destroy dialogBox
+
+  dialogBox.addButton("Close", () -> destroy dialogBox)
+  dialogBox.display(p, true)    
+
+function showSetAllianceForPlayerDialogToPlayer(player p, player otherPlayer)
+  let dialogBox = new DialogBox("Set Alliance - " + otherPlayer.getNameColored())
+  let alliance = getAlliance(p, otherPlayer)
+
+  var nuetralText = alliance == PlayerAlliances.Neutral ? " > Nuetral <" : "Nuetral"
+  dialogBox.addButton(nuetralText, 'N') ->
+    setAlliance(p, otherPlayer, PlayerAlliances.Neutral)
+    destroy dialogBox
+
+  var alliesText = alliance == PlayerAlliances.Ally ? "> Allies <" : "Allies"
+  dialogBox.addButton(alliesText, 'A') ->
+    setAlliance(p, otherPlayer, PlayerAlliances.Ally)
+    destroy dialogBox
+
+  var enemiesText = alliance == PlayerAlliances.Ally ? "> Enemies <" : "Enemies"
+  dialogBox.addButton(enemiesText, 'E') ->
+    setAlliance(p, otherPlayer, PlayerAlliances.Enemy)
+    destroy dialogBox
+
+  dialogBox.addButton("Close", () -> destroy dialogBox)
+  dialogBox.display(p, true)
+
+function setAlliance(player p, player otherPlayer, PlayerAlliances alliance)
+  var existingAlliance = getAlliance(p, otherPlayer)
+  if (alliance == existingAlliance)
+    return
+  switch (alliance)
+    case PlayerAlliances.Neutral
+      SetPlayerAllianceStateBJ(p, otherPlayer, bj_ALLIANCE_NEUTRAL)
+      SetPlayerAllianceBJ(p, ALLIANCE_SHARED_VISION, false, otherPlayer)
+      displayTextToPlayer(p, "You are treating " + otherPlayer.getNameColored() + " as |cffffcc00Neutral|r")
+      displayTextToPlayer(otherPlayer, p.getNameColored() + " is treating you as |cffffcc00Neutral|r")
+    case PlayerAlliances.Ally
+      SetPlayerAllianceStateBJ(p, otherPlayer, bj_ALLIANCE_ALLIED_VISION)
+      SetPlayerAllianceBJ(p, ALLIANCE_SHARED_VISION, true, otherPlayer)
+      displayTextToPlayer(p, "You are treating " + otherPlayer.getNameColored() + " as an |cffffcc00Ally|r")
+      displayTextToPlayer(otherPlayer, p.getNameColored() + " wants to be your |cffffcc00Ally|r")
+    case PlayerAlliances.Enemy
+      SetPlayerAllianceStateBJ(p, otherPlayer, bj_ALLIANCE_UNALLIED)
+      SetPlayerAllianceBJ(p, ALLIANCE_SHARED_VISION, false, otherPlayer)
+      displayTextToPlayer(p, "You are treating " + otherPlayer.getNameColored() + " as an |cffffcc00Enemy|r")
+      displayTextToPlayer(otherPlayer, p.getNameColored() + " has made you their |cffffcc00Enemy|r")
+    case PlayerAlliances.Manual
+      error("Cannot call setAlliances with PlayerAlliances.Manual")
+
+function setAlliancesAll(player p, PlayerAlliances alliance)
+  if (alliance == PlayerAlliances.Manual)
+    error("Cannot call setAlliancesAll with PlayerAlliances.Manual")
+  for otherPlayer in g_PlayingHumanPlayers
+    if (p != otherPlayer)
+      setAlliance(p, otherPlayer, alliance)
+
+function getAlliance(player p, player otherPlayer) returns PlayerAlliances
+  if (p.isAllyOf(otherPlayer))
+    if (GetPlayerAlliance(p, otherPlayer, ALLIANCE_SHARED_VISION))
+      return PlayerAlliances.Ally
+    else
+      return PlayerAlliances.Neutral
+  else
+    return PlayerAlliances.Enemy
+
+function getAlliancesAll(player p) returns PlayerAlliances
+  var alliances = PlayerAlliances.Manual
+  var first = true
+  for otherPlayer in g_PlayingHumanPlayers
+    if (p != otherPlayer)
+      let alliance = getAlliance(p, otherPlayer)
+      if (first)
+        alliances = alliance
+        first = false
+      else
+        if (alliances != alliance)
+          return PlayerAlliances.Manual
+  return alliances
+
+init
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_SELECTED, function onUnitSelected)
+
+  //if (g_PlayingHumanPlayers.size() > 1)
+  for p in g_PlayingHumanPlayers
+    var pos = gg_rct_BaseUnits.randomPoint()
+    CreateUnit(p, UNIT_ID_ALLIANCES, pos.x, pos.y, bj_UNIT_FACING)
