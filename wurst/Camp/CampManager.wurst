@@ -1,0 +1,91 @@
+package CampManager
+import HashMap
+import ICamp
+import GameConstants
+import UnitExtensions
+import Camp
+import ICampUnitFactory
+import PlayerExtensions
+import RegisterEvents
+import HumanPlayers
+import EventHelper
+
+ICampUnitFactory g_CampUnitFactory
+HashMap<player, ICamp> g_PlayerCamps
+trigger g_UnitEnteredMapTrigger
+
+public function player.getCamp() returns ICamp
+  return getPlayerCamp(this)
+
+function getPlayerCamp(player p) returns ICamp
+  if (not g_PlayerCamps.has(p))
+    return null
+  return g_PlayerCamps.get(p)
+
+function createCamp(player p)
+  let camp = new Camp(p, g_CampUnitFactory)
+  g_PlayerCamps.put(p, camp)
+
+function isCampStructure(unit u) returns bool
+  let unitTypeId = u.getTypeId()
+  if (not u.isStructure())
+    return false
+  if (unitTypeId == UNIT_ID_CAMP_FLAG)
+    return false
+  return true
+
+function isCampSurvivor(unit u) returns bool
+  let unitTypeId = u.getTypeId()
+  if (u.isStructure())
+    return false
+  if (unitTypeId == UNIT_ID_CAMP or
+      unitTypeId == UNIT_ID_SURVIVOR_HERO or
+      unitTypeId == UNIT_ID_ADMIN or
+      unitTypeId == UNIT_ID_SKILLS)
+    return false
+  return true
+
+function onPlayerUnitDeath()
+  let dyingUnit = GetDyingUnit()
+  let owner = dyingUnit.getOwner()
+  let camp = owner.getCamp()
+  if (camp == null)
+    return
+  camp.removeUnit(dyingUnit)
+
+function onPlayerUnitConstructFinished()
+  let structure = GetConstructedStructure()
+  if (not isCampStructure(structure))
+    return
+  let owner = structure.getOwner()
+  let camp = owner.getCamp()
+  if (camp != null and structure.getTypeId() != UNIT_ID_CAMP_FLAG)
+    camp.addUnit(structure)
+
+function onUnitEnteredMap()
+  let u = GetEnteringUnit()
+  if (not isCampSurvivor(u))
+    return
+  let owner = u.getOwner()
+  if (not owner.isHumanPlayer())
+    return
+  let camp = owner.getCamp()
+  if (camp != null)
+    camp.addUnit(u)
+
+function initializePlayerCamp(player p)
+  createCamp(p)
+  registerPlayerUnitEventForPlayer(EVENT_PLAYER_UNIT_CONSTRUCT_FINISH, function onPlayerUnitConstructFinished, p)
+  registerPlayerUnitEventForPlayer(EVENT_PLAYER_UNIT_DEATH, function onPlayerUnitDeath, p)
+
+function initializePlayerCamps()
+  for p in g_PlayingHumanPlayers
+    initializePlayerCamp(p)
+
+init
+  g_PlayerCamps = new HashMap<player, ICamp>()
+  initializePlayerCamps()
+
+  g_UnitEnteredMapTrigger = CreateTrigger()
+  g_UnitEnteredMapTrigger.registerRectEnterEventSource(GetEntireMapRect())
+  g_UnitEnteredMapTrigger.addAction(function onUnitEnteredMap)
