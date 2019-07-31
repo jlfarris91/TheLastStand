@@ -1,0 +1,136 @@
+package Gate
+import Unit_Gate
+import CampStructure
+import ICamp
+import ErrorHandling
+import RegisterEvents
+import ICampStructure
+import Ability_RotateGate
+import initlater CampManager
+import Math
+
+public class Gate extends CampStructure
+  private bool _isOpen
+  private int _index
+  private real _angle
+
+  construct(ICamp camp, unit u)
+    super(camp, u)
+    this._index = 0
+    this._isOpen = false
+    this._angle = this._unit.getFacingAngle().degrees()
+    this.updateState()
+
+  function getIsOpen() returns bool
+    return this._isOpen
+
+  function openGate()
+    if (this._isOpen)
+      return
+    let unitId = this._unit.getTypeId()
+    var upgradeId = 0
+    switch (unitId)
+      case UNIT_ID_GATE_HORIZONTAL_BUILD | UNIT_ID_GATE_HORIZONTAL_CLOSED
+        upgradeId = UNIT_ID_GATE_HORIZONTAL_OPEN
+      case UNIT_ID_GATE_DIAGONAL_CLOSED
+        upgradeId = UNIT_ID_GATE_DIAGONAL_OPEN
+      default
+        error("Gate.openGate() called with an invalid unit {0}".format(this._unit.getName()))
+    IssueTrainOrderByIdBJ(this._unit, upgradeId)
+    updateState()
+
+  function closeGate()
+    if (not this._isOpen)
+      return
+    let unitId = this._unit.getTypeId()
+    var upgradeId = 0
+    switch (unitId)
+      case UNIT_ID_GATE_HORIZONTAL_OPEN
+        upgradeId = UNIT_ID_GATE_HORIZONTAL_CLOSED
+      case UNIT_ID_GATE_DIAGONAL_OPEN
+        upgradeId = UNIT_ID_GATE_DIAGONAL_CLOSED
+      default
+        error("Gate.closeGate() called with an invalid unit {0}".format(this._unit.getName()))
+    IssueTrainOrderByIdBJ(this._unit, upgradeId)
+    updateState()
+
+  function rotateGateClockwise()
+    this.rotateGate(-1)
+
+  function rotateGateCounterClockwise()
+    this.rotateGate(1)
+
+  private function rotateGate(int dir)
+    let pos = this._unit.getPos()
+    let owner = this._unit.getOwner()
+
+    this._camp.removeUnit(this)
+    this._unit.remove()
+
+    int nextUnitId
+
+    if (this._index % 2 == 0)
+      nextUnitId = this._isOpen ? UNIT_ID_GATE_DIAGONAL_OPEN : UNIT_ID_GATE_DIAGONAL_CLOSED
+      this._angle += (90.0 * ISignBJ(dir))
+    else
+      nextUnitId = this._isOpen ? UNIT_ID_GATE_HORIZONTAL_OPEN : UNIT_ID_GATE_HORIZONTAL_CLOSED
+
+    let replaced = CreateUnit(owner, nextUnitId, pos.x, pos.y, this._angle)
+
+    this._unit = replaced
+    this._camp.addUnit(this)
+
+    replaced.setLife(this._unit.getLife())
+    replaced.setPathing(false)
+    replaced.setPos(pos)
+    replaced.setPathing(true)
+    owner.select(replaced)
+    
+    this._index = wrap(this._index + dir, 0, 7)
+    
+    updateState()
+
+  protected function updateState()
+    switch (this._unit.getTypeId())
+      case UNIT_ID_GATE_HORIZONTAL_BUILD | UNIT_ID_GATE_HORIZONTAL_CLOSED | UNIT_ID_GATE_DIAGONAL_CLOSED
+        _unit.setAnimation("stand")
+        _unit.setPathing(true)
+        _isOpen = false
+      case UNIT_ID_GATE_HORIZONTAL_OPEN | UNIT_ID_GATE_DIAGONAL_OPEN
+        _unit.setAnimation("death alternate")
+        _unit.setPathing(false)
+        _isOpen = true
+
+public function unit.isGate() returns bool
+  let unitId = this.getTypeId()
+  return unitId == UNIT_ID_GATE_DIAGONAL_CLOSED or
+         unitId == UNIT_ID_GATE_DIAGONAL_OPEN or
+         unitId == UNIT_ID_GATE_HORIZONTAL_BUILD or
+         unitId == UNIT_ID_GATE_HORIZONTAL_CLOSED or
+         unitId == UNIT_ID_GATE_HORIZONTAL_OPEN
+
+function onRotateGateCast()
+  var caster = GetSpellAbilityUnit()
+  let owner = caster.getOwner()
+  let camp = owner.getCamp()
+  let gate = camp.getStructure(caster) castTo Gate
+  gate.rotateGateClockwise()
+
+function onGateUpgradeFinished()
+  var caster = GetTriggerUnit()
+  let owner = caster.getOwner()
+  let camp = owner.getCamp()
+  let gate = camp.getStructure(caster) castTo Gate
+  gate.updateState()
+
+function onGateUpgradeStart()
+  var caster = GetTriggerUnit()
+  let owner = caster.getOwner()
+  let camp = owner.getCamp()
+  let gate = camp.getStructure(caster) castTo Gate
+  gate.updateState()
+
+init
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_UPGRADE_START, function onGateUpgradeStart)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_UPGRADE_FINISH, function onGateUpgradeFinished)
+  registerSpellEffectEvent(ABILITY_ID_ROTATEGATE, function onRotateGateCast)

@@ -6,6 +6,7 @@ import Host
 import GroupUtils
 import Ids
 import ErrorHandling
+import PlayerMetadata
 
 constant string COMMAND_DAY = "day"
 constant string COMMAND_NIGHT = "night"
@@ -13,6 +14,8 @@ constant string COMMAND_SEE = "see"
 constant string COMMAND_KILL = "kill"
 constant string COMMAND_MOVE = "move"
 constant string COMMAND_CREATE_ITEM = "item"
+constant string COMMAND_CREATE_UNIT = "unit"
+constant string COMMAND_ADD_MATS = "mats"
 
 function startNextDay()
   SetTimeOfDay(TIME_OF_DAY)
@@ -52,16 +55,60 @@ function createItemAtCameraPos()
   let cameraPos = vec2(GetLocationX(cameraLoc), GetLocationY(cameraLoc))
 
   var args = getCommandArgs()
-  let itemId = args.get(0)
-  let id = itemId.toId()
+  let itemIdArg = args.get(0)
+
+  let id = itemIdArg.toId()
   if (id == -1)
-    error("Couldn't parse item id from " + itemId)
+    error("Couldn't parse item id from arg 0 \"{0}\"".format(itemIdArg))
     return
+
   let itm = CreateItem(id, cameraPos.x, cameraPos.y)
   if (itm != null)
     displayTextToPlayer(g_HostPlayer, "Created " + itm.getName())
 
   RemoveLocation(cameraLoc)
+
+function createUnitAtCameraPos()
+  let cameraLoc = GetCameraTargetPositionLoc()
+  let cameraPos = vec2(GetLocationX(cameraLoc), GetLocationY(cameraLoc))
+
+  var args = getCommandArgs()
+  let playerIdArg = args.get(0)
+  let itemIdArg = args.get(1)
+  
+  let p = Player(playerIdArg.toInt())
+  if (p == null)
+    error("Couldn't parse player id from argument 0 \"{0}\"".format(playerIdArg))
+    return
+
+  let id = itemIdArg.toId()
+  if (id == -1)
+    error("Couldn't parse unit id from argument 1 \"{0}\"".format(itemIdArg))
+    return
+
+  let u = CreateUnit(p, id, cameraPos.x, cameraPos.y, GetRandomDirectionDeg())
+  if (u != null)
+    displayTextToPlayer(g_HostPlayer, "Created " + u.getName())
+
+  RemoveLocation(cameraLoc)
+
+function addMats()
+  var args = getCommandArgs()
+  let playerIdArg = args.get(0)
+  let matsArg = args.get(1)
+
+  let p = Player(playerIdArg.toInt())
+  if (p == null)
+    error("Couldn't parse player id from argument 0 \"{0}\"".format(playerIdArg))
+    return
+
+  let mats = matsArg.toInt()
+  if (mats == -1)
+    error("Couldn't parse material count from argument 1 \"{0}\"".format(matsArg))
+    return
+
+  p.giveMaterials(mats)
+  displayTextToPlayer(p, "Gave {0} materials to {1}".format(I2S(mats), p.getNameColored()))
 
 init
   registerHostCommand(COMMAND_DAY, function startNextDay)
@@ -70,3 +117,5 @@ init
   registerHostCommand(COMMAND_KILL, function killSelectedUnits)
   registerHostCommand(COMMAND_MOVE, function moveSelectedUnits)
   registerHostCommand(COMMAND_CREATE_ITEM, function createItemAtCameraPos)
+  registerHostCommand(COMMAND_CREATE_UNIT, function createUnitAtCameraPos)
+  registerHostCommand(COMMAND_ADD_MATS, function addMats)
