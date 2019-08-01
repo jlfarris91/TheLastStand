@@ -1,0 +1,79 @@
+package Wall
+import CampStructure
+import ICamp
+import RegisterEvents
+import ICampStructure
+import initlater CampManager
+import Math
+import TlsUnitIds
+import TlsAbilityIds
+
+public class Wall extends CampStructure
+  private bool _isOpen
+  private int _index
+  private real _angle
+
+  construct(ICamp camp, unit u)
+    super(camp, u)
+    this._index = 0
+    this._isOpen = false
+    this._angle = this._unit.getFacingAngle().degrees()
+
+  function rotateClockwise()
+    this.rotateWall(-1)
+
+  function rotateCounterClockwise()
+    this.rotateWall(1)
+
+  private function rotateWall(int dir)
+    let pos = this._unit.getPos()
+    let owner = this._unit.getOwner()
+
+    this._camp.removeUnit(this)
+    this._unit.remove()
+
+    int nextUnitId
+
+    if (this._index % 2 == 0)
+      nextUnitId = TlsUnitIds.wallCorner
+      this._angle += (90.0 * ISignBJ(dir))
+    else
+      nextUnitId = TlsUnitIds.wallHorizontal
+
+    let replaced = CreateUnit(owner, nextUnitId, pos.x, pos.y, this._angle)
+
+    this._unit = replaced
+    this._camp.addUnit(this)
+
+    replaced.setLife(this._unit.getLife())
+    replaced.setPathing(false)
+    replaced.setPos(pos)
+    replaced.setPathing(true)
+    owner.select(replaced)
+    
+    this._index = wrap(this._index + dir, 0, 7)
+
+public function unit.isWall() returns bool
+  let unitId = this.getTypeId()
+  return unitId == TlsUnitIds.wallCorner or
+         unitId == TlsUnitIds.wallHorizontal
+
+function onRotateClockwiseCast()
+  var caster = GetSpellAbilityUnit()
+  let owner = caster.getOwner()
+  let camp = owner.getCamp()
+  let wall = camp.getStructure(caster) castTo Wall
+  if (wall != null)
+    wall.rotateClockwise()
+
+function onRotateCounterClockwiseCast()
+  var caster = GetSpellAbilityUnit()
+  let owner = caster.getOwner()
+  let camp = owner.getCamp()
+  let wall = camp.getStructure(caster) castTo Wall
+  if (wall != null)
+    wall.rotateCounterClockwise()
+
+init
+  registerSpellEffectEvent(TlsAbilityIds.rotateClockwise, function onRotateClockwiseCast)
+  registerSpellEffectEvent(TlsAbilityIds.rotateCounterClockwise, function onRotateCounterClockwiseCast)

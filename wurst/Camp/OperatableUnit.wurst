@@ -1,0 +1,74 @@
+package OperatableUnit
+import CampUnit
+import ICamp
+import ICampUnit
+import RegisterEvents
+import CampManager
+import IOperatableUnit
+import Orders
+import TlsUnitIds
+
+public abstract class OperatableUnit extends CampUnit implements IOperatableUnit
+  private unit _operatingUnit
+
+  construct(ICamp camp, unit u)
+    super(camp, u)
+    
+  override function getUnit() returns unit
+    return super.getUnit()
+  
+  override function getCamp() returns ICamp
+    return super.getCamp()
+
+  override function getOperatingUnit() returns unit
+    return this._operatingUnit
+
+  override function isOperated() returns bool
+    return this._operatingUnit != null
+
+  override function canOperate(unit u) returns bool
+    return not this.isOperated() and u.getTypeId() == TlsUnitIds.survivor
+
+  override function startOperating(unit u) returns bool
+    if (not this.canOperate(u))
+      return false
+    this._operatingUnit = u
+    this.onOperated()
+    return true
+
+  override function stopOperating()
+    if (not this.isOperated())
+      return
+    this._operatingUnit = null
+    this.onUnoperated()
+
+  protected abstract function onOperated()
+  protected abstract function onUnoperated()
+
+function onOperatingUnitLoaded()
+  let transportingUnit = GetTransportUnit()
+  let transportedUnit = GetTriggerUnit()
+  let camp = transportingUnit.getCamp()
+  if (camp == null)
+    return
+  let operatableUnit = camp.getUnit(transportingUnit) castTo IOperatableUnit
+  if (operatableUnit != null)
+    operatableUnit.startOperating(transportedUnit)
+
+function onOperatingUnitUnloaded()
+  let orderId = GetIssuedOrderId()
+  if (orderId != OrderIds.unload or orderId != OrderIds.standdown)
+    return
+  let orderedUnit = GetOrderedUnit()
+  let targetUnit = GetOrderTargetUnit()
+  let camp = orderedUnit.getCamp()
+  if (camp == null)
+    return
+  let operatableUnit = camp.getUnit(orderedUnit) castTo IOperatableUnit
+  if (operatableUnit != null and targetUnit == operatableUnit.getOperatingUnit())
+    operatableUnit.stopOperating()
+
+init
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_LOADED, function onOperatingUnitLoaded)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ISSUED_ORDER, function onOperatingUnitUnloaded)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ISSUED_UNIT_ORDER, function onOperatingUnitUnloaded)
