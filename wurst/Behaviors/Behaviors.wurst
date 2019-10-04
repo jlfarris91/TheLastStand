@@ -3,49 +3,67 @@ import LinkedList
 import TimerUtils
 import ClosureTimers
 import Table
-
-public enum BehaviorState
-  RUNNING
-  FAILURE
-  SUCCESS
-
-public enum BehaviorTreeExecutionPriority
-  LOW
-  HIGH
-  REALTIME
-
-public class BehaviorCollection extends LinkedList<IBehavior>
-
-public interface IBehavior
-  function update(IBehaviorTreeContext context) returns BehaviorState
-  function clone() returns IBehavior
-
-public interface IBehaviorTree
-  function setRoot(IBehavior behavior)
-  function getRoot() returns IBehavior
-  function start(IBehaviorTreeContext context, BehaviorTreeExecutionPriority priority)
-  function pause()
-  function stop()
-  function update()
-  function clone() returns IBehaviorTree
-
-public interface IBehaviorTreeContext
-  function getUnit() returns unit
-  function getTable() returns Table
-
-public interface IBehaviorTreeRunner
-  function register(IBehaviorTree tree)
-  function unregister(IBehaviorTree tree)
+import initlater SmartUnit
 
 PeriodicBehaviorTreeRunner g_lowPriorityRunner
 PeriodicBehaviorTreeRunner g_highPriorityRunner
 PeriodicBehaviorTreeRunner g_realtimePriorityRunner
 
-// ==========================================================================
+// ============================================================================
+public enum BehaviorState
+  RUNNING
+  FAILURE
+  SUCCESS
+
+// ============================================================================
+public enum BehaviorTreeExecutionPriority
+  LOW
+  HIGH
+  REALTIME
+
+// ============================================================================
+public class BehaviorCollection extends LinkedList<IBehavior>
+
+// ============================================================================
+public interface IBehavior
+  function update(IBehaviorTreeContext context) returns BehaviorState
+  function clone() returns IBehavior
+
+// ============================================================================
+public interface IBehaviorTree
+  function setRoot(IBehavior behavior)
+  function getRoot() returns IBehavior
+  function start(IBehaviorTreeContext context, BehaviorTreeExecutionPriority priority)
+  function resume()
+  function pause()
+  function stop()
+  function update()
+  function clone() returns IBehaviorTree
+  function toString() returns string
+
+// ============================================================================
+public interface IBehaviorTreeContext
+  function getUnit() returns SmartUnit
+  function getTable() returns Table
+
+// ============================================================================
+public interface IBehaviorTreeRunner
+  function register(IBehaviorTree tree)
+  function unregister(IBehaviorTree tree)
+
+// ============================================================================
+public interface IHasBehaviors
+  function getBehavior() returns IBehaviorTree
+  function pushBehavior(IBehaviorTree behaviorTree, BehaviorTreeExecutionPriority priority)
+  function popBehavior() returns IBehaviorTree
+  function cancelAllBehaviors()
+
+// ============================================================================
 class PeriodicBehaviorTreeRunner implements IBehaviorTreeRunner
   LinkedList<IBehaviorTree> _trees
   private timer _updateTimer
 
+  // --------------------------------------------------------------------------
   construct(real updateRate)
     _trees = new LinkedList<IBehaviorTree>()
 
@@ -53,55 +71,78 @@ class PeriodicBehaviorTreeRunner implements IBehaviorTreeRunner
     _updateTimer.doPeriodically(updateRate) (CallbackPeriodic cb) ->
       this.updateTrees()
 
+  // --------------------------------------------------------------------------
   ondestroy
     destroy _trees
     _trees = null
 
+  // --------------------------------------------------------------------------
   override function register(IBehaviorTree tree)
     _trees.add(tree)
 
+  // --------------------------------------------------------------------------
   override function unregister(IBehaviorTree tree)
     _trees.remove(tree)
 
+  // --------------------------------------------------------------------------
   private function updateTrees()
     for tree in _trees
       tree.update()
 
-// ==========================================================================
+// ============================================================================
 public class BehaviorTree implements IBehaviorTree
   private IBehavior _root
   private IBehaviorTreeRunner _runner
   private IBehaviorTreeContext _context
   private bool _isRunning
+  private string _name
 
+  // --------------------------------------------------------------------------
   construct()
-    skip
+    _name = "BehaviorTree"
 
+  // --------------------------------------------------------------------------
+  construct(string name)
+    _name = name
+
+  // --------------------------------------------------------------------------
   construct(BehaviorTree other)
     _root = other._root.clone()
+    _name = other._name
 
+  // --------------------------------------------------------------------------
   ondestroy
-    destroy _context
-    _context = null
-    destroy _root
-    _root = null
+    if (_context != null)
+      destroy _context
+      _context = null
+    if (_root != null)
+      destroy _root
+      _root = null
     _runner = null
+  
+  // --------------------------------------------------------------------------  
+  override function toString() returns string
+    return _name
 
+  // --------------------------------------------------------------------------
   override function clone() returns IBehaviorTree
     return new BehaviorTree(this)
 
+  // --------------------------------------------------------------------------
   override function setRoot(IBehavior behavior)
     _root = behavior
 
+  // --------------------------------------------------------------------------
   override function getRoot() returns IBehavior
     return _root
 
+  // --------------------------------------------------------------------------
   override function start(IBehaviorTreeContext context, BehaviorTreeExecutionPriority priority)
     if (_root == null)
       Log.error("Trying to call start() on a BehaviorTree with no root")
       return
 
-    if (_isRunning)
+    if (_isRunning or _runner != null)
       Log.error("BehaviorTree is already running!")
       return
 
@@ -117,16 +158,28 @@ public class BehaviorTree implements IBehaviorTree
     _runner.register(this)
     _isRunning = true
 
+  // --------------------------------------------------------------------------
+  override function resume()
+    if (not _isRunning)
+      _isRunning = true
+      _runner.register(this)
+
+  // --------------------------------------------------------------------------
   override function pause()
     if (_isRunning)
       _isRunning = false
       _runner.unregister(this)
 
+  // --------------------------------------------------------------------------
   override function stop()
     if (_isRunning)
       _isRunning = false
       _runner.unregister(this)
+      _runner = null
+      destroy _context
+      _context = null
   
+  // --------------------------------------------------------------------------
   override function update()
     if (_root == null)
       Log.error("Trying to call update() on a BehaviorTree with no root")
@@ -141,275 +194,80 @@ public class BehaviorTree implements IBehaviorTree
     if (not (state == BehaviorState.RUNNING))
       stop()
 
-// ==========================================================================
+// ============================================================================
 public class BehaviorTreeContext implements IBehaviorTreeContext
   Table _table
-  unit _unit
+  SmartUnit _unit
 
-  construct(unit u)
+  // --------------------------------------------------------------------------
+  construct(SmartUnit u)
     _unit = u
     _table = new Table()
 
+  // --------------------------------------------------------------------------
   ondestroy
     destroy _table
     _unit = null
 
-  override function getUnit() returns unit
+  // --------------------------------------------------------------------------
+  override function getUnit() returns SmartUnit
     return _unit
 
+  // --------------------------------------------------------------------------
   override function getTable() returns Table
     return _table
 
-// ==========================================================================
+// ============================================================================
 public abstract class BehaviorBase implements IBehavior
   private bool _isRunning
 
+  // --------------------------------------------------------------------------
   construct()
     skip
 
+  // --------------------------------------------------------------------------
   construct(BehaviorBase _other)
     skip
 
+  // --------------------------------------------------------------------------
   abstract function getName() returns string
 
+  // --------------------------------------------------------------------------
   override function update(IBehaviorTreeContext context) returns BehaviorState
     if (not _isRunning)
       _isRunning = true
+      Log.info(getName() + "::onEnter")
       onEnter(context)
 
     let state = onUpdate(context)
 
+    if (state == BehaviorState.SUCCESS)
+      Log.info(getName() + "::SUCCESS")
+    if (state == BehaviorState.FAILURE)
+      Log.info(getName() + "::FAILURE")
+
     if (not (state == BehaviorState.RUNNING))
       _isRunning = false
+      Log.info(getName() + "::onExit")
       onExit(context)
 
     return state
 
+  // --------------------------------------------------------------------------
   override abstract function clone() returns IBehavior
+
+  // --------------------------------------------------------------------------
   abstract protected function onUpdate(IBehaviorTreeContext context) returns BehaviorState
 
+  // --------------------------------------------------------------------------
   protected function onEnter(IBehaviorTreeContext _context)
     skip
 
+  // --------------------------------------------------------------------------
   protected function onExit(IBehaviorTreeContext _context)
     skip
 
-// ==========================================================================
-public abstract class Decorator extends BehaviorBase
-  protected IBehavior _child
-
-  construct()
-    skip
-
-  construct(Decorator other)
-    super(other)
-    setChild(other._child.clone())
-
-  ondestroy
-    destroy _child
-    _child = null
-
-  function setChild(IBehavior child)
-    if (_child != null)
-      Log.error("Decorator::setChild can only be called once!")
-    _child = child
-
-  function getChild() returns IBehavior
-    return _child
-
-  override abstract function clone() returns IBehavior
-
-// ==========================================================================
-public abstract class Composite extends BehaviorBase
-  protected BehaviorCollection _children
-
-  construct()
-    _children = new BehaviorCollection()
-
-  construct(Composite other)
-    super(other)
-    _children = new BehaviorCollection()
-    for child in other._children
-      addChild(child.clone())
-
-  ondestroy
-    for child in _children
-      destroy child
-    destroy _children
-    _children = null
-
-  override abstract function clone() returns IBehavior
-
-  function addChild(IBehavior behavior)
-    _children.add(behavior)
-
-  function addChildAt(IBehavior behavior, int index)
-    _children.addAt(behavior, index)
-
-  function removeChild(IBehavior behavior)
-    _children.remove(behavior)
-
-  function removeChildAt(int index)
-    _children.removeAt(index)
-  
-// ==========================================================================
-public class Sequence extends Composite
-  LLIterator<IBehavior> _iterator
-  IBehavior _current
-
-  construct()
-    skip
-
-  construct(Sequence other)
-    super(other)
-
-  override function getName() returns string
-    return "Sequence"
-
-  override function clone() returns IBehavior
-    return new Sequence(this)
-
-  override function onEnter(IBehaviorTreeContext context)
-    Log.info("Sequence::onEnter")
-    _iterator = _children.iterator()
-    _current = _iterator.next()
-
-  override function onUpdate(IBehaviorTreeContext context) returns BehaviorState
-
-    let childState = _current.update(context)
-
-    if (childState != BehaviorState.RUNNING)
-      if (childState == BehaviorState.FAILURE)
-        Log.info("Sequence::onUpdate FAILURE")
-        return BehaviorState.FAILURE
-      if (not _iterator.hasNext())
-        Log.info("Sequence::onUpdate SUCCESS")
-        return BehaviorState.SUCCESS
-      _current = _iterator.next()
-      // Execute onUpdate again so we don't have to wait for another tick
-      // Only wait or another tick when the child's value is RUNNING
-      onUpdate(context)
-      
-    return BehaviorState.RUNNING
-
-  override function onExit(IBehaviorTreeContext context)
-    Log.info("Sequence::onExit")
-    _iterator.close()
-    _iterator = null
-    _current = null
-
-// ==========================================================================
-public class Selector extends Composite
-  LLIterator<IBehavior> _iterator
-  IBehavior _current
-
-  construct()
-    skip
-
-  construct(Selector other)
-    super(other)
-
-  override function getName() returns string
-    return "Selector"
-
-  override function clone() returns IBehavior
-    return new Selector(this)
-
-  override function onEnter(IBehaviorTreeContext _context)
-    Log.info("Selector::onEnter")
-    _iterator = _children.iterator()
-    _current = _iterator.next()
-
-  override function onUpdate(IBehaviorTreeContext context) returns BehaviorState
-
-    let childState = _current.update(context)
-
-    if (childState != BehaviorState.RUNNING)
-      if (childState == BehaviorState.SUCCESS)
-        Log.info("Selector::onUpdate SUCCESS")
-        return BehaviorState.SUCCESS
-      if (not _iterator.hasNext())
-        Log.info("Selector::onUpdate FAILURE")
-        return BehaviorState.FAILURE
-      _current = _iterator.next()
-      // Execute onUpdate again so we don't have to wait for another tick
-      // Only wait or another tick when the child's value is RUNNING
-      onUpdate(context)
-
-    return BehaviorState.RUNNING
-
-  override function onExit(IBehaviorTreeContext context)
-    Log.info("Selector::onExit")
-    _iterator.close()
-    _iterator = null
-    _current = null
-
-// ==========================================================================
-public class Inverter extends Decorator
-  construct()
-    skip
-  construct(Inverter other)
-    super(other)
-  override function getName() returns string
-    return "Inverter"
-  override function clone() returns IBehavior
-    return new Inverter(this)
-  override function onUpdate(IBehaviorTreeContext context) returns BehaviorState
-    var childState = _child.update(context)
-    switch (childState)
-      case BehaviorState.RUNNING
-        return BehaviorState.RUNNING
-      case BehaviorState.SUCCESS
-        return BehaviorState.FAILURE
-      case BehaviorState.FAILURE
-        return BehaviorState.SUCCESS
-
-// ==========================================================================
-public class Succeeder extends Decorator
-  construct()
-    skip
-  construct(Succeeder other)
-    super(other)
-  override function getName() returns string
-    return "Succeeder"
-  override function clone() returns IBehavior
-    return new Succeeder(this)
-  override function onUpdate(IBehaviorTreeContext context) returns BehaviorState
-    let childState = _child.update(context)
-    return (childState == BehaviorState.RUNNING) ? BehaviorState.RUNNING : BehaviorState.SUCCESS
-
-// ==========================================================================
-public class Repeater extends Decorator
-  construct()
-    skip
-  construct(Repeater other)
-    super(other)
-  override function getName() returns string
-    return "Repeater"
-  override function clone() returns IBehavior
-    return new Repeater(this)
-  override function onUpdate(IBehaviorTreeContext context) returns BehaviorState
-    let childState = _child.update(context)
-    if (childState != BehaviorState.RUNNING)
-      onUpdate(context)
-    return BehaviorState.RUNNING
-
-// ==========================================================================
-public class RepeatUntilFail extends Decorator
-  construct()
-    skip
-  construct(RepeatUntilFail other)
-    super(other)
-  override function getName() returns string
-    return "RepeatUntilFail"
-  override function clone() returns IBehavior
-    return new RepeatUntilFail(this)
-  override function onUpdate(IBehaviorTreeContext context) returns BehaviorState
-    let childState = _child.update(context)
-    if (childState == BehaviorState.FAILURE)
-      return BehaviorState.SUCCESS
-    return BehaviorState.RUNNING
-
+// ============================================================================
 init
   g_lowPriorityRunner = new PeriodicBehaviorTreeRunner(3.0)
   g_highPriorityRunner = new PeriodicBehaviorTreeRunner(1.0)

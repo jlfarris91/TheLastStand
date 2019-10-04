@@ -1,0 +1,67 @@
+package SmartUnit
+import initlater Behaviors
+import initlater LinkedList
+import initlater IUnit
+import initlater BlackboardBehaviors
+
+// ============================================================================
+public class SmartUnit implements IHasBehaviors, IUnit
+
+  protected LinkedList<IBehaviorTree> _behaviors
+  protected unit _unit
+
+  // --------------------------------------------------------------------------
+  construct(unit u)
+    this._unit = u
+    this._behaviors = new LinkedList<IBehaviorTree>()
+
+    pushBehavior(new BlackboardListenerBehaviorTree(), BehaviorTreeExecutionPriority.LOW)
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    RemoveUnit(this._unit)
+    this._unit = null
+
+    for behavior in _behaviors
+      destroy behavior
+
+    destroy _behaviors
+    _behaviors = null
+
+  // --------------------------------------------------------------------------
+  @inline
+  override function getUnit() returns unit
+    return this._unit
+
+  // --------------------------------------------------------------------------
+  override function getBehavior() returns IBehaviorTree
+    return _behaviors.peek()
+
+  // --------------------------------------------------------------------------
+  override function pushBehavior(IBehaviorTree behaviorTree, BehaviorTreeExecutionPriority priority)
+    let currentBehavior = getBehavior()
+    if (currentBehavior != null)
+      currentBehavior.pause()
+
+    _behaviors.push(behaviorTree)
+    let context = new BehaviorTreeContext(this)
+    behaviorTree.start(context, priority)
+
+  // --------------------------------------------------------------------------
+  override function popBehavior() returns IBehaviorTree
+    if (_behaviors.size() == 1)
+      return null
+
+    let behavior = _behaviors.pop()
+    behavior.stop()
+
+    let currentBehavior = getBehavior()
+    if (currentBehavior != null)
+      currentBehavior.resume()
+
+    return behavior
+
+  // --------------------------------------------------------------------------
+  override function cancelAllBehaviors()
+    while not _behaviors.isEmpty()
+      popBehavior()

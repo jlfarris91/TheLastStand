@@ -2,59 +2,600 @@ package BehaviorLibrary
 import Behaviors
 import Table
 import Orders
+import LinkedList
+import Keys
+
+// ============================================================================
+public abstract class Decorator extends BehaviorBase
+  protected IBehavior _child
+
+  // --------------------------------------------------------------------------
+  construct()
+    skip
+
+  // --------------------------------------------------------------------------
+  construct(Decorator other)
+    super(other)
+    setChild(other._child.clone())
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    destroy _child
+    _child = null
+
+  // --------------------------------------------------------------------------
+  function setChild(IBehavior child)
+    if (_child != null)
+      Log.error("Decorator.setChild can only be called once!")
+    _child = child
+
+  // --------------------------------------------------------------------------
+  function getChild() returns IBehavior
+    return _child
+
+  // --------------------------------------------------------------------------
+  override abstract function clone() returns IBehavior
+
+// ============================================================================
+public abstract class Composite extends BehaviorBase
+  protected BehaviorCollection _children
+
+  // --------------------------------------------------------------------------
+  construct()
+    _children = new BehaviorCollection()
+
+  // --------------------------------------------------------------------------
+  construct(Composite other)
+    super(other)
+    _children = new BehaviorCollection()
+    for child in other._children
+      addChild(child.clone())
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    for child in _children
+      destroy child
+    destroy _children
+    _children = null
+
+  // --------------------------------------------------------------------------
+  override abstract function clone() returns IBehavior
+
+  // --------------------------------------------------------------------------
+  function addChild(IBehavior behavior)
+    _children.add(behavior)
+
+  // --------------------------------------------------------------------------
+  function addChildAt(IBehavior behavior, int index)
+    _children.addAt(behavior, index)
+
+  // --------------------------------------------------------------------------
+  function removeChild(IBehavior behavior)
+    _children.remove(behavior)
+
+  // --------------------------------------------------------------------------
+  function removeChildAt(int index)
+    _children.removeAt(index)
+  
+// ============================================================================
+public class Sequence extends Composite
+  private LLIterator<IBehavior> _iterator
+  private IBehavior _current
+
+  // --------------------------------------------------------------------------
+  construct()
+    skip
+
+  // --------------------------------------------------------------------------
+  construct(Sequence other)
+    super(other)
+
+  // --------------------------------------------------------------------------
+  override function getName() returns string
+    return "Sequence"
+
+  // --------------------------------------------------------------------------
+  override function clone() returns IBehavior
+    return new Sequence(this)
+
+  // --------------------------------------------------------------------------
+  override function onEnter(IBehaviorTreeContext context)
+    _iterator = _children.iterator()
+    _current = _iterator.next()
+
+  // --------------------------------------------------------------------------
+  override function onUpdate(IBehaviorTreeContext context) returns BehaviorState
+
+    let childState = _current.update(context)
+
+    if (childState != BehaviorState.RUNNING)
+      if (childState == BehaviorState.FAILURE)
+        return BehaviorState.FAILURE
+      if (not _iterator.hasNext())
+        return BehaviorState.SUCCESS
+      _current = _iterator.next()
+      // Execute onUpdate again so we don't have to wait for another tick
+      // Only wait or another tick when the child's value is RUNNING
+      onUpdate(context)
+      
+    return BehaviorState.RUNNING
+
+  // --------------------------------------------------------------------------
+  override function onExit(IBehaviorTreeContext context)
+    _iterator.close()
+    _iterator = null
+    _current = null
+
+// ============================================================================
+public class Selector extends Composite
+  private LLIterator<IBehavior> _iterator
+  private IBehavior _current
+
+  // --------------------------------------------------------------------------
+  construct()
+    skip
+
+  // --------------------------------------------------------------------------
+  construct(Selector other)
+    super(other)
+
+  // --------------------------------------------------------------------------
+  override function getName() returns string
+    return "Selector"
+
+  // --------------------------------------------------------------------------
+  override function clone() returns IBehavior
+    return new Selector(this)
+
+  // --------------------------------------------------------------------------
+  override function onEnter(IBehaviorTreeContext _context)
+    _iterator = _children.iterator()
+    _current = _iterator.next()
+
+  // --------------------------------------------------------------------------
+  override function onUpdate(IBehaviorTreeContext context) returns BehaviorState
+
+    let childState = _current.update(context)
+
+    if (childState != BehaviorState.RUNNING)
+      if (childState == BehaviorState.SUCCESS)
+        return BehaviorState.SUCCESS
+      if (not _iterator.hasNext())
+        return BehaviorState.FAILURE
+      _current = _iterator.next()
+      // Execute onUpdate again so we don't have to wait for another tick
+      // Only wait or another tick when the child's value is RUNNING
+      onUpdate(context)
+
+    return BehaviorState.RUNNING
+
+  // --------------------------------------------------------------------------
+  override function onExit(IBehaviorTreeContext context)
+    _iterator.close()
+    _iterator = null
+    _current = null
+
+// ============================================================================
+public class Inverter extends Decorator
+
+  // --------------------------------------------------------------------------
+  construct()
+    skip
+
+  // --------------------------------------------------------------------------
+  construct(Inverter other)
+    super(other)
+
+  // --------------------------------------------------------------------------
+  override function getName() returns string
+    return "Inverter"
+
+  // --------------------------------------------------------------------------
+  override function clone() returns IBehavior
+    return new Inverter(this)
+    
+  // --------------------------------------------------------------------------
+  override function onUpdate(IBehaviorTreeContext context) returns BehaviorState
+    var childState = _child.update(context)
+    switch (childState)
+      case BehaviorState.RUNNING
+        return BehaviorState.RUNNING
+      case BehaviorState.SUCCESS
+        return BehaviorState.FAILURE
+      case BehaviorState.FAILURE
+        return BehaviorState.SUCCESS
+
+// ============================================================================
+public class Succeeder extends Decorator
+
+  // --------------------------------------------------------------------------
+  construct()
+    skip
+    
+  // --------------------------------------------------------------------------
+  construct(Succeeder other)
+    super(other)
+    
+  // --------------------------------------------------------------------------
+  override function getName() returns string
+    return "Succeeder"
+    
+  // --------------------------------------------------------------------------
+  override function clone() returns IBehavior
+    return new Succeeder(this)
+    
+  // --------------------------------------------------------------------------
+  override function onUpdate(IBehaviorTreeContext context) returns BehaviorState
+    let childState = _child.update(context)
+    return (childState == BehaviorState.RUNNING) ? BehaviorState.RUNNING : BehaviorState.SUCCESS
+
+// ============================================================================
+public class Repeater extends Decorator
+
+  // --------------------------------------------------------------------------
+  construct()
+    skip
+    
+  // --------------------------------------------------------------------------
+  construct(Repeater other)
+    super(other)
+    
+  // --------------------------------------------------------------------------
+  override function getName() returns string
+    return "Repeater"
+    
+  // --------------------------------------------------------------------------
+  override function clone() returns IBehavior
+    return new Repeater(this)
+    
+  // --------------------------------------------------------------------------
+  override function onUpdate(IBehaviorTreeContext context) returns BehaviorState
+    let childState = _child.update(context)
+    if (childState != BehaviorState.RUNNING)
+      onUpdate(context)
+    return BehaviorState.RUNNING
+
+// ============================================================================
+public class RepeatUntilFail extends Decorator
+
+  // --------------------------------------------------------------------------
+  construct()
+    skip
+    
+  // --------------------------------------------------------------------------
+  construct(RepeatUntilFail other)
+    super(other)
+    
+  // --------------------------------------------------------------------------
+  override function getName() returns string
+    return "RepeatUntilFail"
+    
+  // --------------------------------------------------------------------------
+  override function clone() returns IBehavior
+    return new RepeatUntilFail(this)
+    
+  // --------------------------------------------------------------------------
+  override function onUpdate(IBehaviorTreeContext context) returns BehaviorState
+    let childState = _child.update(context)
+    if (childState == BehaviorState.FAILURE)
+      return BehaviorState.SUCCESS
+    return BehaviorState.RUNNING
+
+// ==========================================================================
+public class IsWidgetNull extends BehaviorBase
+  private int _widgetVarKey
+
+  // --------------------------------------------------------------------------
+  construct(int widgetVarKey)
+    _widgetVarKey = widgetVarKey
+
+  // --------------------------------------------------------------------------
+  construct(IsWidgetNull other)
+    super(other)
+    _widgetVarKey = other._widgetVarKey
+
+  // --------------------------------------------------------------------------
+  override function getName() returns string
+    return "IsWidgetNull"
+
+  // --------------------------------------------------------------------------
+  override function clone() returns IBehavior
+    return new IsWidgetNull(this)
+    
+  // --------------------------------------------------------------------------
+  override function onUpdate(IBehaviorTreeContext context) returns BehaviorState
+    let t = context.getTable()
+    if (not t.hasInt(_widgetVarKey))
+      return BehaviorState.SUCCESS
+    return t.loadWidget(_widgetVarKey) == null ? BehaviorState.SUCCESS : BehaviorState.FAILURE
+
+// ============================================================================
+public class SetRandomReal extends BehaviorBase
+  private key _valueKey
+  private key _minKey = INVALID_KEY
+  private key _maxKey = INVALID_KEY
+  private real _min
+  private real _max
+
+  // --------------------------------------------------------------------------
+  construct(key valueKey, real min, real max)
+    _valueKey = valueKey
+    _min = min
+    _max = max
+
+  // --------------------------------------------------------------------------
+  construct(key valueKey, key minKey, key maxKey)
+    _valueKey = valueKey
+    _minKey = minKey
+    _maxKey = maxKey
+
+  // --------------------------------------------------------------------------
+  construct(SetRandomReal other)
+    super(other)
+    _valueKey = other._valueKey
+    _minKey = other._minKey
+    _maxKey = other._maxKey
+    _min = other._min
+    _max = other._max
+
+  // --------------------------------------------------------------------------
+  override function getName() returns string
+    return "SetRandomReal"
+
+  // --------------------------------------------------------------------------
+  override function clone() returns IBehavior
+    return new SetRandomReal(this)
+
+  // --------------------------------------------------------------------------
+  override function onUpdate(IBehaviorTreeContext context) returns BehaviorState
+
+    let t = context.getTable()
+
+    real min = _min
+    real max = _max
+
+    if (_minKey != INVALID_KEY)
+      min = t.loadReal(_minKey.value)
+
+    if (_maxKey != INVALID_KEY)
+      max = t.loadReal(_maxKey.value)
+
+    t.saveReal(_valueKey.value, GetRandomReal(min, max))
+    
+    return BehaviorState.SUCCESS
+
+// ==========================================================================
+public class PushToStack extends BehaviorBase
+  private int _stackVarKey
+  private int _itemVarKey
+
+  // --------------------------------------------------------------------------
+  construct(int stackVarKey, int itemVarKey)
+    _stackVarKey = stackVarKey
+    _itemVarKey = itemVarKey
+
+  // --------------------------------------------------------------------------
+  construct(PushToStack other)
+    super(other)
+    _stackVarKey = other._stackVarKey
+    _itemVarKey = other._itemVarKey
+
+  // --------------------------------------------------------------------------
+  override function getName() returns string
+    return "PushToStack"
+
+  // --------------------------------------------------------------------------
+  override function clone() returns IBehavior
+    return new PushToStack(this)
+
+  // --------------------------------------------------------------------------
+  override function onEnter(IBehaviorTreeContext context)
+    let t = context.getTable()
+    if (not t.hasInt(_stackVarKey))
+      let stack = new LinkedList<int>()
+      t.saveInt(_stackVarKey, stack castTo int)
+    
+  // --------------------------------------------------------------------------
+  override function onUpdate(IBehaviorTreeContext context) returns BehaviorState
+    let t = context.getTable()
+    let stack = t.loadInt(_stackVarKey) castTo LinkedList<int>
+    let stackItem = t.loadInt(_itemVarKey)
+    stack.push(stackItem)
+    return BehaviorState.SUCCESS
+
+// ==========================================================================
+public class PopFromStack extends BehaviorBase
+  private key _stackVarKey
+  private key _itemVarKey
+
+  // --------------------------------------------------------------------------
+  construct(key stackVarKey, key itemVarKey)
+    _stackVarKey = stackVarKey
+    _itemVarKey = itemVarKey
+
+  // --------------------------------------------------------------------------
+  construct(PopFromStack other)
+    super(other)
+    _stackVarKey = other._stackVarKey
+    _itemVarKey = other._itemVarKey
+
+  // --------------------------------------------------------------------------
+  override function getName() returns string
+    return "PopFromStack"
+
+  // --------------------------------------------------------------------------
+  override function clone() returns IBehavior
+    return new PopFromStack(this)
+    
+  // --------------------------------------------------------------------------
+  override function onUpdate(IBehaviorTreeContext context) returns BehaviorState
+    let t = context.getTable()
+
+    if (not t.hasInt(_stackVarKey.value))
+      return BehaviorState.FAILURE
+
+    let stack = t.loadInt(_stackVarKey.value) castTo LinkedList<int>
+
+    if (stack.isEmpty())
+      return BehaviorState.FAILURE
+
+    t.saveInt(_itemVarKey.value, stack.pop())
+    
+    return BehaviorState.SUCCESS
+
+// ==========================================================================
+public class IsStackEmpty extends BehaviorBase
+  private int _stackVarKey
+
+  // --------------------------------------------------------------------------
+  construct(int stackVarKey)
+    _stackVarKey = stackVarKey
+
+  // --------------------------------------------------------------------------
+  construct(IsStackEmpty other)
+    super(other)
+    _stackVarKey = other._stackVarKey
+
+  // --------------------------------------------------------------------------
+  override function getName() returns string
+    return "IsStackEmpty"
+
+  // --------------------------------------------------------------------------
+  override function clone() returns IBehavior
+    return new IsStackEmpty(this)
+    
+  // --------------------------------------------------------------------------
+  override function onUpdate(IBehaviorTreeContext context) returns BehaviorState
+    let t = context.getTable()
+    if (not t.hasInt(_stackVarKey))
+      return BehaviorState.SUCCESS
+    let stack = t.loadInt(_stackVarKey) castTo LinkedList<int>
+    return stack.isEmpty() ? BehaviorState.SUCCESS : BehaviorState.FAILURE
 
 // ==========================================================================
 public class MoveToPoint extends BehaviorBase
-  constant real s_arrivalDistanceSq = 32.0 * 32.0
-  int _targetXKey
-  int _targetYKey
+  private constant real s_arrivalDistanceSq = 32.0 * 32.0
+  private key _targetXKey
+  private key _targetYKey
 
-  construct(int targetXKey, int targetYKey)
+  // --------------------------------------------------------------------------
+  construct(key targetXKey, key targetYKey)
     _targetXKey = targetXKey
     _targetYKey = targetYKey
 
+  // --------------------------------------------------------------------------
   construct(MoveToPoint other)
     super(other)
     _targetXKey = other._targetXKey
     _targetYKey = other._targetYKey
 
+  // --------------------------------------------------------------------------
   override function getName() returns string
     return "MoveToPoint"
 
+  // --------------------------------------------------------------------------
   override function clone() returns IBehavior
     return new MoveToPoint(this)
 
+  // --------------------------------------------------------------------------
   override function onEnter(IBehaviorTreeContext context)
-    Log.info("MoveToPoint::onEnter")
     let u = context.getUnit()
     let t = context.getTable()
     let targetPoint = getTargetPoint(t)
-    u.issuePointOrderById(OrderIds.move, targetPoint)
+    u.getUnit().issuePointOrderById(OrderIds.move, targetPoint)
     
+  // --------------------------------------------------------------------------
   override function onUpdate(IBehaviorTreeContext context) returns BehaviorState
     let u = context.getUnit()
     let t = context.getTable()
     let targetPoint = getTargetPoint(t)
-    let dist = u.getPos().distanceToSq(targetPoint)
+    let dist = u.getUnit().getPos().distanceToSq(targetPoint)
 
-    if (u.getCurrentOrder() != OrderIds.move)
-      Log.info("MoveToPoint::onUpdate FAILURE Order was different than move")
+    if (u.getUnit().getCurrentOrder() != OrderIds.move)
       return BehaviorState.FAILURE
 
     if (dist < s_arrivalDistanceSq)
-      Log.info("MoveToPoint::onUpdate SUCCESS Arrived at target location")
       return BehaviorState.SUCCESS
     
     return BehaviorState.RUNNING
 
+  // --------------------------------------------------------------------------
   override function onExit(IBehaviorTreeContext context)
-    Log.info("MoveToPoint::onExit")
     let u = context.getUnit()
-    u.issueImmediateOrderById(OrderIds.stop)
+    u.getUnit().issueImmediateOrderById(OrderIds.stop)
     
+  // --------------------------------------------------------------------------
   private function getTargetPoint(Table table) returns vec2
-    let targetX = table.loadReal(_targetXKey)
-    let targetY = table.loadReal(_targetYKey)
+    let targetX = table.loadReal(_targetXKey.value)
+    let targetY = table.loadReal(_targetYKey.value)
     return vec2(targetX, targetY)
-    
 
+// ==========================================================================
+public class IssueTargetOrderIdBehavior extends BehaviorBase
+  private key _orderIdKey = INVALID_KEY
+  private key _targetWidgetKey = INVALID_KEY
+  private int _orderId
+
+  // --------------------------------------------------------------------------
+  construct(int orderId, key targetWidgetKey)
+    _orderId = orderId
+    _targetWidgetKey = targetWidgetKey
+
+  // --------------------------------------------------------------------------
+  construct(key orderIdKey, key targetWidgetKey)
+    _orderIdKey = orderIdKey
+    _targetWidgetKey = targetWidgetKey
+
+  // --------------------------------------------------------------------------
+  construct(IssueTargetOrderIdBehavior other)
+    super(other)
+    _orderIdKey = other._orderIdKey
+    _targetWidgetKey = other._targetWidgetKey
+
+  // --------------------------------------------------------------------------
+  override function getName() returns string
+    return "IssueTargetOrderIdBehavior"
+
+  // --------------------------------------------------------------------------
+  override function clone() returns IBehavior
+    return new IssueTargetOrderIdBehavior(this)
+
+  // --------------------------------------------------------------------------
+  override function onEnter(IBehaviorTreeContext context)
+    let u = context.getUnit()
+    let t = context.getTable()
+    int order = getOrder(t)
+    let target = t.loadWidget(_targetWidgetKey.value)
+    u.getUnit().issueTargetOrderById(order, target)
+    
+  // --------------------------------------------------------------------------
+  override function onUpdate(IBehaviorTreeContext context) returns BehaviorState    
+    return BehaviorState.SUCCESS
+    
+  // --------------------------------------------------------------------------
+  private function getOrder(Table table) returns int
+    int order = _orderId
+    if (_orderIdKey != INVALID_KEY)
+      order = table.loadInt(_orderIdKey.value)
+    return order
+
+// ============================================================================
+public class IsUnitFullHealth implements IBehavior
+  private key _unitKey
+
+  construct(key unitKey)
+    _unitKey = unitKey
+
+  // --------------------------------------------------------------------------
+  construct(IsUnitFullHealth other)
+    _unitKey = other._unitKey
+
+  // --------------------------------------------------------------------------
+  override function clone() returns IBehavior
+    return new IsUnitFullHealth(this)
+
+  // --------------------------------------------------------------------------
+  override function update(IBehaviorTreeContext context) returns BehaviorState
+    let t = context.getTable()
+    let w = t.loadUnit(_unitKey.value)
+    return w == null or w.getMissingHP() > 0 ? BehaviorState.FAILURE : BehaviorState.SUCCESS
