@@ -1,0 +1,55 @@
+package BrainComponent
+import Composition
+import Behaviors
+import LinkedList
+import SmartUnit
+
+// ============================================================================
+public class BrainComponent extends Component implements IHasBehaviors
+
+  protected LinkedList<IBehaviorTree> _behaviors
+  
+  // --------------------------------------------------------------------------
+  construct(IComposite owner)
+    super(owner)
+    this._behaviors = new LinkedList<IBehaviorTree>()
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    for behavior in _behaviors
+      destroy behavior
+    destroy _behaviors
+    _behaviors = null
+
+  // --------------------------------------------------------------------------
+  override function getBehavior() returns IBehaviorTree
+    return _behaviors.peek()
+
+  // --------------------------------------------------------------------------
+  override function pushBehavior(IBehaviorTree behaviorTree, BehaviorTreeExecutionPriority priority)
+    let currentBehavior = getBehavior()
+    if (currentBehavior != null)
+      currentBehavior.pause()
+
+    _behaviors.push(behaviorTree)
+    let context = new BehaviorTreeContext(this._owner castTo SmartUnit)
+    behaviorTree.start(context, priority)
+
+  // --------------------------------------------------------------------------
+  override function popBehavior() returns IBehaviorTree
+    if (_behaviors.size() == 1)
+      return null
+
+    let behavior = _behaviors.pop()
+    behavior.stop()
+
+    let currentBehavior = getBehavior()
+    if (currentBehavior != null)
+      currentBehavior.resume()
+
+    return behavior
+
+  // --------------------------------------------------------------------------
+  override function cancelAllBehaviors()
+    while not _behaviors.isEmpty()
+      popBehavior()
