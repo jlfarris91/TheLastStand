@@ -1,0 +1,80 @@
+package UnitMetadata
+import Composition
+import HashMap
+import LinkedList
+import public UnitMetadataExtensions
+import ErrorHandling
+import OnUnitEnterLeave
+
+HashMap<unit, IUnitMetadata> g_unitMetadataMap
+LinkedList<IUnitMetadataFactory> g_unitMetadataFactories
+IUnitMetadata g_replacedUnit
+
+public interface IUnitMetadata extends IComposite
+  function getUnit() returns unit
+
+public abstract class BaseUnitMetadata implements IUnitMetadata
+  protected unit _unit
+
+  construct(unit u)
+    _unit = u
+
+  ondestroy
+    unregisterUnitMetadata(this)
+    _unit = null
+
+  override function getUnit() returns unit
+    return _unit
+
+public interface IUnitMetadataFactory
+  function createUnit(unit u) returns IUnitMetadata
+
+public function unit.getMetadata() returns IUnitMetadata
+  if (g_unitMetadataMap.has(this) == false)
+    Log.info("No metadata found for unit " + this.getName())
+  return g_unitMetadataMap.get(this)
+
+public function registerUnitMetadataFactory(IUnitMetadataFactory factory)
+  if (factory == null)
+    error("Unit metadata factory cannot be null")
+  g_unitMetadataFactories.addAt(factory, 0)
+
+public function unregisterUnitMetadataFactory(IUnitMetadataFactory factory)
+  if (factory == null)
+    error("Unit metadata factory cannot be null")
+  g_unitMetadataFactories.remove(factory)
+
+function constructUnitMetadata(unit u) returns IUnitMetadata
+  if (u == null)
+    error("Unit cannot be null")
+  for factory in g_unitMetadataFactories
+    var uu = factory.createUnit(u)
+    if (uu != null)
+      return uu
+  return null
+
+function registerUnitMetadata(IUnitMetadata u)
+  g_unitMetadataMap.put(u.getUnit(), u)
+
+function unregisterUnitMetadata(IUnitMetadata u)
+  g_unitMetadataMap.remove(u.getUnit())
+
+function onUnitEnteredMap()
+  let u = constructUnitMetadata(getEnterLeaveUnit())
+  if (u != null)
+    registerUnitMetadata(u)
+    Log.info("Registered metadata for unit " + u.getName())
+
+function onUnitRemovedFromMap()
+  let u = getEnterLeaveUnit().getMetadata()
+  if (u != null)
+    unregisterUnitMetadata(u)
+    Log.info("Unregistered metadata for unit " + u.getName())
+    destroy u
+
+init
+  g_unitMetadataMap = new HashMap<unit, IUnitMetadata>()
+  g_unitMetadataFactories = new LinkedList<IUnitMetadataFactory>()
+
+  onEnter(function onUnitEnteredMap)
+  onLeave(function onUnitRemovedFromMap)

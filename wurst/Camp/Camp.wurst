@@ -4,43 +4,83 @@ import HashList
 import ErrorHandling
 import PlayerMetadata
 import LinkedList
-import initlater ICamp
-import initlater ICampUnitFactory
-import initlater ICampUnit
 import TlsUnitIds
+import CampUnitFactory
+import UnitMetadata
+import SmartUnit
+import Composition
+import UnitExtensions
+import HumanPlayers
 
+HashMap<player, ICamp> g_PlayerCamps
+
+// ============================================================================
+public interface ICamp
+  function getOwner() returns player
+  
+  function getCampUnit() returns unit
+  function setCampUnit(unit u)
+  
+  function getCenter() returns vec2
+  
+  function getIsSecure() returns bool
+  function setIsSecure(bool isSecure)
+
+  function getUnit(unit u) returns ICampUnitMetadata
+  function addUnit(ICampUnitMetadata u) returns ICampUnitMetadata
+  function removeUnit(ICampUnitMetadata u) returns bool
+
+  function getUnits() returns LinkedList<ICampUnitMetadata>
+
+  function reset()
+
+// ============================================================================
+public interface ICampUnitMetadata extends IUnitMetadata
+  function getCamp() returns ICamp
+
+// ============================================================================
+public interface ICampStructure extends ICampUnitMetadata
+
+// ============================================================================
+public interface ICampSurvivor extends ICampUnitMetadata
+
+// ============================================================================
 public class Camp implements ICamp
   protected player _owner
-  protected HashList<ICampUnit> _units
-  protected HashMap<unit, ICampUnit> _unitToCampUnitMap
+  protected HashList<ICampUnitMetadata> _units
+  protected HashMap<unit, ICampUnitMetadata> _unitToCampUnitMap
   protected unit _campFlag
   protected int _worth
   protected bool _isSecure
-  protected ICampUnitFactory _unitFactory
 
-  construct(player owner, ICampUnitFactory unitFactory)
+  // --------------------------------------------------------------------------
+  construct(player owner)
     this._owner = owner
-    this._units = new HashList<ICampUnit>()
-    this._unitToCampUnitMap = new HashMap<unit, ICampUnit>()
-    this._unitFactory = unitFactory
+    this._units = new HashList<ICampUnitMetadata>()
+    this._unitToCampUnitMap = new HashMap<unit, ICampUnitMetadata>()
     this.reset()
 
+  // --------------------------------------------------------------------------
   ondestroy
     this.reset()
     destroy this._units
     destroy this._unitToCampUnitMap
 
+  // --------------------------------------------------------------------------
   override function reset()
     this._units.clear()
     this._unitToCampUnitMap.flush()
     setCampUnit(null)
 
+  // --------------------------------------------------------------------------
   override function getOwner() returns player
     return this._owner
 
+  // --------------------------------------------------------------------------
   override function getCampUnit() returns unit
     return this._campFlag
 
+  // --------------------------------------------------------------------------
   override function setCampUnit(unit flag)
     if (flag != null and flag.getTypeId() != TlsUnitIds.camp)
       error("Tried to assign a camp unit that was the incorrect type")
@@ -49,6 +89,7 @@ public class Camp implements ICamp
       this._campFlag.remove()
     this._campFlag = flag
 
+  // --------------------------------------------------------------------------
   override function getCenter() returns vec2
     if (_campFlag != null)
       return _campFlag.getPos()
@@ -56,41 +97,166 @@ public class Camp implements ICamp
       return _owner.getHeroUnit().getPos()
     return ZERO2
 
+  // --------------------------------------------------------------------------
   override function getIsSecure() returns bool
     return this._isSecure
 
+  // --------------------------------------------------------------------------
   override function setIsSecure(bool isSecure)
     this._isSecure = isSecure
 
-  override function getUnit(unit u) returns ICampUnit
+  // --------------------------------------------------------------------------
+  override function getUnit(unit u) returns ICampUnitMetadata
     return this._unitToCampUnitMap.get(u)
 
-  override function addUnit(unit u) returns ICampUnit
-    let campUnit = this._unitFactory.createCampUnit(this, u)
-    if (campUnit == null)
-      return null
-    return this.addUnit(campUnit)
-
-  override function addUnit(ICampUnit campUnit) returns ICampUnit
+  // --------------------------------------------------------------------------
+  override function addUnit(ICampUnitMetadata campUnit) returns ICampUnitMetadata
     this._units.add(campUnit)
     this._unitToCampUnitMap.put(campUnit.getUnit(), campUnit)
     print("Added unit {0} to {1} camp".format(campUnit.getUnit().getName(), _owner.getName()))
     return campUnit
 
-  override function removeUnit(unit u) returns bool
-    if (not this._unitToCampUnitMap.has(u))
-      return false
-    let campUnit = this._unitToCampUnitMap.get(u)
-    return this.removeUnit(campUnit)
-
-  override function removeUnit(ICampUnit campUnit) returns bool
+  // --------------------------------------------------------------------------
+  override function removeUnit(ICampUnitMetadata campUnit) returns bool
     this._units.remove(campUnit)
     this._unitToCampUnitMap.remove(campUnit.getUnit())
     print("Removed unit {0} from {1} camp".format(campUnit.getUnit().getName(), _owner.getName()))
     return true
 
-  override function getUnits() returns LinkedList<ICampUnit>
-    let campUnits = new LinkedList<ICampUnit>()
+  // --------------------------------------------------------------------------
+  override function getUnits() returns LinkedList<ICampUnitMetadata>
+    let campUnits = new LinkedList<ICampUnitMetadata>()
     for campUnit in this._units
       campUnits.add(campUnit)
     return campUnits
+
+// ============================================================================
+public class CampUnit extends ComposableUnit implements ICampUnitMetadata
+  protected ICamp _camp
+
+  // --------------------------------------------------------------------------
+  construct(ICamp camp, unit u)
+    super(u)
+    this._camp = camp
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    this._camp.removeUnit(this)
+    this._camp = null
+
+  // --------------------------------------------------------------------------
+  @inline
+  override function getCamp() returns ICamp
+    return this._camp
+    
+  // --------------------------------------------------------------------------
+  @inline
+  override function getUnit() returns unit
+    return super.getUnit()
+    
+  // --------------------------------------------------------------------------
+  @inline
+  override function addComponent(IComponent component) returns IComponent
+    return super.addComponent(component)
+
+  // --------------------------------------------------------------------------
+  @inline
+  override function getComponent(int componentTypeId) returns IComponent
+    return super.getComponent(componentTypeId)
+
+// ============================================================================
+public class CampStructure extends CampUnit implements ICampStructure
+
+  // --------------------------------------------------------------------------
+  construct(ICamp camp, unit u)
+    super(camp, u)
+
+  // --------------------------------------------------------------------------
+  @inline
+  override function getCamp() returns ICamp
+    return super.getCamp()
+
+  // --------------------------------------------------------------------------
+  @inline
+  override function getUnit() returns unit
+    return super.getUnit()
+    
+  // --------------------------------------------------------------------------
+  @inline
+  override function addComponent(IComponent component) returns IComponent
+    return super.addComponent(component)
+
+  // --------------------------------------------------------------------------
+  @inline
+  override function getComponent(int componentTypeId) returns IComponent
+    return super.getComponent(componentTypeId)
+
+// ============================================================================
+public class Survivor extends CampUnit
+  construct(ICamp camp, unit u)
+    super(camp, u)
+
+// ============================================================================
+public function player.getCamp() returns ICamp
+  return getPlayerCamp(this)
+
+// ============================================================================
+public function unit.getCamp() returns ICamp
+  return this.getOwner().getCamp()
+
+// ============================================================================
+public function unit.hasCamp() returns bool
+  return this.getCamp() != null
+
+// ============================================================================
+public function ICamp.getSurvivor(unit structure) returns ICampSurvivor
+  return this.getUnit(structure) castTo ICampSurvivor
+
+// ============================================================================
+public function ICamp.getStructure(unit structure) returns ICampStructure
+  return this.getUnit(structure) castTo ICampStructure
+
+// ============================================================================
+function getPlayerCamp(player p) returns ICamp
+  if (not g_PlayerCamps.has(p))
+    return null
+  return g_PlayerCamps.get(p)
+
+// ============================================================================
+function createCamp(player p)
+  let camp = new Camp(p)
+  g_PlayerCamps.put(p, camp)
+
+// ============================================================================
+function isCampStructure(unit u) returns bool
+  let unitTypeId = u.getTypeId()
+  if (not u.isStructure())
+    return false
+  if (unitTypeId == TlsUnitIds.campFlag)
+    return false
+  return true
+
+// ============================================================================
+function isCampSurvivor(unit u) returns bool
+  let unitTypeId = u.getTypeId()
+  if (u.isStructure())
+    return false
+  if (unitTypeId == TlsUnitIds.camp or
+      unitTypeId == TlsUnitIds.hero or
+      unitTypeId == TlsUnitIds.host or
+      unitTypeId == TlsUnitIds.skills)
+    return false
+  return true
+
+// ============================================================================
+function initializePlayerCamps()
+  for p in g_PlayingHumanPlayers
+    createCamp(p)
+
+// ============================================================================
+init
+  g_PlayerCamps = new HashMap<player, ICamp>()
+  initializePlayerCamps()
+
+  let campUnitFactory = new CampUnitFactory()
+  registerUnitMetadataFactory(campUnitFactory)
