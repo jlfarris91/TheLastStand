@@ -3,28 +3,55 @@ import Composition
 import UnitMetadata
 import TlsUnitIds
 import TlsAbilityIds
+import Type
+import Orders
+import FX
+import ColorUtility
 
+constant int EXHAUST_ORDER_ID = OrderIds.slow
+unit g_casterUnit
+
+// ============================================================================
 public class ExhaustionComponent extends Component
-
   private int _level = 1
 
+  // --------------------------------------------------------------------------
   construct(IComposite owner)
     super(owner)
 
+  // --------------------------------------------------------------------------
   function setLevel(int level)
     _level = level
 
+  // --------------------------------------------------------------------------
   function getLevel() returns int
     return _level
 
+  // --------------------------------------------------------------------------
   function exhaustUnit()
-    let ownerPlayer = (_owner castTo IUnitMetadata).getUnit().getOwner()
-    let spawnPos = gg_rct_BaseUnits.randomPoint()
-    let caster = CreateUnit(ownerPlayer, TlsUnitIds.exhaustCasterDummy, spawnPos.x, spawnPos.y, 0)
-    caster.setAbilityLevel(TlsAbilityIds.sprintExhaust, _level)
+    let u = (_owner castTo IUnitMetadata).getUnit()
+    let ownerPlayer = u.getOwner()
+    
+    ensureCasterExists()
+    updateCasterAbilityLevel()
 
+    g_casterUnit.issueTargetOrderById(EXHAUST_ORDER_ID, u)
+    FX.createTag(u.getX(), u.getY(), "Exhausted!", COLOR_RED, ownerPlayer)    
+
+  // --------------------------------------------------------------------------
+  private function updateCasterAbilityLevel()
+    g_casterUnit.setAbilityLevel(TlsAbilityIds.sprintExhaust, _level)
+
+// ============================================================================
 public function IUnitMetadata.getOrAddExhaustionComponent() returns ExhaustionComponent
-  var component = this.getComponent(ExhaustionComponent.typeId) castTo ExhaustionComponent
+  var component = this.getComponent(Type(ExhaustionComponent.typeId)) castTo ExhaustionComponent
   if (component == null)
     component = this.addComponent(new ExhaustionComponent(this)) castTo ExhaustionComponent
   return component
+
+// ============================================================================
+function ensureCasterExists()
+  if (g_casterUnit != null)
+    return
+  let spawnPos = gg_rct_BaseUnits.randomPoint()
+  g_casterUnit = CreateUnit(DUMMY_PLAYER, TlsUnitIds.exhaustCasterDummy, spawnPos.x, spawnPos.y, 0)

@@ -2,21 +2,21 @@ package Camp
 import HashMap
 import HashList
 import ErrorHandling
-import PlayerMetadata
 import LinkedList
 import TlsUnitIds
 import CampUnitFactory
 import UnitMetadata
-import SmartUnit
+import ComposableUnit
 import Composition
 import UnitExtensions
-import HumanPlayers
+import Type
+import HumanPlayerMetadata
 
 HashMap<player, ICamp> g_PlayerCamps
 
 // ============================================================================
 public interface ICamp
-  function getOwner() returns player
+  function getOwner() returns IPlayerMetadata
   
   function getCampUnit() returns unit
   function setCampUnit(unit u)
@@ -46,7 +46,7 @@ public interface ICampSurvivor extends ICampUnitMetadata
 
 // ============================================================================
 public class Camp implements ICamp
-  protected player _owner
+  protected HumanPlayerMetadata _owner
   protected HashList<ICampUnitMetadata> _units
   protected HashMap<unit, ICampUnitMetadata> _unitToCampUnitMap
   protected unit _campFlag
@@ -54,7 +54,7 @@ public class Camp implements ICamp
   protected bool _isSecure
 
   // --------------------------------------------------------------------------
-  construct(player owner)
+  construct(HumanPlayerMetadata owner)
     this._owner = owner
     this._units = new HashList<ICampUnitMetadata>()
     this._unitToCampUnitMap = new HashMap<unit, ICampUnitMetadata>()
@@ -73,7 +73,7 @@ public class Camp implements ICamp
     setCampUnit(null)
 
   // --------------------------------------------------------------------------
-  override function getOwner() returns player
+  override function getOwner() returns IPlayerMetadata
     return this._owner
 
   // --------------------------------------------------------------------------
@@ -93,8 +93,8 @@ public class Camp implements ICamp
   override function getCenter() returns vec2
     if (_campFlag != null)
       return _campFlag.getPos()
-    else if (_owner.getHeroUnit() != null)
-      return _owner.getHeroUnit().getPos()
+    else if (_owner.getHero() != null)
+      return _owner.getHero().getPos()
     return ZERO2
 
   // --------------------------------------------------------------------------
@@ -156,13 +156,18 @@ public class CampUnit extends ComposableUnit implements ICampUnitMetadata
     
   // --------------------------------------------------------------------------
   @inline
+  override function setUnit(unit u)
+    super.setUnit(u)
+    
+  // --------------------------------------------------------------------------
+  @inline
   override function addComponent(IComponent component) returns IComponent
     return super.addComponent(component)
 
   // --------------------------------------------------------------------------
   @inline
-  override function getComponent(int componentTypeId) returns IComponent
-    return super.getComponent(componentTypeId)
+  override function getComponent(Type componentType) returns IComponent
+    return super.getComponent(componentType)
 
 // ============================================================================
 public class CampStructure extends CampUnit implements ICampStructure
@@ -180,6 +185,11 @@ public class CampStructure extends CampUnit implements ICampStructure
   @inline
   override function getUnit() returns unit
     return super.getUnit()
+
+  // --------------------------------------------------------------------------
+  @inline
+  override function setUnit(unit u)
+    super.setUnit(u)
     
   // --------------------------------------------------------------------------
   @inline
@@ -188,25 +198,13 @@ public class CampStructure extends CampUnit implements ICampStructure
 
   // --------------------------------------------------------------------------
   @inline
-  override function getComponent(int componentTypeId) returns IComponent
-    return super.getComponent(componentTypeId)
+  override function getComponent(Type componentType) returns IComponent
+    return super.getComponent(componentType)
 
 // ============================================================================
 public class Survivor extends CampUnit
   construct(ICamp camp, unit u)
     super(camp, u)
-
-// ============================================================================
-public function player.getCamp() returns ICamp
-  return getPlayerCamp(this)
-
-// ============================================================================
-public function unit.getCamp() returns ICamp
-  return this.getOwner().getCamp()
-
-// ============================================================================
-public function unit.hasCamp() returns bool
-  return this.getCamp() != null
 
 // ============================================================================
 public function ICamp.getSurvivor(unit structure) returns ICampSurvivor
@@ -215,17 +213,6 @@ public function ICamp.getSurvivor(unit structure) returns ICampSurvivor
 // ============================================================================
 public function ICamp.getStructure(unit structure) returns ICampStructure
   return this.getUnit(structure) castTo ICampStructure
-
-// ============================================================================
-function getPlayerCamp(player p) returns ICamp
-  if (not g_PlayerCamps.has(p))
-    return null
-  return g_PlayerCamps.get(p)
-
-// ============================================================================
-function createCamp(player p)
-  let camp = new Camp(p)
-  g_PlayerCamps.put(p, camp)
 
 // ============================================================================
 function isCampStructure(unit u) returns bool
@@ -249,14 +236,6 @@ function isCampSurvivor(unit u) returns bool
   return true
 
 // ============================================================================
-function initializePlayerCamps()
-  for p in g_PlayingHumanPlayers
-    createCamp(p)
-
-// ============================================================================
 init
-  g_PlayerCamps = new HashMap<player, ICamp>()
-  initializePlayerCamps()
-
   let campUnitFactory = new CampUnitFactory()
   registerUnitMetadataFactory(campUnitFactory)

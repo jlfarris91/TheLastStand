@@ -2,11 +2,17 @@ package SkillsComponent
 import Composition
 import LinkedList
 import Skills
+import Type
+import initlater SkillsBoard
+import RegisterEvents
+import UnitMetadata
+import ClosureTimers
 
 // ============================================================================
 public class SkillsComponent extends Component
 
-  protected LinkedList<ISkillInstance> _skills
+  protected LinkedList<ISkill> _skills
+  private SkillsBoard _board
   
   // --------------------------------------------------------------------------
   construct(IComposite owner)
@@ -18,25 +24,84 @@ public class SkillsComponent extends Component
       destroy skill
     destroy _skills
     _skills = null
+    destroy _board
 
   // --------------------------------------------------------------------------
-  function addSkill(ISkillInstance skill) returns ISkillInstance
+  function addSkill(ISkill skill) returns ISkill
     if (_skills == null)
-      _skills = new LinkedList<ISkillInstance>()
+      _skills = new LinkedList<ISkill>()
+
     _skills.add(skill)
+
     skill.reset()
+
+    if (_board != null)
+      _board.updateMultiboardRows()
+
     return skill
 
   // --------------------------------------------------------------------------
-  function getSkill(int skillTypeId) returns ISkillInstance
+  function getSkill(Type skillType) returns ISkill
     if (_skills != null)
       for skill in _skills
-        if (skill.typeId == skillTypeId)
+        if (skill.typeId == skillType.id)
           return skill
     return null
   
+  // --------------------------------------------------------------------------
+  function getSkillInstances() returns LinkedList<ISkill>
+    return _skills
+
+  // --------------------------------------------------------------------------
+  override function initialize()
+    super.initialize()
+    _board = new SkillsBoard(this, "Skills")
+    _board.updateMultiboardRows()
+    
+  // --------------------------------------------------------------------------
+  function show()
+    _board.updateMultiboardRows()
+    _board.update()
+    _board.show()
+    
+  // --------------------------------------------------------------------------
+  function hide()
+    _board.hide()
+  
+// ============================================================================
 public function IComposite.getOrAddSkillsComponent() returns SkillsComponent
-  var component = this.getComponent(SkillsComponent.typeId) castTo SkillsComponent
+  var component = this.getComponent(Type(SkillsComponent.typeId)) castTo SkillsComponent
   if (component == null)
     component = this.addComponent(new SkillsComponent(this)) castTo SkillsComponent
   return component
+
+// ============================================================================
+function onUnitSelected()
+  let u = GetTriggerUnit()
+  let metadata = u.getMetadata()
+  if (metadata == null)
+    return
+  let skillsComponent = metadata.getComponent(Type(SkillsComponent.typeId)) castTo SkillsComponent
+  if (skillsComponent == null)
+    return
+  skillsComponent.show()
+
+// ============================================================================
+function onUnitDeselected()
+  let u = GetTriggerUnit()
+  let metadata = u.getMetadata()
+  if (metadata == null)
+    return
+  let skillsComponent = metadata.getComponent(Type(SkillsComponent.typeId)) castTo SkillsComponent
+  if (skillsComponent == null)
+    return
+  skillsComponent.hide()
+
+function delayedInit()
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_SELECTED, function onUnitSelected)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_DESELECTED, function onUnitDeselected)
+
+// ============================================================================
+init
+  doAfter(1.0) () ->
+    delayedInit()

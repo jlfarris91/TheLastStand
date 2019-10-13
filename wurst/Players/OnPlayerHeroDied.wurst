@@ -1,38 +1,47 @@
 package OnPlayerHeroDied
 import RegisterEvents
-import PlayerMetadata
 import GameSettings
 import DisplayTextToPlayer
 import GameConstants
 import Camp
+import HumanPlayerMetadata
 
+// ============================================================================
 function givePlayerUnitsToVillagers(player p)
-  let campUnits = p.getCamp().getUnits()
+  let playerMetadata = p.getHumanMetadataRequired()
+  let campUnits = playerMetadata.getCamp().getUnits()
   for u in campUnits
     u.getUnit().setOwner(PLAYER_VILLAGERS, true)
 
+// ============================================================================
 function disableFogOfWarForPlayer(player p)
   CreateFogModifierRectBJ(true, p, FOG_OF_WAR_VISIBLE, GetPlayableMapRect())
 
-function onPlayerHeroDied(player p)
-  p.setDisplayName("-Deceased-")
-  p.setIsDead(true)
+// ============================================================================
+function onPlayerHeroDied(HumanPlayerMetadata playerMetadata)
+  playerMetadata.setDisplayName("-Deceased-")
 
   if (GameSettings.allowRespawn)
-    displayTextToPlayer(p, "You will be respawned at the start of the next day")
+    displayTextToPlayer(playerMetadata.getPlayer(), "You will be respawned at the start of the next day")
   else
-    disableFogOfWarForPlayer(p)
+    disableFogOfWarForPlayer(playerMetadata.getPlayer())
 
-  p.resetPlayerMetadata()
-  p.getCamp().reset()
+  playerMetadata.reset()
+  playerMetadata.getCamp().reset()
   // TODO: disable trackables for player
 
+// ============================================================================
 function onPlayerUnitDied()
-  var dyingUnit = GetDyingUnit()
-  var owner = dyingUnit.getOwner()
+  let dyingUnit = GetDyingUnit()
+  let owner = dyingUnit.getOwner()
+  let playerMetadata = owner.getMetadata() castTo HumanPlayerMetadata
 
-  if (dyingUnit == owner.getHeroUnit())
-    onPlayerHeroDied(owner)
+  if (playerMetadata == null)
+    return
 
+  if (dyingUnit == playerMetadata.getHero().getUnit())
+    onPlayerHeroDied(playerMetadata)
+
+// ============================================================================
 init
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_DEATH, function onPlayerUnitDied)

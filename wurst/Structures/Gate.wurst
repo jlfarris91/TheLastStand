@@ -5,12 +5,16 @@ import Camp
 import Math
 import TlsUnitIds
 import TlsAbilityIds
+import HumanPlayerMetadata
+import UnitMetadata
 
+// ============================================================================
 public class Gate extends CampStructure
   private bool _isOpen
   private int _index
   private int _angle
 
+  // --------------------------------------------------------------------------
   construct(ICamp camp, unit u)
     super(camp, u)
     this._index = 0
@@ -18,12 +22,15 @@ public class Gate extends CampStructure
     this._angle = this._unit.getFacingAngle().degrees().toInt()
     this.updateState()
 
+  // --------------------------------------------------------------------------
   function getIsOpen() returns bool
     return this._isOpen
 
+  // --------------------------------------------------------------------------
   function getIsClosed() returns bool
     return not this._isOpen
 
+  // --------------------------------------------------------------------------
   function openGate()
     if (this._isOpen)
       return
@@ -39,6 +46,7 @@ public class Gate extends CampStructure
     IssueTrainOrderByIdBJ(this._unit, upgradeId)
     updateState()
 
+  // --------------------------------------------------------------------------
   function closeGate()
     if (not this._isOpen)
       return
@@ -54,18 +62,18 @@ public class Gate extends CampStructure
     IssueTrainOrderByIdBJ(this._unit, upgradeId)
     updateState()
 
+  // --------------------------------------------------------------------------
   function rotateClockwise()
     this.rotateGate(-1)
 
+  // --------------------------------------------------------------------------
   function rotateCounterClockwise()
     this.rotateGate(1)
 
+  // --------------------------------------------------------------------------
   private function rotateGate(int dir)
     let pos = this._unit.getPos()
     let owner = this._unit.getOwner()
-
-    this._camp.removeUnit(this)
-    this._unit.remove()
 
     int nextUnitId
 
@@ -78,13 +86,10 @@ public class Gate extends CampStructure
       if (dir < 0)
         this._angle = wrapMaxEx(this._angle - 90 * dir, 0, 360)
 
-    let replaced = CreateUnit(owner, nextUnitId, pos.x, pos.y, I2R(this._angle))
+    let replaced = createUnitTLS(this, owner, nextUnitId, pos.x, pos.y, I2R(this._angle))
 
     let rot = replaced.getFacingAngle().degrees()
     print("Gate rotation is now " + R2S(rot))
-
-    this._unit = replaced
-    this._camp.addUnit(this)
 
     replaced.setLife(this._unit.getLife())
     replaced.setPathing(false)
@@ -96,6 +101,7 @@ public class Gate extends CampStructure
     
     updateState()
 
+  // --------------------------------------------------------------------------
   protected function updateState()
     switch (this._unit.getTypeId())
       case TlsUnitIds.gateHorizontalBuild | TlsUnitIds.gateHorizontalClosed | TlsUnitIds.gateDiagonalClosed
@@ -107,6 +113,7 @@ public class Gate extends CampStructure
         _unit.setPathing(false)
         _isOpen = true
 
+// ============================================================================
 public function unit.isGate() returns bool
   let unitId = this.getTypeId()
   return unitId == TlsUnitIds.gateDiagonalClosed or
@@ -115,57 +122,88 @@ public function unit.isGate() returns bool
          unitId == TlsUnitIds.gateHorizontalClosed or
          unitId == TlsUnitIds.gateHorizontalOpen
 
+// ============================================================================
 function onRotateClockwiseCast()
   var caster = GetSpellAbilityUnit()
   if (not caster.isGate())
     return
-  let owner = caster.getOwner()
-  let camp = owner.getCamp()
+  
+  let playerMetadata = caster.getOwnerHumanMetadata()
+  if (playerMetadata == null)
+    return
+
+  let camp = playerMetadata.getCamp()
+
   let gate = camp.getStructure(caster) castTo Gate
   if (gate != null)
     gate.rotateClockwise()
 
+// ============================================================================
 function onRotateCounterClockwiseCast()
   var caster = GetSpellAbilityUnit()
   if (not caster.isGate())
     return
-  let owner = caster.getOwner()
-  let camp = owner.getCamp()
+  
+  let playerMetadata = caster.getOwnerHumanMetadata()
+  if (playerMetadata == null)
+    return
+
+  let camp = playerMetadata.getCamp()
+
   let gate = camp.getStructure(caster) castTo Gate
   if (gate != null)
     gate.rotateCounterClockwise()
 
+// ============================================================================
 function onGateUpgradeFinished()
   var caster = GetTriggerUnit()
   if (not caster.isGate())
     return
-  let owner = caster.getOwner()
-  let camp = owner.getCamp()
+
+  let playerMetadata = caster.getOwnerHumanMetadata()
+  if (playerMetadata == null)
+    return
+
+  let camp = playerMetadata.getCamp()
+
   let gate = camp.getStructure(caster) castTo Gate
   if (gate != null)
     gate.updateState()
 
+// ============================================================================
 function onGateUpgradeStart()
   var caster = GetTriggerUnit()
   if (not caster.isGate())
     return
-  let owner = caster.getOwner()
-  let camp = owner.getCamp()
+  
+  let playerMetadata = caster.getOwnerHumanMetadata()
+  if (playerMetadata == null)
+    return
+
+  let camp = playerMetadata.getCamp()
+
   let gate = camp.getStructure(caster) castTo Gate
   if (gate != null)
     gate.updateState()
 
+// ============================================================================
 function onGateAttacked()
   var caster = GetTriggerUnit()
   if (not caster.isGate())
     return
-  let owner = caster.getOwner()
-  let camp = owner.getCamp()
+  
+  let playerMetadata = caster.getOwnerHumanMetadata()
+  if (playerMetadata == null)
+    return
+
+  let camp = playerMetadata.getCamp()
+  
   let gate = camp.getStructure(caster) castTo Gate
   if (gate != null and gate.getIsClosed())
     gate.getUnit().setAnimation("hit")
     ResetUnitAnimation(gate.getUnit())
 
+// ============================================================================
 init
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_UPGRADE_START, function onGateUpgradeStart)
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_UPGRADE_FINISH, function onGateUpgradeFinished)

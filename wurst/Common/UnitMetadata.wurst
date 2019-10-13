@@ -9,42 +9,69 @@ import OnUnitEnterLeave
 HashMap<unit, IUnitMetadata> g_unitMetadataMap
 LinkedList<IUnitMetadataFactory> g_unitMetadataFactories
 IUnitMetadata g_replacedUnit
+bool g_generationPaused
+bool g_removalPaused
 
+// ============================================================================
 public interface IUnitMetadata extends IComposite
   function getUnit() returns unit
+  function setUnit(unit u)
 
+// ============================================================================
+public interface IUnitMetadataFactory
+  function createUnit(unit u) returns IUnitMetadata
+
+// ============================================================================
 public abstract class BaseUnitMetadata implements IUnitMetadata
   protected unit _unit
 
+  // --------------------------------------------------------------------------
   construct(unit u)
-    _unit = u
+    setUnit(u)
 
+  // --------------------------------------------------------------------------
   ondestroy
     unregisterUnitMetadata(this)
     _unit = null
 
+  // --------------------------------------------------------------------------
   override function getUnit() returns unit
     return _unit
 
-public interface IUnitMetadataFactory
-  function createUnit(unit u) returns IUnitMetadata
+  // --------------------------------------------------------------------------
+  override function setUnit(unit u)
+    let oldUnit = _unit
+    let newUnit = u
+    if (oldUnit != null)
+      unregisterUnitMetadata(this)
+    _unit = newUnit
+    registerUnitMetadata(this)
+    onUnitChanged(oldUnit, newUnit)
 
+  // --------------------------------------------------------------------------
+  protected function onUnitChanged(unit _oldUnit, unit _newUnit)
+    skip
+
+// ============================================================================
 public function unit.getMetadata() returns IUnitMetadata
   if (g_unitMetadataMap.has(this) == false)
     Log.info("No metadata found for unit " + this.getName())
   return g_unitMetadataMap.get(this)
 
+// ============================================================================
 public function registerUnitMetadataFactory(IUnitMetadataFactory factory)
   if (factory == null)
     error("Unit metadata factory cannot be null")
   g_unitMetadataFactories.addAt(factory, 0)
 
+// ============================================================================
 public function unregisterUnitMetadataFactory(IUnitMetadataFactory factory)
   if (factory == null)
     error("Unit metadata factory cannot be null")
   g_unitMetadataFactories.remove(factory)
 
-function constructUnitMetadata(unit u) returns IUnitMetadata
+// ============================================================================
+public function constructUnitMetadata(unit u) returns IUnitMetadata
   if (u == null)
     error("Unit cannot be null")
   for factory in g_unitMetadataFactories
@@ -53,25 +80,74 @@ function constructUnitMetadata(unit u) returns IUnitMetadata
       return uu
   return null
 
-function registerUnitMetadata(IUnitMetadata u)
+// ============================================================================
+public function registerUnitMetadata(IUnitMetadata u)
   g_unitMetadataMap.put(u.getUnit(), u)
+  Log.info("Registered metadata for unit " + u.getName())
 
-function unregisterUnitMetadata(IUnitMetadata u)
+// ============================================================================
+public function unregisterUnitMetadata(IUnitMetadata u)
   g_unitMetadataMap.remove(u.getUnit())
+  Log.info("Unregistered metadata for unit " + u.getName())
 
+// ============================================================================
+public function replaceUnitTLS(unit whichUnit, integer newUnitId, integer unitStateMethod) returns unit
+  let existingMetadata = whichUnit.getMetadata()
+  pauseMetadataGeneration()
+  pauseMetadataRemoval()
+  let newUnit = ReplaceUnitBJ(whichUnit, newUnitId, unitStateMethod)
+  if (existingMetadata != null)
+    existingMetadata.setUnit(newUnit)
+  return newUnit
+
+// ============================================================================
+public function createUnitTLS(player p, integer unitId, real x, real y, real face) returns unit
+  pauseMetadataGeneration()
+  let newUnit = CreateUnit(p, unitId, x, y, face)
+  constructUnitMetadata(newUnit)
+  return newUnit
+
+// ============================================================================
+public function createUnitTLS(IUnitMetadata metadata, player p, integer unitId, real x, real y, real face) returns unit
+  if (metadata == null)
+    error("metadata cannot be null")
+  pauseMetadataGeneration()
+  let newUnit = CreateUnit(p, unitId, x, y, face)
+  metadata.setUnit(newUnit)
+  return newUnit
+
+// ============================================================================
+public function pauseMetadataGeneration()
+  g_generationPaused = true
+
+// ============================================================================
+function resumeMetadataGeneration()
+  g_generationPaused = false
+
+// ============================================================================
+public function pauseMetadataRemoval()
+  g_removalPaused = true
+
+// ============================================================================
+function resumeMetadataRemoval()
+  g_removalPaused = false
+
+// ============================================================================
 function onUnitEnteredMap()
-  let u = constructUnitMetadata(getEnterLeaveUnit())
-  if (u != null)
-    registerUnitMetadata(u)
-    Log.info("Registered metadata for unit " + u.getName())
+  if (not g_generationPaused)
+    constructUnitMetadata(getEnterLeaveUnit())
+  resumeMetadataGeneration()
 
+// ============================================================================
 function onUnitRemovedFromMap()
-  let u = getEnterLeaveUnit().getMetadata()
-  if (u != null)
-    unregisterUnitMetadata(u)
-    Log.info("Unregistered metadata for unit " + u.getName())
-    destroy u
+  if (not g_removalPaused)
+    let metadata = getEnterLeaveUnit().getMetadata()
+    if (metadata != null)
+      unregisterUnitMetadata(metadata)
+      destroy metadata
+  resumeMetadataRemoval()
 
+// ============================================================================
 init
   g_unitMetadataMap = new HashMap<unit, IUnitMetadata>()
   g_unitMetadataFactories = new LinkedList<IUnitMetadataFactory>()

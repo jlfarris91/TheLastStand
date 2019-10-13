@@ -2,7 +2,6 @@ package Zombies
 import GroupUtils
 import GameConstants
 import HumanPlayers
-import PlayerMetadata
 import UndeadSpawnPoints
 import GameSettings
 import HashMap
@@ -15,6 +14,8 @@ import Math
 import MainItemLibrary
 import TlsUnitIds
 import Camp
+import HumanPlayerMetadata
+import UnitMetadata
 
 timer g_SpawnTimer
 HashMap<player, PlayerZombieMetadata> g_PlayerMetadata
@@ -40,10 +41,12 @@ public class Zombies
       spawnDayZombiesNearPlayer(p)
 
   static function spawnDayZombiesNearPlayer(player p)
-    if (p.getIsDead())
+    let playerMetadata = p.getHumanMetadataRequired()
+
+    if (playerMetadata.getIsDead())
       return
     
-    var camp = p.getCamp()
+    var camp = playerMetadata.getCamp()
     var center = camp.getCenter()
 
     // Clamp the spawn area to the world bounds
@@ -59,7 +62,7 @@ public class Zombies
     for sp in spawnPoints
       // TODO: unit recycler
       for i = 0 to groupSize - 1
-        CreateUnit(
+        createUnitTLS(
           PLAYER_UNDEAD,
           TlsUnitIds.zombieDay,
           sp.getPos().x,
@@ -80,7 +83,7 @@ public class Zombies
 
 function getClosestZombieTarget(player p, vec2 pos) returns unit
   var distance = 100000000.0
-  var camp = p.getCamp()
+  var camp = p.getHumanMetadataRequired().getCamp()
   var isSecure = camp.getIsSecure()
   unit target = null
 
@@ -95,7 +98,9 @@ function getClosestZombieTarget(player p, vec2 pos) returns unit
         distance = d    
 
   if (target == null)
-    target = p.getHeroUnit()
+    let playerMetadata = p.getHumanMetadata()
+    if (playerMetadata != null and not playerMetadata.getIsDead())
+      target = playerMetadata.getHero().getUnit()
 
   return target
 
@@ -113,17 +118,19 @@ function spawnZombieNearPlayer(player p, vec2 pos) returns Zombie
   return zombie
 
 function spawnZombiesNearPlayer(player p)
-  if (p.getIsDead())
+  let playerMetadata = p.getHumanMetadataRequired()
+
+  if (playerMetadata.getIsDead())
     return
 
-  var camp = p.getCamp()
+  var camp = playerMetadata.getCamp()
   var center = camp.getCenter()
-  var playerMetadata = g_PlayerMetadata.get(p)
+  let playerZombieMetadata = g_PlayerMetadata.get(p)
 
   // Clamp the spawn area to the world bounds
   center = clampToWorldBounds(center, ZOMBIES_SPAWN_RANGE)
 
-  int zombieCount = playerMetadata.zombies.size()
+  int zombieCount = playerZombieMetadata.zombies.size()
   int max = R2I(GameSettings.zombies_SpawnsMaxPerPlayer)
 
   if (zombieCount == max)
@@ -135,7 +142,7 @@ function spawnZombiesNearPlayer(player p)
   if (numberOfSpawnPoints == 1)
     var sp = g_UndeadSpawnPointManager.getRandomSpawnPointInRange(center, ZOMBIES_SPAWN_RANGE)  
     var zombie = spawnZombieNearPlayer(p, sp.getPos())
-    playerMetadata.zombies.add(zombie)
+    playerZombieMetadata.zombies.add(zombie)
   else
     var spawnPoints = g_UndeadSpawnPointManager.getRandomSpawnPointsInRangeWeighted(
       center,
@@ -144,7 +151,7 @@ function spawnZombiesNearPlayer(player p)
     for sp in spawnPoints
       if (zombieCount < max)
         var zombie = spawnZombieNearPlayer(p, sp.getPos())
-        playerMetadata.zombies.add(zombie)
+        playerZombieMetadata.zombies.add(zombie)
         zombieCount++
     destroy spawnPoints
 
@@ -153,7 +160,7 @@ function spawnZombiesNearPlayers()
     spawnZombiesNearPlayer(p)
 
 function createZombie(real x, real y) returns Zombie
-  var u = CreateUnit(PLAYER_UNDEAD, TlsUnitIds.zombieNight, x, y, GetRandomDirectionDeg())
+  var u = createUnitTLS(PLAYER_UNDEAD, TlsUnitIds.zombieNight, x, y, GetRandomDirectionDeg())
   var scale = GetRandomReal(-0.2, 0.2)
 
   u.setScale(1.0 + scale)
@@ -197,9 +204,11 @@ function onZombieKilled()
   var y = dyingUnit.getY()
 
   if (passesChanceCheck(ZOMBIES_MATERIALS_DROP_CHANCE))
-    killingPlayer.giveMaterials(ZOMBIES_MATERIALS_DROP_AMOUNT)
-    FX.createGoldCreditEffect(x, y, killingPlayer)
-    FX.createFoundMaterialsTag(x, y, ZOMBIES_MATERIALS_DROP_AMOUNT, killingPlayer)
+    let killingPlayerMetadata = killingPlayer.getHumanMetadata()
+    if (killingPlayerMetadata != null)
+      killingPlayerMetadata.giveMaterials(ZOMBIES_MATERIALS_DROP_AMOUNT)
+      FX.createGoldCreditEffect(x, y, killingPlayer)
+      FX.createFoundMaterialsTag(x, y, ZOMBIES_MATERIALS_DROP_AMOUNT, killingPlayer)
 
 class PlayerZombieMetadata
   player p

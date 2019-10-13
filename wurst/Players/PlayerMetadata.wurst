@@ -1,84 +1,110 @@
 package PlayerMetadata
 import HashMap
-import HashList
-import HumanPlayers
+import Composition
+import LinkedList
+import Type
+import StringExtensions
+import public initlater PlayerMetadataExtensions
 
-HashMap<player, PlayerMetadata> g_PlayerMetadata
+HashMap<player, IPlayerMetadata> g_PlayerMetadata
 
-class PlayerMetadata
-  player p
-  unit hero
-  int kills
-  bool isHeroDead
-  string name
+// ============================================================================
+public interface IPlayerMetadata
+  function getPlayer() returns player
+  function getDisplayName() returns string
+  function setDisplayName(string displayName)
+  function reset()
 
+// ============================================================================
+public abstract class BasePlayerMetadata implements IComposite, IPlayerMetadata
+  protected LinkedList<IComponent> _components
+
+  protected player _player
+  private string _displayName
+
+  // --------------------------------------------------------------------------
   construct(player p)
-    this.p = p
-    this.p.setDisplayName(this.p.getName())
+    this._player = p
+    this.setDisplayName(p.getName())
     this.reset()
 
-  function reset() 
-    this.kills = 0
+  // --------------------------------------------------------------------------
+  override function reset()
+    skip
 
+  // --------------------------------------------------------------------------
+  ondestroy
+    if (_components != null)
+      for component in _components
+        destroy component
+      destroy _components
+      _components = null
+
+  // --------------------------------------------------------------------------
+  override function getPlayer() returns player
+    return _player
+
+  // --------------------------------------------------------------------------
+  override function getDisplayName() returns string
+    return _displayName
+
+  // --------------------------------------------------------------------------
+  override function setDisplayName(string displayName)
+    _displayName = displayName
+
+  // --------------------------------------------------------------------------
+  @inline
+  override function addComponent(IComponent component) returns IComponent
+    if (_components == null)
+      _components = new LinkedList<IComponent>()
+    _components.add(component)
+    (component castTo Component).initialize()
+    component.setEnabled(true)
+    return component
+
+  // --------------------------------------------------------------------------
+  @inline
+  override function getComponent(Type componentType) returns IComponent
+    if (_components != null)
+      for component in _components
+        if (component.typeId == componentType.id)
+          return component
+    return null
+
+// ============================================================================
 public function player.getDisplayName() returns string
-  return getPlayerMetadata(this).name
+  return this.getMetadata().getDisplayName()
 
-public function player.setDisplayName(string name)
-  getPlayerMetadata(this).name = name
+// ============================================================================
+public function player.setDisplayName(string displayName)
+  this.getMetadata().setDisplayName(displayName)
 
+// ============================================================================
 public function player.getDisplayNameColored() returns string
-  return this.getColor().toColor().toColorString() + this.getDisplayName() + "|r"
+  return this.getDisplayName().colorize(this.getColor().toColor())
 
-public function player.getHeroUnit() returns unit
-  return getPlayerMetadata(this).hero
-
-public function player.setHeroUnit(unit u)
-  getPlayerMetadata(this).hero = u
-
-public function player.getIsDead() returns bool
-  return getPlayerMetadata(this).isHeroDead
-
-public function player.setIsDead(bool isHeroDead)
-  getPlayerMetadata(this).isHeroDead = isHeroDead
-
-public function player.getMaterials() returns int
-  return GetPlayerState(this, PLAYER_STATE_RESOURCE_GOLD)
-  
-public function player.setMaterials(int materials)
-  SetPlayerState(this, PLAYER_STATE_RESOURCE_GOLD, materials)
-
-public function player.giveMaterials(int materials)
-  this.setMaterials(this.getMaterials() + materials)
-
-public function player.removeMaterials(int materials)
-  this.setMaterials(IMaxBJ(this.getMaterials() - materials, 0))
-
-/** Gets the player's current number of kills */
-public function player.getKills() returns int
-  return getPlayerMetadata(this).kills
-
-public function player.incrementKills()
-  getPlayerMetadata(this).kills++
-
+// ============================================================================
 public function player.resetPlayerMetadata()
-  getPlayerMetadata(this).reset()
+  this.getMetadata().reset()
 
+// ============================================================================
 /**
 *   Gets the PlayerMetadata instance registered for player p or creates a new PlayerMetadata instance if
 *   one has not been registered yet.
 */
-@inline function getPlayerMetadata(player p) returns PlayerMetadata
-  return g_PlayerMetadata.get(p)
+@inline
+public function player.getMetadata() returns IPlayerMetadata
+  return g_PlayerMetadata.get(this)
 
-function createPlayerMetadata(player p)
-  var data = new PlayerMetadata(p)
-  g_PlayerMetadata.put(p, data)
+// ============================================================================
+@inline
+public function unit.getOwnerMetadata() returns IPlayerMetadata
+  return g_PlayerMetadata.get(this.getOwner())
 
-function initializePlayerMetadata(player p)
-  createPlayerMetadata(p)
+// ============================================================================
+public function registerPlayerMetadata(IPlayerMetadata playerMetadata)
+  g_PlayerMetadata.put(playerMetadata.getPlayer(), playerMetadata)
 
+// ============================================================================
 init
-  g_PlayerMetadata = new HashMap<player, PlayerMetadata>()
-
-  for p in g_PlayingHumanPlayers
-    initializePlayerMetadata(p)
+  g_PlayerMetadata = new HashMap<player, IPlayerMetadata>()

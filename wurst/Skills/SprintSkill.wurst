@@ -8,82 +8,108 @@ import SkillsComponent
 import SprintComponent
 import MovementComponent
 import Events
+import Type
 
 // ============================================================================
-public class SprintSkill extends Skill
+public class SprintSkillDefinition extends SkillDefinition
   private real array[5] _staminaCosts
   private real array[5] _speeds
 
+  // --------------------------------------------------------------------------
   function getStaminaCost(int level) returns real
     return _staminaCosts[level]
 
+  // --------------------------------------------------------------------------
   function setStaminaCost(int level, real staminaCost)
     _staminaCosts[level] = staminaCost
 
+  // --------------------------------------------------------------------------
   function getSpeed(int level) returns real
     return _speeds[level]
 
+  // --------------------------------------------------------------------------
   function setSpeed(int level, real speed)
     _speeds[level] = speed
 
-  override function createInstance(IUnitMetadata u) returns ISkillInstance
-    return new SprintSkillInstance(this, u)
+  // --------------------------------------------------------------------------
+  override function createInstance(IUnitMetadata u) returns ISkill
+    return new SprintSkill(this, u)
 
 // ============================================================================
-public class SprintSkillInstance extends SkillInstanceBase
-
+public class SprintSkill extends SkillBase
   private SprintComponent _sprintComponent
   private MovementComponent _movementComponent
-  private GenericEventHandler<SprintComponent> _startedSprintingEventHandle
-  private GenericEventHandler<SprintComponent> _stoppedSprintingEventHandle
-  private GenericArgsEventHandler<MovementComponent, real> _onUnitMovedEventHandle
+  private GenericEventHandler<SprintComponent> _startedSprintingHandler
+  private GenericEventHandler<SprintComponent> _stoppedSprintingHandler
+  private GenericArgsEventHandler<MovementComponent, real> _onUnitMovedHandler
 
-  construct(SprintSkill skill, IUnitMetadata u)
+  // --------------------------------------------------------------------------
+  construct(SprintSkillDefinition skill, IUnitMetadata u)
     super(skill, u)
 
     _sprintComponent = u.getOrAddSprintComponent()
     _movementComponent = u.getOrAddMovementComponent()
 
-    _startedSprintingEventHandle = _sprintComponent.startedSprintingEvent.addListener() (SprintComponent sender) ->
+    _startedSprintingHandler = _sprintComponent.startedSprintingEvent.addListener() (SprintComponent sender) ->
       onStartedSprinting()
 
-    _stoppedSprintingEventHandle = _sprintComponent.stoppedSprintingEvent.addListener() (SprintComponent sender) ->
+    _stoppedSprintingHandler = _sprintComponent.stoppedSprintingEvent.addListener() (SprintComponent sender) ->
       onStoppedSprinting()
 
-  ondestroy
-    _stoppedSprintingEventHandle = _sprintComponent.stoppedSprintingEvent.removeListener(_stoppedSprintingEventHandle)
-    _startedSprintingEventHandle = _sprintComponent.startedSprintingEvent.removeListener(_startedSprintingEventHandle)
-    _onUnitMovedEventHandle = _movementComponent.unitMovedEvent.removeListener(_onUnitMovedEventHandle)
+    updateSprintComponent()
 
+  // --------------------------------------------------------------------------
+  ondestroy
+    _stoppedSprintingHandler = _sprintComponent.stoppedSprintingEvent.removeListener(_stoppedSprintingHandler)
+    _startedSprintingHandler = _sprintComponent.startedSprintingEvent.removeListener(_startedSprintingHandler)
+    _onUnitMovedHandler = _movementComponent.unitMovedEvent.removeListener(_onUnitMovedHandler)
+
+  // --------------------------------------------------------------------------
   override function onLevelUp()
+    super.onLevelUp()
     let u = _unit.getUnit()
     u.setAbilityLevel(TlsAbilityIds.sprintSkill, _level)
     u.setAbilityLevel(TlsAbilityIds.sprint, _level)
+    updateSprintComponent()
 
+  // --------------------------------------------------------------------------
   override function onReset()
+    super.onReset()
     let u = _unit.getUnit()
     u.setAbilityLevel(TlsAbilityIds.sprintSkill, 1)
     u.setAbilityLevel(TlsAbilityIds.sprint, 1)
+    updateSprintComponent()
 
+  // --------------------------------------------------------------------------
   private function onStartedSprinting()
-    _onUnitMovedEventHandle = _movementComponent.unitMovedEvent.addListener() (MovementComponent sender, real distanceInMeters) ->
+    _onUnitMovedHandler = _movementComponent.unitMovedEvent.addListener() (MovementComponent sender, real distanceInMeters) ->
       onUnitMoved(distanceInMeters)
 
+  // --------------------------------------------------------------------------
   private function onStoppedSprinting()
-    _onUnitMovedEventHandle = _movementComponent.unitMovedEvent.removeListener(_onUnitMovedEventHandle)
+    _onUnitMovedHandler = _movementComponent.unitMovedEvent.removeListener(_onUnitMovedHandler)
 
+  // --------------------------------------------------------------------------
   private function onUnitMoved(real distanceInMeters)
-    Log.info("Moved " + R2S(distanceInMeters) + " meters")
+    incrementExperience(distanceInMeters)
 
-public function SkillsComponent.getOrAddSprintSkill() returns SprintSkillInstance
-  var sprintSkill = this.getSkill(SprintSkillInstance.typeId) castTo SprintSkillInstance
+  // --------------------------------------------------------------------------
+  private function updateSprintComponent()
+    let sprintSkill = _skill castTo SprintSkillDefinition
+    _sprintComponent.setSprintSpeed(sprintSkill.getSpeed(_level))
+    _sprintComponent.setStaminaCost(sprintSkill.getStaminaCost(_level))
+
+// ============================================================================
+public function SkillsComponent.getOrAddSprintSkill() returns SprintSkill
+  var sprintSkill = this.getSkill(Type(SprintSkill.typeId)) castTo SprintSkill
   if (sprintSkill == null)
-    sprintSkill = this.addSkill(Skills.sprint.createInstance(this.getOwner() castTo IUnitMetadata)) castTo SprintSkillInstance
+    sprintSkill = this.addSkill(Skills.sprint.createInstance(this.getOwner() castTo IUnitMetadata)) castTo SprintSkill
   return sprintSkill
 
+// ============================================================================
 init
 
-  let sprint = new SprintSkill()
+  let sprint = new SprintSkillDefinition()
   ..setName("Sprint")
   ..setIconPath(Icons.bTNBootsOfSpeed)
   ..setUnits("meters")
@@ -92,10 +118,10 @@ init
   ..setLevelRequirement(2, 500.0)
   ..setLevelRequirement(3, 1500.0)
   ..setLevelRequirement(4, 3000.0)
-  ..setStaminaCost(1, 24.0)
-  ..setStaminaCost(2, 16.0)
-  ..setStaminaCost(3, 8.0)
-  ..setStaminaCost(4, 4.0)
+  ..setStaminaCost(1, 2.4)
+  ..setStaminaCost(2, 1.8)
+  ..setStaminaCost(3, 1.2)
+  ..setStaminaCost(4, 0.6)
   ..setSpeed(1, 100.0)
   ..setSpeed(2, 100.0)
   ..setSpeed(3, 100.0)
