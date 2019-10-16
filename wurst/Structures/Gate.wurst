@@ -1,25 +1,17 @@
 package Gate
-import ErrorHandling
 import RegisterEvents
 import Camp
-import Math
-import TlsUnitIds
-import TlsAbilityIds
-import HumanPlayerMetadata
+import Unit_Gate2
 import UnitMetadata
 
 // ============================================================================
 public class Gate extends CampStructure
   private bool _isOpen
-  private int _index
   private int _angle
 
   // --------------------------------------------------------------------------
   construct(ICamp camp, unit u)
     super(camp, u)
-    this._index = 0
-    this._isOpen = false
-    this._angle = this._unit.getFacingAngle().degrees().toInt()
     this.updateState()
 
   // --------------------------------------------------------------------------
@@ -31,19 +23,18 @@ public class Gate extends CampStructure
     return not this._isOpen
 
   // --------------------------------------------------------------------------
+  override function setUnit(unit newUnit)
+    super.setUnit(newUnit)
+    this.updateState()
+
+  // --------------------------------------------------------------------------
   function openGate()
     if (this._isOpen)
       return
     let unitId = this._unit.getTypeId()
-    var upgradeId = 0
-    switch (unitId)
-      case TlsUnitIds.gateHorizontalBuild | TlsUnitIds.gateHorizontalClosed
-        upgradeId = TlsUnitIds.gateHorizontalOpen
-      case TlsUnitIds.gateDiagonalClosed
-        upgradeId = TlsUnitIds.gateDiagonalOpen
-      default
-        error("Gate.openGate() called with an invalid unit {0}".format(this._unit.getName()))
-    IssueTrainOrderByIdBJ(this._unit, upgradeId)
+    let upgradeId = GateUtility.getOpenGateId(_angle)
+    if (unitId != upgradeId)
+      IssueTrainOrderByIdBJ(this._unit, upgradeId)
     updateState()
 
   // --------------------------------------------------------------------------
@@ -51,126 +42,29 @@ public class Gate extends CampStructure
     if (not this._isOpen)
       return
     let unitId = this._unit.getTypeId()
-    var upgradeId = 0
-    switch (unitId)
-      case TlsUnitIds.gateHorizontalOpen
-        upgradeId = TlsUnitIds.gateHorizontalClosed
-      case TlsUnitIds.gateDiagonalOpen
-        upgradeId = TlsUnitIds.gateDiagonalClosed
-      default
-        error("Gate.closeGate() called with an invalid unit {0}".format(this._unit.getName()))
-    IssueTrainOrderByIdBJ(this._unit, upgradeId)
-    updateState()
-
-  // --------------------------------------------------------------------------
-  function rotateClockwise()
-    this.rotateGate(-1)
-
-  // --------------------------------------------------------------------------
-  function rotateCounterClockwise()
-    this.rotateGate(1)
-
-  // --------------------------------------------------------------------------
-  private function rotateGate(int dir)
-    let pos = this._unit.getPos()
-    let owner = this._unit.getOwner()
-
-    int nextUnitId
-
-    if (this._index % 2 == 0)
-      nextUnitId = this._isOpen ? TlsUnitIds.gateDiagonalOpen : TlsUnitIds.gateDiagonalClosed
-      if (dir > 0)
-        this._angle = wrapMaxEx(this._angle + 90 * dir, 0, 360)
-    else
-      nextUnitId = this._isOpen ? TlsUnitIds.gateHorizontalOpen : TlsUnitIds.gateHorizontalClosed
-      if (dir < 0)
-        this._angle = wrapMaxEx(this._angle - 90 * dir, 0, 360)
-
-    // We don't want to remove this metadata when the old gate unit is removed
-    removeUnitTLS(this._unit)
-
-    // Instead calling createUnitTLS() will reuse this metadata by calling setUnit()
-    let replaced = createUnitTLS(this, owner, nextUnitId, pos.x, pos.y, I2R(this._angle))
-
-    let rot = replaced.getFacingAngle().degrees()
-    print("Gate rotation is now " + R2S(rot))
-
-    replaced.setLife(this._unit.getLife())
-    replaced.setPathing(false)
-    replaced.setPos(pos)
-    replaced.setPathing(true)
-    owner.select(replaced)
-    
-    this._index = wrap(this._index + dir, 0, 7)
-    
+    let upgradeId = GateUtility.getClosedGateId(_angle)
+    if (unitId != upgradeId)
+      IssueTrainOrderByIdBJ(this._unit, upgradeId)
     updateState()
 
   // --------------------------------------------------------------------------
   protected function updateState()
-    switch (this._unit.getTypeId())
-      case TlsUnitIds.gateHorizontalBuild | TlsUnitIds.gateHorizontalClosed | TlsUnitIds.gateDiagonalClosed
-        _unit.setAnimation("stand")
-        _unit.setPathing(true)
-        _isOpen = false
-      case TlsUnitIds.gateHorizontalOpen | TlsUnitIds.gateDiagonalOpen
-        _unit.setAnimation("death alternate")
-        _unit.setPathing(false)
-        _isOpen = true
-
-// ============================================================================
-public function unit.isGate() returns bool
-  let unitId = this.getTypeId()
-  return unitId == TlsUnitIds.gateDiagonalClosed or
-         unitId == TlsUnitIds.gateDiagonalOpen or
-         unitId == TlsUnitIds.gateHorizontalBuild or
-         unitId == TlsUnitIds.gateHorizontalClosed or
-         unitId == TlsUnitIds.gateHorizontalOpen
-
-// ============================================================================
-function onRotateClockwiseCast()
-  var caster = GetSpellAbilityUnit()
-  if (not caster.isGate())
-    return
-  
-  let playerMetadata = caster.getOwnerHumanMetadata()
-  if (playerMetadata == null)
-    return
-
-  let camp = playerMetadata.getCamp()
-
-  let gate = camp.getStructure(caster) castTo Gate
-  if (gate != null)
-    gate.rotateClockwise()
-
-// ============================================================================
-function onRotateCounterClockwiseCast()
-  var caster = GetSpellAbilityUnit()
-  if (not caster.isGate())
-    return
-  
-  let playerMetadata = caster.getOwnerHumanMetadata()
-  if (playerMetadata == null)
-    return
-
-  let camp = playerMetadata.getCamp()
-
-  let gate = camp.getStructure(caster) castTo Gate
-  if (gate != null)
-    gate.rotateCounterClockwise()
+    _angle = GateUtility.getGateAngle(_unit.getTypeId())
+    if (this._unit.isClosedGate())
+      _unit.setAnimation("stand")
+      _unit.setPathing(true)
+      _isOpen = false
+    else if (this._unit.isOpenGate())
+      _unit.setAnimation("death alternate")
+      _unit.setPathing(false)
+      _isOpen = true
 
 // ============================================================================
 function onGateUpgradeFinished()
   var caster = GetTriggerUnit()
   if (not caster.isGate())
     return
-
-  let playerMetadata = caster.getOwnerHumanMetadata()
-  if (playerMetadata == null)
-    return
-
-  let camp = playerMetadata.getCamp()
-
-  let gate = camp.getStructure(caster) castTo Gate
+  let gate = caster.getMetadata() castTo Gate
   if (gate != null)
     gate.updateState()
 
@@ -179,14 +73,7 @@ function onGateUpgradeStart()
   var caster = GetTriggerUnit()
   if (not caster.isGate())
     return
-  
-  let playerMetadata = caster.getOwnerHumanMetadata()
-  if (playerMetadata == null)
-    return
-
-  let camp = playerMetadata.getCamp()
-
-  let gate = camp.getStructure(caster) castTo Gate
+  let gate = caster.getMetadata() castTo Gate
   if (gate != null)
     gate.updateState()
 
@@ -195,14 +82,7 @@ function onGateAttacked()
   var caster = GetTriggerUnit()
   if (not caster.isGate())
     return
-  
-  let playerMetadata = caster.getOwnerHumanMetadata()
-  if (playerMetadata == null)
-    return
-
-  let camp = playerMetadata.getCamp()
-  
-  let gate = camp.getStructure(caster) castTo Gate
+  let gate = caster.getMetadata() castTo Gate
   if (gate != null and gate.getIsClosed())
     gate.getUnit().setAnimation("hit")
     ResetUnitAnimation(gate.getUnit())
@@ -211,6 +91,4 @@ function onGateAttacked()
 init
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_UPGRADE_START, function onGateUpgradeStart)
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_UPGRADE_FINISH, function onGateUpgradeFinished)
-  registerSpellEffectEvent(TlsAbilityIds.rotateClockwise, function onRotateClockwiseCast)
-  registerSpellEffectEvent(TlsAbilityIds.rotateCounterClockwise, function onRotateCounterClockwiseCast)
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ATTACKED, function onGateAttacked)
