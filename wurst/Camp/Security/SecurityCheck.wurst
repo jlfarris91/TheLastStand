@@ -1,0 +1,204 @@
+package SecurityCheck
+import OnUnitEnterLeave
+import UnitExtensions
+import HumanPlayerMetadata
+import UndeadSpawnPoints
+import ErrorHandling
+import TlsUnitIds
+import Orders
+import HumanPlayers
+import HashMap
+import ClosureTimers
+import PlayerExtensions
+import SpawnPoints
+import RegisterEvents
+
+constant int UNIT_TYPE_ID = TlsUnitIds.baseFooty
+constant real SPAWN_RANGE = 4096.0
+constant real UPDATE_INTERVAL = 0.3
+constant real MIN_MOVEMENT_DIST = 64.0
+constant real MIN_MOVEMENT_DIST_SQ = MIN_MOVEMENT_DIST * MIN_MOVEMENT_DIST
+constant real ARRIVAL_DIST = 64.0
+constant real ARRIVAL_DIST_SQ = ARRIVAL_DIST * ARRIVAL_DIST
+constant real STAND_STILL_DURATION = 3.0
+constant real TIME_TO_WAIT = 30.0
+
+HashMap<player, SecurityChecker> g_securityCheckers
+timer g_updateTimer
+LinkedList<SecurityChecker> g_activeCheckers
+
+// ============================================================================
+class SecurityChecker
+  private unit _unit
+  private player _player
+  private timer _timer
+  private real _standStillTimer
+  private vec2 _lastPos
+  private unit _target
+  private bool _isRunning
+
+  // --------------------------------------------------------------------------
+  construct(unit u, player p)
+    _unit = u
+    _player = p
+    _timer = CreateTimer()      
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    _unit.remove()
+    _unit = null
+    DestroyTimer(_timer)
+    _timer = null
+
+  // --------------------------------------------------------------------------
+  function start(vec2 startPos, unit target)
+    if (_isRunning)
+      stop()
+
+    _isRunning = true
+    registerActiveSecurityChecker(this)
+
+    _unit.setMoveSpeed(1000.0)
+
+    setPos(startPos)
+    _target = target
+
+    // If it takes longer than N seconds to reach the target then assume the
+    // security checker was unable to get into the camp
+    _timer.doAfter(TIME_TO_WAIT) () ->
+      onTimerExpired()
+
+  // --------------------------------------------------------------------------
+  function stop()
+    if (not _isRunning)
+      return
+
+    unregisterActiveSecurityChecker(this)
+    _isRunning = false
+
+    _timer.pause()
+    _standStillTimer = 0.0
+    setPos(gg_rct_BaseUnits.randomPoint())
+
+    _unit.setMoveSpeed(0)
+
+  // --------------------------------------------------------------------------
+  function update(real dt)
+    let currentPos = _unit.getPos()
+    let distanceMovedSq = currentPos.distanceToSq(_lastPos)
+
+    // The unit is effectively standing still
+    if (distanceMovedSq < MIN_MOVEMENT_DIST_SQ)
+      _standStillTimer += dt
+      if (_standStillTimer > STAND_STILL_DURATION)
+        setPlayerCampIsSecure(true)
+        stop()
+        return
+
+    // The unit is on the move
+    else
+      _standStillTimer = 0.0
+      _lastPos = currentPos
+
+    let targetPos = _target.getPos()
+
+    let distanceToTarget = currentPos.distanceToSq(targetPos)
+    if (distanceToTarget < ARRIVAL_DIST_SQ)
+      setPlayerCampIsSecure(false)
+      stop()
+      return
+
+    _unit.issuePointOrderById(OrderIds.move, targetPos)
+
+  // --------------------------------------------------------------------------
+  private function onTimerExpired()
+    setPlayerCampIsSecure(true)
+    stop()
+
+  // --------------------------------------------------------------------------
+  private function setPos(vec2 pos)
+    _unit.setPos(pos)
+    _lastPos = pos
+
+  // --------------------------------------------------------------------------
+  private function setPlayerCampIsSecure(bool isSecure)
+    _player.getHumanMetadataRequired().getCamp().setIsSecure(isSecure)
+
+// ============================================================================
+function registerActiveSecurityChecker(SecurityChecker securityChecker)
+  g_activeCheckers.add(securityChecker)
+  if (g_activeCheckers.size() == 1)
+    g_updateTimer.startPeriodic(UPDATE_INTERVAL, function updateSecurityCheckers)
+
+// ============================================================================
+function unregisterActiveSecurityChecker(SecurityChecker securityChecker)
+  g_activeCheckers.remove(securityChecker)
+  if (g_activeCheckers.size() == 0)
+    g_updateTimer.pause()
+
+// ============================================================================
+public function runCampSecurityCheckForPlayer(player p)
+  let metadata = p.getHumanMetadata()
+  if (metadata == null)
+    return
+
+  var securityChecker = getSecurityChecker(p)
+  securityChecker.stop()
+
+  let target = metadata.getCamp().getCampUnit()
+  let targetPos = target.getPos()
+
+  let spawnPoint = g_UndeadSpawnPointManager.getClosestSpawnPointInRange(targetPos, SPAWN_RANGE)
+  if (spawnPoint == null)
+    error("Could not find spawn point for base footy for player " + p.getName())
+    return
+  
+  securityChecker.start(spawnPoint.getPos(), target)
+
+// ============================================================================
+function updateSecurityCheckers()
+  for securityChecker in g_activeCheckers
+    securityChecker.update(UPDATE_INTERVAL)
+  
+// ============================================================================
+function getSecurityChecker(player p) returns SecurityChecker
+  let securityChecker = g_securityCheckers.get(p)
+  if (securityChecker == null)
+    error("No security checker found for player " + p.getName())
+  return securityChecker
+
+// ============================================================================
+function createSecurityCheckerForPlayer(player p)
+  let pos = gg_rct_BaseUnits.randomPoint()
+  let u = CreateUnit(DUMMY_PLAYER, UNIT_TYPE_ID, pos.x, pos.y, GetRandomDirectionDeg())
+  u.setField(UNIT_RF_SCALING_VALUE, 0.0)
+  u.setField(UNIT_RF_SELECTION_SCALE, -1.0)
+  u.setField(UNIT_RF_SPEED, 1000.0)
+  u.setScale(0.0)
+  SetUnitScalePercent(u, 0.0, 0.0, 0.0)
+
+  let securityChecker = new SecurityChecker(u, p)
+  securityChecker.stop()
+
+  g_securityCheckers.put(p, securityChecker)
+
+// ============================================================================
+function runCampSecurityCheck()
+  let u = getEnterLeaveUnit()
+  let owner = u.getOwner()
+  if (owner.isHumanPlayer() and u.isStructure())
+    runCampSecurityCheckForPlayer(owner)
+
+// ============================================================================
+init
+  g_securityCheckers = new HashMap<player, SecurityChecker>()
+  g_activeCheckers = new LinkedList<SecurityChecker>()
+
+  g_updateTimer = CreateTimer()
+
+  for p in g_PlayingHumanPlayers
+    createSecurityCheckerForPlayer(p)
+
+  onEnter(function runCampSecurityCheck)
+  onLeave(function runCampSecurityCheck)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_UPGRADE_FINISH, function runCampSecurityCheck)
