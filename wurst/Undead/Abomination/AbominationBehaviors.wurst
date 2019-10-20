@@ -1,0 +1,109 @@
+package AbominationBehaviors
+import Behaviors
+import Keys
+import ErrorHandling
+import Zombies
+import UnitMetadataExtensions
+import BehaviorLibrary
+import Orders
+import TlsAbilityIds
+import ComparisonOperator
+import TlsUnitIds
+
+// ============================================================================
+public class GetClosestUndeadTarget extends BehaviorBase
+  private key _storage = INVALID_KEY
+  private key _variablePlayer = INVALID_KEY
+
+  // --------------------------------------------------------------------------
+  construct(key storage, key playerIndex)
+    if (storage ==  INVALID_KEY)
+      error("Argument storage cannot be INVALID_KEY")
+    if (playerIndex ==  INVALID_KEY)
+      error("Argument playerIndex cannot be INVALID_KEY")
+    _storage = storage
+    _variablePlayer = playerIndex
+
+  // --------------------------------------------------------------------------
+  construct(GetClosestUndeadTarget other)
+    super(other)
+    _storage = other._storage
+    _variablePlayer = other._variablePlayer
+
+  // --------------------------------------------------------------------------
+  override function getName() returns string
+    return "GetClosestUndeadTarget"
+
+  // --------------------------------------------------------------------------
+  override function clone() returns IBehavior
+    return new GetClosestUndeadTarget(this)
+    
+  // --------------------------------------------------------------------------
+  override function onUpdate(IBehaviorTreeContext context) returns BehaviorState
+    let t = context.getTable()
+
+    if (not t.hasHandle(_variablePlayer.value))
+      return BehaviorState.FAILURE
+
+    player p = t.loadPlayer(_variablePlayer.value)
+
+    let target = getClosestZombieTarget(p, context.getUnit().getPos())
+    if (target == null)
+      return BehaviorState.FAILURE
+
+    t.saveUnit(_storage.value, target)
+    return BehaviorState.SUCCESS
+
+
+// ============================================================================  
+public class AbominationBehaviorTree extends BehaviorTree
+  private constant key KEY_IS_HOLDING_ZOMBIE = key(StringHashBJ("IsHoldingZombie"))
+  private constant key KEY_HOLDING_ZOMBIE_TIME = key(StringHashBJ("HoldingZombieTime"))
+  private constant key KEY_HOLDING_ZOMBIE_UNIT = key(StringHashBJ("HoldingZombieUnit"))
+  private constant key KEY_ACQUIRE_ATTACK_TARGET_TIME = key(StringHashBJ("AcquireAttackTargetTime"))
+  private constant key KEY_ATTACK_TARGET = key(StringHashBJ("AttackTarget"))
+  private constant key KEY_ATTACK_PLAYER = key(StringHashBJ("AttackPlayer"))
+
+  private constant real IDLE_TIME = 10.0
+  private constant real GRAB_RANGE = 256.0
+  private constant int GRAB_ANIMATION_INDEX = 2
+  private constant real GRAB_ANIMATION_DURATION = 0.6
+
+  // --------------------------------------------------------------------------
+  construct()
+    constructTree()
+
+  // --------------------------------------------------------------------------
+  private function constructTree()
+
+    let throwZombieSequence = new Sequence()
+    ..addChild(new BooleanComparison(KEY_IS_HOLDING_ZOMBIE, true))
+    ..addChild(new IncrementReal(KEY_HOLDING_ZOMBIE_TIME, BehaviorTree.KEY_DELTA_TIME))
+    ..addChild(new RealComparison(KEY_HOLDING_ZOMBIE_TIME, 3.0, ComparisonOperator.GREATER_THAN_OR_EQUAL))
+
+    let grabNearbyZombieSequence = new Sequence()
+    ..addChild(new BooleanComparison(KEY_IS_HOLDING_ZOMBIE, false))
+    ..addChild(new IsIdleBehavior(IDLE_TIME))
+    ..addChild(new GetSingleUnitOfTypeInRange(KEY_HOLDING_ZOMBIE_UNIT, GRAB_RANGE, TlsUnitIds.zombieNight))
+    ..addChild(new CastTargetAbility(OrderIds.charm, TlsAbilityIds.abomGrabZombie, KEY_HOLDING_ZOMBIE_UNIT))
+    ..addChild(new SetUnitAnimation(GRAB_ANIMATION_INDEX, GRAB_ANIMATION_DURATION))
+    ..addChild(new SetBoolean(KEY_IS_HOLDING_ZOMBIE, true))
+    ..addChild(new HideUnit(KEY_HOLDING_ZOMBIE_UNIT))
+    ..addChild(new SetReal(KEY_HOLDING_ZOMBIE_TIME, 0.0))
+
+    let attackNearestHumanUnitSequence = new Sequence()
+    ..addChild(new IncrementReal(KEY_ACQUIRE_ATTACK_TARGET_TIME, BehaviorTree.KEY_DELTA_TIME))
+    ..addChild(new RealComparison(KEY_ACQUIRE_ATTACK_TARGET_TIME, 3.0, ComparisonOperator.GREATER_THAN_OR_EQUAL))
+    ..addChild(new SetReal(KEY_ACQUIRE_ATTACK_TARGET_TIME, 0.0))
+    ..addChild(new GetClosestUndeadTarget(KEY_ATTACK_TARGET, KEY_ATTACK_PLAYER))
+    ..addChild(new IssueAttackTargetOrder(KEY_ATTACK_TARGET))
+    
+    var mainSelector = new Selector()
+    mainSelector.addChild(throwZombieSequence)
+    mainSelector.addChild(grabNearbyZombieSequence)
+    mainSelector.addChild(attackNearestHumanUnitSequence)
+
+    var root = new Repeater()
+    root.setChild(mainSelector)
+
+    setRoot(root)

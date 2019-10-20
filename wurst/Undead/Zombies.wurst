@@ -76,26 +76,43 @@ public class Zombies
 
     destroy spawnPoints
 
-function getClosestZombieTarget(player p, vec2 pos) returns unit
-  var distance = 100000000.0
-  var camp = p.getHumanMetadataRequired().getCamp()
-  var isSecure = camp.getIsSecure()
+function isFilterUnitVulnerableStructure() returns bool
+  let u = GetFilterUnit()
+  return u.isStructure() and not u.isInvulnerable()
+
+function isFilterUnitVulnerableNonStructure() returns bool
+  let u = GetFilterUnit()
+  return not u.isStructure() and not u.isInvulnerable()
+
+public function getClosestZombieTarget(player p, vec2 pos) returns unit
+  var distance = REAL_MAX
+  let playerMetadata = p.getHumanMetadataRequired()
   unit target = null
 
+  // === Needs cleanup
   var ug = getGroup()
-  ug.enumUnitsOfPlayer(p, null)
+  let filter = playerMetadata.getCamp().getIsSecure()
+                ? Condition(function isFilterUnitVulnerableStructure)
+                : Condition(function isFilterUnitVulnerableNonStructure)
+  // ===
+
+  ug.enumUnitsOfPlayer(p, filter)
 
   for u in ug
-    if (((isSecure and u.isStructure()) or (not isSecure and not u.isStructure())) and not u.isInvulnerable())
-      var d = u.getPos().distanceToSq(pos)
-      if (d < distance)
-        target = u
-        distance = d    
+    var d = u.getPos().distanceToSq(pos)
+    if (d < distance)
+      target = u
+      distance = d    
+
+  // === Cleanup
+  DestroyCondition(filter)
+  ug.release()
+  // ===
 
   if (target == null)
-    let playerMetadata = p.getHumanMetadata()
-    if (playerMetadata != null and not playerMetadata.getIsDead())
-      target = playerMetadata.getHero().getUnit()
+    let hero = playerMetadata.getHero()
+    if (hero.isAlive())
+      target = hero.getUnit()
 
   return target
 
@@ -175,6 +192,9 @@ function createZombie(real x, real y) returns Zombie
 function destroyZombieMetadata(unit u)
   var zombie = g_Zombies.get(u)
   
+  if (zombie == null)
+    return
+
   var playerMetadata = g_PlayerMetadata.get(zombie.targetPlayer)
   if (playerMetadata == null)
     error("Couldn't find player metadata for zombie")

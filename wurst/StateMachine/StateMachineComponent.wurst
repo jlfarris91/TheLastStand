@@ -1,0 +1,79 @@
+package StateMachineComponent
+import Composition
+import StateMachine
+import RealtimeComponent
+import LinkedList
+import HashMap
+import ErrorHandling
+import UnitMetadata
+
+// ============================================================================
+public class StateMachineComponent extends RealtimeComponent implements IStateMachine
+  private LinkedList<IStateMachineState> _states
+  private HashMap<string, IStateMachineState> _nameToStateMap
+  private IStateMachineState _current
+
+  // --------------------------------------------------------------------------
+  construct(IUnitMetadata owner)
+    super(owner)
+    _states = new LinkedList<IStateMachineState>()
+    _nameToStateMap = new HashMap<string, IStateMachineState>()
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    if (_current != null)
+      _current.exit()
+    for state in _states
+      destroy state
+    destroy _states
+    destroy _nameToStateMap
+
+  // --------------------------------------------------------------------------
+  override function getUnit() returns IUnitMetadata
+    return _owner castTo IUnitMetadata
+
+  // --------------------------------------------------------------------------
+  override function onEnabled()
+    super.onEnabled()
+    registerForUpdate()
+
+  // --------------------------------------------------------------------------
+  override function onDisabled()
+    super.onDisabled()
+    unregisterForUpdate()
+
+  // --------------------------------------------------------------------------
+  override function onUpdate(real dt)
+    super.onUpdate(dt)
+    
+    if (_current != null)
+      _current.update(dt)
+
+  // --------------------------------------------------------------------------
+  override function transitionToState(string stateName)
+    let next = getState(stateName)
+    if (next == null)
+      error("[StateMachine] Could not find state named " + stateName)
+
+    if (_current != null)
+      Log.info("[StateMachine] Exiting state: " + _current.getName())
+      _current.exit()
+
+    _current = next
+
+    Log.info("[StateMachine] Entering state: " + _current.getName())
+    _current.enter()
+
+  // --------------------------------------------------------------------------
+  override function getState(string stateName) returns IStateMachineState
+    return _nameToStateMap.get(stateName)
+
+  // --------------------------------------------------------------------------
+  override function addState(IStateMachineState state)
+    let stateName = state.getName()
+
+    if (getState(stateName) != null)
+      error("[StateMachine] State with name " + stateName + " already exists")
+
+    _states.add(state)
+    _nameToStateMap.put(stateName, state)

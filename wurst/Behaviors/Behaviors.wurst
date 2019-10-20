@@ -4,6 +4,11 @@ import TimerUtils
 import ClosureTimers
 import Table
 import ComposableUnit
+import Keys
+
+constant real LOW_PRIORITY_TIMER_INTERVAL = 3.0
+constant real HIGH_PRIORITY_TIMER_INTERVAL = 1.0
+constant real REALTIME_PRIORITY_TIMER_INTERVAL = 0.4
 
 PeriodicBehaviorTreeRunner g_lowPriorityRunner
 PeriodicBehaviorTreeRunner g_highPriorityRunner
@@ -63,11 +68,13 @@ class PeriodicBehaviorTreeRunner implements IBehaviorTreeRunner
   LinkedList<IBehaviorTree> _trees
   LinkedList<IBehaviorTree> _cleanup
   private timer _updateTimer
+  private real _updateRate
 
   // --------------------------------------------------------------------------
   construct(real updateRate)
     _trees = new LinkedList<IBehaviorTree>()
     _cleanup = new LinkedList<IBehaviorTree>()
+    _updateRate = updateRate
 
     _updateTimer = getTimer()
     _updateTimer.doPeriodically(updateRate) (CallbackPeriodic cb) ->
@@ -79,6 +86,10 @@ class PeriodicBehaviorTreeRunner implements IBehaviorTreeRunner
     _trees = null
     destroy _cleanup
     _cleanup = null
+
+  // --------------------------------------------------------------------------
+  function getDeltaTime() returns real
+    return _updateRate
 
   // --------------------------------------------------------------------------
   override function register(IBehaviorTree tree)
@@ -99,11 +110,14 @@ class PeriodicBehaviorTreeRunner implements IBehaviorTreeRunner
 
 // ============================================================================
 public class BehaviorTree implements IBehaviorTree
+  static constant KEY_DELTA_TIME = key(StringHashBJ("BehaviorTree.DeltaTime"))
+
   private IBehavior _root
   private IBehaviorTreeRunner _runner
   private IBehaviorTreeContext _context
   private bool _isRunning
   private string _name
+  private real _deltaTime
 
   // --------------------------------------------------------------------------
   construct()
@@ -157,10 +171,13 @@ public class BehaviorTree implements IBehaviorTree
     switch (priority)
       case BehaviorTreeExecutionPriority.LOW
         _runner = g_lowPriorityRunner
+        _deltaTime = LOW_PRIORITY_TIMER_INTERVAL
       case BehaviorTreeExecutionPriority.HIGH
         _runner = g_highPriorityRunner
+        _deltaTime = HIGH_PRIORITY_TIMER_INTERVAL
       case BehaviorTreeExecutionPriority.REALTIME
         _runner = g_realtimePriorityRunner
+        _deltaTime = REALTIME_PRIORITY_TIMER_INTERVAL
 
     _context = context
     _runner.register(this)
@@ -186,6 +203,7 @@ public class BehaviorTree implements IBehaviorTree
       _runner = null
       destroy _context
       _context = null
+      _deltaTime = 0.0
   
   // --------------------------------------------------------------------------
   override function update()
@@ -196,6 +214,8 @@ public class BehaviorTree implements IBehaviorTree
     if (_isRunning == false)
       Log.error("Must start the BehaviorTree before calling update()")
       return
+
+    _context.getTable().saveReal(KEY_DELTA_TIME.value, _deltaTime)
 
     let state = _root.update(_context)
 
@@ -277,6 +297,6 @@ public abstract class BehaviorBase implements IBehavior
 
 // ============================================================================
 init
-  g_lowPriorityRunner = new PeriodicBehaviorTreeRunner(3.0)
-  g_highPriorityRunner = new PeriodicBehaviorTreeRunner(1.0)
-  g_realtimePriorityRunner = new PeriodicBehaviorTreeRunner(0.4)
+  g_lowPriorityRunner = new PeriodicBehaviorTreeRunner(LOW_PRIORITY_TIMER_INTERVAL)
+  g_highPriorityRunner = new PeriodicBehaviorTreeRunner(HIGH_PRIORITY_TIMER_INTERVAL)
+  g_realtimePriorityRunner = new PeriodicBehaviorTreeRunner(REALTIME_PRIORITY_TIMER_INTERVAL)
