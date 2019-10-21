@@ -1,0 +1,184 @@
+package ProgressBar
+import Math
+import UnitPool
+import ClosureTimers
+import Events
+import AbilityIds
+import ProgressBarUnit
+import UnitIds
+
+constant player PROGRESS_BAR_OWNER = DUMMY_PLAYER
+constant real PROGRESS_BAR_UPDATE_INTERVAL = 0.1
+
+AnonymousEvent g_updateProgressBarEvent
+
+// ============================================================================
+public class ProgressBar
+  private unit _bar
+  private unit _target
+  private vec2 _offset
+  private real _currentValue
+  private real _targetValue
+  private real _speed
+  private bool _reverse
+  private bool _done
+
+  private AnonymousEventHandler _updateCb
+
+  // --------------------------------------------------------------------------
+  construct()
+    _bar = getDummyUnit(PROGRESS_BAR_DUMMY_ID)
+    _done = true
+    _speed = 1.0
+
+    _bar.setAnimation(1)
+    _bar.setTimeScale(0)
+  
+  // --------------------------------------------------------------------------
+  ondestroy
+    unregisterForUpdate()
+    releaseDummyUnit(_bar)
+    _bar = null
+    _target = null
+    _currentValue = 0.0
+    _targetValue = 0.0
+
+  // --------------------------------------------------------------------------
+  function setPercentage(real percentage)
+    setPercentage(percentage, _speed)
+
+  // --------------------------------------------------------------------------
+  function setPercentage(real percentage, real speed)
+    _targetValue = clamp(percentage, 0.0, 100.0)
+    _speed = speed
+    _reverse = _targetValue > _currentValue
+    registerForUpdate()
+
+  // --------------------------------------------------------------------------
+  function getPercentage() returns real
+    return _currentValue
+
+  // --------------------------------------------------------------------------
+  function getPos() returns vec2
+    return _bar.getPos()
+
+  // --------------------------------------------------------------------------
+  function setPos(vec2 pos)
+    _bar.setPos(pos)
+
+  // --------------------------------------------------------------------------
+  function getZOffset() returns real
+    return _bar.getFlyHeight()
+
+  // --------------------------------------------------------------------------
+  function setZOffset(real offset)
+    _bar.setFlyHeight(offset, 0)
+
+  // --------------------------------------------------------------------------
+  function setScale(real scale)
+    _bar.setScale(scale)
+
+  // --------------------------------------------------------------------------
+  function setColor(playercolor color)
+    _bar.setColor(color)
+
+  // --------------------------------------------------------------------------
+  function setColor(colorA color)
+    _bar.setVertexColor(color)
+
+  // --------------------------------------------------------------------------
+  function setTarget(unit u)
+    _target = u
+    updatePosition()
+
+  // --------------------------------------------------------------------------
+  function getTarget() returns unit
+    return _target
+
+  // --------------------------------------------------------------------------
+  function setSpeed(real speed)
+    _speed = speed
+  
+  // --------------------------------------------------------------------------
+  function getSpeed() returns real
+    return _speed
+
+  // --------------------------------------------------------------------------
+  function show(bool flag)
+    _bar.removeAbility(AbilityIds.locust)
+    ShowUnit(_bar, flag)
+    _bar.addAbility(AbilityIds.locust)
+
+  // --------------------------------------------------------------------------
+  function reset()
+    _bar.setAnimation(1)
+
+  // --------------------------------------------------------------------------
+  private function updateProgress()
+
+    bool isDone
+    real actualSpeed
+
+    if (_reverse)
+      isDone = _currentValue <= _targetValue
+      actualSpeed = -_speed
+    else
+      isDone = _currentValue >= _targetValue
+      actualSpeed = _speed
+
+    if (isDone)
+      done()
+    else
+      _bar.setTimeScale(actualSpeed)      
+      _currentValue += actualSpeed
+        
+  // --------------------------------------------------------------------------
+  private function updatePosition()
+    if (_target != null)
+      setPos(_target.getPos() + _offset)
+
+  // --------------------------------------------------------------------------
+  private function done()
+    _done = true
+    _bar.setTimeScale(0.0)
+    _currentValue = _targetValue
+
+  // --------------------------------------------------------------------------
+  private function registerForUpdate()
+    if (_updateCb == null)
+      _updateCb = g_updateProgressBarEvent.addListener() () -> 
+        updatePosition()
+        updateProgress()
+
+  // --------------------------------------------------------------------------
+  private function unregisterForUpdate()
+    if (_updateCb != null)
+      _updateCb = g_updateProgressBarEvent.removeListener(_updateCb)
+
+// ============================================================================
+function getDummyUnit(int unitId) returns unit
+  return createUnitPooled(PROGRESS_BAR_OWNER, unitId, ZERO2, angle(0))
+
+// ============================================================================
+function releaseDummyUnit(unit u)
+  u.setAnimation(0)
+  u.setTimeScale(1)
+  u.release()
+  
+// ============================================================================
+init
+  g_updateProgressBarEvent = new AnonymousEvent()
+
+  doPeriodically(PROGRESS_BAR_UPDATE_INTERVAL) (CallbackPeriodic cb) ->
+    g_updateProgressBarEvent.invoke()
+    
+  nullTimer() () ->
+    let peasant = CreateUnit(Player(0), UnitIds.peasant, 0, 0, 0)
+
+    let progressBar = new ProgressBar()
+    ..setTarget(peasant)
+    
+    doPeriodically(0.1) (CallbackPeriodic cb) ->
+      let t = peasant.getHP() / peasant.getMaxHP()
+      progressBar.setPercentage(t, 1.0)
+    

@@ -1,0 +1,254 @@
+package Unit_Gate2
+import UnitIds
+import RegisterEvents
+import TlsAbilityIds
+import ObjectIdGenerator
+import UnitObjEditing
+import ObjectIds
+
+// If there are any moveable units in the way when a gate rotates using the old
+// rotate ability (which used ReplaceUnitTLS) the gate had a chance of
+// literally jumping to a new position. This method uses upgrades instead
+// which avoids the jumping bug but adds a ton of complexity as you can see.
+// We create 1 gate unit for each permutation of open/closed and a unit
+// for "rotate" open/closed which is so that the open/closed gate can upgradeT
+// to the rotated equivalent and avoid using replace. After the gate succesfully
+// upgrades to its "rotate" counterpart it is replaced with the regular unit.
+
+// We need one unit each for the open and closed variations since the pathing maps change
+// The gate_build unit is the one the builder can actually build
+
+public constant int UNIT_GATE_BUILD_COLD_COST = 42  // How much it costs to build a gate
+constant int UNIT_GATE_BUILD_TIME = 1              // How long it takes to build a gate
+constant int UNIT_GATE_REPAIR_COLD_COST = 25        // How much it costs to repair a gate from 0 to full health
+constant int UNIT_GATE_REPAIR_TIME = 10             // How long it takes to repair a gate from 0 to full health
+constant real UNIT_GATE_SCALE_DIAGONAL = 0.36       // How large the diagonal gate model is
+constant real UNIT_GATE_SCALE_HORIZONTAL = 0.38     // How large the horizonta/vertical gate model is
+
+public class GateIds
+  static constant int gate_EW_build = compiletime(UNIT_ID_GEN.next())
+  static constant int gate_EW_open = compiletime(UNIT_ID_GEN.next())
+  static constant int gate_EW_closed = compiletime(UNIT_ID_GEN.next())
+  static constant int gate_NESW_build = compiletime(UNIT_ID_GEN.next())
+  static constant int gate_NESW_open = compiletime(UNIT_ID_GEN.next())
+  static constant int gate_NESW_closed = compiletime(UNIT_ID_GEN.next())
+  static constant int gate_NS_build = compiletime(UNIT_ID_GEN.next())
+  static constant int gate_NS_open = compiletime(UNIT_ID_GEN.next())
+  static constant int gate_NS_closed = compiletime(UNIT_ID_GEN.next())
+  static constant int gate_NWSE_build = compiletime(UNIT_ID_GEN.next())
+  static constant int gate_NWSE_open = compiletime(UNIT_ID_GEN.next())
+  static constant int gate_NWSE_closed = compiletime(UNIT_ID_GEN.next())
+
+public function unit.isGate() returns bool
+  return this.isOpenGate() or
+        this.isClosedGate() or
+        this.isBuildGate()
+
+public function unit.isOpenGate() returns bool
+  let unitId = this.getTypeId()
+  return unitId == GateIds.gate_EW_open or
+        unitId == GateIds.gate_NESW_open or
+        unitId == GateIds.gate_NS_open or
+        unitId == GateIds.gate_NWSE_open
+
+public function unit.isClosedGate() returns bool
+  let unitId = this.getTypeId()
+  return unitId == GateIds.gate_EW_closed or
+        unitId == GateIds.gate_NESW_closed or
+        unitId == GateIds.gate_NS_closed or
+        unitId == GateIds.gate_NWSE_closed or
+        this.isBuildGate()
+
+public function unit.isBuildGate() returns bool
+  let unitId = this.getTypeId()
+  return unitId == GateIds.gate_EW_build or
+        unitId == GateIds.gate_NESW_build or
+        unitId == GateIds.gate_NS_build or
+        unitId == GateIds.gate_NWSE_build
+
+//=============================================================================
+//
+// Unit generation
+//
+//=============================================================================
+
+abstract class BaseGateDefinition extends BuildingDefinition
+  construct(int newId)
+    super(newId, UnitIds.scouttower)
+    this.setName("Gate")
+    this.setTintingColorRed(150)
+    this.setTintingColorGreen(150)
+    this.setTintingColorBlue(150)
+    this.setShadowTextureBuilding("")
+    this.setButtonPositionX(0)
+    this.setButtonPositionY(0)
+    this.setDeathTimeseconds(0.83)
+    this.setGroundTexture("")
+    this.setSelectionScale(4.0)
+    this.setScalingValue(0.4)
+    this.setDeathType(0)
+    this.setCollisionSize(0.0)
+    this.setPlacementRequires("unbuildable,unwalkable")
+    this.setBuildTime(1)
+    this.setCanFlee(false)
+    this.setGoldCost(0)
+    this.setHideMinimapDisplay(true)
+    this.setHitPointsMaximumBase(1000)
+    this.setLumberCost(0)
+    this.setRepairGoldCost(UNIT_GATE_REPAIR_COLD_COST)
+    this.setRepairLumberCost(0)
+    this.setRepairTime(UNIT_GATE_REPAIR_TIME)
+    this.setSightRadiusDay(400)
+    this.setSightRadiusNight(200)
+    this.setHotkey("G")
+    this.setBuildTime(1) // Most gate variations are only buildable via upgrades
+    this.setNormalAbilities(commaList(TlsAbilityIds.recycle))
+
+class OpenGateDefinition extends BaseGateDefinition
+  construct(int id, int angle)
+    super(id)
+    this.setIconGameInterface("ReplaceableTextures\\CommandButtons\\BTNGate_0_Open.BLP")
+    this.setModelFile("Units\\Gate\\Gate_" + I2S(angle) + ".mdx")
+    this.setPathingMap(GateUtility.getOpenGatePathMap(angle))
+
+    let closedGateId = GateUtility.getClosedGateId(angle)
+    this.setUpgradesTo(commaList(closedGateId))
+
+    this.setTooltipBasic("Open |cffffcc00G|rate " + I2S(angle))
+    this.setTooltipExtended("Open this gate")
+
+class ClosedGateDefinition extends BaseGateDefinition
+  construct(int id, int angle)
+    super(id)
+    this.setIconGameInterface("ReplaceableTextures\\CommandButtons\\BTNGate_0_Closed.BLP")
+    this.setModelFile("Units\\Gate\\Gate_" + I2S(angle) + ".mdx")
+    this.setPathingMap(GateUtility.getClosedGatePathMap(angle))
+    
+    let openGateId = GateUtility.getOpenGateId(angle)
+    this.setUpgradesTo(commaList(openGateId))
+
+    this.setTooltipBasic("Close |cffffcc00G|rate " + I2S(angle))
+    this.setTooltipExtended("Close this gate")
+
+// This is the gate that is actually built by the builder
+// Which is why it has a gold cost and a build time
+class BuildGateDefinition extends ClosedGateDefinition
+  construct(int id, int angle)
+    super(id, angle)
+    this.setIconGameInterface("ReplaceableTextures\\CommandButtons\\BTNGate_" + I2S(angle) + "_Closed.BLP")
+    this.setGoldCost(UNIT_GATE_BUILD_COLD_COST)
+    this.setBuildTime(UNIT_GATE_BUILD_TIME)
+    this.setTooltipBasic("Build |cffffcc00G|rate")
+    this.setTooltipExtended("Build a gate that can be opened and closed to allow or prevent access to your camp. The gate can be rotated.")
+
+@compiletime
+function createGateUnitVariations()
+  let row = 1
+  createGateUnitVariations(315, 0, row, "Diagonal (NE SW)", UNIT_GATE_SCALE_DIAGONAL)
+  createGateUnitVariations(0, 1, row, "Horizontal (NS)", UNIT_GATE_SCALE_HORIZONTAL)
+  createGateUnitVariations(90, 2, row, "Vertical (EW)", UNIT_GATE_SCALE_HORIZONTAL)
+  createGateUnitVariations(45, 3, row, "Diagonal (NW SE)", UNIT_GATE_SCALE_DIAGONAL)
+
+function createGateUnitVariations(int angle, int buttonPosX, int buttonPosY, string name, real scale)
+  new OpenGateDefinition(GateUtility.getOpenGateId(angle), angle).setScalingValue(scale)
+  new ClosedGateDefinition(GateUtility.getClosedGateId(angle), angle).setScalingValue(scale)
+  new BuildGateDefinition(GateUtility.getBuildGateId(angle), angle)
+    ..setButtonPositionX(buttonPosX)
+    ..setButtonPositionY(buttonPosY)
+    ..setTooltipBasic("Build |cffffcc00G|rate")
+    ..setTooltipExtended("|cffffcc00" + name + "|r|nBuild a gate that can be opened and closed to allow or prevent access to your camp.")
+    ..setScalingValue(scale)
+
+//=============================================================================
+//
+// Internal
+//
+//=============================================================================
+
+public class GateUtility
+
+  static function getOpenGateId(int angle) returns int
+    switch (angle)
+      case 0
+        return GateIds.gate_NS_open
+      case 45
+        return GateIds.gate_NWSE_open
+      case 90
+        return GateIds.gate_EW_open
+      case 315
+        return GateIds.gate_NESW_open
+    return -1
+
+  static function getBuildGateId(int angle) returns int
+    switch (angle)
+      case 0
+        return GateIds.gate_NS_build
+      case 45
+        return GateIds.gate_NWSE_build
+      case 90
+        return GateIds.gate_EW_build
+      case 315
+        return GateIds.gate_NESW_build
+    return -1
+
+  static function getClosedGateId(int angle) returns int
+    switch (angle)
+      case 0
+        return GateIds.gate_NS_closed
+      case 45
+        return GateIds.gate_NWSE_closed
+      case 90
+        return GateIds.gate_EW_closed
+      case 315
+        return GateIds.gate_NESW_closed
+    return -1
+
+  static function getGateAngle(int unitId) returns int
+    switch (unitId)
+      case GateIds.gate_NS_open | GateIds.gate_NS_closed | GateIds.gate_NS_build
+        return 0
+      case GateIds.gate_NWSE_open | GateIds.gate_NWSE_closed | GateIds.gate_NWSE_build
+        return 45
+      case GateIds.gate_EW_open | GateIds.gate_EW_closed | GateIds.gate_EW_build
+        return 90
+      case GateIds.gate_NESW_open | GateIds.gate_NESW_closed | GateIds.gate_NESW_build
+        return 315
+    return -1
+
+  static function getOpenGatePathMap(int angle) returns string
+    switch (angle)
+      case 0
+        return "Units\\Gate\\Gate_0Dead.tga"
+      case 45
+        return "Units\\Gate\\Gate_45Dead.tga"
+      case 90
+        return "Units\\Gate\\Gate_90Dead.tga"
+      case 315
+        return "Units\\Gate\\Gate_135Dead.tga"
+    return ""
+
+  static function getClosedGatePathMap(int angle) returns string
+    switch (angle)
+      case 0
+        return "Units\\Gate\\Gate_0.tga"
+      case 45
+        return "Units\\Gate\\Gate_45.tga"
+      case 90
+        return "Units\\Gate\\Gate_90.tga"
+      case 315
+        return "Units\\Gate\\Gate_135.tga"
+    return ""
+
+function onGateUpgradeFinish()
+  var u = GetTriggerUnit()
+  let angle = GateUtility.getGateAngle(u.getTypeId())
+  if (angle == -1)
+    return
+  if (u.isOpenGate())
+    u.setAnimation("death alternate")
+  else
+    u.setAnimation("stand")
+  u.getOwner().select(u)
+
+init
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_UPGRADE_FINISH, function onGateUpgradeFinish)
