@@ -1,16 +1,18 @@
 package ProgressBar
-import Math
 import UnitPool
 import ClosureTimers
 import Events
-import AbilityIds
 import ProgressBarUnit
-import UnitIds
+import Math
 
 constant player PROGRESS_BAR_OWNER = DUMMY_PLAYER
-constant real PROGRESS_BAR_UPDATE_INTERVAL = ANIMATION_PERIOD
+constant real PROGRESS_BAR_UPDATE_PROGRESS_INTERVAL = ANIMATION_PERIOD//0.01
+constant real PROGRESS_BAR_UPDATE_POSITION_INTERVAL = ANIMATION_PERIOD
+constant int DEATH_ANIMATION_INDEX = 0
+constant int ZERO_ANIMATION_INDEX = 1
 
-AnonymousEvent g_updateProgressBarEvent
+AnonymousEvent g_updateProgressBarProgressEvent
+AnonymousEvent g_updateProgressBarPositionEvent
 
 // ============================================================================
 public class ProgressBar
@@ -20,39 +22,55 @@ public class ProgressBar
   private real _currentValue
   private real _targetValue
   private real _speed
-  private bool _reverse
-  private bool _done
+  private colorA _color
 
-  private AnonymousEventHandler _updateCb
+  private real _currentAlpha
+  private real _targetAlpha
+  private real _alphaSpeed
+
+  private AnonymousEventHandler _updateProgressCb
+  private AnonymousEventHandler _updatePositionCb
 
   // --------------------------------------------------------------------------
   construct()
     _bar = getDummyUnit(PROGRESS_BAR_DUMMY_ID)
-    _done = true
+    _target = null
+    _offset = ZERO2
+    _currentValue = 0.0
+    _targetValue = 0.0
     _speed = 1.0
+    _alphaSpeed = 3.0
 
-    _bar.setAnimation(1)
-    _bar.setTimeScale(0)
+    show(false)
+    reset()
   
   // --------------------------------------------------------------------------
   ondestroy
-    unregisterForUpdate()
+    unregisterForVisualUpdate()
+    unregisterForPositionUpdate()
     releaseDummyUnit(_bar)
     _bar = null
     _target = null
-    _currentValue = 0.0
-    _targetValue = 0.0
+    _currentValue = 0
+    _targetValue = 0
 
   // --------------------------------------------------------------------------
-  function setPercentage(real percentage)
-    setPercentage(percentage, _speed)
+  function setPercentage(real percentage01)
+    setPercentage(percentage01, _speed)
 
   // --------------------------------------------------------------------------
-  function setPercentage(real percentage, real speed)
-    _targetValue = clamp(percentage, 0.0, 100.0)
-    _speed = speed
-    _reverse = _targetValue > _currentValue
-    registerForUpdate()
+  function setPercentage(real percentage01, real speed)
+    let delta = RAbsBJ(percentage01 - _currentValue)
+    if (delta > 0.01)
+      _targetValue = percentage01
+      _speed = speed
+      registerForVisualUpdate()
+
+  // --------------------------------------------------------------------------
+  function setPercentageNow(real percentage01)
+    _currentValue = percentage01
+    _targetValue = percentage01
+    setAnimationIndexByPercentage(percentage01)
 
   // --------------------------------------------------------------------------
   function getPercentage() returns real
@@ -60,18 +78,26 @@ public class ProgressBar
 
   // --------------------------------------------------------------------------
   function getPos() returns vec2
-    return _bar.getPos()
+    return _bar.getPos() - _offset
 
   // --------------------------------------------------------------------------
   function setPos(vec2 pos)
-    _bar.setPos(pos)
+    _bar.setPos(pos + _offset)
 
   // --------------------------------------------------------------------------
-  function getZOffset() returns real
+  function getOffset() returns vec2
+    return _offset
+
+  // --------------------------------------------------------------------------
+  function setOffset(vec2 pos)
+    _offset = pos
+
+  // --------------------------------------------------------------------------
+  function getHeight() returns real
     return _bar.getFlyHeight()
 
   // --------------------------------------------------------------------------
-  function setZOffset(real offset)
+  function setHeight(real offset)
     _bar.setFlyHeight(offset, 0)
 
   // --------------------------------------------------------------------------
@@ -85,11 +111,15 @@ public class ProgressBar
   // --------------------------------------------------------------------------
   function setColor(colorA color)
     _bar.setVertexColor(color)
+    _color = color
+    registerForVisualUpdate()
 
   // --------------------------------------------------------------------------
   function setTarget(unit u)
     _target = u
     updatePosition()
+    if (u != null)
+      registerForPositionUpdate()
 
   // --------------------------------------------------------------------------
   function getTarget() returns unit
@@ -105,55 +135,78 @@ public class ProgressBar
 
   // --------------------------------------------------------------------------
   function show(bool flag)
-    _bar.removeAbility(AbilityIds.locust)
-    ShowUnit(_bar, flag)
-    _bar.addAbility(AbilityIds.locust)
+    registerForVisualUpdate()
+    _targetAlpha = flag ? 1.0 : 0.0
 
   // --------------------------------------------------------------------------
   function reset()
-    _bar.setAnimation(1)
+    _bar.setAnimation(ZERO_ANIMATION_INDEX)
+    _currentValue = 0.0
 
   // --------------------------------------------------------------------------
-  private function updateProgress()
+  private function updateVisuals(real dt)
+    var doneUpdatingProgress = updateProgress(dt)
+    var doneUpdatingAlpha = updateAlpha(dt)
+    if (doneUpdatingProgress and doneUpdatingAlpha)
+      unregisterForVisualUpdate()
 
-    bool isDone
-    real actualSpeed
+  // --------------------------------------------------------------------------
+  private function updateProgress(real dt) returns bool
+    _currentValue = moveTowards(_currentValue, _targetValue, _speed * dt)
+    setAnimationIndexByPercentage(_currentValue)
 
-    if (_reverse)
-      isDone = _currentValue <= _targetValue
-      actualSpeed = -_speed
-    else
-      isDone = _currentValue >= _targetValue
-      actualSpeed = _speed
+    let valueDelta = RAbsBJ(_targetValue - _currentValue)
+    if (valueDelta <= 0.01)
+      _currentValue = _targetValue
+      return true
 
-    if (isDone)
-      done()
-    else
-      _bar.setTimeScale(actualSpeed)      
-      _currentValue += actualSpeed
+    return false
+
+  // --------------------------------------------------------------------------
+  private function updateAlpha(real dt) returns bool
+    _currentAlpha = moveTowards(_currentAlpha, _targetAlpha, _alphaSpeed * dt)
+    
+    let alpha = lerpInt(0, 255, _currentAlpha)
+    _bar.setVertexColor(colorA(_color.red, _color.green, _color.blue, alpha))
+
+    let alphaDelta = RAbsBJ(_targetAlpha - _currentAlpha)
+    if (alphaDelta <= 0.01)
+      _currentAlpha = _targetAlpha
+      return true
+
+    return false
         
   // --------------------------------------------------------------------------
   private function updatePosition()
     if (_target != null)
-      setPos(_target.getPos() + _offset)
+      setPos(_target.getPos())
 
   // --------------------------------------------------------------------------
-  private function done()
-    _done = true
-    _bar.setTimeScale(0.0)
-    _currentValue = _targetValue
+  private function setAnimationIndexByPercentage(real t)
+    int animationIndex = clamp(R2I(t * 100.0), 0, 100)
+    _bar.setAnimation(2 + animationIndex)
 
   // --------------------------------------------------------------------------
-  private function registerForUpdate()
-    if (_updateCb == null)
-      _updateCb = g_updateProgressBarEvent.addListener() () -> 
+  private function registerForVisualUpdate()
+    if (_updateProgressCb == null)
+      _updateProgressCb = g_updateProgressBarProgressEvent.addListener() () -> 
+        updateVisuals(PROGRESS_BAR_UPDATE_PROGRESS_INTERVAL)
+
+  // --------------------------------------------------------------------------
+  private function unregisterForVisualUpdate()
+    if (_updateProgressCb != null)
+      _updateProgressCb = g_updateProgressBarProgressEvent.removeListener(_updateProgressCb)
+
+  // --------------------------------------------------------------------------
+  private function registerForPositionUpdate()
+    if (_updatePositionCb == null)
+      _updatePositionCb = g_updateProgressBarPositionEvent.addListener() () -> 
         updatePosition()
-        updateProgress()
 
   // --------------------------------------------------------------------------
-  private function unregisterForUpdate()
-    if (_updateCb != null)
-      _updateCb = g_updateProgressBarEvent.removeListener(_updateCb)
+  private function unregisterForPositionUpdate()
+    if (_updatePositionCb != null)
+      _updatePositionCb = g_updateProgressBarPositionEvent.removeListener(_updatePositionCb)
 
 // ============================================================================
 function getDummyUnit(int unitId) returns unit
@@ -161,24 +214,17 @@ function getDummyUnit(int unitId) returns unit
 
 // ============================================================================
 function releaseDummyUnit(unit u)
-  u.setAnimation(0)
-  u.setTimeScale(1)
+  u.setAnimation(DEATH_ANIMATION_INDEX)
   u.release()
   
 // ============================================================================
 init
-  g_updateProgressBarEvent = new AnonymousEvent()
+  g_updateProgressBarProgressEvent = new AnonymousEvent()
+  g_updateProgressBarPositionEvent = new AnonymousEvent()
 
-  doPeriodically(PROGRESS_BAR_UPDATE_INTERVAL) (CallbackPeriodic cb) ->
-    g_updateProgressBarEvent.invoke()
-    
-  // nullTimer() () ->
-  //   let peasant = CreateUnit(Player(0), UnitIds.peasant, 0, 0, 0)
-
-  //   let progressBar = new ProgressBar()
-  //   ..setTarget(peasant)
-    
-  //   doPeriodically(0.1) (CallbackPeriodic cb) ->
-  //     let t = peasant.getHP() / peasant.getMaxHP()
-  //     progressBar.setPercentage(t, 1.0)
+  doPeriodically(PROGRESS_BAR_UPDATE_PROGRESS_INTERVAL) (CallbackPeriodic cb) ->
+    g_updateProgressBarProgressEvent.invoke()
+  
+  doPeriodically(PROGRESS_BAR_UPDATE_POSITION_INTERVAL) (CallbackPeriodic cb) ->
+    g_updateProgressBarPositionEvent.invoke()   
     

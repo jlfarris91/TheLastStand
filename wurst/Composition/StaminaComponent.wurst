@@ -3,33 +3,94 @@ import Composition
 import UnitMetadata
 import Events
 import Type
+import ProgressBar
+import ColorUtility
+import ClosureTimers
 
+// ============================================================================
 public class StaminaComponent extends Component
 
+  private constant real TIME_TO_HIDE_STAMINA_BAR = 3.0
+
+  private ProgressBar _staminaBar
+  private GenericArgsEventHandler<StaminaComponent, real> _staminaChangedEventHandler
+  private timer _hideStaminaBarTimer
+
+  GenericArgsEvent<StaminaComponent, real> staminaChangedEvent
   GenericEvent<StaminaComponent> outOfStaminaEvent
 
+  // --------------------------------------------------------------------------
   construct(IUnitMetadata owner)
     super(owner)
 
+    staminaChangedEvent = new GenericArgsEvent<StaminaComponent, real>()
     outOfStaminaEvent = new GenericEvent<StaminaComponent>()
 
-  ondestroy
-    destroy outOfStaminaEvent
+    _staminaBar = new ProgressBar()
+    ..setTarget(owner.getUnit())
+    ..setHeight(135.0)
+    ..setOffset(vec2(-14.5, 0))
+    ..setScale(1.2)
+    ..setColor(Colors.gold)
+    ..setPercentageNow(getStamina()/getMaxStamina())
+    ..show(false)
 
+    _staminaChangedEventHandler = staminaChangedEvent.addListener() (StaminaComponent sender, real args) ->
+      let t = getStamina() / getMaxStamina()
+      _staminaBar.setPercentage(t)
+      _staminaBar.show(true)
+      hideStaminaBarDelayed()
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    if (_hideStaminaBarTimer != null)
+      _hideStaminaBarTimer.destr()
+      _hideStaminaBarTimer = null
+
+    if (_staminaChangedEventHandler != null)
+      _staminaChangedEventHandler = staminaChangedEvent.removeListener(_staminaChangedEventHandler)
+
+    destroy outOfStaminaEvent
+    destroy staminaChangedEvent
+
+    if (_staminaBar != null)
+      destroy _staminaBar
+
+  // --------------------------------------------------------------------------
   function getStamina() returns real
     return (_owner castTo IUnitMetadata).getUnit().getMana()
 
+  // --------------------------------------------------------------------------
   function getMaxStamina() returns real
     return (_owner castTo IUnitMetadata).getUnit().getMaxMana()
 
+  // --------------------------------------------------------------------------
   function removeStamina(real amount)
     let u = (_owner castTo IUnitMetadata).getUnit()
-    let remainingMana = RMaxBJ(u.getMana() - amount, 0.0)
+    let originalMana = u.getMana()
+    let remainingMana = RMaxBJ(originalMana - amount, 0.0)
+    let actualDelta = originalMana - remainingMana
+
+    if (RAbsBJ(actualDelta) <= 0.0)
+      return
+    
     u.setMana(remainingMana)
+    staminaChangedEvent.invoke(this, actualDelta)
 
     if (remainingMana <= 0.0)
       outOfStaminaEvent.invoke(this)
 
+  // --------------------------------------------------------------------------
+  private function hideStaminaBarDelayed()
+    if (_hideStaminaBarTimer != null)
+      _hideStaminaBarTimer.destr()
+
+    _hideStaminaBarTimer = CreateTimer()
+    _hideStaminaBarTimer.doAfter(TIME_TO_HIDE_STAMINA_BAR) () ->
+      _staminaBar.show(false)
+      _hideStaminaBarTimer.destr()
+
+// ============================================================================
 public function IUnitMetadata.getOrAddStaminaComponent() returns StaminaComponent
   var component = this.getComponent(Type(StaminaComponent.typeId)) castTo StaminaComponent
   if (component == null)

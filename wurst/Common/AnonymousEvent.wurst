@@ -5,6 +5,8 @@ import LinkedList
 public abstract class AnonymousEventHandler
   bool _isMarkedForRemoval
   abstract function call()
+  ondestroy
+    _isMarkedForRemoval = false
 
 // ============================================================================
 public class AnonymousEvent
@@ -19,7 +21,7 @@ public class AnonymousEvent
 
   // --------------------------------------------------------------------------
   function addListener(AnonymousEventHandler handler) returns AnonymousEventHandler
-    if (handler == (0 castTo AnonymousEventHandler))
+    if (handler == null)
       return handler
     if (_handlers == null)
       _handlers = new LinkedList<AnonymousEventHandler>()
@@ -28,9 +30,9 @@ public class AnonymousEvent
 
   // --------------------------------------------------------------------------
   function removeListener(AnonymousEventHandler handler) returns AnonymousEventHandler
-    if (handler != (0 castTo AnonymousEventHandler) and _handlers != null)
+    if (handler != null and _handlers != null)
       handler._isMarkedForRemoval = true
-    return 0 castTo AnonymousEventHandler
+    return null
 
   // --------------------------------------------------------------------------
   function invoke()
@@ -42,3 +44,104 @@ public class AnonymousEvent
         else
           handler.call()
     
+class Counter
+  int value
+
+class String
+  string value
+
+@test
+function invoke_CallsAddedHandler()
+  // arrange
+  let ev = new AnonymousEvent()
+  let counter = new Counter()
+
+  // act
+  let cb = ev.addListener() () ->
+    counter.value++
+
+  ev.invoke()
+
+  // assert
+  assertTrue(cb != null)
+  assertTrue(counter.value == 1)
+
+@test
+function invoke_DoesNotCallRemovedHandler()
+  // arrange
+  var ev = new AnonymousEvent()
+  var counter = new Counter()
+
+  var cb = ev.addListener() () ->
+    counter.value++
+
+  cb = ev.removeListener(cb)
+
+  // act
+  ev.invoke()
+
+  // assert
+  assertTrue(cb == null)
+  assertTrue(counter.value == 0)
+
+@test
+function invoke_DoesNotCallReremovedHandler()
+  // arrange
+  var ev = new AnonymousEvent()
+  var counter = new Counter()
+
+  var cb = ev.addListener() () ->
+    counter.value++
+
+  // act
+  ev.invoke()
+  cb = ev.removeListener(cb)
+  ev.invoke()
+
+  // assert
+  assertTrue(cb == null)
+  assertTrue(counter.value == 1)
+
+@test
+function invoke_CallsReaddedHandler()
+  // arrange
+  var ev = new AnonymousEvent()
+  var counter = new Counter()
+
+  var cb = ev.addListener() () ->
+    counter.value++
+  
+  ev.removeListener(cb)
+
+  ev.invoke()
+
+  // act
+  cb = ev.addListener() () ->
+    counter.value += 10
+
+  ev.invoke()
+
+  // assert
+  assertTrue(cb != null)
+  assertTrue(counter.value == 10)
+
+@test
+function invoke_CallsMultipleHandlersInOrder()
+  // arrange
+  var ev = new AnonymousEvent()
+  var s = new String()
+
+  var cb1 = ev.addListener() () ->
+    s.value += "Hello"
+  
+  var cb2 = ev.addListener() () ->
+    s.value += " World!"
+
+  // act
+  ev.invoke()
+
+  // assert
+  assertTrue(cb1 != null)
+  assertTrue(cb2 != null)
+  assertTrue(cb1 != cb2)
+  assertTrue(s.value == "Hello World!")
