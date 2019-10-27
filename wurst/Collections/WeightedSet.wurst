@@ -1,31 +1,50 @@
 package WeightedSet
 import ErrorHandling
+import initlater LinkedList
 
-/**
-*  A set containing elements with associated weights
-*/
+// ============================================================================
+/** A set containing elements with associated weights */
 public class WeightedSet<T>
   protected WeightedSetEntry<T> head = null
   protected WeightedSetEntry<T> tail = null
   private int size
   private real totalWeight
 
+  // --------------------------------------------------------------------------
   construct()
     this.head = null
     this.tail = null
     this.size = 0
     this.totalWeight = 0
 
+  // --------------------------------------------------------------------------
+  construct(WeightedSet<T> other)
+    addAll(other)
+
+  // --------------------------------------------------------------------------
   ondestroy
     clear()
 
+  // --------------------------------------------------------------------------
+  /** Returns the number of items in the set */
   function size() returns int
     return this.size
 
+  // --------------------------------------------------------------------------
   /** Adds an element to the set */
   function add(T elem, real weight)
     this.addEntry(new WeightedSetEntry<T>(elem, weight))
 
+  // --------------------------------------------------------------------------
+  /** Adds all elements to the set */
+  function addAll(WeightedSet<T> other)
+    var current = other.head
+    while (current != null)
+      var next = current.next
+      add(current.elem, current.weight)
+      current = next
+
+  // --------------------------------------------------------------------------
   /** Tries to remove an element from the set */
   function remove(T elem) returns bool
     if (this.head == null or this.tail == null)
@@ -33,6 +52,8 @@ public class WeightedSet<T>
     let entry = this.findEntry(elem)
     return removeEntry(entry)
 
+  // --------------------------------------------------------------------------
+  /** Removes all elements from the set */
   function clear()
     var current = this.head
     while (current != null)
@@ -44,19 +65,13 @@ public class WeightedSet<T>
     this.size = 0
     this.totalWeight = 0
 
+  // --------------------------------------------------------------------------
+  /** Returns true if the set contains no elements */
   function isEmpty() returns bool
     return this.size == 0
 
-  function get(int index) returns T
-    if (index < 0 or index >= size())
-      error("Index is out of bounds")
-    var i = 0
-    for elem in this
-      if (i == index)
-        return elem
-      i++
-    return null
-
+  // --------------------------------------------------------------------------
+  /** Returns a random element from the set */
   function getRandom() returns T
     var r = GetRandomReal(0, this.totalWeight)
     var entry = this.head
@@ -68,6 +83,16 @@ public class WeightedSet<T>
     error("getRandom failed: " + R2S(r) + "/" + R2S(this.totalWeight))
     return null
 
+  // --------------------------------------------------------------------------
+  /** Returns N random elements from the set */
+  function getRandom(int count) returns LinkedList<T>
+    let clone = new WeightedSet<T>(this)
+    let output = clone.popRandom(count)
+    destroy clone
+    return output
+
+  // --------------------------------------------------------------------------
+  /** Removes and returns a random element from the set */
   function popRandom() returns T
     if (isEmpty())
       error("popRandom cannot pop from an empty set")
@@ -84,16 +109,29 @@ public class WeightedSet<T>
     error("popRandom failed: " + R2S(r) + "/" + R2S(this.totalWeight))
     return null
 
+  // --------------------------------------------------------------------------
+  /** Removes and returns N random elements from the set */
+  function popRandom(int count) returns LinkedList<T>
+    let output = new LinkedList<T>()
+    for i = 0 to count - 1
+      if (not isEmpty())
+        output.add(popRandom())
+    return output
+
+  // --------------------------------------------------------------------------
+  /** Get the chance [0.0 - 1.0] that an element in the set will be randomly selected */
   function getChance(T elem) returns real
     var entry = findEntry(elem)
     if (entry == null)
       return 0.0
     return entry.weight / this.totalWeight
 
+  // --------------------------------------------------------------------------
   /** Gets an iterator that can be used to iterate through the elements in the set */
   function iterator() returns WeightedSetIterator<T>
     return new WeightedSetIterator<T>(this)
     
+  // --------------------------------------------------------------------------
   protected function findEntry(T elem) returns WeightedSetEntry<T>
     var entry = this.head
     while (entry != null)
@@ -102,6 +140,7 @@ public class WeightedSet<T>
       entry = entry.next
     return null
 
+  // --------------------------------------------------------------------------
   protected function addEntry(WeightedSetEntry<T> entry)
     if (this.head == null)
       this.head = entry
@@ -115,6 +154,7 @@ public class WeightedSet<T>
     this.size++
     this.totalWeight += entry.weight
 
+  // --------------------------------------------------------------------------
   protected function removeEntry(WeightedSetEntry<T> entry) returns bool
     if (entry == null)
       return false      
@@ -137,6 +177,7 @@ public class WeightedSet<T>
 
     return true
 
+  // --------------------------------------------------------------------------
   function toString() returns string
     var s = "size: " + I2S(size())
     var entry = this.head
@@ -146,46 +187,55 @@ public class WeightedSet<T>
       entry = entry.next
     return s
 
+// ============================================================================
 class WeightedSetEntry<T>
   T elem
   real weight
   protected thistype prev
   protected thistype next
   
+  // --------------------------------------------------------------------------
   construct(T elem, real weight)
     this.elem = elem
     this.weight = weight
     this.prev = null
     this.next = null
 
+  // --------------------------------------------------------------------------
   ondestroy
     this.elem = null
     this.weight = 0.0
     this.prev = null
     this.next = null
 
+// ============================================================================
 public class WeightedSetIterator<T>
   private WeightedSet<T> weightedSet
   private WeightedSetEntry<T> current
   private bool hasMovedOnce
 
+  // --------------------------------------------------------------------------
   construct(WeightedSet<T> weightedSet)
     this.weightedSet = weightedSet
     this.reset()
 
+  // --------------------------------------------------------------------------
   function reset()
     this.current = this.weightedSet.head
     this.hasMovedOnce = false
 
+  // --------------------------------------------------------------------------
   function hasNext() returns bool
     return this.current != null and this.current.next != null
   
+  // --------------------------------------------------------------------------
   function next() returns T
     if (this.hasMovedOnce)
       this.current = this.current.next
     this.hasMovedOnce = true
     return this.current.elem
 
+  // --------------------------------------------------------------------------
   function close()
     destroy this
 

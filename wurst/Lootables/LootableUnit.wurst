@@ -1,6 +1,5 @@
 package LootableUnit
 import TimerUtils
-import HashMap
 import WeightedSet
 import FX
 import MainItemLibrary
@@ -9,10 +8,10 @@ import GameConstants
 import HashList
 import TextProgressBar
 import TextProgressBarTag
-import PeriodicTimer
 import TlsUnitIds
 import HumanPlayerMetadata
 import UnitMetadata
+import ClosureTimers
 
 constant int ABILITY_ID_LOOTABLE = 'A02C'
 constant colorA LOOTABLE_COLOR = colorA(255, 255, 255, 255)
@@ -23,7 +22,6 @@ constant colorA PROGRESS_BAR_FOREGROUND = colorA(0, 170, 0, 255)
 constant colorA PROGRESS_BAR_BACKGROUND = colorA(0, 64, 0, 255)
 constant real PROGRESS_BAR_UPDATE_PERIOD = 0.1
 
-HashMap<timer, LootOperation> g_TimerToOperationMap
 HashList<LootOperation> g_RunningOperations
 TextProgressBar g_LootOperationProgressBar
 
@@ -44,6 +42,7 @@ public class LootableUnit
   real _chanceForEpicItem
   real _chanceForLegendaryItem
 
+  // --------------------------------------------------------------------------
   construct(unit lootableUnit)
     this._unit = lootableUnit
     this._chanceForMaterials = 0.0
@@ -59,21 +58,26 @@ public class LootableUnit
     this._chanceForLegendaryItem = 1.0
     this.onLootable()
 
+  // --------------------------------------------------------------------------
   function getUnit() returns unit
     return this._unit
 
+  // --------------------------------------------------------------------------
   function getPos() returns vec2
     return this._unit.getPos()
 
+  // --------------------------------------------------------------------------
   function canLoot(unit _lootingUnit) returns bool
     return this._daysUntilCanBeLooted == 0 and not this._isBeingLooted
 
+  // --------------------------------------------------------------------------
   function resetCooldown()
     if (this._daysUntilCanBeLooted == 0)
       return
     this._daysUntilCanBeLooted = 0
     this.onLootable()
 
+  // --------------------------------------------------------------------------
   function decrementCooldown()
     if (this._daysUntilCanBeLooted == 0)
       return
@@ -81,6 +85,7 @@ public class LootableUnit
     if (this._daysUntilCanBeLooted == 0)
       onLootable()    
 
+  // --------------------------------------------------------------------------
   function startLooting(unit lootingUnit)
     if (not canLoot(lootingUnit))
       return
@@ -89,12 +94,14 @@ public class LootableUnit
     lootingUnit.pause()
     startLootOperation(lootingUnit, this, _searchDuration)
 
+  // --------------------------------------------------------------------------
   protected function onLootingFinished(unit lootingUnit)
     this._isBeingLooted = false
     lootingUnit.unpause()
     this.giveLoot(lootingUnit)
     this.onLooted()
 
+  // --------------------------------------------------------------------------
   protected function giveLoot(unit lootingUnit)
     let lootOptions = new WeightedSet<int>()
     lootOptions.add(0, _chanceForMaterials)
@@ -107,6 +114,7 @@ public class LootableUnit
         giveItem(lootingUnit)
     destroy lootOptions
 
+  // --------------------------------------------------------------------------
   protected function giveMaterials(unit lootingUnit)
     let mats = GetRandomInt(_minMaterials, _maxMaterials)
     let owner = lootingUnit.getOwnerMetadata() castTo HumanPlayerMetadata
@@ -114,6 +122,7 @@ public class LootableUnit
     FX.createFoundMaterialsTag(lootingUnit.getX(), lootingUnit.getY(), mats, owner.getPlayer())
     FX.createGoldCreditEffect(lootingUnit.getX(), lootingUnit.getY(), owner.getPlayer())
 
+  // --------------------------------------------------------------------------
   protected function giveItem(unit lootingUnit)
     let itm = g_MainItemLibrary.giveRandomItemToUnit(
       lootingUnit,
@@ -126,11 +135,13 @@ public class LootableUnit
     FX.createFoundItemTag(lootingUnit.getX(), lootingUnit.getY(), lootingUnit.getOwner())
     displayMessageToPlayer(lootingUnit.getOwner(), "Found " + itm.getName())
 
+  // --------------------------------------------------------------------------
   private function onLooted()
     this._unit.removeAbility(ABILITY_ID_LOOTABLE)
     this._unit.setVertexColor(LOOTED_COLOR)
     UnitRemoveType(this._unit, UNIT_TYPE_ANCIENT)
 
+  // --------------------------------------------------------------------------
   private function onLootable()
     this._unit.addAbility(ABILITY_ID_LOOTABLE)
     this._unit.setVertexColor(LOOTABLE_COLOR)
@@ -138,14 +149,13 @@ public class LootableUnit
     UnitAddType(this._unit, UNIT_TYPE_ANCIENT)
 
 // ============================================================================
-// EnterableLootable
-// ============================================================================
 public class EnterableLootable extends LootableUnit
   real _chanceForSurvivor
   real _chanceForZombies
   int _minZombies
   int _maxZombies
 
+  // --------------------------------------------------------------------------
   construct(unit lootableUnit)
     super(lootableUnit)
     this._minZombies = 1
@@ -153,17 +163,20 @@ public class EnterableLootable extends LootableUnit
     this._chanceForSurvivor = 15.0
     this._chanceForZombies = 15.0
 
+  // --------------------------------------------------------------------------
   override function startLooting(unit lootingUnit)
     lootingUnit.hide()
     this._unit.shareVision(lootingUnit.getOwner(), true)
     super.startLooting(lootingUnit)
 
+  // --------------------------------------------------------------------------
   override function onLootingFinished(unit lootingUnit)
     this._unit.shareVision(lootingUnit.getOwner(), false)
     lootingUnit.show()
     lootingUnit.getOwner().selectSingle(lootingUnit)
     super.onLootingFinished(lootingUnit)
 
+  // --------------------------------------------------------------------------
   override function giveLoot(unit lootingUnit)
     let lootOptions = new WeightedSet<int>()
     lootOptions.add(0, _chanceForMaterials)
@@ -182,6 +195,7 @@ public class EnterableLootable extends LootableUnit
         spawnZombies(lootingUnit)
     destroy lootOptions
 
+  // --------------------------------------------------------------------------
   protected function spawnSurvivor(unit lootingUnit)
     let survivor = createUnitTLS(
       PLAYER_VILLAGERS,
@@ -192,6 +206,7 @@ public class EnterableLootable extends LootableUnit
     survivor.issuePointOrder("move", lootingUnit.getPos())
     FX.createFoundSurvivorTag(lootingUnit.getX(), lootingUnit.getY(), lootingUnit.getOwner())
 
+  // --------------------------------------------------------------------------
   protected function spawnZombies(unit lootingUnit)
     let zombieCount = GetRandomInt(_minZombies, _maxZombies)
     unit lastCreatedZombie = null
@@ -215,8 +230,6 @@ public class EnterableLootable extends LootableUnit
     PlaySoundOnUnitBJ(gg_snd_ZombieDeath1, 30.00, this._unit)
 
 // ============================================================================
-// LootOperation
-// ============================================================================
 class LootOperation
   unit _lootingUnit
   LootableUnit _lootable
@@ -226,56 +239,42 @@ class LootOperation
   ProgressBarTag _progressBar
   real _duration
 
+  private CallbackPeriodic _updateCB
+
+  // --------------------------------------------------------------------------
   construct(unit lootingUnit, LootableUnit lootable, real duration)
     this._lootingUnit = lootingUnit
     this._lootable = lootable
     this._duration = duration
+
     this._timer = getTimer()
-    this._timer.start(duration, function onLootOperationFinished)
+    this._timer.doAfter(duration) () ->
+      lootable.onLootingFinished(lootingUnit)
+      destroy this
     
     this._dialog = this._timer.createTimerDialog()
     this._dialog.setRealTimeRemaining(duration)
     this._dialog.setTitle("Looting...")
     if (localPlayer == lootingUnit.getOwner())
       this._dialog.display(true)
-    
+
     this._progressBar = new ProgressBarTag(g_LootOperationProgressBar, lootable.getPos().withZ(0.0), 10.0)
     this._progressBar.showForPlayer(lootingUnit.getOwner())
-    
-    registerRunningOperation(this)
 
+    _updateCB = doPeriodically(PROGRESS_BAR_UPDATE_PERIOD) (CallbackPeriodic cb) ->
+      this._progressBar.update(_timer.getElapsed() / this._duration)
+
+  // --------------------------------------------------------------------------
   ondestroy
-    deregisterRunningOperation(this)
-    this._timer.release()
-    this._dialog.destr()
     destroy this._progressBar
+    destroy _updateCB
+    this._dialog.destr()
 
-  function update()
-    this._progressBar.update(_timer.getElapsed() / this._duration)
-
+// ============================================================================
 function startLootOperation(unit lootingUnit, LootableUnit lootable, real duration)
   new LootOperation(lootingUnit, lootable, duration)
-    
-function onLootOperationFinished()
-  let t = GetExpiredTimer()
-  let op = g_TimerToOperationMap.get(t)
-  op._lootable.onLootingFinished(op._lootingUnit)
-  destroy op
 
-function registerRunningOperation(LootOperation op)
-  g_TimerToOperationMap.put(op._timer, op)
-  g_RunningOperations.add(op)
-  
-function deregisterRunningOperation(LootOperation op)
-  g_TimerToOperationMap.remove(op._timer)
-  g_RunningOperations.remove(op)
-
-function updateProgressBars()
-  for op in g_RunningOperations
-    op.update()
-
+// ============================================================================
 init
-  g_TimerToOperationMap = new HashMap<timer, LootOperation>()
   g_RunningOperations = new HashList<LootOperation>()
   g_LootOperationProgressBar = new TextProgressBar(PROGRESS_BAR_LENGTH, PROGRESS_BAR_FOREGROUND, PROGRESS_BAR_BACKGROUND)
-  PeriodicTimer.get(PROGRESS_BAR_UPDATE_PERIOD).add(Condition(function updateProgressBars))
