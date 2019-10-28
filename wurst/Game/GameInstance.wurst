@@ -1,9 +1,162 @@
 package GameInstance
+import TimeOfDayEvents
+import Zombies
+import Items
+import SurvivorSpawnPoints
+import GameSettings
+import Survivors
+import GameConstants
+import HumanPlayers
+import HumanPlayerMetadata
+import Heroes
+import AnonymousEvent
+import ClosureTimers
 
+public GameInstance g_GameInstance
+
+constant real TIME_OF_DAY_INITIAL = 5.0
+constant real GAME_SPEED_INITIAL = 50.0
+
+// ============================================================================
 public class GameInstance
-  static int days
-  static int nights
+  private int _days
+  private int _nights
+  private AnonymousEventHandler _dayCB
+  private AnonymousEventHandler _nightCB
 
+  // --------------------------------------------------------------------------
+  ondestroy
+    stop()
+
+  // --------------------------------------------------------------------------
   function reset()
-    days = 0
-    nights = 0
+
+    stop()
+
+    _days = 0
+    _nights = 0
+    SetTimeOfDay(0.0)
+
+    start()
+
+  // --------------------------------------------------------------------------
+  function start()
+
+    initializeGeneral()
+    initializeAlliances()
+
+    _dayCB = g_DayEvent.addListener() () ->
+      onDayStart()
+
+    _nightCB = g_NightEvent.addListener() () ->
+      onNightStart()
+
+    nullTimer() ->
+      postStart()
+
+  // --------------------------------------------------------------------------
+  function stop()
+    
+    if (_dayCB != null)
+      _dayCB = g_DayEvent.removeListener(_dayCB)
+
+    if (_nightCB != null)
+      _nightCB = g_NightEvent.removeListener(_nightCB)
+
+  // --------------------------------------------------------------------------
+  private function postStart()
+    spawnHeroesForPlayers()
+    
+    for p in g_PlayingHumanPlayers
+      // Create a visible region around the base units
+      createVision(p, gg_rct_BaseUnits, false)
+
+  // --------------------------------------------------------------------------
+  private function onDayStart()
+    if (_days > 1)
+      _nights++
+
+    PlaySoundBJ(gg_snd_QuestCompleted)
+
+    Zombies.stopSpawning()
+    Zombies.killAllUndead()
+    Zombies.spawnDayZombiesNearPlayers()
+
+    Items.spawnItemsNearPlayers()
+
+    // Must be called after spawning undead and before spawning survivors
+    g_SurvivorSpawnPointManager.updateSpawnPointsNow()
+
+    if (GameSettings.allowRespawn)
+      respawnDeadPlayers()
+
+    spawnUnrescuedSurvivorsNearPlayers()
+
+    // TODO: update player stats multiboard
+
+    // Have to wait for some reason
+    TriggerSleepAction(1.0)
+    SetTimeOfDayScalePercentBJ(GAME_SPEED_DAY)
+
+  // --------------------------------------------------------------------------
+  private function onNightStart()
+    _days++
+
+    GameSettings.zombies_SpawnsPerTick += GameSettings.zombies_SpawnsPerTickInc
+    GameSettings.zombies_SpawnsMaxPerPlayer += GameSettings.zombies_SpawnsMaxPerPlayerInc
+
+    removeUnrescuedSurvivors()
+    Items.removeAllItemsNotNearHumanUnits()
+
+    Zombies.killAllUndead()
+    Zombies.startSpawning()
+
+    if (_days > GameSettings.aboms_StartDay)
+      // TODO: Aboms.spawnAboms()
+
+    // Have to wait for some reason
+    TriggerSleepAction(1.0)
+    SetTimeOfDayScalePercentBJ(GAME_SPEED_NIGHT)
+
+  // --------------------------------------------------------------------------
+  private function respawnDeadPlayers()
+    g_PlayingHumanPlayers.forEach() (player p) ->
+      if (p.getHumanMetadata().getIsDead())
+        spawnInitialPlayerUnitsAtRandomPoint(p)  
+
+  // --------------------------------------------------------------------------
+  private function initializeGeneral()
+    EnableMinimapFilterButtons(true, false)
+    SetPlayerFlagBJ(PLAYER_STATE_GIVES_BOUNTY, true, PLAYER_UNDEAD)
+    CameraSetSmoothingFactor(5.0)
+    SetCreepCampFilterState(false)
+    SetTimeOfDayScalePercentBJ(GAME_SPEED_INITIAL)
+    SetTimeOfDay(TIME_OF_DAY_INITIAL)
+    FogEnableOn()
+
+  // --------------------------------------------------------------------------
+  private function initializeAlliances()  
+    SetPlayerAllianceStateBJ(PLAYER_RAIDERS, PLAYER_UNDEAD, bj_ALLIANCE_UNALLIED)
+    SetPlayerAllianceStateBJ(PLAYER_UNDEAD, PLAYER_RAIDERS, bj_ALLIANCE_UNALLIED)
+    for p in g_HumanPlayers
+      // Make player treat undead as an enemy
+      SetPlayerAllianceStateBJ(p, PLAYER_UNDEAD, bj_ALLIANCE_UNALLIED)
+      // Make undead treat player as an enemy
+      SetPlayerAllianceStateBJ(PLAYER_UNDEAD, p, bj_ALLIANCE_UNALLIED )
+      // Make player treat villagers as nuetral
+      SetPlayerAllianceStateBJ(p, PLAYER_VILLAGERS, bj_ALLIANCE_NEUTRAL )
+      // Make villagers treat player as nuetral
+      SetPlayerAllianceStateBJ(PLAYER_VILLAGERS, p, bj_ALLIANCE_NEUTRAL )
+      // Make player treat raiders as an enemy
+      SetPlayerAllianceStateBJ(p, PLAYER_UNDEAD, bj_ALLIANCE_UNALLIED)
+      // Make raiders treat player as an enemy
+      SetPlayerAllianceStateBJ(PLAYER_UNDEAD, p, bj_ALLIANCE_UNALLIED)
+      // Turn off undead shared vision with player (probably unnecessary)
+      SetPlayerAllianceBJ(PLAYER_UNDEAD, ALLIANCE_SHARED_VISION, false, p)
+
+// ============================================================================
+init
+  g_GameInstance = new GameInstance()
+
+  doAfter(0.1) ->
+    g_GameInstance.start()

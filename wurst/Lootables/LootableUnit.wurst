@@ -1,17 +1,17 @@
 package LootableUnit
 import TimerUtils
 import WeightedSet
-import FX
-import MainItemLibrary
-import DisplayTextToPlayer
 import GameConstants
-import HashList
 import TextProgressBar
 import TextProgressBarTag
-import TlsUnitIds
-import HumanPlayerMetadata
 import UnitMetadata
 import ClosureTimers
+import LootableReward
+import ErrorHandling
+import Composition
+import Type
+import TimeOfDayEvents
+import AnonymousEvent
 
 constant int ABILITY_ID_LOOTABLE = 'A02C'
 constant colorA LOOTABLE_COLOR = colorA(255, 255, 255, 255)
@@ -22,124 +22,123 @@ constant colorA PROGRESS_BAR_FOREGROUND = colorA(0, 170, 0, 255)
 constant colorA PROGRESS_BAR_BACKGROUND = colorA(0, 64, 0, 255)
 constant real PROGRESS_BAR_UPDATE_PERIOD = 0.1
 
-HashList<LootOperation> g_RunningOperations
 TextProgressBar g_LootOperationProgressBar
 
 // ============================================================================
-// LootableUnit
-// ============================================================================
-public class LootableUnit
-  unit _unit
-  real _chanceForMaterials
-  real _chanceForItem
-  int _minMaterials
-  int _maxMaterials
-  real _searchDuration
-  bool _isBeingLooted
-  int _daysUntilCanBeLooted
-  real _chanceForCommonItem
-  real _chanceForRareItem
-  real _chanceForEpicItem
-  real _chanceForLegendaryItem
+public class LootableUnit extends BaseUnitMetadata
+  private WeightedSet<ILootableReward> _rewards
+  private real _searchDuration
+  private bool _isBeingLooted
+  private int _cooldown
+  private AnonymousEventHandler _dayCB
 
   // --------------------------------------------------------------------------
   construct(unit lootableUnit)
-    this._unit = lootableUnit
-    this._chanceForMaterials = 0.0
-    this._chanceForItem = 0.0
-    this._minMaterials = 5
-    this._maxMaterials = 10
+    super(lootableUnit)
+
+    // All lootables belong to the Villagers player
+    lootableUnit.setOwner(PLAYER_VILLAGERS, true)
+
     this._searchDuration = 3.0
     this._isBeingLooted = false
-    this._daysUntilCanBeLooted = 0
-    this._chanceForCommonItem = 83.0
-    this._chanceForRareItem = 12.0
-    this._chanceForEpicItem = 4.0
-    this._chanceForLegendaryItem = 1.0
+    this._cooldown = 0
+    this._rewards = new WeightedSet<ILootableReward>()
+
     this.onLootable()
 
   // --------------------------------------------------------------------------
-  function getUnit() returns unit
-    return this._unit
+  ondestroy
+    for reward in _rewards
+      destroy reward
+    destroy _rewards
+    _rewards = null
+
+    if (_dayCB != null)
+      _dayCB = g_DayEvent.removeListener(_dayCB)
+    
+  // --------------------------------------------------------------------------
+  @inline
+  override function getUnit() returns unit
+    return super.getUnit()
+    
+  // --------------------------------------------------------------------------
+  @inline
+  override function addComponent(IComponent component) returns IComponent
+    return super.addComponent(component)
+
+  // --------------------------------------------------------------------------
+  @inline
+  override function getComponent(Type componentTypeId) returns IComponent
+    return super.getComponent(componentTypeId)
+
+  // --------------------------------------------------------------------------
+  function getRewardsSet() returns WeightedSet<ILootableReward>
+    return _rewards
 
   // --------------------------------------------------------------------------
   function getPos() returns vec2
     return this._unit.getPos()
 
   // --------------------------------------------------------------------------
-  function canLoot(unit _lootingUnit) returns bool
-    return this._daysUntilCanBeLooted == 0 and not this._isBeingLooted
+  function getSearchDuration() returns real
+    return _searchDuration
+
+  // --------------------------------------------------------------------------
+  function setSearchDuration(real duration)
+    _searchDuration = duration
+
+  // --------------------------------------------------------------------------
+  function isBeingLooted() returns bool
+    return this._isBeingLooted
+
+  // --------------------------------------------------------------------------
+  function canLoot(IUnitMetadata _lootingUnit) returns bool
+    return this._cooldown == 0 and not this._isBeingLooted
 
   // --------------------------------------------------------------------------
   function resetCooldown()
-    if (this._daysUntilCanBeLooted == 0)
+    if (this._cooldown == 0)
       return
-    this._daysUntilCanBeLooted = 0
+    this._cooldown = 0
     this.onLootable()
 
   // --------------------------------------------------------------------------
   function decrementCooldown()
-    if (this._daysUntilCanBeLooted == 0)
+    if (this._cooldown == 0)
       return
-    this._daysUntilCanBeLooted--
-    if (this._daysUntilCanBeLooted == 0)
-      onLootable()    
+    this._cooldown--
+    if (this._cooldown == 0)
+      onLootable()
 
   // --------------------------------------------------------------------------
-  function startLooting(unit lootingUnit)
+  function startLooting(IUnitMetadata lootingUnit)
     if (not canLoot(lootingUnit))
       return
-    this._daysUntilCanBeLooted = GetRandomInt(LOOTABLES_COOLDOWN_MIN, LOOTABLES_COOLDOWN_MAX)
+    this._cooldown = GetRandomInt(LOOTABLES_COOLDOWN_MIN, LOOTABLES_COOLDOWN_MAX)
     this._isBeingLooted = true
     lootingUnit.pause()
     startLootOperation(lootingUnit, this, _searchDuration)
 
   // --------------------------------------------------------------------------
-  protected function onLootingFinished(unit lootingUnit)
+  protected function onLootingFinished(IUnitMetadata lootingUnit)
     this._isBeingLooted = false
     lootingUnit.unpause()
     this.giveLoot(lootingUnit)
     this.onLooted()
 
   // --------------------------------------------------------------------------
-  protected function giveLoot(unit lootingUnit)
-    let lootOptions = new WeightedSet<int>()
-    lootOptions.add(0, _chanceForMaterials)
-    lootOptions.add(1, _chanceForItem)
-    let lootChoice = lootOptions.getRandom()
-    switch (lootChoice)
-      case 0
-        giveMaterials(lootingUnit)
-      case 1
-        giveItem(lootingUnit)
-    destroy lootOptions
-
-  // --------------------------------------------------------------------------
-  protected function giveMaterials(unit lootingUnit)
-    let mats = GetRandomInt(_minMaterials, _maxMaterials)
-    let owner = lootingUnit.getOwnerMetadata() castTo HumanPlayerMetadata
-    owner.giveMaterials(mats)
-    FX.createFoundMaterialsTag(lootingUnit.getX(), lootingUnit.getY(), mats, owner.getPlayer())
-    FX.createGoldCreditEffect(lootingUnit.getX(), lootingUnit.getY(), owner.getPlayer())
-
-  // --------------------------------------------------------------------------
-  protected function giveItem(unit lootingUnit)
-    let itm = g_MainItemLibrary.giveRandomItemToUnit(
-      lootingUnit,
-      ItemChances(
-        _chanceForCommonItem,
-        _chanceForRareItem,
-        _chanceForEpicItem,
-        _chanceForLegendaryItem))
-
-    FX.createFoundItemTag(lootingUnit.getX(), lootingUnit.getY(), lootingUnit.getOwner())
-    displayMessageToPlayer(lootingUnit.getOwner(), "Found " + itm.getName())
+  protected function giveLoot(IUnitMetadata lootingUnit)
+    let reward = _rewards.getRandom()
+    if (reward == null)
+      error("No reward registered for lootable")
+    reward.giveReward(this, lootingUnit)
 
   // --------------------------------------------------------------------------
   private function onLooted()
     this._unit.removeAbility(ABILITY_ID_LOOTABLE)
     this._unit.setVertexColor(LOOTED_COLOR)
     UnitRemoveType(this._unit, UNIT_TYPE_ANCIENT)
+    startListeningToDayEvent()
 
   // --------------------------------------------------------------------------
   private function onLootable()
@@ -147,102 +146,51 @@ public class LootableUnit
     this._unit.setVertexColor(LOOTABLE_COLOR)
     // Makes the unit targettable by the search ability
     UnitAddType(this._unit, UNIT_TYPE_ANCIENT)
+    stopListeningToDayEvent()
+
+  // --------------------------------------------------------------------------
+  private function startListeningToDayEvent()
+    stopListeningToDayEvent()
+    _dayCB = g_DayEvent.addListener() () ->
+      decrementCooldown()
+
+  // --------------------------------------------------------------------------
+  private function stopListeningToDayEvent()
+    if (_dayCB != null)
+      _dayCB = g_DayEvent.removeListener(_dayCB)
 
 // ============================================================================
 public class EnterableLootable extends LootableUnit
-  real _chanceForSurvivor
-  real _chanceForZombies
-  int _minZombies
-  int _maxZombies
 
   // --------------------------------------------------------------------------
   construct(unit lootableUnit)
     super(lootableUnit)
-    this._minZombies = 1
-    this._maxZombies = 3
-    this._chanceForSurvivor = 15.0
-    this._chanceForZombies = 15.0
 
   // --------------------------------------------------------------------------
-  override function startLooting(unit lootingUnit)
+  override function startLooting(IUnitMetadata lootingUnit)
     lootingUnit.hide()
     this._unit.shareVision(lootingUnit.getOwner(), true)
     super.startLooting(lootingUnit)
 
   // --------------------------------------------------------------------------
-  override function onLootingFinished(unit lootingUnit)
+  override function onLootingFinished(IUnitMetadata lootingUnit)
     this._unit.shareVision(lootingUnit.getOwner(), false)
     lootingUnit.show()
-    lootingUnit.getOwner().selectSingle(lootingUnit)
+    lootingUnit.getOwner().selectSingle(lootingUnit.getUnit())
     super.onLootingFinished(lootingUnit)
-
-  // --------------------------------------------------------------------------
-  override function giveLoot(unit lootingUnit)
-    let lootOptions = new WeightedSet<int>()
-    lootOptions.add(0, _chanceForMaterials)
-    lootOptions.add(1, _chanceForItem)
-    lootOptions.add(2, _chanceForSurvivor)
-    lootOptions.add(3, _chanceForZombies)
-    let lootChoice = lootOptions.getRandom()
-    switch (lootChoice)
-      case 0
-        giveMaterials(lootingUnit)
-      case 1
-        giveItem(lootingUnit)
-      case 2
-        spawnSurvivor(lootingUnit)
-      case 3
-        spawnZombies(lootingUnit)
-    destroy lootOptions
-
-  // --------------------------------------------------------------------------
-  protected function spawnSurvivor(unit lootingUnit)
-    let survivor = createUnitTLS(
-      PLAYER_VILLAGERS,
-      TlsUnitIds.survivorUnrescued,
-      lootingUnit.getX(),
-      lootingUnit.getY(),
-      GetRandomDirectionDeg())
-    survivor.issuePointOrder("move", lootingUnit.getPos())
-    FX.createFoundSurvivorTag(lootingUnit.getX(), lootingUnit.getY(), lootingUnit.getOwner())
-
-  // --------------------------------------------------------------------------
-  protected function spawnZombies(unit lootingUnit)
-    let zombieCount = GetRandomInt(_minZombies, _maxZombies)
-    unit lastCreatedZombie = null
-    for i = 0 to zombieCount - 1
-      lastCreatedZombie = createUnitTLS(
-        PLAYER_UNDEAD,
-        TlsUnitIds.zombieDay,
-        this._unit.getX(),
-        this._unit.getY(),
-        GetRandomDirectionDeg())
-      lastCreatedZombie.issueTargetOrder("attack", lootingUnit)
-    // Give a random item to the last created zombie
-    g_MainItemLibrary.giveRandomItemToUnit(
-      lastCreatedZombie,
-      ItemChances(
-        this._chanceForCommonItem,
-        this._chanceForRareItem,
-        this._chanceForEpicItem,
-        this._chanceForLegendaryItem))
-    // Play a sound to alert the player
-    PlaySoundOnUnitBJ(gg_snd_ZombieDeath1, 30.00, this._unit)
 
 // ============================================================================
 class LootOperation
-  unit _lootingUnit
-  LootableUnit _lootable
-  timer _timer
-  timerdialog _dialog
-  bool _wasSelected
-  ProgressBarTag _progressBar
-  real _duration
-
+  private IUnitMetadata _lootingUnit
+  private LootableUnit _lootable
+  private timer _timer
+  private timerdialog _dialog
+  private ProgressBarTag _progressBar
+  private real _duration
   private CallbackPeriodic _updateCB
 
   // --------------------------------------------------------------------------
-  construct(unit lootingUnit, LootableUnit lootable, real duration)
+  construct(IUnitMetadata lootingUnit, LootableUnit lootable, real duration)
     this._lootingUnit = lootingUnit
     this._lootable = lootable
     this._duration = duration
@@ -271,10 +219,9 @@ class LootOperation
     this._dialog.destr()
 
 // ============================================================================
-function startLootOperation(unit lootingUnit, LootableUnit lootable, real duration)
+function startLootOperation(IUnitMetadata lootingUnit, LootableUnit lootable, real duration)
   new LootOperation(lootingUnit, lootable, duration)
 
 // ============================================================================
 init
-  g_RunningOperations = new HashList<LootOperation>()
   g_LootOperationProgressBar = new TextProgressBar(PROGRESS_BAR_LENGTH, PROGRESS_BAR_FOREGROUND, PROGRESS_BAR_BACKGROUND)

@@ -2,23 +2,30 @@ package SearchLootable
 import EventUtility
 import Lootables
 import ColorUtility
-import LootableUnit
 import RegisterEvents
 import LootableTypes
 import Orders
+import UnitMetadata
+import ErrorHandling
 
 constant int ABILITY_ID_SEARCH = 'A01R'
 constant int ABILITY_SEARCH_ORDER = Orders.phaseshift
 
+// ============================================================================
 function onSearchChannel()
   let caster = GetSpellAbilityUnit()
   let target = GetSpellTargetUnit()
+  let looter = caster.getMetadata()
+  let lootable = target.getLootable()
 
-  if (not target.isLootable())
+  if (lootable == null)
     return
 
-  let lootable = target.getLootable()
-  if (not lootable.canLoot(caster))
+  if (looter == null)
+    error("Looter is invalid because it has no metadata")
+    return
+
+  if (not lootable.canLoot(looter))
     caster.issueImmediateOrderById(Orders.stop)
     createTTEx(
       lootable.getUnit().getPos().withZ(30),
@@ -29,15 +36,22 @@ function onSearchChannel()
 
   // We don't do anything here except show the error message
 
+// ============================================================================
 function onSearchCast()
   let caster = GetSpellAbilityUnit()
   let target = GetSpellTargetUnit()
+  let looter = caster.getMetadata()
+  let lootable = target.getLootable()
 
-  if (not target.isLootable())
+  if (lootable == null)
+    error("Cannot loot target lootable")
     return
 
-  let lootable = target.getLootable()
-  if (not lootable.canLoot(caster))
+  if (looter == null)
+    error("Looter is invalid because it has no metadata")
+    return
+
+  if (not lootable.canLoot(looter))
     caster.issueImmediateOrderById(Orders.stop)
     createTTEx(
       lootable.getUnit().getPos().withZ(30),
@@ -47,14 +61,16 @@ function onSearchCast()
       caster.getOwner())
     return
 
-  lootable.startLooting(caster)
+  lootable.startLooting(looter)
 
+// ============================================================================
 function onRightClick()
   let orderedUnit = GetOrderedUnit()
   let targetUnit = GetOrderTargetUnit()
   if (GetIssuedOrderId() == Orders.smart and targetUnit.isLootableUnitType())
     orderedUnit.issueTargetOrderById(ABILITY_SEARCH_ORDER, targetUnit)
 
+// ============================================================================
 init
   registerSpellChannelEvent(ABILITY_ID_SEARCH, function onSearchChannel)
   registerSpellEffectEvent(ABILITY_ID_SEARCH, function onSearchCast)

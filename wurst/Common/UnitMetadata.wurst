@@ -6,6 +6,8 @@ import public UnitMetadataExtensions
 import ErrorHandling
 import OnUnitEnterLeave
 import HashList
+import Type
+import ErrorIf
 //import Reflection
 
 HashMap<unit, IUnitMetadata> g_unitMetadataMap
@@ -56,6 +58,28 @@ public abstract class BaseUnitMetadata implements IUnitMetadata
     skip
 
 // ============================================================================
+public class NullUnitMetadata extends BaseUnitMetadata
+  
+  // --------------------------------------------------------------------------
+  construct(unit u)
+    super(u)
+
+  // --------------------------------------------------------------------------
+  @inline
+  override function getUnit() returns unit
+    return super.getUnit()
+    
+  // --------------------------------------------------------------------------
+  @inline
+  override function addComponent(IComponent component) returns IComponent
+    return super.addComponent(component)
+
+  // --------------------------------------------------------------------------
+  @inline
+  override function getComponent(Type componentTypeId) returns IComponent
+    return super.getComponent(componentTypeId)
+
+// ============================================================================
 public function unit.getMetadata() returns IUnitMetadata
   //if (g_unitMetadataMap.has(this) == false)
   //  Log.info("No metadata found for unit " + this.getName())
@@ -63,33 +87,36 @@ public function unit.getMetadata() returns IUnitMetadata
 
 // ============================================================================
 public function registerUnitMetadataFactory(IUnitMetadataFactory factory)
-  if (factory == null)
-    error("Unit metadata factory cannot be null")
+  ErrorIf.argumentIsNull(factory, "factory")
   g_unitMetadataFactories.addAt(factory, 0)
 
 // ============================================================================
 public function unregisterUnitMetadataFactory(IUnitMetadataFactory factory)
-  if (factory == null)
-    error("Unit metadata factory cannot be null")
+  ErrorIf.argumentIsNull(factory, "factory")
   g_unitMetadataFactories.remove(factory)
 
 // ============================================================================
 public function constructUnitMetadata(unit u) returns IUnitMetadata
-  if (u == null)
-    error("Unit cannot be null")
+  ErrorIf.argumentIsNull(u, "u")
   for factory in g_unitMetadataFactories
     var uu = factory.createUnit(u)
     if (uu != null)
       return uu
-  return null
+  return new NullUnitMetadata(u)
 
 // ============================================================================
-public function registerUnitMetadata(IUnitMetadata u)
-  g_unitMetadataMap.put(u.getUnit(), u)
+public function registerUnitMetadata(IUnitMetadata metadata)
+  ErrorIf.argumentIsNull(metadata, "metadata")
+  let u = metadata.getUnit()
+  if (g_unitMetadataMap.has(u))
+    error("Unit already has a metadata object assigned")
+  g_unitMetadataMap.put(u, metadata)
 
 // ============================================================================
-public function unregisterUnitMetadata(IUnitMetadata u)
-  g_unitMetadataMap.remove(u.getUnit())
+public function unregisterUnitMetadata(IUnitMetadata metadata)
+  ErrorIf.argumentIsNull(metadata, "metadata")
+  g_unitMetadataMap.remove(metadata.getUnit())
+  destroy metadata
 
 // ============================================================================
 public function replaceUnitTLS(unit whichUnit, integer newUnitId, integer unitStateMethod) returns unit
@@ -116,8 +143,8 @@ public function createUnitTLS(player p, integer unitId, vec2 pos, real face) ret
 
 // ============================================================================
 public function createUnitTLS(IUnitMetadata metadata, player p, integer unitId, real x, real y, real face) returns unit
-  if (metadata == null)
-    error("metadata cannot be null")
+  ErrorIf.argumentIsNull(metadata, "metadata")
+  ErrorIf.argumentIsNull(p, "p")
   pauseMetadataGeneration(unitId)
   let newUnit = CreateUnit(p, unitId, x, y, face)
   metadata.setUnit(newUnit)
