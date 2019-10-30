@@ -1,0 +1,115 @@
+package ItemSet
+//import ItemType
+//import WeightedItemTypeSet
+import StringExtensions
+import ErrorHandling
+import WeightedSet
+import ItemExtensions
+
+// TODO: this dependency sucks
+import initlater ItemLibrary
+
+// ============================================================================
+public class ItemSet
+  private WeightedItemTypeSet itemTypes
+  private string name
+  private color color
+  private string itemRarityString
+
+  // --------------------------------------------------------------------------
+  construct(string name, color color)
+    this.name = name
+    this.color = color
+    this.itemRarityString = (name + " Item").colorize(color) + "|n|n"
+    this.itemTypes = new WeightedItemTypeSet()
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    destroy this.itemTypes
+
+  // --------------------------------------------------------------------------
+  function isEmpty() returns bool
+    return itemTypes.isEmpty()
+
+  // --------------------------------------------------------------------------
+  function getName() returns string
+    return this.name
+
+  // --------------------------------------------------------------------------
+  function add(int itemId, real weight) returns ItemType
+    var itemType = new ItemType(itemId)
+    this.add(itemType, weight)
+    return itemType
+
+  // --------------------------------------------------------------------------
+  function add(ItemType itemType, real weight)
+    this.itemTypes.add(itemType, weight)
+    if (not g_AllItemTypes.has(itemType.id))
+      g_AllItemTypes.put(itemType.id, itemType)
+
+  // --------------------------------------------------------------------------
+  function getItemType(int id) returns ItemType
+    for d in itemTypes
+      if (d.id == id)
+        return d
+    error("Couldn't find item type for item id " + I2S(id))
+    return null
+
+  // --------------------------------------------------------------------------
+  function createRandomItem(vec2 pos) returns item
+    var itemType = getRandomItemType()
+    var itm = CreateItem(itemType.id, pos.x, pos.y)
+    if (itm != null)
+      this.decorateItem(itm, itemType)
+    return itm
+
+  // --------------------------------------------------------------------------
+  function getRandomItemType() returns ItemType
+    return itemTypes.getRandom()
+
+  // --------------------------------------------------------------------------
+  function getRandomItemTypeId() returns int
+    let itm = itemTypes.getRandom()
+    return itm != null ? itm.id : -1
+  
+  // --------------------------------------------------------------------------
+  function getItemTypeChance(int id) returns real
+    let itemDef = getItemType(id)
+    if (itemDef == null)
+      return 0.0
+    return this.itemTypes.getChance(itemDef)
+
+  // --------------------------------------------------------------------------
+  function iterator() returns WeightedSetIterator<ItemType>
+    return this.itemTypes.iterator()
+
+  // --------------------------------------------------------------------------
+  private function decorateItem(item i, ItemType itemType)
+    var _name = itemType.name
+    var _description = itemType.description
+    var _extended = itemType.extendedTooltip
+
+    if (_name == "")
+      _name = i.getName()
+
+    if (_description == "")
+      _description = i.getDescription()
+    
+    if (_extended == "")
+      _extended = i.getExtendedTooltip()
+  
+    _name = _name.colorize(this.color)
+    _description = this.itemRarityString + _description
+    _extended = this.itemRarityString + _extended
+
+    i.setName(_name)
+    i.setDescription(_description)
+    i.setExtendedTooltip(_extended)
+
+    if (itemType.tooltip != "")
+      i.setTooltip(itemType.tooltip)
+
+    i.setPawnable(itemType.pawnable)
+    i.setDroppable(itemType.droppable)
+    i.setDropOnDeath(itemType.dropOnDeath)
+    i.setTintColor(this.color)

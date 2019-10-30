@@ -5,8 +5,9 @@ import TimerUtils
 import GameConstants
 import HumanPlayers
 import LinkedListExtensions
+import ClosureTimers
 
-constant real SPAWN_POINT_UPDATE_INTERVAL = 2.0
+constant real SPAWN_POINT_UPDATE_INTERVAL = 3.0
 constant real TEST_RADIUS = 512.0
 
 public SurvivorSpawnPointManager g_SurvivorSpawnPointManager
@@ -16,47 +17,57 @@ public class SurvivorSpawnPointManager implements ISpawnPointManager
   private SpawnPointManager _sourceManager
   private SpawnPointList _spawnPoints
 
+  // --------------------------------------------------------------------------
   construct(SpawnPointManager sourceManager)
     this._sourceManager = sourceManager
     this._spawnPoints = new SpawnPointList()
 
+  // --------------------------------------------------------------------------
   ondestroy
     destroy this._spawnPoints
     this._spawnPoints = null
     this._sourceManager = null
 
+  // --------------------------------------------------------------------------
   override function getSpawnPoints() returns SpawnPointList
     return this._spawnPoints
 
+  // --------------------------------------------------------------------------
   function getRandomSpawnPoint() returns ISpawnPoint
     return this._spawnPoints.getRandom()
     
+  // --------------------------------------------------------------------------
   function updateSpawnPointsNow()
     this._spawnPoints.clear()
     for sp in _sourceManager.getSpawnPoints()
       this.updateSpawnPoint(sp)
-    //print("Survivor spawn points: " + I2S(this.spawnPoints.size()))
+    //Log.info("Survivor spawn points: " + I2S(_spawnPoints.size()))
 
+  // --------------------------------------------------------------------------
   private function updateSpawnPoint(ISpawnPoint sp)
     let ug = getGroup()
-    ug.enumUnitsInRange(sp.getPos(), TEST_RADIUS)
+    let cnd = Condition(function doesFilterUnitInvalidateSpawnPoint)
+    ug.enumUnitsInRange(sp.getPos(), TEST_RADIUS, cnd)
     
-    var isValidForUndead = true
-
-    for u in ug
-      if (u.isAlive() and (u.isEnemyOf(PLAYER_VILLAGERS) or g_HumanPlayers.has(u.getOwner())))
-        isValidForUndead = false
-
-    if (isValidForUndead)
+    if (ug.isEmpty())
       this._spawnPoints.add(sp)
 
+    DestroyCondition(cnd)
     ug.release()
 
+// ============================================================================
+function doesFilterUnitInvalidateSpawnPoint() returns bool
+  let u = GetFilterUnit()
+  return u.isAlive() and (u.isEnemyOf(PLAYER_VILLAGERS) or g_HumanPlayers.has(u.getOwner()))
+
+// ============================================================================
 function updateSpawnPoints()
   g_SurvivorSpawnPointManager.updateSpawnPointsNow()
 
+// ============================================================================
 init
   g_SurvivorSpawnPointManager = new SurvivorSpawnPointManager(g_SpawnPointManager)
 
   var t = getTimer()
-  t.startPeriodic(SPAWN_POINT_UPDATE_INTERVAL, function updateSpawnPoints)
+  doAfter(SPAWN_POINT_UPDATE_INTERVAL / 2.0) () ->
+    t.startPeriodic(SPAWN_POINT_UPDATE_INTERVAL, function updateSpawnPoints)

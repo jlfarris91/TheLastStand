@@ -1,5 +1,4 @@
 package LootableUnit
-import TimerUtils
 import WeightedSet
 import GameConstants
 import TextProgressBar
@@ -23,9 +22,10 @@ constant colorA PROGRESS_BAR_BACKGROUND = colorA(0, 64, 0, 255)
 constant real PROGRESS_BAR_UPDATE_PERIOD = 0.1
 
 TextProgressBar g_LootOperationProgressBar
+AnonymousEvent g_UpdateProgressBarsEvent
 
 // ============================================================================
-public class LootableUnit extends BaseUnitMetadata
+public class LootableUnit extends UnitMetadata
   private WeightedSet<ILootableReward> _rewards
   private real _searchDuration
   private bool _isBeingLooted
@@ -168,60 +168,85 @@ public class EnterableLootable extends LootableUnit
 
   // --------------------------------------------------------------------------
   override function startLooting(IUnitMetadata lootingUnit)
+    if (not canLoot(lootingUnit))
+      return
+    super.startLooting(lootingUnit)
     lootingUnit.hide()
     this._unit.shareVision(lootingUnit.getOwner(), true)
-    super.startLooting(lootingUnit)
 
   // --------------------------------------------------------------------------
   override function onLootingFinished(IUnitMetadata lootingUnit)
+    super.onLootingFinished(lootingUnit)
     this._unit.shareVision(lootingUnit.getOwner(), false)
     lootingUnit.show()
     lootingUnit.getOwner().selectSingle(lootingUnit.getUnit())
-    super.onLootingFinished(lootingUnit)
 
 // ============================================================================
 class LootOperation
   private IUnitMetadata _lootingUnit
   private LootableUnit _lootable
-  private timer _timer
-  private timerdialog _dialog
   private ProgressBarTag _progressBar
+  private AnonymousEventHandler _updateHandler
+  private real _elapsed
   private real _duration
-  private CallbackPeriodic _updateCB
 
   // --------------------------------------------------------------------------
   construct(IUnitMetadata lootingUnit, LootableUnit lootable, real duration)
-    this._lootingUnit = lootingUnit
-    this._lootable = lootable
-    this._duration = duration
+    _lootingUnit = lootingUnit
+    _lootable = lootable
+    _duration = duration
+    _elapsed = 0.0
 
-    this._timer = getTimer()
-    this._timer.doAfter(duration) () ->
-      lootable.onLootingFinished(lootingUnit)
-      destroy this
+    if (_duration <= 0.0)
+      error("Argument 'duration' must be greater than zero")
+
+    doAfter(duration) () ->
+      onOperationFinished()
     
-    this._dialog = this._timer.createTimerDialog()
-    this._dialog.setRealTimeRemaining(duration)
-    this._dialog.setTitle("Looting...")
-    if (localPlayer == lootingUnit.getOwner())
-      this._dialog.display(true)
+    _progressBar = new ProgressBarTag(g_LootOperationProgressBar, _lootable.getPos().withZ(0.0), 10.0)
+    _progressBar.showForPlayer(_lootingUnit.getOwner())
 
-    this._progressBar = new ProgressBarTag(g_LootOperationProgressBar, lootable.getPos().withZ(0.0), 10.0)
-    this._progressBar.showForPlayer(lootingUnit.getOwner())
-
-    _updateCB = doPeriodically(PROGRESS_BAR_UPDATE_PERIOD) (CallbackPeriodic cb) ->
-      this._progressBar.update(_timer.getElapsed() / this._duration)
+    registerForUpdate()
 
   // --------------------------------------------------------------------------
   ondestroy
-    destroy this._progressBar
-    destroy _updateCB
-    this._dialog.destr()
+    unregisterForUpdate()
+    
+    if (_progressBar != null)
+      destroy _progressBar
+      _progressBar = null
+
+  // --------------------------------------------------------------------------
+  private function registerForUpdate()
+    _updateHandler = g_UpdateProgressBarsEvent.addListener() () ->
+      update()
+
+  // --------------------------------------------------------------------------
+  private function unregisterForUpdate()
+    _updateHandler = g_UpdateProgressBarsEvent.removeListener(_updateHandler)
+
+  // --------------------------------------------------------------------------
+  private function update()
+    _elapsed += PROGRESS_BAR_UPDATE_PERIOD
+
+    if (_progressBar != null)
+      _progressBar.update(_elapsed / _duration)
+  
+  // --------------------------------------------------------------------------
+  private function onOperationFinished()
+    _lootable.onLootingFinished(_lootingUnit)
+    nullTimer() () ->
+      destroy this
 
 // ============================================================================
-function startLootOperation(IUnitMetadata lootingUnit, LootableUnit lootable, real duration)
-  new LootOperation(lootingUnit, lootable, duration)
+function startLootOperation(IUnitMetadata lootingUnit, LootableUnit lootable, real duration) returns LootOperation
+  return new LootOperation(lootingUnit, lootable, duration)
 
 // ============================================================================
 init
   g_LootOperationProgressBar = new TextProgressBar(PROGRESS_BAR_LENGTH, PROGRESS_BAR_FOREGROUND, PROGRESS_BAR_BACKGROUND)
+  g_UpdateProgressBarsEvent = new AnonymousEvent()
+
+  doPeriodically(PROGRESS_BAR_UPDATE_PERIOD) (CallbackPeriodic cb) ->
+    g_UpdateProgressBarsEvent.invoke()
+    
