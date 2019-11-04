@@ -1,8 +1,7 @@
 package UndeadSpawnPoints
 import SpawnPoints
-import GroupUtils
-import TimerUtils
 import GameConstants
+import ClosureTimers
 
 constant real SPAWN_POINT_UPDATE_INTERVAL = 3.0
 constant real TEST_RADIUS = 800.0
@@ -11,53 +10,66 @@ public UndeadSpawnPointManager g_UndeadSpawnPointManager
 
 // ============================================================================
 public class UndeadSpawnPointManager implements ISpawnPointManager
-  private SpawnPointManager _sourceManager
+  private static group s_testGroup = CreateGroup()
+  private ISpawnPointManager _sourceManager
   private SpawnPointList _spawnPoints
+  private CallbackPeriodic _updateCB
 
   // --------------------------------------------------------------------------
-  construct(SpawnPointManager sourceManager)
+  construct(ISpawnPointManager sourceManager)
     this._sourceManager = sourceManager
     this._spawnPoints = new SpawnPointList()
 
+    startUpdating()
+
   // --------------------------------------------------------------------------
   ondestroy
+    stopUpdating()
     destroy _spawnPoints
+    this._spawnPoints = null
+    this._sourceManager = null
 
   // --------------------------------------------------------------------------
   override function getSpawnPoints() returns SpawnPointList
     return _spawnPoints
 
   // --------------------------------------------------------------------------
+  function startUpdating()
+    if (_updateCB == null)
+      _updateCB = doPeriodically(SPAWN_POINT_UPDATE_INTERVAL) (CallbackPeriodic cb) ->
+        updateSpawnPoints()
+
+  // --------------------------------------------------------------------------
+  function stopUpdating()
+    if (_updateCB != null)
+      destroy _updateCB
+
+  // --------------------------------------------------------------------------
   protected function updateSpawnPoints()
     this._spawnPoints.clear()
     for sp in _sourceManager.getSpawnPoints()
-      this.updateSpawnPoint(sp)
-    //Log.info("undead spawn points: " + I2S(_spawnPoints.size()))
+      if (this.isSpawnPointValid(sp))
+        _spawnPoints.add(sp)
+    Log.info("undead spawn points: " + I2S(_spawnPoints.size()))
 
   // --------------------------------------------------------------------------
-  private function updateSpawnPoint(ISpawnPoint sp)
-    let ug = getGroup()
-    let cnd = Condition(function doesFilterUnitInvalidateUndeadSpawnPoint)
-    ug.enumUnitsInRange(sp.getPos(), TEST_RADIUS, cnd)
+  private function isSpawnPointValid(ISpawnPoint sp) returns bool
 
-    if (ug.isEmpty())
-      this._spawnPoints.add(sp)
+    s_testGroup.enumUnitsInRange(sp.getPos(), TEST_RADIUS)
 
-    DestroyCondition(cnd)
-    ug.release()
+    var isValid = true
 
-// ============================================================================
-function doesFilterUnitInvalidateUndeadSpawnPoint() returns bool
-  let u = GetFilterUnit()
-  return u.isAlive() and u.isEnemyOf(PLAYER_UNDEAD) and not u.isInvulnerable()
+    for u from s_testGroup
+      if (doesUnitInvalidateUndeadSpawnPoint(u))
+        isValid = false
+        break
 
-// ============================================================================
-function updateSpawnPoints()
-  g_UndeadSpawnPointManager.updateSpawnPoints()
+    return isValid
+
+  // ============================================================================
+  private function doesUnitInvalidateUndeadSpawnPoint(unit u) returns bool
+    return u.isAlive() and u.isEnemyOf(PLAYER_UNDEAD) and not u.isInvulnerable()
 
 // ============================================================================
 init
   g_UndeadSpawnPointManager = new UndeadSpawnPointManager(g_SpawnPointManager)
-
-  var t = getTimer()
-  t.startPeriodic(SPAWN_POINT_UPDATE_INTERVAL, function updateSpawnPoints)
