@@ -8,6 +8,7 @@ import OnUnitEnterLeave
 import HashList
 import Type
 import ErrorIf
+// import Reflection
 
 HashMap<unit, IUnitMetadata> g_unitMetadataMap
 LinkedList<IUnitMetadataFactory> g_unitMetadataFactories
@@ -22,6 +23,17 @@ public interface IUnitMetadata extends IComposite
 // ============================================================================
 public interface IUnitMetadataFactory
   function createUnit(unit u) returns IUnitMetadata
+
+// ============================================================================
+public abstract class UnitComponent extends Component
+
+  // --------------------------------------------------------------------------
+  construct (IUnitMetadata metadata)
+    super(metadata)
+
+  // --------------------------------------------------------------------------
+  function getUnit() returns unit
+    return (_owner castTo IUnitMetadata).getUnit()
 
 // ============================================================================
 public class UnitMetadata implements IUnitMetadata
@@ -50,8 +62,8 @@ public class UnitMetadata implements IUnitMetadata
     _unit = newUnit
     registerUnitMetadata(this)
     onUnitChanged(oldUnit, newUnit)
-    //if (oldUnit != null)
-    //  Log.info(typeIdToTypeName(this.typeId) + " replaced " + I2S(oldUnit.getTypeId()) + " with " + I2S(newUnit.getTypeId()))
+    // if (oldUnit != null)
+    //   Log.info(typeIdToTypeName(this.typeId) + " replaced " + I2S(oldUnit.getTypeId()) + " with " + I2S(newUnit.getTypeId()))
 
   // --------------------------------------------------------------------------
   protected function onUnitChanged(unit _oldUnit, unit _newUnit)
@@ -69,9 +81,13 @@ public class UnitMetadata implements IUnitMetadata
 
 // ============================================================================
 public function unit.getMetadata() returns IUnitMetadata
-  //if (g_unitMetadataMap.has(this) == false)
-  //  Log.info("No metadata found for unit " + this.getName())
   return g_unitMetadataMap.get(this)
+
+// ============================================================================
+public function unit.getMetadataRequired() returns IUnitMetadata
+  if (g_unitMetadataMap.has(this) == false)
+    error("No metadata found for unit " + this.getName())
+  return this.getMetadata()
 
 // ============================================================================
 public function registerUnitMetadataFactory(IUnitMetadataFactory factory)
@@ -99,44 +115,59 @@ public function registerUnitMetadata(IUnitMetadata metadata)
   if (g_unitMetadataMap.has(u))
     error("Unit already has a metadata object assigned")
   g_unitMetadataMap.put(u, metadata)
+  // Log.info("registerUnitMetadata - registered metadata for unit " + u.getName())
 
 // ============================================================================
 public function unregisterUnitMetadata(IUnitMetadata metadata)
-  ErrorIf.argumentIsNull(metadata, "metadata")
-  g_unitMetadataMap.remove(metadata.getUnit())
-  destroy metadata
+  ErrorIf.argumentIsNull(metadata, "metadata")  
+  let u = metadata.getUnit()
+  if (u == null)
+    error("Metadata has no unit set")  
+  g_unitMetadataMap.remove(u)
+  // Log.info("unregisterUnitMetadata - unregistered metadata for unit " + u.getName())
 
 // ============================================================================
 public function replaceUnitTLS(unit whichUnit, integer newUnitId, integer unitStateMethod) returns unit
+  ErrorIf.argumentIsNull(whichUnit, "whichUnit")
+
   let existingMetadata = whichUnit.getMetadata()
-  pauseMetadataRemoval(whichUnit.getTypeId())
-  pauseMetadataGeneration(newUnitId)
+
+  if (existingMetadata != null)
+    pauseMetadataRemoval(whichUnit.getTypeId())
+    pauseMetadataGeneration(newUnitId)
+  // else
+  //   Log.info("replaceUnitTLS: no metadata exists for " + whichUnit.getName())
+
   let newUnit = ReplaceUnitBJ(whichUnit, newUnitId, unitStateMethod)
+
   if (existingMetadata != null)
     existingMetadata.setUnit(newUnit)
-  //Log.info("replaceUnitTLS: reassigned metadata from unit " + whichUnit.getName() + " to unit " + newUnit.getName())
+  //   Log.info("replaceUnitTLS: reassigned metadata")
+  // else
+  //   Log.info("Wait now the metadata is null")
+    
   return newUnit
 
 // ============================================================================
-public function createUnitTLS(player p, integer unitId, real x, real y, real face) returns unit
+public function createUnitTLS(player owner, integer unitId, vec2 pos, real face) returns unit
+  return createUnitTLS(owner, unitId, pos.x, pos.y, face)
+
+// ============================================================================
+public function createUnitTLS(player owner, integer unitId, real x, real y, real face) returns unit
   pauseMetadataGeneration(unitId)
-  let newUnit = CreateUnit(p, unitId, x, y, face)
+  let newUnit = CreateUnit(owner, unitId, x, y, face)
   constructUnitMetadata(newUnit)
-  //Log.info("createUnitTLS: 2 created metadata for unit " + newUnit.getName())
+  // Log.info("createUnitTLS: created metadata for unit " + newUnit.getName())
   return newUnit
 
 // ============================================================================
-public function createUnitTLS(player p, integer unitId, vec2 pos, real face) returns unit
-  return createUnitTLS(p, unitId, pos.x, pos.y, face)
-
-// ============================================================================
-public function createUnitTLS(IUnitMetadata metadata, player p, integer unitId, real x, real y, real face) returns unit
+public function createUnitTLS(IUnitMetadata metadata, player owner, integer unitId, real x, real y, real face) returns unit
   ErrorIf.argumentIsNull(metadata, "metadata")
-  ErrorIf.argumentIsNull(p, "p")
   pauseMetadataGeneration(unitId)
-  let newUnit = CreateUnit(p, unitId, x, y, face)
+  // let oldUnit = metadata.getUnit()
+  let newUnit = CreateUnit(owner, unitId, x, y, face)
   metadata.setUnit(newUnit)
-  //Log.info("createUnitTLS: reassigned metadata from unit " + (oldUnit != null ? oldUnit.getName() : "null") + " to unit " + newUnit.getName())
+  // Log.info("createUnitTLS: reassigned metadata from unit " + (oldUnit != null ? oldUnit.getName() : "null") + " to unit " + newUnit.getName())
   return newUnit
 
 // ============================================================================
@@ -147,43 +178,49 @@ public function removeUnitTLS(unit u)
 // ============================================================================
 public function pauseMetadataGeneration(int unitTypeId)
   g_ignoreAdd.add(unitTypeId)
+  // Log.info("pausing metadata generation for " + I2S(unitTypeId))
 
 // ============================================================================
 function resumeMetadataGeneration(int unitTypeId)
   g_ignoreAdd.remove(unitTypeId)
+  // Log.info("resuming metadata generation for " + I2S(unitTypeId))
 
 // ============================================================================
 public function pauseMetadataRemoval(int unitTypeId)
   g_ignoreRemove.add(unitTypeId)
+  // Log.info("pausing metadata removal for " + I2S(unitTypeId))
 
 // ============================================================================
 function resumeMetadataRemoval(int unitTypeId)
   g_ignoreRemove.remove(unitTypeId)
+  // Log.info("resuming metadata removal for " + I2S(unitTypeId))
 
 // ============================================================================
 function onUnitEnteredMap()
   let u = getEnterLeaveUnit()
-  let shouldGenerateMetadata = g_ignoreAdd.isEmpty() or not g_ignoreAdd.has(u.getTypeId())
+  let id = u.getTypeId()
+  let shouldGenerateMetadata = g_ignoreAdd.isEmpty() or not g_ignoreAdd.has(id)
 
-  // if (g_ignoreAdd.has(u.getTypeId()))
+  // if (g_ignoreAdd.has(id))
   //   Log.info("onUnitEnteredMap: ignoring unit " + u.getName())
   // else
   //   Log.info("onUnitEnteredMap: creating metadata for unit " + u.getName())
 
   if (shouldGenerateMetadata)
     constructUnitMetadata(u)
-    //let metadata = constructUnitMetadata(u)
-    //if (metadata != null)
-    //  Log.info("Registered metadata for unit " + u.getName() + " " + I2S(u.getTypeId()))
+    // let metadata = constructUnitMetadata(u)
+    // if (metadata != null)
+    //   Log.info("Registered metadata for unit " + u.getName() + " " + I2S(id))
   else
-    resumeMetadataGeneration(u.getTypeId())
+    resumeMetadataGeneration(id)
 
 // ============================================================================
 function onUnitRemovedFromMap()
   let u = getEnterLeaveUnit()
-  let shouldRemoveMetadata = g_ignoreRemove.isEmpty() or not g_ignoreRemove.has(u.getTypeId())
+  let id = u.getTypeId()
+  let shouldRemoveMetadata = g_ignoreRemove.isEmpty() or not g_ignoreRemove.has(id)
 
-  // if (g_ignoreRemove.has(u.getTypeId()))
+  // if (not shouldRemoveMetadata)
   //   Log.info("onUnitRemovedFromMap: ignoring unit " + u.getName())
   // else
   //   Log.info("onUnitRemovedFromMap: removing metadata for unit " + u.getName())
@@ -193,9 +230,9 @@ function onUnitRemovedFromMap()
     if (metadata != null)
       unregisterUnitMetadata(metadata)
       destroy metadata
-      //Log.info("Unregistered metadata for unit " + u.getName() + " " + I2S(u.getTypeId()))
+      // Log.info("Unregistered metadata for unit " + u.getName() + " " + I2S(id))
   else
-    resumeMetadataRemoval(u.getTypeId())
+    resumeMetadataRemoval(id)
 
 // ============================================================================
 init
