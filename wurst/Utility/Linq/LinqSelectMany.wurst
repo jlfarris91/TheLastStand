@@ -1,0 +1,85 @@
+package LinqSelectMany
+import Enumerable
+import Func
+import ErrorIf
+import ErrorHandling
+
+// ============================================================================
+public function IEnumerable<TSource>.selectMany<TSource, TResult>(Func1<TSource, IEnumerable<TResult>> selector) returns IEnumerable<TResult>
+  return new TransformManyEnumerable(this, selector)
+
+// ============================================================================
+class TransformManyEnumerable<TSource, TResult> implements IEnumerable<TResult>
+  protected IEnumerable<TSource> _child
+  private Func1<TSource, IEnumerable<TResult>> _transform
+
+  // --------------------------------------------------------------------------
+  construct(IEnumerable<TSource> child, Func1<TSource, IEnumerable<TResult>> transform)
+    ErrorIf.argumentIsNull(child, "child")
+    ErrorIf.argumentIsNull(transform, "transform")
+    _child = child
+    _transform = transform
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    destroy _child
+    _child = null
+    destroy _transform
+    _transform = null
+
+  // --------------------------------------------------------------------------
+  override function iterator() returns IEnumerator<TResult>
+    return new TransformManyEnumerator(_child.iterator(), _transform)
+    
+// ============================================================================
+class TransformManyEnumerator<TSource, TResult> implements IEnumerator<TResult>
+  protected IEnumerator<TSource> _child
+  private Func1<TSource, IEnumerable<TResult>> _transform
+  private IEnumerable<TResult> _currentEnumerable
+  private IEnumerator<TResult> _currentEnumerator
+
+  // --------------------------------------------------------------------------
+  construct(IEnumerator<TSource> child, Func1<TSource, IEnumerable<TResult>> transform)
+    ErrorIf.argumentIsNull(child, "child")
+    ErrorIf.argumentIsNull(transform, "transform")
+    _child = child
+    _transform = transform
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    destroy _child
+    _child = null
+    _transform = null
+
+    if (_currentEnumerator != null)
+      destroy _currentEnumerator
+      _currentEnumerator = null
+
+    if (_currentEnumerable != null)
+      destroy _currentEnumerable
+      _currentEnumerable = null
+
+  // --------------------------------------------------------------------------
+  override function hasNext() returns bool
+    if (_currentEnumerator != null)
+      if (_currentEnumerator.hasNext())
+        return true
+      else
+        destroy _currentEnumerator
+        _currentEnumerator = null
+        destroy _currentEnumerable    
+        _currentEnumerable = null
+
+    while (_child.hasNext())
+      _currentEnumerable = _transform.execute(_child.next())
+      if (_currentEnumerable == null)
+        error("Cannot enumerate null object")
+      _currentEnumerator = _currentEnumerable.iterator()
+      if (_currentEnumerator.hasNext())
+        break
+
+    return _currentEnumerator != null and _currentEnumerator.hasNext()
+
+  // --------------------------------------------------------------------------
+  override function next() returns TResult
+    return _currentEnumerator.next()

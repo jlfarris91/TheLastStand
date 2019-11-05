@@ -1,0 +1,67 @@
+package LinqWhere
+import Enumerable
+import Predicate
+import ErrorIf
+
+// ============================================================================
+public function IEnumerable<TSource>.where<TSource>(Predicate<TSource> predicate) returns IEnumerable<TSource>
+  return new PredicateEnumerable(this, predicate)
+
+// ============================================================================
+class PredicateEnumerable<TSource> implements IEnumerable<TSource>
+  private IEnumerable<TSource> _child
+  private Predicate<TSource> _predicate
+
+  // --------------------------------------------------------------------------
+  construct(IEnumerable<TSource> child, Predicate<TSource> predicate)
+    ErrorIf.argumentIsNull(child, "child")
+    ErrorIf.argumentIsNull(predicate, "predicate")
+    _child = child
+    _predicate = predicate
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    destroy _child
+    _child = null
+    destroy _predicate
+    _predicate = null
+
+  // --------------------------------------------------------------------------
+  override function iterator() returns IEnumerator<TSource>
+    return new PredicateEnumerator(_child.iterator(), _predicate)
+    
+// ============================================================================
+class PredicateEnumerator<TSource> implements IEnumerator<TSource>
+  private IEnumerator<TSource> _child
+  private Predicate<TSource> _predicate
+  private TSource _next
+
+  // --------------------------------------------------------------------------
+  construct(IEnumerator<TSource> child, Predicate<TSource> predicate)
+    ErrorIf.argumentIsNull(child, "child")
+    ErrorIf.argumentIsNull(predicate, "predicate")
+    _child = child
+    _predicate = predicate
+    _next = 0 castTo TSource
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    destroy _child
+    _child = null
+    _predicate = null
+    _next = 0 castTo TSource
+
+  // --------------------------------------------------------------------------
+  override function hasNext() returns bool
+    var retVal = false
+    while (_child.hasNext())
+      let next = _child.next()
+      if (_predicate.execute(next))
+        _next = next
+        retVal = true
+        break
+    return retVal
+
+  // --------------------------------------------------------------------------
+  override function next() returns TSource
+    return _next
