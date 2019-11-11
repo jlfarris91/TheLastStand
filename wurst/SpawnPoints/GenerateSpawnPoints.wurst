@@ -1,0 +1,253 @@
+package GenerateSpawnPoints
+import ClosureTimers
+import Enumerable
+import TerrainUtils
+import MapBounds
+import SpawnPoint
+import TileUtility
+import LinkedList
+import GridList
+import Bounds
+
+constant int QUAD_TREE_CHILD_TOP_LEFT = 0
+constant int QUAD_TREE_CHILD_TOP_RIGHT = 1
+constant int QUAD_TREE_CHILD_BOTTOM_LEFT = 2
+constant int QUAD_TREE_CHILD_BOTTOM_RIGHT = 3
+
+constant real SPAWN_POINT_RADIUS = 96.0
+
+LinkedList<SpawnPoint> g_SpawnPoints
+
+// ============================================================================
+public class QuadTreeNode<T> implements IEnumerable<QuadTreeNode<T>>
+
+  private QuadTreeNode<T> _parent
+  private QuadTreeNode array[4] _children
+  private T _data
+  private vec2 _min
+  private vec2 _max
+
+  // --------------------------------------------------------------------------
+  construct(vec2 min, vec2 max)
+    _min = min
+    _max = max
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    for i = 0 to 4
+      if (_children[i] != null)
+        destroy _children[i]
+      _children[i] = null
+
+    _data = null
+
+  // --------------------------------------------------------------------------
+  function getParent() returns QuadTreeNode<T>
+    return _parent
+
+  // --------------------------------------------------------------------------
+  function getChild(int index) returns QuadTreeNode<T>
+    return _children[index]
+
+  // --------------------------------------------------------------------------
+  function setChild(int index, QuadTreeNode child)
+    let existingChild = getChild(index)
+    if (existingChild != null)
+      destroy existingChild
+    _children[index] = child
+
+  // --------------------------------------------------------------------------
+  function getData() returns T
+    return _data
+
+  // --------------------------------------------------------------------------
+  function setData(T data)
+    _data = data
+
+  // --------------------------------------------------------------------------
+  function getMin() returns vec2
+    return _min
+
+  // --------------------------------------------------------------------------
+  function getMax() returns vec2
+    return _max
+
+  // --------------------------------------------------------------------------
+  function isEmpty() returns bool
+    return _children[0] == null and _children[1] == null and _children[2] == null and _children[3] == null
+
+  // --------------------------------------------------------------------------
+  override function iterator() returns IEnumerator<QuadTreeNode<T>>
+    return new QuadTreeNodeChildrenIterator<T>(this)
+
+  // --------------------------------------------------------------------------
+  protected function setParent(QuadTreeNode<T> parent)
+    _parent = parent
+
+// ============================================================================
+class QuadTreeNodeChildrenIterator<T> implements IEnumerator<QuadTreeNode<T>>
+  private QuadTreeNode<T> _parent
+  private int _index
+
+  // --------------------------------------------------------------------------
+  construct (QuadTreeNode<T> parent)
+    _parent = parent
+    _index = -1
+
+  // --------------------------------------------------------------------------
+  override function hasNext() returns bool
+    return _index != QUAD_TREE_CHILD_BOTTOM_RIGHT
+
+  // --------------------------------------------------------------------------
+  override function next() returns QuadTreeNode<T>
+    _index++
+    return _parent.getChild(_index)
+
+  // --------------------------------------------------------------------------
+  override function close()
+    destroy this
+
+// ============================================================================
+public class SpawnPointQuadTreeNode extends QuadTreeNode<SpawnPoint>
+
+  // --------------------------------------------------------------------------
+  construct(SpawnPointQuadTreeNode parent, vec2 min, vec2 max)
+    super(min, max)
+
+    // TODO: have to do this instead of pass into constructor due to bug
+    // https://github.com/wurstscript/WurstScript/issues/871
+    setParent(parent)
+
+// ============================================================================
+public class SpawnPointQuadTree extends SpawnPointQuadTreeNode
+
+  // --------------------------------------------------------------------------
+  construct()
+    super(null, playableMin, playableMax)
+
+// ============================================================================
+public class SpawnPointQuadTreeBuilder
+
+  // --------------------------------------------------------------------------
+  function buildTree() returns SpawnPointQuadTree
+    let tree = new SpawnPointQuadTree()
+
+    let totalRadius = tree.getMin().distanceTo(tree.getMax())
+    var minRadius = totalRadius
+
+    while (minRadius > SPAWN_POINT_RADIUS)
+      minRadius = minRadius / 2
+
+    Log.info("Total radius: " + R2S(totalRadius) + " min radius: " + R2S(minRadius))
+
+    generateNodesRecursive(tree, minRadius)
+    return tree
+
+  // --------------------------------------------------------------------------
+  private function generateNodesRecursive(SpawnPointQuadTreeNode parent, real minSize)
+
+    let parentMin = parent.getMin()
+    let parentMax = parent.getMax()
+    let parentCenter = (parentMin + parentMax) / 2.0
+    let radius = parentMin.distanceTo(parentMax) / 2.0
+
+    if (radius <= minSize)
+      return
+
+    /*
+            +y
+            ^           cx      max
+            │       ┌────┬────┐
+            │       │ TL │ TR │
+            │   cy  ├────┼────┤  cy
+            │       │ BL │ BR │
+            │       └────┴────┘
+            │   min     cx
+            │
+            └─────────────────────> +x
+    
+    */
+
+    if (areaIsInvalidated(parentMin, parentMax))
+
+      let tlMin = vec2(parentMin.x, parentCenter.y)
+      let tlMax = vec2(parentCenter.x, parentMax.y)
+
+      let trMin = parentCenter
+      let trMax = parentMax
+
+      let blMin = parentMin
+      let blMax = parentCenter
+
+      let brMin = vec2(parentCenter.x, parentMin.y)
+      let brMax = vec2(parentMax.x, parentCenter.y)
+
+      generateChildNode(parent, QUAD_TREE_CHILD_TOP_LEFT, tlMin, tlMax, minSize)
+      generateChildNode(parent, QUAD_TREE_CHILD_TOP_RIGHT, trMin, trMax, minSize)
+      generateChildNode(parent, QUAD_TREE_CHILD_BOTTOM_LEFT, blMin, blMax, minSize)
+      generateChildNode(parent, QUAD_TREE_CHILD_BOTTOM_RIGHT, brMin, brMax, minSize)
+
+    else
+
+      let sp = new SpawnPoint(parentCenter)
+      parent.setData(sp)
+
+      g_SpawnPoints.add(sp)
+    
+  // --------------------------------------------------------------------------
+  private function generateChildNode(SpawnPointQuadTreeNode parent, int index, vec2 min, vec2 max, real minSize)
+    let child = new SpawnPointQuadTreeNode(parent, min, max)
+    parent.setChild(index, child)
+
+    if (min.distanceTo(max) > 512.0)
+      nullTimer() () ->
+        generateNodesRecursive(child, minSize)
+    else
+      generateNodesRecursive(child, minSize)
+
+  // --------------------------------------------------------------------------
+  private function areaIsInvalidated(vec2 min, vec2 max) returns bool
+
+    let tileMin = min.getTile()
+    let tileMax = max.getTile()
+
+    let xmin = tileMin.getColumn()
+    let ymin = tileMin.getRow()
+    let xmax = tileMax.getColumn()
+    let ymax = tileMax.getRow()
+
+    for x = xmin to xmax
+      for y = ymin to ymax
+        let t = tile(x, y)
+        if (not t.toVec2().isTerrainWalkable())
+          return true
+
+    return false
+
+// ============================================================================
+function generateSpawnPointsTest()
+
+  Log.info("Building spawn point quad tree...")
+
+  let builder = new SpawnPointQuadTreeBuilder()
+  let tree = builder.buildTree()
+
+  Log.info("Done building spawn point quad tree")
+  
+  Log.info("Adding spawn points to grid...")
+
+  var gridList = new GridList<SpawnPoint>(bounds(playableMin, playableMax), 100, 100)
+
+  g_SpawnPoints.forEach() (SpawnPoint sp) ->
+    gridList.add(sp, sp.getPos())
+
+  Log.info("Done adding spawn points to grid")
+
+
+  //FX.createRangeEffect(parentCenter, radius, Colors.white)
+
+// ============================================================================
+init
+  g_SpawnPoints = new LinkedList<SpawnPoint>()
+  //nullTimer() () ->
+  //  generateSpawnPointsTest()
