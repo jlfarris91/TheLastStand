@@ -1,7 +1,7 @@
 ﻿namespace W3xPipeline
 {
     using System.IO;
-    using StormLib.Net;
+    using StormLibSharp;
     using WorldEditor.Common;
 
     public class PathingMapBuildabilityModifier : IPipelineObject
