@@ -1,6 +1,6 @@
 ﻿namespace W3xPipeline
 {
-    using StormLib.Net;
+    using StormLibSharp;
 
     public interface IPipelineObject
     {
