@@ -1,6 +1,11 @@
 package SpawnPointManager
-import SpawnPointList
 import SpawnPoint
+import GridList
+import Bounds
+import MapBounds
+import Enumerable
+import Linq
+import LinkedListExtensions
 
 @configurable constant int SPAWN_POINT_UNIT_ID = 'h00I'
 
@@ -8,61 +13,144 @@ public SpawnPointManager g_SpawnPointManager
 
 // ============================================================================
 public interface ISpawnPointManager
-  function getSpawnPoints() returns SpawnPointList
+  function getSpawnPoints() returns IEnumerable<ISpawnPoint>
+  function getSpawnPointsInRange(vec2 pos, real range) returns IEnumerable<ISpawnPoint>
 
 // ============================================================================
 public class SpawnPointManager implements ISpawnPointManager
-  private SpawnPointList _spawnPoints
+  private GridList<ISpawnPoint> _spawnPoints
 
   // --------------------------------------------------------------------------
   construct()
-    this._spawnPoints = new SpawnPointList()
+    this._spawnPoints = new GridList<ISpawnPoint>(bounds(playableMin, playableMax), 10, 10)
 
   // --------------------------------------------------------------------------
   function registerSpawnPointUnit(unit u)
     let sp = new SpawnPoint(u.getName(), u.getPos())
-    this._spawnPoints.add(sp)
+    registerSpawnPoint(sp)
     u.remove()
 
   // --------------------------------------------------------------------------
   function registerSpawnPoint(SpawnPoint sp)
-    this._spawnPoints.add(sp)
+    this._spawnPoints.add(sp, sp.getPos())
 
   // --------------------------------------------------------------------------
-  override function getSpawnPoints() returns SpawnPointList
+  override function getSpawnPoints() returns IEnumerable<ISpawnPoint>
     return _spawnPoints
+
+  // --------------------------------------------------------------------------
+  override function getSpawnPointsInRange(vec2 pos, real range) returns IEnumerable<ISpawnPoint>
+    return _spawnPoints.getElementsInRange(pos, range) (ISpawnPoint sp) ->
+      return sp.getPos()
 
   // --------------------------------------------------------------------------
   protected function size() returns int
     return this._spawnPoints.size()
 
 // ============================================================================
-public function ISpawnPointManager.getSpawnPointsInRange(vec2 pos, real range) returns SpawnPointList
-  return this.getSpawnPoints().getSpawnPointsInRange(pos, range)
-
-// ============================================================================
 public function ISpawnPointManager.getClosestSpawnPoint(vec2 pos, real range) returns ISpawnPoint
-  return this.getSpawnPoints().getClosestSpawnPoint(pos, range)
+  ISpawnPoint spawnPoint = null
+  var closestRR = range * range
+
+  let spawnPointsInRange = this.getSpawnPointsInRange(pos, range)
+  let spawnPointsInRangeList = spawnPointsInRange.toList()
+
+  for sp in spawnPointsInRangeList
+    var dd = sp.getPos().distanceToSq(pos)
+    if (dd < closestRR)
+      spawnPoint = sp
+      closestRR = dd
+
+  destroy spawnPointsInRangeList
+  destroy spawnPointsInRange
+
+  return spawnPoint
 
 // ============================================================================
-public function ISpawnPointManager.getClosestSpawnPoints(vec2 pos, real range, int count) returns SpawnPointList
-  return this.getSpawnPoints().getClosestSpawnPoints(pos, range, count)
+public function ISpawnPointManager.getClosestSpawnPoints(vec2 pos, real range, int count) returns IEnumerable<ISpawnPoint>
+
+  let spawnPointsInRange = this.getSpawnPointsInRange(pos, range)
+  let spawnPointsInRangeList = spawnPointsInRange.toList()
+
+  // Sort by closest distance to pos
+  spawnPointsInRangeList.sortWith() (ISpawnPoint sp1, ISpawnPoint sp2) ->
+    return sp1.getPos().distanceToSq(pos) < sp2.getPos().distanceToSq(pos) ? 1 : -1
+
+  let final = spawnPointsInRangeList.asEnumerable<ISpawnPoint>().take(count)
+
+  destroy spawnPointsInRangeList
+  destroy spawnPointsInRange
+
+  return final
 
 // ============================================================================
 public function ISpawnPointManager.getFurthestSpawnPoint(vec2 pos, real range) returns ISpawnPoint
-  return this.getSpawnPoints().getFurthestSpawnPoint(pos, range)
+  let rr = range * range
+  ISpawnPoint spawnPoint = null
+  var furthestRR = 0.0
+
+  let spawnPointsInRange = this.getSpawnPointsInRange(pos, range)
+  let spawnPointsInRangeList = spawnPointsInRange.toList()
+
+  for sp in spawnPointsInRangeList
+    var dd = sp.getPos().distanceToSq(pos)
+    if (dd < rr and dd > furthestRR)
+      spawnPoint = sp
+      furthestRR = dd
+
+  destroy spawnPointsInRangeList
+  destroy spawnPointsInRange
+
+  return spawnPoint
 
 // ============================================================================
-public function ISpawnPointManager.getFurthestSpawnPoints(vec2 pos, real range, int count) returns SpawnPointList
-  return this.getSpawnPoints().getFurthestSpawnPoints(pos, range, count)
+public function ISpawnPointManager.getFurthestSpawnPoints(vec2 pos, real range, int count) returns IEnumerable<ISpawnPoint>
+
+  let spawnPointsInRange = this.getSpawnPointsInRange(pos, range)
+  let spawnPointsInRangeList = spawnPointsInRange.toList()
+
+  // Sort by furthest distance to pos
+  spawnPointsInRangeList.sortWith() (ISpawnPoint sp1, ISpawnPoint sp2) ->
+    return sp1.getPos().distanceToSq(pos) < sp2.getPos().distanceToSq(pos) ? -1 : 1
+
+  let final = spawnPointsInRangeList.asEnumerable<ISpawnPoint>().take(count)
+
+  destroy spawnPointsInRangeList
+  destroy spawnPointsInRange
+
+  return final
 
 // ============================================================================
 public function ISpawnPointManager.getRandomSpawnPointInRange(vec2 pos, real range) returns ISpawnPoint
-  return this.getSpawnPoints().getRandomSpawnPointInRange(pos, range)
+  let spawnPointsInRange = this.getSpawnPointsInRange(pos, range)
+  let spawnPointsInRangeList = spawnPointsInRange.toList()
+  let spawnPoint = spawnPointsInRangeList.getRandom<ISpawnPoint>()
+  destroy spawnPointsInRangeList
+  destroy spawnPointsInRange
+  return spawnPoint
 
 // ============================================================================
-public function ISpawnPointManager.getRandomSpawnPointsInRange(vec2 pos, real range, int count) returns SpawnPointList
-  return this.getSpawnPoints().getRandomSpawnPointsInRange(pos, range, count)
+public function ISpawnPointManager.getRandomSpawnPointsInRange(vec2 pos, real range, int count) returns IEnumerable<ISpawnPoint>
+  let spawnPointsInRange = this.getSpawnPointsInRange(pos, range)
+  let spawnPointsInRangeList = spawnPointsInRange.toList()
+
+  let weightedPoints = spawnPointsInRangeList.toWeightedSet() (sp) ->
+    return sp.getPos().distanceToSq(pos)
+
+  let spawnPoints = weightedPoints.popRandom(count)
+
+  destroy weightedPoints
+  destroy spawnPointsInRangeList
+  destroy spawnPointsInRange
+
+  return spawnPoints.asEnumerable()
+
+// ============================================================================
+public function ISpawnPointManager.getRandomSpawnPoint() returns ISpawnPoint
+  let spawnPointList = this.getSpawnPoints().toList()
+  let spawnPoint = spawnPointList.getRandom()
+  destroy spawnPointList
+  return spawnPoint
 
 // ============================================================================
 /** Registers all spawn points that exist at map startup */
@@ -74,7 +162,7 @@ function registerAllSpawnPoints()
       g_SpawnPointManager.registerSpawnPointUnit(u)
       i++
   ug.destr()
-  //Log.info("Number of spawn points: " + I2S(i))
+  Log.info("Number of spawn points: " + I2S(i))
 
 // ============================================================================
 init

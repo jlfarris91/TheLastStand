@@ -2,6 +2,10 @@ package UndeadSpawnPoints
 import SpawnPoints
 import GameConstants
 import ClosureTimers
+import GridList
+import Bounds
+import MapBounds
+import Enumerable
 
 constant real SPAWN_POINT_UPDATE_INTERVAL = 3.0
 constant real TEST_RADIUS = 800.0
@@ -12,13 +16,13 @@ public UndeadSpawnPointManager g_UndeadSpawnPointManager
 public class UndeadSpawnPointManager implements ISpawnPointManager
   private static group s_testGroup = CreateGroup()
   private ISpawnPointManager _sourceManager
-  private SpawnPointList _spawnPoints
   private CallbackPeriodic _updateCB
+  private GridList<ISpawnPoint> _spawnPoints
 
   // --------------------------------------------------------------------------
   construct(ISpawnPointManager sourceManager)
     this._sourceManager = sourceManager
-    this._spawnPoints = new SpawnPointList()
+    this._spawnPoints = new GridList<ISpawnPoint>(bounds(playableMin, playableMax), 10, 10)
 
     startUpdating()
 
@@ -30,8 +34,13 @@ public class UndeadSpawnPointManager implements ISpawnPointManager
     this._sourceManager = null
 
   // --------------------------------------------------------------------------
-  override function getSpawnPoints() returns SpawnPointList
+  override function getSpawnPoints() returns IEnumerable<ISpawnPoint>
     return _spawnPoints
+
+  // --------------------------------------------------------------------------
+  override function getSpawnPointsInRange(vec2 pos, real range) returns IEnumerable<ISpawnPoint>
+    return _spawnPoints.getElementsInRange(pos, range) (ISpawnPoint sp) ->
+      return sp.getPos()
 
   // --------------------------------------------------------------------------
   function startUpdating()
@@ -47,10 +56,12 @@ public class UndeadSpawnPointManager implements ISpawnPointManager
   // --------------------------------------------------------------------------
   protected function updateSpawnPoints()
     this._spawnPoints.clear()
-    for sp in _sourceManager.getSpawnPoints()
+
+    _sourceManager.getSpawnPoints().forEach() (ISpawnPoint sp) ->
       if (this.isSpawnPointValid(sp))
-        _spawnPoints.add(sp)
-    //Log.info("undead spawn points: " + I2S(_spawnPoints.size()))
+        _spawnPoints.add(sp, sp.getPos())
+
+    Log.info("undead spawn points: " + I2S(_spawnPoints.size()))
 
   // --------------------------------------------------------------------------
   private function isSpawnPointValid(ISpawnPoint sp) returns bool

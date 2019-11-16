@@ -1,9 +1,12 @@
 package SurvivorSpawnPoints
 import SpawnPoints
 import GameConstants
-import LinkedListExtensions
 import ClosureTimers
 import PlayerExtensions
+import Enumerable
+import GridList
+import Bounds
+import MapBounds
 
 constant real SPAWN_POINT_UPDATE_INTERVAL = 3.0
 constant real TEST_RADIUS = 512.0
@@ -14,38 +17,38 @@ public SurvivorSpawnPointManager g_SurvivorSpawnPointManager
 public class SurvivorSpawnPointManager implements ISpawnPointManager
   private static group s_testGroup = CreateGroup()
   private ISpawnPointManager _sourceManager
-  private SpawnPointList _spawnPoints
   private CallbackPeriodic _updateCB
+  private GridList<ISpawnPoint> _spawnPoints
 
   // --------------------------------------------------------------------------
   construct(ISpawnPointManager sourceManager)
     this._sourceManager = sourceManager
-    this._spawnPoints = new SpawnPointList()
-
+    this._spawnPoints = new GridList<ISpawnPoint>(bounds(playableMin, playableMax), 10, 10)
     startUpdating()
 
   // --------------------------------------------------------------------------
   ondestroy
     stopUpdating()
-    destroy this._spawnPoints
-    this._spawnPoints = null
     this._sourceManager = null
 
   // --------------------------------------------------------------------------
-  override function getSpawnPoints() returns SpawnPointList
-    return this._spawnPoints
+  override function getSpawnPoints() returns IEnumerable<ISpawnPoint>
+    return _spawnPoints
 
   // --------------------------------------------------------------------------
-  function getRandomSpawnPoint() returns ISpawnPoint
-    return this._spawnPoints.getRandom()
+  override function getSpawnPointsInRange(vec2 pos, real range) returns IEnumerable<ISpawnPoint>
+    return _spawnPoints.getElementsInRange(pos, range) (ISpawnPoint sp) ->
+      return sp.getPos()
     
   // --------------------------------------------------------------------------
   function updateSpawnPoints()
     _spawnPoints.clear()
-    for sp in _sourceManager.getSpawnPoints()
+
+    _sourceManager.getSpawnPoints().forEach() (ISpawnPoint sp) ->
       if (isSpawnPointValid(sp))
-        _spawnPoints.add(sp)
-    //Log.info("Survivor spawn points: " + I2S(_spawnPoints.size()))
+        _spawnPoints.add(sp, sp.getPos())
+
+    Log.info("Survivor spawn points: " + I2S(_spawnPoints.size()))
 
   // --------------------------------------------------------------------------
   function startUpdating()

@@ -1,9 +1,12 @@
 ﻿namespace W3xPipeline
 {
     using System;
+    using System.Numerics;
+    using WorldEditor.Common;
 
     public class PathingMap
     {
+        private const int PIXELS_PER_CELL = 32;
         private readonly PathingType[] m_pathingData;
 
         public PathingMap(int width, int height)
@@ -18,6 +21,11 @@
         public int Width { get; }
 
         public int Height { get; }
+
+        public int CellSize
+        {
+            get => PIXELS_PER_CELL;
+        }
 
         public PathingType this[int index]
         {
@@ -36,31 +44,64 @@
 
         public PathingType this[int row, int column]
         {
-            get => this[CellToIndex(row, column)];
-            set => this[CellToIndex(row, column)] = value;
+            get => this[GetCell(row, column)];
+            set => this[GetCell(row, column)] = value;
         }
 
-        private int CellToIndex(int row, int column)
+        public int GetCell(int row, int column)
         {
-            if (row < 0 || row >= Height)
-            {
-                throw new ArgumentOutOfRangeException(nameof(row), row, $"Argument {nameof(row)} is out of bounds.");
-            }
-
-            if (column < 0 || column >= Width)
-            {
-                throw new ArgumentOutOfRangeException(nameof(column), column, $"Argument {nameof(column)} is out of bounds.");
-            }
-
+            ThrowIf.ArgumentIsOutOfRange(row, 0, Height - 1, nameof(row));
+            ThrowIf.ArgumentIsOutOfRange(column, 0, Width - 1, nameof(column));
             return row * Width + column;
+        }
+
+        public int GetRow(int index)
+        {
+            ThrowIfIndexIsOutOfRange(index);
+            return index / Width;
+        }
+
+        public int GetColumn(int index)
+        {
+            ThrowIfIndexIsOutOfRange(index);
+            return index % Width;
+        }
+
+        public int LocalToCell(Vector2 localPos)
+        {
+            var c = (int)Math.Floor(localPos.X / PIXELS_PER_CELL);
+            var r = (int)Math.Floor(localPos.Y / PIXELS_PER_CELL);
+            return GetCell(r, c);
+        }
+
+        public int WorldToCell(Vector2 worldPos)
+        {
+            return LocalToCell(WorldToLocal(worldPos));
+        }
+
+        public PathingType SampleLocal(Vector2 localPos)
+        {
+            return this[LocalToCell(localPos)];
+        }
+
+        public PathingType SampleWorld(Vector2 worldPos)
+        {
+            return SampleLocal(WorldToLocal(worldPos));
+        }
+
+        public Vector2 LocalToWorld(Vector2 localPos)
+        {
+            return localPos - new Vector2(Width, Height) * 0.5f * PIXELS_PER_CELL;
+        }
+
+        public Vector2 WorldToLocal(Vector2 worldPos)
+        {
+            return worldPos + new Vector2(Width, Height) * 0.5f * PIXELS_PER_CELL;
         }
 
         private void ThrowIfIndexIsOutOfRange(int index)
         {
-            if (index < 0 || index >= Width * Height)
-            {
-                throw new ArgumentOutOfRangeException(nameof(index), index, $"Argument {nameof(index)} is out of bounds.");
-            }
+            ThrowIf.ArgumentIsOutOfRange(index, 0, Width * Height - 1, nameof(index));
         }
     }
 }

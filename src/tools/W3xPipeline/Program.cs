@@ -29,7 +29,8 @@
 
             var objects = new IPipelineObject[]
             {
-                new PathingMapBuildabilityModifier()
+                new PathingMapBuildabilityModifier(),
+                new SpawnPointGenerator()
             };
 
             try
