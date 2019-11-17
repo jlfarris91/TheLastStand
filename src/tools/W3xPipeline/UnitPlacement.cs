@@ -6,6 +6,24 @@
 
     public class UnitPlacement
     {
+        public UnitPlacement()
+        {
+            CustomColor = -1;
+            Flags = UnitPlacementFlags.VisibleSolid;
+            Gold = 12500;
+            Health = -1;
+            Mana = -1;
+            HeroLevel = 1;
+            ItemTablePointer = -1;
+            TargetAcquisition = -1;
+            WaygateRegionId = -1;
+            Scale = Vector3.One;
+            ItemSets = new List<ItemSet>();
+            InventoryItems = new List<InventoryItemSlot>();
+            ModifiedAbilities = new List<ModifiedAbility>();
+            PlacementTypeData = new PlacementTypeData();
+        }
+
         public Tag Id { get; set; }
         public int Variation { get; set; }
         public Vector3 Position { get; set; }
@@ -30,7 +48,7 @@
         public PlacementType PlacementType { get; set; }
         public PlacementTypeData PlacementTypeData { get; set; }
         public int CustomColor { get; set; }
-        public int WaygateDestinationNumber { get; set; }
+        public int WaygateRegionId { get; set; }
         public int CreationNumber { get; set; }
     }
 }

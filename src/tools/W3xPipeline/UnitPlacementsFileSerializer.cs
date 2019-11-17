@@ -109,7 +109,7 @@
             }
 
             writer.Write(unit.CustomColor);
-            writer.Write(unit.WaygateDestinationNumber);
+            writer.Write(unit.WaygateRegionId);
             writer.Write(unit.CreationNumber);
         }
     }

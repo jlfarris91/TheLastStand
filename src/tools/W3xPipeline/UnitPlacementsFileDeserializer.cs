@@ -130,7 +130,7 @@
             unit.PlacementTypeData = placementTypeData;
 
             unit.CustomColor = reader.ReadInt32();
-            unit.WaygateDestinationNumber = reader.ReadInt32();
+            unit.WaygateRegionId = reader.ReadInt32();
             unit.CreationNumber = reader.ReadInt32();
 
             return unit;

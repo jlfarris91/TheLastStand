@@ -2,8 +2,14 @@
 {
     using System.Collections.Generic;
 
-    public struct PlacementTypeData
+    public class PlacementTypeData
     {
+        public PlacementTypeData()
+        {
+            ItemLevel = 1;
+            CustomTableUnits = new List<CustomTableEntry>();
+        }
+
         public int ItemLevel { get; set; }
         public int ItemClass { get; set; }
         public int UnitGroupTableIndex { get; set; }
