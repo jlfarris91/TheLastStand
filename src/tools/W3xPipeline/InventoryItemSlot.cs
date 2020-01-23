@@ -1,6 +1,6 @@
 ﻿namespace W3xPipeline
 {
-    using WorldEditor.Common;
+    using War3.Net;
 
     public struct InventoryItemSlot
     {

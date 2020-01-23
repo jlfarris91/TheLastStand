@@ -1,14 +1,21 @@
 ﻿namespace W3xPipeline
 {
     using System;
-    using System.Collections.Generic;
     using System.IO;
     using System.Linq;
     using StormLibSharp;
+    using War3.Net;
+    using War3.Net.Mpq;
 
     class Program
     {
         private static ILogger sLogger;
+
+        private static readonly string WAR3_MPQ_PATH = @"D:\Projects\WarcraftIII\MPQ\War3.mpq";
+        private static readonly string WAR3X_MPQ_PATH = @"D:\Projects\WarcraftIII\MPQ\War3x.mpq";
+        private static int WAR3_PRI = 100;
+        private static int WAR3X_PRI = 200;
+        private static int MAP_PRI = 300;
 
         private static int Main(string[] rawArgs)
         {
@@ -30,19 +37,30 @@
                 Environment.Exit(-1);
             }
 
-            var objects = new IPipelineObject[]
-            {
-                new PathingMapBuildabilityModifier(),
-                new SpawnPointGenerator(sLogger)
-            };
+            MpqArchive war3Archive = null;
+            MpqArchive war3XArchive = null;
+            var mountedArchives = new LayeredFileSystem();
 
             try
             {
+                war3Archive = new MpqArchive(WAR3_MPQ_PATH, FileAccess.Read);
+                war3XArchive = new MpqArchive(WAR3X_MPQ_PATH, FileAccess.Read);
+
+                mountedArchives.AddSystem(new MpqFileSystem(war3Archive), WAR3_PRI);
+                mountedArchives.AddSystem(new MpqFileSystem(war3XArchive), WAR3X_PRI);
+
+                var objects = new IPipelineObject[]
+                {
+                    new PathingMapBuildabilityModifier(),
+                    new RegionMapper(sLogger, mountedArchives),
+                    //new SpawnPointGenerator(sLogger)
+                };
+
                 if (!args.InputMapDirectory.Exists)
                 {
                     throw new DirectoryNotFoundException($"Could not locate map folder {args.InputMapDirectory}");
                 }
-                
+
                 string mapName = Path.GetFileNameWithoutExtension(args.OutputMapFile.Name);
                 string mapExt = args.InputMapDirectory.Extension.ToLower();
 
@@ -66,13 +84,14 @@
                     sLogger.Log($"Deleting existing intermediate map file {intermediateMpqPath}");
                     File.Delete(intermediateMpqPath);
                 }
-                
+
                 sLogger.Log($"Creating intermediate archive {intermediateMpqPath}");
 
-                FileInfo[] filesToAdd = args.InputMapDirectory.EnumerateFiles("*.*", SearchOption.AllDirectories).ToArray();
+                FileInfo[] filesToAdd =
+                    args.InputMapDirectory.EnumerateFiles("*.*", SearchOption.AllDirectories).ToArray();
 
                 // Create the map file
-                using (MpqArchive archive = MpqArchive.CreateNew(
+                using (MpqArchive newMapArchive = MpqArchive.CreateNew(
                     intermediateMpqPath,
                     MpqArchiveVersion.Version1,
                     MpqFileStreamAttributes.None,
@@ -82,19 +101,22 @@
                     foreach (FileInfo fileInfo in filesToAdd)
                     {
                         string archiveFilePath = MakeRelativeToDirectory(args.InputMapDirectory, fileInfo);
-                        archive.AddFileFromDisk(fileInfo.FullName, archiveFilePath);
+                        newMapArchive.AddFileFromDisk(fileInfo.FullName, archiveFilePath);
                         sLogger.Log($"Added file {fileInfo.FullName} -> {archiveFilePath}");
                     }
+
+                    mountedArchives.AddSystem(new MpqFileSystem(newMapArchive), MAP_PRI);
 
                     sLogger.Log("Running pipeline...");
                     foreach (IPipelineObject pipelineObject in objects)
                     {
-                        pipelineObject.DoWork(archive);
+                        pipelineObject.DoWork(newMapArchive);
                     }
+
                     sLogger.Log("Done running pipeline");
 
                     sLogger.Log("Flushing archive...");
-                    archive.Flush();
+                    newMapArchive.Flush();
                     sLogger.Log("Done flushing archive");
                 }
 
@@ -103,7 +125,7 @@
                     sLogger.Log($"Deleting existing map file {outputMapFile}");
                     File.Delete(outputMapFile);
                 }
-                
+
                 sLogger.Log($"Moving intermediate map {intermediateMpqPath} -> {outputMapFile}");
                 File.Copy(intermediateMpqPath, outputMapFile);
             }
@@ -111,6 +133,11 @@
             {
                 sLogger.Log($"Failed: {ex.Message}");
                 Environment.Exit(-1);
+            }
+            finally
+            {
+                DisposeUtility.SafeDispose(ref war3XArchive);
+                DisposeUtility.SafeDispose(ref war3Archive);
             }
 
             sLogger.Log("Succeeded.");

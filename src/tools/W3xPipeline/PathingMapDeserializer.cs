@@ -2,7 +2,7 @@
 {
     using System;
     using System.IO;
-    using WorldEditor.Common;
+    using War3.Net;
 
     public class PathingMapDeserializer
     {

@@ -6,8 +6,12 @@ import MapBounds
 import Enumerable
 import Linq
 import LinkedListExtensions
-
-@configurable constant int SPAWN_POINT_UNIT_ID = 'h00I'
+import Unit_SpawnPoint
+import TlsUnitIds
+import Grid
+import ClosureTimers
+import FX
+import ColorUtility
 
 public SpawnPointManager g_SpawnPointManager
 
@@ -22,7 +26,48 @@ public class SpawnPointManager implements ISpawnPointManager
 
   // --------------------------------------------------------------------------
   construct()
-    this._spawnPoints = new GridList<ISpawnPoint>(bounds(playableMin, playableMax), 10, 10)
+    let gridSize = SPAWN_POINT_COLLISION_SIZE
+    let width = R2I(playableMapRect.width() / gridSize)
+    let height = R2I(playableMapRect.height() / gridSize)
+
+    Log.info("Size: " + I2S(width) + ", " + I2S(height))
+
+    this._spawnPoints = new GridList<ISpawnPoint>(bounds(playableMin, playableMax), width, height)
+
+    //doAfter(0.01) () ->
+    //  createSpawnPoints()
+    
+  // --------------------------------------------------------------------------
+  function createSpawnPoints()
+    //let u = createUnit(Player(0), TlsUnitIds.spawnPoint, vec2(0,0), angle(0))
+
+    Log.info("Creating spawn points...")
+
+    let width = _spawnPoints.getWidth()
+    let height = _spawnPoints.getHeight()
+    let b = (width - 1) * (height - 1)
+
+    for r = 0 to height - 1
+      doAfter(0.01) () ->
+        for c = 0 to width - 1
+          let cell = cell(r, c)
+          let cellBounds = _spawnPoints.getCellBounds(cell)
+          //u.setPos(cellBounds.center())
+          let u = createUnit(Player(0), TlsUnitIds.spawnPoint, cellBounds.center(), angle(0))
+          let finalPos = u.getPos()
+          let finalCell = _spawnPoints.getCell(finalPos)
+          if (cell == finalCell)
+            let sp = new SpawnPoint("SpawnPoint("+I2S(r)+","+I2S(c)+")", finalPos)
+            registerSpawnPoint(sp)
+            FX.createRangeEffect(finalPos, SPAWN_POINT_COLLISION_SIZE / 2.0, Colors.white)
+          else
+            u.setVertexColor(Colors.red)
+            //u.remove()
+
+        if (r == height - 1)
+          Log.info("Created spawn points: " + I2S(_spawnPoints.size()))
+          Log.info("Spawn point coverage: " + R2S((I2R(_spawnPoints.size()) / I2R(b)) * 100.0) + "%")
+          //u.remove()
 
   // --------------------------------------------------------------------------
   function registerSpawnPointUnit(unit u)
@@ -155,13 +200,12 @@ public function ISpawnPointManager.getRandomSpawnPoint() returns ISpawnPoint
 // ============================================================================
 /** Registers all spawn points that exist at map startup */
 function registerAllSpawnPoints()
-  let ug = GetUnitsOfTypeIdAll(SPAWN_POINT_UNIT_ID)
+  let ug = GetUnitsOfTypeIdAll(TlsUnitIds.spawnPoint)
   Log.info("Number of units: " + I2S(CountUnitsInGroup(ug)))
   var i = 0
   for u in ug
-    if (u.getTypeId() == SPAWN_POINT_UNIT_ID)
-      g_SpawnPointManager.registerSpawnPointUnit(u)
-      i++
+    g_SpawnPointManager.registerSpawnPointUnit(u)
+    i++
   ug.destr()
   Log.info("Number of spawn points: " + I2S(i))
 

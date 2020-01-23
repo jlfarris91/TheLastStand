@@ -1,13 +1,15 @@
 ﻿namespace W3xPipeline
 {
     using System;
-    using System.Collections;
     using System.Collections.Generic;
     using System.IO;
     using System.Linq;
     using System.Numerics;
     using StormLibSharp;
-    using WorldEditor.Common;
+    using War3.Net;
+    using War3.Net.IO;
+    using War3.Net.Maps.Regions;
+    using War3.Net.Maps.Units;
 
     public class SpawnPointGenerator : IPipelineObject
     {
@@ -34,8 +36,8 @@
             try
             {
                 PathingMap pathingMap;
-                UnitPlacements unitPlacements;
-                MapRegions mapRegions; 
+                UnitPlacementFile unitPlacements;
+                MapRegions mapRegions;
 
                 using (MpqFileStream file = archive.OpenFile(ARCHIVE_TERRAIN_FILE_PATH))
                 using (var reader = new BinaryReader(file))
@@ -46,7 +48,8 @@
                 using (MpqFileStream file = archive.OpenFile(ARCHIVE_UNIT_PLACEMENT_FILE_PATH))
                 using (var reader = new BinaryReader(file))
                 {
-                    unitPlacements = new UnitPlacementsFileDeserializer().Deserialize(reader);
+                    IBinaryDeserializer<IList<UnitPlacement>> Factory(int v, int sv) => new UnitPlacementBinaryDeserializer();
+                    unitPlacements = new UnitPlacementFileBinaryDeserializer(Factory).Deserialize(reader);
                 }
 
                 using (MpqFileStream file = archive.OpenFile(ARCHIVE_REGION_PLACEMENT_FILE_PATH))
@@ -55,7 +58,7 @@
                     mapRegions = new MapRegionsBinaryDeserializer().Deserialize(reader);
                 }
 
-                RemoveExistingSpawnPoints(unitPlacements);
+                RemoveExistingSpawnPoints(unitPlacements.Placements);
 
                 m_logger.Log("Calculating positions...");
                 QuadTreeNode<Vector2> spawnPointTree = GenerateSpawnPointPositions(pathingMap);
@@ -71,13 +74,14 @@
 
                 Vector2[] spawnPoints = spawnPointsNodes.Where((_, i) => i % skip == 0).Select(_ => _.Data).ToArray();
 
-                GenerateSpawnPointUnits(unitPlacements, spawnPoints);
+                GenerateSpawnPointUnits(unitPlacements.Placements, spawnPoints);
 
                 m_logger.Log("Serializing unit placements...");
                 using (Stream file = File.Create(tempFileName))
                 using (var writer = new BinaryWriter(file))
                 {
-                    new UnitPlacementsFileSerializer().Serialize(writer, unitPlacements);
+                    IBinarySerializer<IList<UnitPlacement>> Factory(int v, int sv) => new UnitPlacementBinarySerializer();
+                    new UnitPlacementFileBinarySerializer(Factory).Serialize(writer, unitPlacements);
                 }
                 m_logger.Log("Done serializing unit placements");
                 
@@ -95,16 +99,19 @@
             }
         }
 
-        private void RemoveExistingSpawnPoints(UnitPlacements unitPlacements)
+        private void RemoveExistingSpawnPoints(ICollection<UnitPlacement> unitPlacements)
         {
-            UnitPlacement[] existingSpawnPoints = unitPlacements.Placements.Where(_ => _.Id == SpawnPointUnitId).ToArray();
+            UnitPlacement[] existingSpawnPoints = unitPlacements.Where(_ => _.Id == SpawnPointUnitId).ToArray();
 
             m_logger.Log($"Deleting {existingSpawnPoints.Length} existing spawn points");
 
-            unitPlacements.Placements = unitPlacements.Placements.Except(existingSpawnPoints).ToList();
+            foreach (UnitPlacement spawnPoint in existingSpawnPoints)
+            {
+                unitPlacements.Remove(spawnPoint);
+            }
         }
 
-        private void GenerateSpawnPointUnits(UnitPlacements unitPlacements, Vector2[] positions)
+        private void GenerateSpawnPointUnits(ICollection<UnitPlacement> unitPlacements, IReadOnlyCollection<Vector2> positions)
         {
             m_logger.Log("Creating spawn point units...");
 
@@ -118,10 +125,10 @@
                     PlayerId = SPAWN_POINT_OWNER_ID,
                 };
 
-                unitPlacements.Placements.Add(unit);
+                unitPlacements.Add(unit);
             }
 
-            m_logger.Log($"Done creating spawn points. Created {positions.Length} units.");
+            m_logger.Log($"Done creating spawn points. Created {positions.Count} units.");
         }
 
         private QuadTreeNode<Vector2> GenerateSpawnPointPositions(PathingMap pathingMap)
@@ -245,93 +252,6 @@
             }
 
             return false;
-        }
-    }
-
-    public enum QuadTreeChild
-    {
-        TopLeft,
-        TopRight,
-        BottomLeft,
-        BottomRight
-    }
-
-    public class QuadTreeNode<T> : IEnumerable<QuadTreeNode<T>>
-    {
-        private readonly QuadTreeNode<T>[] m_children = new QuadTreeNode<T>[4];
-
-        public QuadTreeNode(QuadTreeNode<T> parent, Vector2 min, Vector2 max)
-        {
-            Parent = parent;
-            Min = min;
-            Max = max;
-        }
-
-        public QuadTreeNode<T> Parent { get; }
-
-        public T Data { get; set; }
-
-        public Vector2 Min { get; }
-
-        public Vector2 Max { get; }
-
-        public bool IsLeaf
-        {
-            get
-            {
-                return m_children[0] == null &&
-                       m_children[1] == null &&
-                       m_children[2] == null &&
-                       m_children[3] == null;
-            }
-        }
-
-        public QuadTreeNode<T> this[QuadTreeChild index]
-        {
-            get => m_children[(int)index];
-            set => m_children[(int)index] = value;
-        }
-
-        public IEnumerator<QuadTreeNode<T>> GetEnumerator()
-        {
-            yield return m_children[0];
-            yield return m_children[1];
-            yield return m_children[2];
-            yield return m_children[3];
-        }
-
-        IEnumerator IEnumerable.GetEnumerator()
-        {
-            return GetEnumerator();
-        }
-    }
-
-    public class QuadTree<T> : QuadTreeNode<T>
-    {
-        public QuadTree(Vector2 min, Vector2 max)
-            : base(null, min, max)
-        {
-        }
-    }
-
-    public static class QuadTreeExtensions
-    {
-        public static IEnumerable<QuadTreeNode<T>> GetAllNodes<T>(this QuadTreeNode<T> parent)
-        {
-            if (parent == null)
-            {
-                yield break;
-            }
-
-            yield return parent;
-            
-            foreach (QuadTreeNode<T> child in parent)
-            {
-                foreach (QuadTreeNode<T> childChild in child.GetAllNodes())
-                {
-                    yield return childChild;
-                }
-            }
         }
     }
 }

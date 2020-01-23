@@ -2,7 +2,7 @@
 {
     using System.IO;
     using StormLibSharp;
-    using WorldEditor.Common;
+    using War3.Net;
 
     public class PathingMapBuildabilityModifier : IPipelineObject
     {
@@ -41,7 +41,7 @@
             }
         }
 
-        private void MakeAllWalkableTerrainBuildable(PathingMap pathingMap)
+        private static void MakeAllWalkableTerrainBuildable(PathingMap pathingMap)
         {
             for (var i = 0; i < pathingMap.Width * pathingMap.Height; ++i)
             {

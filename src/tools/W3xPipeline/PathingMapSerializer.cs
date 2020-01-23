@@ -1,7 +1,8 @@
 ﻿namespace W3xPipeline
 {
     using System.IO;
-    using WorldEditor.Common;
+    using War3.Net;
+    using War3.Net.IO;
 
     public class PathingMapSerializer
     {
