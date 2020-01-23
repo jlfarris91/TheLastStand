@@ -5,14 +5,19 @@
     using System.Linq;
     using StormLibSharp;
     using War3.Net;
+    using War3.Net.Data;
+    using War3.Net.Data.Units;
+    using War3.Net.Doodads;
+    using War3.Net.IO;
     using War3.Net.Mpq;
+    using War3.Net.Slk;
 
     class Program
     {
         private static ILogger sLogger;
 
-        private static readonly string WAR3_MPQ_PATH = @"D:\Projects\WarcraftIII\MPQ\War3.mpq";
-        private static readonly string WAR3X_MPQ_PATH = @"D:\Projects\WarcraftIII\MPQ\War3x.mpq";
+        private static readonly string WAR3_MPQ_PATH = @"C:\Users\jfarris\Desktop\Projects\MpqEditor\War3.mpq";
+        private static readonly string WAR3X_MPQ_PATH = @"C:\Users\jfarris\Desktop\Projects\MpqEditor\War3x.mpq";
         private static int WAR3_PRI = 100;
         private static int WAR3X_PRI = 200;
         private static int MAP_PRI = 300;
@@ -39,20 +44,21 @@
 
             MpqArchive war3Archive = null;
             MpqArchive war3XArchive = null;
-            var mountedArchives = new LayeredFileSystem();
+            var fileSystem = new LayeredFileSystem();
+            var entityLibrary = new AggregateEntityLibrary();
 
             try
             {
                 war3Archive = new MpqArchive(WAR3_MPQ_PATH, FileAccess.Read);
                 war3XArchive = new MpqArchive(WAR3X_MPQ_PATH, FileAccess.Read);
 
-                mountedArchives.AddSystem(new MpqFileSystem(war3Archive), WAR3_PRI);
-                mountedArchives.AddSystem(new MpqFileSystem(war3XArchive), WAR3X_PRI);
+                fileSystem.AddSystem(new MpqFileSystem(war3Archive), WAR3_PRI);
+                fileSystem.AddSystem(new MpqFileSystem(war3XArchive), WAR3X_PRI);
 
                 var objects = new IPipelineObject[]
                 {
                     new PathingMapBuildabilityModifier(),
-                    new RegionMapper(sLogger, mountedArchives),
+                    new RegionMapper(sLogger, fileSystem, entityLibrary),
                     //new SpawnPointGenerator(sLogger)
                 };
 
@@ -105,8 +111,13 @@
                         sLogger.Log($"Added file {fileInfo.FullName} -> {archiveFilePath}");
                     }
 
-                    mountedArchives.AddSystem(new MpqFileSystem(newMapArchive), MAP_PRI);
+                    // Map archive is now done being loaded
+                    fileSystem.AddSystem(new MpqFileSystem(newMapArchive), MAP_PRI);
+                    entityLibrary.AddLibrary(ReadDoodadLibrary(fileSystem));
+                    entityLibrary.AddLibrary(ReadDestructibleLibrary(fileSystem));
+                    entityLibrary.AddLibrary(ReadUnitLibrary(fileSystem));
 
+                    // Run all of the pipeline steps
                     sLogger.Log("Running pipeline...");
                     foreach (IPipelineObject pipelineObject in objects)
                     {
@@ -148,6 +159,100 @@
         private static string MakeRelativeToDirectory(DirectoryInfo dir, FileInfo file)
         {
             return file.FullName.Replace(dir.FullName, string.Empty).Trim('\\');
+        }
+
+        private static IEntityLibrary ReadDoodadLibrary(IReadOnlyFileSystem fileSystem)
+        {
+            StringDataTable doodadData = ReadSlk(fileSystem, "Doodads/Doodads.slk", "doodID");
+            StringDataTable doodadMetadata = ReadSlk(fileSystem, "Doodads/DoodadMetaData.slk", "ID");
+            var deserializer = new DoodadLibrarySerializer(ObjectSerializationHelper.DeserializeObject);
+            return deserializer.LoadLibrary(doodadData, doodadMetadata);
+        }
+
+        private static IEntityLibrary ReadDestructibleLibrary(IReadOnlyFileSystem fileSystem)
+        {
+            StringDataTable destructibleData = ReadSlk(fileSystem, "Units/DestructableData.slk", "DestructableID");
+            StringDataTable destructibleMetadata = ReadSlk(fileSystem, "Units/DestructableMetaData.slk", "ID");
+            var deserializer = new DestructibleLibrarySerializer(ObjectSerializationHelper.DeserializeObject);
+            return deserializer.LoadLibrary(destructibleData, destructibleMetadata);
+        }
+
+        private static IEntityLibrary ReadUnitLibrary(LayeredFileSystem fileSystem)
+        {
+            StringDataTable unitDataTable = ReadSlk(fileSystem, "Units/UnitData.slk", "unitID");
+            StringDataTable unitWeaponDataTable = ReadSlk(fileSystem, "Units/UnitWeapons.slk", "unitWeapID");
+            StringDataTable unitBalanceDataTable = ReadSlk(fileSystem, "Units/UnitBalance.slk", "unitBalanceID");
+            StringDataTable unitArtDataTable = ReadSlk(fileSystem, "Units/UnitUI.slk", "unitUIID");
+
+            unitDataTable.Join(unitWeaponDataTable, unitBalanceDataTable, unitArtDataTable);
+
+            StringDataTable unitDataMetadataTable = ReadSlk(fileSystem, "Units/UnitMetaData.slk", "ID");
+
+            var deserializer = new UnitLibrarySerializer(ObjectSerializationHelper.DeserializeObject);
+            UnitLibrary library = deserializer.LoadLibrary(
+                unitDataTable,
+                unitDataMetadataTable,
+                unitWeaponDataTable,
+                unitBalanceDataTable,
+                unitArtDataTable);
+
+            var adjustmentFiles = new[]
+            {
+                "Units/CampaignUnitFunc.txt",
+                "Units/CampaignUnitStrings.txt",
+                "Units/HumanUnitFunc.txt",
+                "Units/HumanUnitStrings.txt",
+                "Units/NeutralUnitFunc.txt",
+                "Units/NeutralUnitStrings.txt",
+                "Units/NightElfUnitFunc.txt",
+                "Units/NightElfUnitStrings.txt",
+                "Units/OrcUnitFunc.txt",
+                "Units/OrcUnitStrings.txt",
+                "Units/UndeadUnitFunc.txt",
+                "Units/UndeadUnitStrings.txt",
+            };
+
+            foreach (string file in adjustmentFiles)
+            {
+                ReadAdjustmentFile(fileSystem, library, file);
+            }
+
+            return library;
+        }
+
+        private static void ReadAdjustmentFile(IReadOnlyFileSystem fileSystem, IEntityLibrary library, string filePath)
+        {
+            try
+            {
+                using (Stream file = fileSystem.OpenRead(filePath))
+                using (var reader = new StreamReader(file))
+                {
+                    new AdjustmentFileDeserializer().ReadAdjustmentFile(library, reader);
+                }
+            }
+            catch (Exception)
+            {
+                throw;
+            }
+        }
+
+        private static StringDataTable ReadSlk(IReadOnlyFileSystem fileSystem, string filePath, string primaryKey)
+        {
+            try
+            {
+                using (Stream file = fileSystem.OpenRead(filePath))
+                using (var reader = new SlkTextReader(file))
+                {
+                    SlkTable slkTable = new SlkDeserializer().Deserialize(reader);
+                    StringDataTable dataTable = new StringDataTableSlkDeserializer().Deserialize(slkTable);
+                    dataTable.PrimaryKeyColumn = primaryKey;
+                    return dataTable;
+                }
+            }
+            catch (Exception)
+            {
+                throw;
+            }
         }
     }
 }

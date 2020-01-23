@@ -25,11 +25,15 @@
 
         private readonly ILogger m_logger;
         private readonly IReadOnlyFileSystem m_fileSystem;
+        private readonly IReadOnlyEntityLibrary m_objectLibrary;
 
-        public RegionMapper(ILogger logger, IReadOnlyFileSystem fileSystem)
+        public RegionMapper(ILogger logger,
+                            IReadOnlyFileSystem fileSystem,
+                            IReadOnlyEntityLibrary objectLibrary)
         {
             m_logger = logger;
             m_fileSystem = fileSystem;
+            m_objectLibrary = objectLibrary;
         }
 
         public void FindIslands(PathingMap map)
@@ -266,30 +270,6 @@
                 {
                     doodads = new DoodadFileBinaryDeserializer().Deserialize(reader);
                 }
-
-                StringDataTable destructableData;
-                StringDataTable destructableMetadata;
-
-                using (var file = m_fileSystem.OpenRead("Units/DestructableData.slk"))
-                using (var reader = new SlkTextReader(file))
-                {
-                    var slkTable = new SlkDeserializer().Deserialize(reader);
-                    destructableData = new StringDataTableSlkDeserializer().Deserialize(slkTable);
-                    destructableData.PrimaryKeyColumn = "DestructableID";
-                }
-
-                using (var file = m_fileSystem.OpenRead("Units/DestructableMetaData.slk"))
-                using (var reader = new SlkTextReader(file))
-                {
-                    var slkTable = new SlkDeserializer().Deserialize(reader);
-                    destructableMetadata = new StringDataTableSlkDeserializer().Deserialize(slkTable);
-                    destructableMetadata.PrimaryKeyColumn = "ID";
-                }
-
-                DestructableLibrary destructableLibrary =
-                    new DestructableLibrarySerializer(ObjectSerializationHelper.DeserializeObject).LoadLibrary(
-                        destructableData,
-                        destructableMetadata);
 
                 m_logger.Log($"Removed {oldSpawnRegions.Length} existing spawn regions in map");
 
