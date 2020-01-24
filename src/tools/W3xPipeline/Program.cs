@@ -16,8 +16,10 @@
     {
         private static ILogger sLogger;
 
-        private static readonly string WAR3_MPQ_PATH = @"C:\Users\jfarris\Desktop\Projects\MpqEditor\War3.mpq";
-        private static readonly string WAR3X_MPQ_PATH = @"C:\Users\jfarris\Desktop\Projects\MpqEditor\War3x.mpq";
+        private static readonly string MPQ_DIR = @"D:\Projects\WarcraftIII\MPQ";
+        private static readonly string WAR3_MPQ_PATH = $"{MPQ_DIR}\\War3.mpq";
+        private static readonly string WAR3X_MPQ_PATH = $"{MPQ_DIR}\\War3x.mpq";
+        private static readonly string WAR3_W3MOD_PATH = @"D:\Projects\WarcraftIII\MPQ\war3.w3mod";
         private static int WAR3_PRI = 100;
         private static int WAR3X_PRI = 200;
         private static int MAP_PRI = 300;
@@ -49,11 +51,13 @@
 
             try
             {
-                war3Archive = new MpqArchive(WAR3_MPQ_PATH, FileAccess.Read);
-                war3XArchive = new MpqArchive(WAR3X_MPQ_PATH, FileAccess.Read);
+                //war3Archive = new MpqArchive(WAR3_MPQ_PATH, FileAccess.Read);
+                //war3XArchive = new MpqArchive(WAR3X_MPQ_PATH, FileAccess.Read);
 
-                fileSystem.AddSystem(new MpqFileSystem(war3Archive), WAR3_PRI);
-                fileSystem.AddSystem(new MpqFileSystem(war3XArchive), WAR3X_PRI);
+                //fileSystem.AddSystem(new MpqFileSystem(war3Archive), WAR3_PRI);
+                //fileSystem.AddSystem(new MpqFileSystem(war3XArchive), WAR3X_PRI);
+
+                fileSystem.AddSystem(new WindowsFileSystem(new DirectoryInfo(WAR3_W3MOD_PATH)), WAR3_PRI);
 
                 var objects = new IPipelineObject[]
                 {
@@ -180,7 +184,7 @@
         private static IEntityLibrary ReadUnitLibrary(LayeredFileSystem fileSystem)
         {
             StringDataTable unitDataTable = ReadSlk(fileSystem, "Units/UnitData.slk", "unitID");
-            StringDataTable unitWeaponDataTable = ReadSlk(fileSystem, "Units/UnitWeapons.slk", "unitWeapID");
+            StringDataTable unitWeaponDataTable = ReadSlk(fileSystem, "Units/UnitWeapons.slk", "unitWeaponID");
             StringDataTable unitBalanceDataTable = ReadSlk(fileSystem, "Units/UnitBalance.slk", "unitBalanceID");
             StringDataTable unitArtDataTable = ReadSlk(fileSystem, "Units/UnitUI.slk", "unitUIID");
 
@@ -230,9 +234,9 @@
                     new AdjustmentFileDeserializer().ReadAdjustmentFile(library, reader);
                 }
             }
-            catch (Exception)
+            catch (Exception ex)
             {
-                throw;
+                sLogger.Log($"Unable to read adjustment file {filePath}: {ex.Message}");
             }
         }
 

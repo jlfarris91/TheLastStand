@@ -4,9 +4,12 @@
     using System.Collections.Generic;
     using System.IO;
     using System.Linq;
+    using System.Numerics;
     using StormLibSharp;
     using War3.Net;
+    using War3.Net.Blp;
     using War3.Net.Data;
+    using War3.Net.Data.Units;
     using War3.Net.Doodads;
     using War3.Net.IO;
     using War3.Net.Maps.Doodads;
@@ -271,6 +274,8 @@
                     doodads = new DoodadFileBinaryDeserializer().Deserialize(reader);
                 }
 
+                UpdatePathingMap(doodads, pathingMap);
+
                 m_logger.Log($"Removed {oldSpawnRegions.Length} existing spawn regions in map");
 
                 int maxId = mapRegions.Regions.Max(_ => _.Id) + 1;
@@ -314,6 +319,57 @@
                 if (File.Exists(tempFileName))
                 {
                     File.Delete(tempFileName);
+                }
+            }
+        }
+
+        private void UpdatePathingMap(DoodadFile doodads, PathingMap pathingMap)
+        {
+            foreach (DoodadPlacement doodadPlacement in doodads.Placements.Placements)
+            {
+                var entity = m_objectLibrary.GetEntity(doodadPlacement.Id);
+                if (entity == null)
+                {
+                    continue;
+                }
+
+                string pt;
+
+                if (entity is DoodadEntity dde)
+                    pt = dde.PathTexture;
+                else if (entity is DestructibleEntity dse)
+                    pt = dse.PathTexture;
+                else if (entity is UnitEntity ue)
+                    pt = ue.PathingTexture;
+                else
+                    throw new Exception();
+
+                if (string.IsNullOrEmpty(pt))
+                    continue;
+
+                int dx = 1;
+                int dy = 1;
+
+                Rect area = new Rect();
+
+                try
+                {
+                    using (Stream file = m_fileSystem.OpenRead(pt))
+                    {
+                        // TODO: load targas too
+                        BlpImage pathTextureBlp = new BlpBitmapSerializer().Deserialize(file);
+
+                        int cell = pathingMap.WorldToCell(doodadPlacement.Position.XY());
+                        int row = pathingMap.GetRow(cell);
+                        int col = pathingMap.GetColumn(cell);
+
+                        area.Min = new Vector2(col - pathTextureBlp.Width / 2, row - pathTextureBlp.Height / 2);
+                        area.Max = new Vector2(col + pathTextureBlp.Width / 2, row + pathTextureBlp.Height / 2);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    throw;
                 }
             }
         }
