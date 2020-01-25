@@ -16,10 +16,8 @@
     {
         private static ILogger sLogger;
 
-        private static readonly string MPQ_DIR = @"D:\Projects\WarcraftIII\MPQ";
-        private static readonly string WAR3_MPQ_PATH = $"{MPQ_DIR}\\War3.mpq";
-        private static readonly string WAR3X_MPQ_PATH = $"{MPQ_DIR}\\War3x.mpq";
-        private static readonly string WAR3_W3MOD_PATH = @"D:\Projects\WarcraftIII\MPQ\war3.w3mod";
+        //private static readonly string WAR3_W3MOD_PATH = @"D:\Projects\WarcraftIII\MPQ\war3.w3mod";
+        private static readonly string WAR3_W3MOD_PATH = @"C:\War3\data\branches\v1.32.1\War3.w3mod";
         private static int WAR3_PRI = 100;
         private static int WAR3X_PRI = 200;
         private static int MAP_PRI = 300;
@@ -51,12 +49,6 @@
 
             try
             {
-                //war3Archive = new MpqArchive(WAR3_MPQ_PATH, FileAccess.Read);
-                //war3XArchive = new MpqArchive(WAR3X_MPQ_PATH, FileAccess.Read);
-
-                //fileSystem.AddSystem(new MpqFileSystem(war3Archive), WAR3_PRI);
-                //fileSystem.AddSystem(new MpqFileSystem(war3XArchive), WAR3X_PRI);
-
                 fileSystem.AddSystem(new WindowsFileSystem(new DirectoryInfo(WAR3_W3MOD_PATH)), WAR3_PRI);
 
                 var objects = new IPipelineObject[]
