@@ -7,14 +7,17 @@
     using System.Numerics;
     using StormLibSharp;
     using War3.Net;
-    using War3.Net.Blp;
+    using War3.Net.Assets;
     using War3.Net.Data;
     using War3.Net.Data.Units;
     using War3.Net.Doodads;
+    using War3.Net.Imaging;
+    using War3.Net.Imaging.Blp;
     using War3.Net.IO;
     using War3.Net.Maps.Doodads;
     using War3.Net.Maps.Regions;
     using War3.Net.Math;
+    using War3.Net.Optional;
     using War3.Net.Slk;
 
     public class RegionMapper : IPipelineObject
@@ -29,14 +32,20 @@
         private readonly ILogger m_logger;
         private readonly IReadOnlyFileSystem m_fileSystem;
         private readonly IReadOnlyEntityLibrary m_objectLibrary;
+        private readonly IImageProvider m_imageProvider;
+        private readonly IAssetManager m_assetManager;
 
         public RegionMapper(ILogger logger,
                             IReadOnlyFileSystem fileSystem,
-                            IReadOnlyEntityLibrary objectLibrary)
+                            IReadOnlyEntityLibrary objectLibrary,
+                            IImageProvider imageProvider,
+                            IAssetManager assetManager)
         {
             m_logger = logger;
             m_fileSystem = fileSystem;
             m_objectLibrary = objectLibrary;
+            m_imageProvider = imageProvider;
+            m_assetManager = assetManager;
         }
 
         public void FindIslands(PathingMap map)
@@ -327,49 +336,33 @@
         {
             foreach (DoodadPlacement doodadPlacement in doodads.Placements.Placements)
             {
-                var entity = m_objectLibrary.GetEntity(doodadPlacement.Id);
-                if (entity == null)
+                IReadOnlyEntityObject entity = m_objectLibrary.GetEntity(doodadPlacement.Id);
+                if (!(entity is IAffectsPathing affectsPathing))
                 {
                     continue;
                 }
 
-                string pt;
+                string pt = affectsPathing.PathingTexture;
 
-                if (entity is DoodadEntity dde)
-                    pt = dde.PathTexture;
-                else if (entity is DestructibleEntity dse)
-                    pt = dse.PathTexture;
-                else if (entity is UnitEntity ue)
-                    pt = ue.PathingTexture;
-                else
-                    throw new Exception();
+                m_assetManager.FindAsset(pt)
+                    .Map(assetRef => m_imageProvider.GetImage(assetRef))
+                    .Do(UpdatePathingMap);
 
-                if (string.IsNullOrEmpty(pt))
-                    continue;
-
-                int dx = 1;
-                int dy = 1;
-
-                Rect area = new Rect();
-
-                try
+                void UpdatePathingMap(IImage image)
                 {
-                    using (Stream file = m_fileSystem.OpenRead(pt))
-                    {
-                        // TODO: load targas too
-                        BlpImage pathTextureBlp = new BlpBitmapSerializer().Deserialize(file);
+                    var dx = 1;
+                    var dy = 1;
 
-                        int cell = pathingMap.WorldToCell(doodadPlacement.Position.XY());
-                        int row = pathingMap.GetRow(cell);
-                        int col = pathingMap.GetColumn(cell);
+                    var area = new Rect();
 
-                        area.Min = new Vector2(col - pathTextureBlp.Width / 2, row - pathTextureBlp.Height / 2);
-                        area.Max = new Vector2(col + pathTextureBlp.Width / 2, row + pathTextureBlp.Height / 2);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    throw;
+                    int cell = pathingMap.WorldToCell(doodadPlacement.Position.XY());
+                    int row = pathingMap.GetRow(cell);
+                    int col = pathingMap.GetColumn(cell);
+
+                    area.Min = new Vector2(col - image.Width / 2, row - image.Height / 2);
+                    area.Max = new Vector2(col + image.Width / 2, row + image.Height / 2);
+
+
                 }
             }
         }

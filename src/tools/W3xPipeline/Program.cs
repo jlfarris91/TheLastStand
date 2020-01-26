@@ -5,9 +5,14 @@
     using System.Linq;
     using StormLibSharp;
     using War3.Net;
+    using War3.Net.Assets;
+    using War3.Net.Core;
     using War3.Net.Data;
     using War3.Net.Data.Units;
     using War3.Net.Doodads;
+    using War3.Net.Imaging;
+    using War3.Net.Imaging.Blp;
+    using War3.Net.Imaging.Targa;
     using War3.Net.IO;
     using War3.Net.Mpq;
     using War3.Net.Slk;
@@ -18,8 +23,9 @@
 
         private static readonly string WAR3_W3MOD_PATH = @"D:\Projects\WarcraftIII\MPQ\war3.w3mod";
         //private static readonly string WAR3_W3MOD_PATH = @"C:\War3\data\branches\v1.32.1\War3.w3mod";
+        private static readonly string LOCALE_W3MOD_PATH = Path.Combine(WAR3_W3MOD_PATH, @"_locales\enus.w3mod");
         private static int WAR3_PRI = 100;
-        private static int WAR3X_PRI = 200;
+        private static int LOCALE_PRI = 200;
         private static int MAP_PRI = 300;
 
         private static int Main(string[] rawArgs)
@@ -44,17 +50,23 @@
 
             MpqArchive war3Archive = null;
             MpqArchive war3XArchive = null;
+
+            // Services
             var fileSystem = new LayeredFileSystem();
             var entityLibrary = new AggregateEntityLibrary();
+            var assetManager = new AssetManager(fileSystem);
+            var imageCache = new ImageCache("ImageCache");
+            var imageProvider = new ImageProvider(imageCache, ImageDeserializerProvider);
 
             try
             {
                 fileSystem.AddSystem(new WindowsFileSystem(new DirectoryInfo(WAR3_W3MOD_PATH)), WAR3_PRI);
+                fileSystem.AddSystem(new WindowsFileSystem(new DirectoryInfo(LOCALE_W3MOD_PATH)), LOCALE_PRI);
 
                 var objects = new IPipelineObject[]
                 {
                     new PathingMapBuildabilityModifier(),
-                    new RegionMapper(sLogger, fileSystem, entityLibrary),
+                    new RegionMapper(sLogger, fileSystem, entityLibrary, imageProvider, assetManager),
                     //new SpawnPointGenerator(sLogger)
                 };
 
@@ -152,6 +164,21 @@
             return 0;
         }
 
+        private static IDataDeserializer<Stream, IImage> ImageDeserializerProvider(AssetReference arg)
+        {
+            string ext = Path.GetExtension(arg.RelativePath).ToLower().Trim('.');
+
+            switch (ext)
+            {
+                case "blp":
+                    return new BlpImageDeserializer();
+                case "tga":
+                    return new TargaBitmapDeserializer();
+            }
+
+            return null;
+        }
+
         private static string MakeRelativeToDirectory(DirectoryInfo dir, FileInfo file)
         {
             return file.FullName.Replace(dir.FullName, string.Empty).Trim('\\');
@@ -218,8 +245,10 @@
 
         private static void ReadAdjustmentFile(IReadOnlyFileSystem fileSystem, IEntityLibrary library, string filePath)
         {
+
             try
             {
+                sLogger.Log($"Reading adjustment file {filePath}...");
                 using (Stream file = fileSystem.OpenRead(filePath))
                 using (var reader = new StreamReader(file))
                 {
@@ -236,6 +265,7 @@
         {
             try
             {
+                sLogger.Log($"Reading slk file {filePath}...");
                 using (Stream file = fileSystem.OpenRead(filePath))
                 using (var reader = new SlkTextReader(file, SlkRecordDeserializerFactory))
                 {
