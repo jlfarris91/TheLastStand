@@ -16,8 +16,8 @@
     {
         private static ILogger sLogger;
 
-        //private static readonly string WAR3_W3MOD_PATH = @"D:\Projects\WarcraftIII\MPQ\war3.w3mod";
-        private static readonly string WAR3_W3MOD_PATH = @"C:\War3\data\branches\v1.32.1\War3.w3mod";
+        private static readonly string WAR3_W3MOD_PATH = @"D:\Projects\WarcraftIII\MPQ\war3.w3mod";
+        //private static readonly string WAR3_W3MOD_PATH = @"C:\War3\data\branches\v1.32.1\War3.w3mod";
         private static int WAR3_PRI = 100;
         private static int WAR3X_PRI = 200;
         private static int MAP_PRI = 300;
@@ -237,9 +237,10 @@
             try
             {
                 using (Stream file = fileSystem.OpenRead(filePath))
-                using (var reader = new SlkTextReader(file))
+                using (var reader = new SlkTextReader(file, SlkRecordDeserializerFactory))
                 {
-                    SlkTable slkTable = new SlkDeserializer().Deserialize(reader);
+                    SlkFile slkFile = new SlkFileDeserializer().Deserialize(reader);
+                    SlkTable slkTable = new SlkTableDeserializer().Deserialize(slkFile);
                     StringDataTable dataTable = new StringDataTableSlkDeserializer().Deserialize(slkTable);
                     dataTable.PrimaryKeyColumn = primaryKey;
                     return dataTable;
@@ -248,6 +249,21 @@
             catch (Exception)
             {
                 throw;
+            }
+        }
+
+        private static IDataDeserializer<SlkTextReader, SlkRecord> SlkRecordDeserializerFactory(string recordType)
+        {
+            switch (recordType)
+            {
+                case "ID":
+                    return new IdRecordDeserializer();
+                case "B":
+                    return new BRecordDeserializer();
+                case "C":
+                    return new CRecordDeserializer();
+                default:
+                    return new GenericRecordDeserializer(recordType);
             }
         }
     }
