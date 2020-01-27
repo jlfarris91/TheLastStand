@@ -14,11 +14,13 @@
     using War3.Net.Imaging;
     using War3.Net.Imaging.Blp;
     using War3.Net.IO;
+    using War3.Net.Maps;
     using War3.Net.Maps.Doodads;
     using War3.Net.Maps.Regions;
     using War3.Net.Math;
     using War3.Net.Optional;
     using War3.Net.Slk;
+    using Color = System.Drawing.Color;
 
     public class RegionMapper : IPipelineObject
     {
@@ -116,11 +118,15 @@
             return largestIsland;
         }
 
-        public GridSpan[] BuildSpawnRegions(PathingMap pathingMap, GridCell min, GridCell max, int island)
+        public GridSpan[] BuildSpawnRegions(PathingMap pathingMap, GridCell min, GridCell max, int island, int step)
         {
             var openStack = new Queue<GridCell>();
             var regions = new List<GridSpan>();
             var closeStack = new HashSet<int>();
+
+            int width = max.Column - min.Column;
+            int height = max.Row - min.Row;
+            var spans = new int[width * height];
 
             bool IsCellInvalid(int r, int c)
             {
@@ -174,6 +180,7 @@
                             for (int c = span.Min.Column; c <= span.Max.Column; ++c)
                             {
                                 closeStack.Add(pathingMap.GetIndex(r, c));
+                                spans[r * width + c] = regions.Count;
                             }
                         }
 
@@ -185,21 +192,124 @@
                     closeStack.Add(cellIndex);
                 }
 
-                if (span.Max.Column < max.Column - 1)
+                int nextColumn = span.Max.Column + step;
+                int nextRow = span.Max.Row + step;
+
+                if (nextColumn < max.Column - 1)
                 {
-                    openStack.Enqueue(new GridCell(span.Min.Row, span.Max.Column + 1));
+                    openStack.Enqueue(new GridCell(span.Min.Row, nextColumn));
                 }
 
-                if (span.Max.Row < max.Row - 1)
+                if (nextRow < max.Row - 1)
                 {
-                    openStack.Enqueue(new GridCell(span.Max.Row + 1, span.Min.Column));
+                    openStack.Enqueue(new GridCell(nextRow, span.Min.Column));
                 }
             }
+
+            GridCell ToLocalArea(GridCell cell)
+            {
+                return new GridCell(cell.Row - min.Row, cell.Column - min.Column);
+            }
+
+            bool ValidGridSpan(GridSpan span)
+            {
+                return true;
+                //return span.Width > 2 && span.Height > 2 && span.Area > 4 * 4;
+            }
+
+            //var finalSpans = new List<int>();
+
+            //for (var i = 0; i < regions.Count; ++i)
+            //{
+            //    GridSpan span = regions[i];
+
+            //    if (ValidGridSpan(span))
+            //    {
+            //        finalSpans.Add(i);
+            //        continue;
+            //    }
+
+            //    var neighborIds = new HashSet<int>();
+
+            //    for (int c = span.Min.Column - 1; c < span.Max.Column + 1; ++c)
+            //    {
+            //        int r1 = span.Min.Row - 1;
+            //        GridCell cell1 = ToLocalArea(new GridCell(r1, c));
+            //        neighborIds.Add(spans[cell1.Row * width + cell1.Column]);
+
+            //        int r2 = span.Max.Row + 1;
+            //        GridCell cell2 = ToLocalArea(new GridCell(r2, c));
+            //        neighborIds.Add(spans[cell2.Row * width + cell2.Column]);
+            //    }
+
+            //    for (int r = span.Min.Row; r < span.Max.Row; ++r)
+            //    {
+            //        int c1 = span.Min.Column;
+            //        GridCell cell1 = ToLocalArea(new GridCell(r, c1));
+            //        neighborIds.Add(spans[cell1.Row * width + cell1.Column]);
+
+            //        int c2 = span.Max.Column;
+            //        GridCell cell2 = ToLocalArea(new GridCell(r, c2));
+            //        neighborIds.Add(spans[cell2.Row * width + cell2.Column]);
+            //    }
+
+            //    IOrderedEnumerable<int> neighborIdsLargestToSmallest = neighborIds
+            //        .ToList()
+            //        .OrderByDescending(id => regions[id].Area);
+
+            //    foreach (int neighborId in neighborIdsLargestToSmallest)
+            //    {
+            //        GridSpan neighbor = regions[neighborId];
+            //        GridCell neighborMin = neighbor.Min;
+            //        GridCell neighborMax = neighbor.Max;
+
+            //        var absorbedRegion = false;
+
+            //        if (neighbor.Width <= span.Width)
+            //        {
+            //            if (span.Min.Row < neighborMin.Row)
+            //            {
+            //                neighborMin.Row = span.Min.Row;
+            //                absorbedRegion = true;
+            //            }
+
+            //            if (span.Max.Row > neighborMax.Row)
+            //            {
+            //                neighborMax.Row = span.Max.Row;
+            //                absorbedRegion = true;
+            //            }
+            //        }
+
+            //        if (neighbor.Height <= span.Height)
+            //        {
+            //            if (span.Min.Column < neighborMin.Column)
+            //            {
+            //                neighborMin.Column = span.Min.Column;
+            //                absorbedRegion = true;
+            //            }
+
+            //            if (span.Max.Column > neighborMax.Column)
+            //            {
+            //                neighborMax.Column = span.Max.Column;
+            //                absorbedRegion = true;
+            //            }
+            //        }
+
+            //        regions[neighborId] = new GridSpan(neighborMin, neighborMax);
+
+            //        if (absorbedRegion)
+            //        {
+            //            break;
+            //        }
+            //    }
+            //}
+
+            //return finalSpans.Select(id => regions[id]).ToArray();
 
             return regions.ToArray();
         }
 
-        private GridSpan FindLargestRectangleInSpan(Func<int, int, bool> isInvalid, GridCell minCell, GridCell maxCell)
+        private static GridSpan FindLargestRectangleInSpan(Func<int, int, bool> isInvalid, GridCell minCell, GridCell maxCell)
         {
             GridSpan span1 = FindLargestRectangleInSpanHorizontal(isInvalid, minCell, maxCell);
             GridSpan span2 = FindLargestRectangleInSpanVertical(isInvalid, minCell, maxCell);
@@ -208,10 +318,9 @@
             float a2 = Mathf.Min(Mathf.Abs(span2.AspectRatioW - 0.5f), Mathf.Abs(span2.AspectRatioH - 0.5f));
 
             return a1 < a2 ? span1 : span2;
-            //return span1.Area > span2.Area ? span1 : span2;
         }
 
-        private GridSpan FindLargestRectangleInSpanHorizontal(Func<int, int, bool> isInvalid, GridCell minCell, GridCell maxCell)
+        private static GridSpan FindLargestRectangleInSpanHorizontal(Func<int, int, bool> isInvalid, GridCell minCell, GridCell maxCell)
         {
             GridCell result = minCell;
             result.Column = maxCell.Column;
@@ -221,6 +330,7 @@
                 {
                     if (isInvalid(r, c))
                     {
+                        result.Row--;
                         return new GridSpan(minCell, result);
                     }
                 }
@@ -229,7 +339,7 @@
             return new GridSpan(minCell, result);
         }
 
-        private GridSpan FindLargestRectangleInSpanVertical(Func<int, int, bool> isInvalid, GridCell minCell, GridCell maxCell)
+        private static GridSpan FindLargestRectangleInSpanVertical(Func<int, int, bool> isInvalid, GridCell minCell, GridCell maxCell)
         {
             GridCell result = minCell;
             result.Row = maxCell.Row;
@@ -239,6 +349,7 @@
                 {
                     if (isInvalid(r, c))
                     {
+                        result.Column--;
                         return new GridSpan(minCell, result);
                     }
                 }
@@ -297,16 +408,19 @@
                 FindIslands(pathingMap);
                 int largestIsland = FindLargestIsland(pathingMap);
 
-                GridSpan[] regionSpans = BuildSpawnRegions(pathingMap, minCell, maxCell, largestIsland);
-                Region[] newSpawnRegions = regionSpans.Select((span, index) =>
-                {
-                    return CreateRegionFromSpan(
-                        pathingMap,
-                        span,
-                        maxId + index,
-                        $"{SPAWN_REGION_NAME_PREFIX}{index}");
-                }).ToArray();
-                CollectionExtensions.AddRange(mapRegions.Regions, newSpawnRegions);
+                GridSpan[] regionSpans = BuildSpawnRegions(pathingMap, minCell, maxCell, largestIsland, 1);
+
+                Region[] newSpawnRegions = regionSpans
+                    .Select((span, index) =>
+                    {
+                        return CreateRegionFromSpan(
+                            pathingMap,
+                            span,
+                            maxId + index,
+                            $"{SPAWN_REGION_NAME_PREFIX}{index}");
+                    }).ToArray();
+
+                mapRegions.Regions.AddRange(newSpawnRegions);
 
                 m_logger.Log($"Generated {newSpawnRegions.Length} new spawn regions in map");
 
@@ -336,35 +450,89 @@
         {
             foreach (DoodadPlacement doodadPlacement in doodads.Placements.Placements)
             {
-                IReadOnlyEntityObject entity = m_objectLibrary.GetEntity(doodadPlacement.Id);
-                if (!(entity is IAffectsPathing affectsPathing))
+                UpdatePathingMap(doodadPlacement, pathingMap);
+            }
+        }
+
+        private void UpdatePathingMap(Placement placement, PathingMap pathingMap)
+        {
+            IReadOnlyEntityObject entity = m_objectLibrary.GetEntity(placement.Id);
+            if (!(entity is IAffectsPathing affectsPathing))
+            {
+                return;
+            }
+
+            string pt = affectsPathing.PathingTexture;
+
+            m_assetManager.FindAsset(pt)
+                .Map(assetRef => m_imageProvider.GetImage(assetRef))
+                .Do(UpdatePathingMap);
+
+            void UpdatePathingMap(IImage image)
+            {
+                int centerCell = pathingMap.WorldToCell(placement.Position.XY());
+                int centerRow = pathingMap.GetRow(centerCell);
+                int centerCol = pathingMap.GetColumn(centerCell);
+            
+                float rotDeg;
+
+                if (entity is DoodadEntity doodadEntity &&
+                    !doodadEntity.FixedRotation.IsApproximatelyEqual(-1.0f))
                 {
-                    continue;
+                    rotDeg = doodadEntity.FixedRotation;
+                }
+                else if (entity is DestructibleEntity destructibleEntity &&
+                         !destructibleEntity.FixedRotation.IsApproximatelyEqual(-1.0f))
+                {
+                    rotDeg = destructibleEntity.FixedRotation;
+                }
+                else
+                {
+                    rotDeg = placement.Rotation * Mathf.Rad2Deg;
                 }
 
-                string pt = affectsPathing.PathingTexture;
+                float clampedRotation = Mathf.WrapAngleDegrees((int)(rotDeg / 90.0f) * 90.0f) * Mathf.Deg2Rad;
 
-                m_assetManager.FindAsset(pt)
-                    .Map(assetRef => m_imageProvider.GetImage(assetRef))
-                    .Do(UpdatePathingMap);
+                Matrix3x2 imageToPathingMapMtx = Matrix3x2.CreateRotation(clampedRotation);
 
-                void UpdatePathingMap(IImage image)
+                Vector2 imageSizeLS = Vector2.Transform(new Vector2(image.Width, image.Height), imageToPathingMapMtx);
+
+                var min = new Vector2((int) (centerCol - imageSizeLS.X / 2), (int) (centerRow - imageSizeLS.Y / 2));
+
+                imageToPathingMapMtx = imageToPathingMapMtx * Matrix3x2.CreateTranslation(min);
+
+                for (int y = 0; y < image.Height; ++y)
                 {
-                    var dx = 1;
-                    var dy = 1;
-
-                    var area = new Rect();
-
-                    int cell = pathingMap.WorldToCell(doodadPlacement.Position.XY());
-                    int row = pathingMap.GetRow(cell);
-                    int col = pathingMap.GetColumn(cell);
-
-                    area.Min = new Vector2(col - image.Width / 2, row - image.Height / 2);
-                    area.Max = new Vector2(col + image.Width / 2, row + image.Height / 2);
-
-
+                    for (int x = 0; x < image.Width; ++x)
+                    {
+                        Color pixel = image.GetPixel(x, y);
+                        Vector2 posLS = Vector2.Transform(new Vector2(x, y), imageToPathingMapMtx);
+                        var cell = new GridCell((int) posLS.Y, (int) posLS.X);
+                        pathingMap[cell] = GetPathingValueFromColor(pixel);
+                    }
                 }
             }
+        }
+
+        private PathingType GetPathingValueFromColor(Color color)
+        {
+            var pathingType = PathingType.None;
+
+            if (color.R == 255) pathingType = pathingType.SetFlag(PathingType.NotWalkable);
+            if (color.G == 255) pathingType = pathingType.SetFlag(PathingType.NotFlyable);
+            if (color.B == 255) pathingType = pathingType.SetFlag(PathingType.NotBuildable);
+
+            return pathingType;
+        }
+
+        private Color GetColorFromPathingType(PathingType pathingType)
+        {
+            return Color.FromArgb(
+                255,
+                pathingType.HasFlag(PathingType.NotWalkable) ? 255 : 0,
+                pathingType.HasFlag(PathingType.NotFlyable) ? 255 : 0,
+                pathingType.HasFlag(PathingType.NotBuildable) ? 255 : 0
+                );
         }
 
         private static Region CreateRegionFromSpan(PathingMap pathingMap, GridSpan span, int id, string name)

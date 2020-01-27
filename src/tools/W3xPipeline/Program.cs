@@ -186,6 +186,7 @@
 
         private static IEntityLibrary ReadDoodadLibrary(IReadOnlyFileSystem fileSystem)
         {
+            sLogger.Log($"Reading doodad library...");
             StringDataTable doodadData = ReadSlk(fileSystem, "Doodads/Doodads.slk", "doodID");
             StringDataTable doodadMetadata = ReadSlk(fileSystem, "Doodads/DoodadMetaData.slk", "ID");
             var deserializer = new DoodadLibrarySerializer(ObjectSerializationHelper.DeserializeObject);
@@ -194,14 +195,16 @@
 
         private static IEntityLibrary ReadDestructibleLibrary(IReadOnlyFileSystem fileSystem)
         {
+            sLogger.Log($"Reading destructible library...");
             StringDataTable destructibleData = ReadSlk(fileSystem, "Units/DestructableData.slk", "DestructableID");
             StringDataTable destructibleMetadata = ReadSlk(fileSystem, "Units/DestructableMetaData.slk", "ID");
             var deserializer = new DestructibleLibrarySerializer(ObjectSerializationHelper.DeserializeObject);
             return deserializer.LoadLibrary(destructibleData, destructibleMetadata);
         }
 
-        private static IEntityLibrary ReadUnitLibrary(LayeredFileSystem fileSystem)
+        private static IEntityLibrary ReadUnitLibrary(IReadOnlyFileSystem fileSystem)
         {
+            sLogger.Log($"Reading unit library...");
             StringDataTable unitDataTable = ReadSlk(fileSystem, "Units/UnitData.slk", "unitID");
             StringDataTable unitWeaponDataTable = ReadSlk(fileSystem, "Units/UnitWeapons.slk", "unitWeaponID");
             StringDataTable unitBalanceDataTable = ReadSlk(fileSystem, "Units/UnitBalance.slk", "unitBalanceID");
