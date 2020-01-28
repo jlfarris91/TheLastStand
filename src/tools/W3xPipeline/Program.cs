@@ -22,8 +22,8 @@
     {
         private static ILogger sLogger;
 
-        //private static readonly string WAR3_W3MOD_PATH = @"D:\Projects\WarcraftIII\MPQ\war3.w3mod";
-        private static readonly string WAR3_W3MOD_PATH = @"C:\War3\data\branches\v1.32.1\War3.w3mod";
+        private static readonly string WAR3_W3MOD_PATH = @"D:\Projects\WarcraftIII\MPQ\war3.w3mod";
+        //private static readonly string WAR3_W3MOD_PATH = @"C:\War3\data\branches\v1.32.1\War3.w3mod";
         private static readonly string LOCALE_W3MOD_PATH = Path.Combine(WAR3_W3MOD_PATH, @"_locales\enus.w3mod");
         private static int WAR3_PRI = 100;
         private static int LOCALE_PRI = 200;
@@ -65,13 +65,6 @@
             {
                 fileSystem.AddSystem(new WindowsFileSystem(new DirectoryInfo(WAR3_W3MOD_PATH)), WAR3_PRI);
                 fileSystem.AddSystem(new WindowsFileSystem(new DirectoryInfo(LOCALE_W3MOD_PATH)), LOCALE_PRI);
-
-                var objects = new IPipelineObject[]
-                {
-                    new PathMapBuildabilityModifier(pathMapFileBinaryDeserializer, pathMapFileBinarySerializer),
-                    new RegionMapper(sLogger, fileSystem, entityLibrary, imageProvider, assetManager, pathMapFileBinaryDeserializer),
-                    //new SpawnPointGenerator(sLogger)
-                };
 
                 if (!args.InputMapDirectory.Exists)
                 {
@@ -125,8 +118,19 @@
                     // Map archive is now done being loaded
                     fileSystem.AddSystem(new MpqFileSystem(newMapArchive), MAP_PRI);
                     entityLibrary.AddLibrary(ReadDoodadLibrary(fileSystem));
-                    entityLibrary.AddLibrary(ReadDestructibleLibrary(fileSystem));
-                    entityLibrary.AddLibrary(ReadUnitLibrary(fileSystem));
+
+                    var destructibleLibrary = (DestructibleLibrary)ReadDestructibleLibrary(fileSystem);
+                    entityLibrary.AddLibrary(destructibleLibrary);
+
+                    var unitLibrary = (UnitLibrary)ReadUnitLibrary(fileSystem);
+                    entityLibrary.AddLibrary(unitLibrary);
+
+                    var objects = new IPipelineObject[]
+                    {
+                        new PathMapBuildabilityModifier(pathMapFileBinaryDeserializer, pathMapFileBinarySerializer),
+                        new RegionMapper(sLogger, fileSystem, entityLibrary, imageProvider, assetManager, pathMapFileBinaryDeserializer, destructibleLibrary),
+                        //new SpawnPointGenerator(sLogger)
+                    };
 
                     // Run all of the pipeline steps
                     sLogger.Log("Running pipeline...");
@@ -195,9 +199,11 @@
             var deserializer = new DoodadLibrarySerializer(ObjectSerializationHelper.DeserializeObject);
             DoodadLibrary library = deserializer.LoadLibrary(doodadData, doodadMetadata);
 
-            var adjustmentFiles = new[]
+            var adjustmentFiles = new string[]
             {
+#if REFORGED
                 "Doodads/DoodadSkins.txt",
+#endif
             };
 
             foreach (string file in adjustmentFiles)
@@ -216,9 +222,11 @@
             var deserializer = new DestructibleLibrarySerializer(ObjectSerializationHelper.DeserializeObject);
             DestructibleLibrary library = deserializer.LoadLibrary(destructibleData, destructibleMetadata);
 
-            var adjustmentFiles = new[]
+            var adjustmentFiles = new string[]
             {
+#if REFORGED
                 "Units/DestructableSkin.txt",
+#endif
             };
 
             foreach (string file in adjustmentFiles)

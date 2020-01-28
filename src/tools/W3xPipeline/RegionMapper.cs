@@ -12,15 +12,12 @@
     using War3.Net.Data.Units;
     using War3.Net.Doodads;
     using War3.Net.Imaging;
-    using War3.Net.Imaging.Blp;
     using War3.Net.IO;
     using War3.Net.Maps;
     using War3.Net.Maps.Doodads;
     using War3.Net.Maps.Pathing;
     using War3.Net.Maps.Regions;
     using War3.Net.Math;
-    using War3.Net.Optional;
-    using War3.Net.Slk;
     using Color = System.Drawing.Color;
 
     public class RegionMapper : IPipelineObject
@@ -38,12 +35,15 @@
         private readonly IImageProvider m_imageProvider;
         private readonly IAssetManager m_assetManager;
         private readonly IDataDeserializer<BinaryReader, PathMapFile> m_pathMapFileDeserializer;
+        private readonly DestructibleLibrary m_destructibleLibrary;
+
         public RegionMapper(ILogger logger,
                             IReadOnlyFileSystem fileSystem,
                             IReadOnlyEntityLibrary objectLibrary,
                             IImageProvider imageProvider,
                             IAssetManager assetManager,
-                            IDataDeserializer<BinaryReader, PathMapFile> pathMapFileDeserializer)
+                            IDataDeserializer<BinaryReader, PathMapFile> pathMapFileDeserializer,
+                            DestructibleLibrary destructibleLibrary)
         {
             m_logger = logger;
             m_fileSystem = fileSystem;
@@ -51,6 +51,7 @@
             m_imageProvider = imageProvider;
             m_assetManager = assetManager;
             m_pathMapFileDeserializer = pathMapFileDeserializer;
+            m_destructibleLibrary = destructibleLibrary;
         }
 
         public void FindIslands(PathMap map)
@@ -371,8 +372,8 @@
             {
                 MapRegions mapRegions;
                 DoodadFile doodads;
-
                 PathMap pathMap;
+                CustomEntityFile customEntityFile;
 
                 using (MpqFileStream file = archive.OpenFile(ARCHIVE_TERRAIN_FILE_PATH))
                 using (var reader = new BinaryReader(file))
@@ -398,6 +399,21 @@
                     doodads = new DoodadFileBinaryDeserializer().Deserialize(reader);
                 }
 
+                using (MpqFileStream file = archive.OpenFile("war3map.w3b"))
+                using (var reader = new BinaryReader(file))
+                {
+                    customEntityFile = new CustomEntityFileBinaryDeserializer(m_objectLibrary).Deserialize(reader);
+                }
+
+                foreach (CustomEntityDefinition entityDef in customEntityFile.OriginalEntries)
+                {
+                    DestructibleEntity entity = m_destructibleLibrary.GetEntity(entityDef.Id);
+                    foreach (CustomEntityMod mod in entityDef.Modifications)
+                    {
+                        entity.SetValue(mod.Id, mod.Index, mod.Value);
+                    }
+                }
+                
                 UpdatePathingMap(doodads, pathMap);
 
                 m_logger.Log($"Removed {oldSpawnRegions.Length} existing spawn regions in map");
@@ -450,18 +466,23 @@
             }
         }
 
-        private void UpdatePathingMap(DoodadFile doodads, PathMap pathingMap)
+        private void UpdatePathingMap(DoodadFile doodads, PathMap pathMap)
         {
             foreach (DoodadPlacement doodadPlacement in doodads.Placements.Placements)
             {
-                UpdatePathingMap(doodadPlacement, pathingMap);
+                UpdatePathingMap(doodadPlacement, pathMap);
             }
         }
 
-        private void UpdatePathingMap(Placement placement, PathMap pathingMap)
+        private void UpdatePathingMap(Placement placement, PathMap pathMap)
         {
             IReadOnlyEntityObject entity = m_objectLibrary.GetEntity(placement.Id);
             if (!(entity is IAffectsPathing affectsPathing))
+            {
+                return;
+            }
+
+            if (entity is DoodadEntity)
             {
                 return;
             }
@@ -494,22 +515,7 @@
 
             void UpdatePathMap(IImage image)
             {
-                Vector2 pos = placement.Position.XZ();
-
-                pos.X -= 0.5f * PathMap.PATH_CELL_PER_CELL * image.Width;
-                pos.Y -= 0.5f * PathMap.PATH_CELL_PER_CELL * image.Height;
-
-                if (image.Width % 2 == 0)
-                {
-                    pos.X += PathMap.PATH_CELL_PER_CELL * 0.5f;
-                }
-
-                if (image.Height % 2 == 0)
-                {
-                    pos.Y += PathMap.PATH_CELL_PER_CELL * 0.5f;
-                }
-            
-                float rotDeg;
+                m_logger.Log($"UpdatingPathMap: {entity.Id} {pt}");float rotDeg;
 
                 if (entity is DoodadEntity doodadEntity &&
                     !doodadEntity.FixedRotation.IsApproximatelyEqual(-1.0f))
@@ -527,25 +533,41 @@
                 }
 
                 rotDeg = Mathf.WrapAngleDegrees((int)(rotDeg / 90.0f) * 90.0f);
-                int div90 = (int)rotDeg / 90;
+                //int div90 = (int)rotDeg / 90;
                 float rotRad = rotDeg * Mathf.Deg2Rad;
 
-                Matrix3x2 imageToPathMapMtx = Matrix3x2.CreateRotation(rotRad);
+                Vector2 pos = placement.Position.XY();
 
-                int startCell = pathingMap.WorldToCell(pos);
-                int startRow = pathingMap.GetRow(startCell);
-                int startCol = pathingMap.GetColumn(startCell);
+                Matrix3x2 rotMtx = Matrix3x2.CreateRotation(rotRad);
 
-                imageToPathMapMtx *= Matrix3x2.CreateTranslation(new Vector2(startCol, startRow));
+                Vector2 imageSize = new Vector2(image.Width, image.Height);
+                Vector2 imageSizeWS = Vector2.Transform(imageSize / 2.0f, rotMtx) * 2.0f;
+                imageSizeWS = Vector2Utility.Abs(imageSizeWS);
 
-                for (var x = 0; x < image.Width; ++x)
-                for (var y = 0; y < image.Height; ++y)
+                pos -= imageSizeWS * PathMap.PATH_CELL_SIZE / 2.0f;
+
+                if ((int)imageSizeWS.X % 2 == 0)
                 {
-                    //Color pixel = image.GetPixel(x, y);
-                    Color pixel = GetPixel(image, x, y, div90);
-                    Vector2 posLS = Vector2.Transform(new Vector2(x, y), imageToPathMapMtx);
-                    int cell = pathingMap.WorldToCell(posLS);
-                    pathingMap[cell] = GetPathingValueFromColor(pixel);
+                    pos.X += PathMap.PATH_CELL_PER_CELL * 0.5f;
+                }
+
+                if ((int)imageSizeWS.Y % 2 == 0)
+                {
+                    pos.Y += PathMap.PATH_CELL_PER_CELL * 0.5f;
+                }
+
+                Matrix3x2 posMtx = Matrix3x2.CreateTranslation(pos);
+
+                Matrix3x2 imageToPathMapMtx = rotMtx * posMtx;
+
+                for (var y = 0; y < image.Height; ++y)
+                for (var x = 0; x < image.Width; ++x)
+                {
+                    Color pixel = image.GetPixel(x, y);
+                    //Color pixel = GetPixel(image, x, y, div90);
+                    Vector2 posWS = Vector2.Transform(new Vector2(x, y) * PathMap.PATH_CELL_SIZE, imageToPathMapMtx);
+                    int cell = pathMap.WorldToCell(posWS);
+                    pathMap[cell] |= GetPathingValueFromColor(pixel);
                 }
             }
         }
