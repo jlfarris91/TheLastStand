@@ -8,6 +8,7 @@
     using StormLibSharp;
     using War3.Net;
     using War3.Net.IO;
+    using War3.Net.Maps.Pathing;
     using War3.Net.Maps.Regions;
     using War3.Net.Maps.Units;
 
@@ -21,10 +22,12 @@
         private const float SPAWN_POINT_RADIUS = 256.0f;
 
         private readonly ILogger m_logger;
+        private readonly IDataDeserializer<BinaryReader, PathMapFile> m_pathMapFileDeserializer;
 
-        public SpawnPointGenerator(ILogger logger)
+        public SpawnPointGenerator(ILogger logger, IDataDeserializer<BinaryReader, PathMapFile> pathMapFileDeserializer)
         {
             m_logger = logger;
+            m_pathMapFileDeserializer = pathMapFileDeserializer;
         }
 
         public void DoWork(MpqArchive archive)
@@ -35,14 +38,14 @@
 
             try
             {
-                PathingMap pathingMap;
+                PathMap pathingMap;
                 UnitPlacementFile unitPlacements;
                 MapRegions mapRegions;
 
                 using (MpqFileStream file = archive.OpenFile(ARCHIVE_TERRAIN_FILE_PATH))
                 using (var reader = new BinaryReader(file))
                 {
-                    pathingMap = new PathingMapDeserializer().Deserialize(reader);
+                    pathingMap = m_pathMapFileDeserializer.Deserialize(reader).Map;
                 }
 
                 using (MpqFileStream file = archive.OpenFile(ARCHIVE_UNIT_PLACEMENT_FILE_PATH))
@@ -131,7 +134,7 @@
             m_logger.Log($"Done creating spawn points. Created {positions.Count} units.");
         }
 
-        private QuadTreeNode<Vector2> GenerateSpawnPointPositions(PathingMap pathingMap)
+        private QuadTreeNode<Vector2> GenerateSpawnPointPositions(PathMap pathingMap)
         {
             float mapWidth = pathingMap.Width * pathingMap.CellSize;
             float mapHeight = pathingMap.Height * pathingMap.CellSize;
@@ -155,7 +158,7 @@
             return tree;
         }
 
-        private void GenerateNodesRecursive(PathingMap pathingMap, QuadTreeNode<Vector2> parent, float minSize)
+        private void GenerateNodesRecursive(PathMap pathingMap, QuadTreeNode<Vector2> parent, float minSize)
         {
             Vector2 parentMin = parent.Min;
             Vector2 parentMax = parent.Max;
@@ -187,7 +190,7 @@
             }
         }
 
-        private void GenerateChildNode(PathingMap pathingMap, QuadTreeNode<Vector2> parent, QuadTreeChild type, float minSize)
+        private void GenerateChildNode(PathMap pathingMap, QuadTreeNode<Vector2> parent, QuadTreeChild type, float minSize)
         {
             Vector2 parentMin = parent.Min;
             Vector2 parentMax = parent.Max;
@@ -230,7 +233,7 @@
             GenerateNodesRecursive(pathingMap, child, minSize);
         }
 
-        private bool AreaIsInvalidated(PathingMap pathingMap, Vector2 parentMin, Vector2 parentMax)
+        private bool AreaIsInvalidated(PathMap pathingMap, Vector2 parentMin, Vector2 parentMax)
         {
             int minCell = pathingMap.WorldToCell(parentMin);
             int maxCell = pathingMap.WorldToCell(parentMax);
@@ -244,7 +247,7 @@
             {
                 for (int x = xmin; x < xmax; ++x)
                 {
-                    if (pathingMap[y, x].HasFlag(PathingType.NotWalkable))
+                    if (pathingMap[y, x].HasFlag(PathType.NotWalkable))
                     {
                         return true;
                     }

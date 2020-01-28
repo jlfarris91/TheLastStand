@@ -14,6 +14,7 @@
     using War3.Net.Imaging.Blp;
     using War3.Net.Imaging.Targa;
     using War3.Net.IO;
+    using War3.Net.Maps.Pathing;
     using War3.Net.Mpq;
     using War3.Net.Slk;
 
@@ -21,8 +22,8 @@
     {
         private static ILogger sLogger;
 
-        private static readonly string WAR3_W3MOD_PATH = @"D:\Projects\WarcraftIII\MPQ\war3.w3mod";
-        //private static readonly string WAR3_W3MOD_PATH = @"C:\War3\data\branches\v1.32.1\War3.w3mod";
+        //private static readonly string WAR3_W3MOD_PATH = @"D:\Projects\WarcraftIII\MPQ\war3.w3mod";
+        private static readonly string WAR3_W3MOD_PATH = @"C:\War3\data\branches\v1.32.1\War3.w3mod";
         private static readonly string LOCALE_W3MOD_PATH = Path.Combine(WAR3_W3MOD_PATH, @"_locales\enus.w3mod");
         private static int WAR3_PRI = 100;
         private static int LOCALE_PRI = 200;
@@ -57,6 +58,8 @@
             var assetManager = new AssetManager(fileSystem);
             var imageCache = new ImageCache("ImageCache");
             var imageProvider = new ImageProvider(imageCache, ImageDeserializerProvider);
+            var pathMapFileBinaryDeserializer = new PathMapFileBinaryDeserializer(v => new PathMapBinaryDeserializer());
+            var pathMapFileBinarySerializer = new PathMapFileBinarySerializer(v => new PathMapBinarySerializer());
 
             try
             {
@@ -65,8 +68,8 @@
 
                 var objects = new IPipelineObject[]
                 {
-                    new PathingMapBuildabilityModifier(),
-                    new RegionMapper(sLogger, fileSystem, entityLibrary, imageProvider, assetManager),
+                    new PathMapBuildabilityModifier(pathMapFileBinaryDeserializer, pathMapFileBinarySerializer),
+                    new RegionMapper(sLogger, fileSystem, entityLibrary, imageProvider, assetManager, pathMapFileBinaryDeserializer),
                     //new SpawnPointGenerator(sLogger)
                 };
 
@@ -190,7 +193,19 @@
             StringDataTable doodadData = ReadSlk(fileSystem, "Doodads/Doodads.slk", "doodID");
             StringDataTable doodadMetadata = ReadSlk(fileSystem, "Doodads/DoodadMetaData.slk", "ID");
             var deserializer = new DoodadLibrarySerializer(ObjectSerializationHelper.DeserializeObject);
-            return deserializer.LoadLibrary(doodadData, doodadMetadata);
+            DoodadLibrary library = deserializer.LoadLibrary(doodadData, doodadMetadata);
+
+            var adjustmentFiles = new[]
+            {
+                "Doodads/DoodadSkins.txt",
+            };
+
+            foreach (string file in adjustmentFiles)
+            {
+                ReadAdjustmentFile(fileSystem, library, file);
+            }
+
+            return library;
         }
 
         private static IEntityLibrary ReadDestructibleLibrary(IReadOnlyFileSystem fileSystem)
@@ -199,7 +214,19 @@
             StringDataTable destructibleData = ReadSlk(fileSystem, "Units/DestructableData.slk", "DestructableID");
             StringDataTable destructibleMetadata = ReadSlk(fileSystem, "Units/DestructableMetaData.slk", "ID");
             var deserializer = new DestructibleLibrarySerializer(ObjectSerializationHelper.DeserializeObject);
-            return deserializer.LoadLibrary(destructibleData, destructibleMetadata);
+            DestructibleLibrary library = deserializer.LoadLibrary(destructibleData, destructibleMetadata);
+
+            var adjustmentFiles = new[]
+            {
+                "Units/DestructableSkin.txt",
+            };
+
+            foreach (string file in adjustmentFiles)
+            {
+                ReadAdjustmentFile(fileSystem, library, file);
+            }
+
+            return library;
         }
 
         private static IEntityLibrary ReadUnitLibrary(IReadOnlyFileSystem fileSystem)
@@ -255,7 +282,7 @@
                 using (Stream file = fileSystem.OpenRead(filePath))
                 using (var reader = new StreamReader(file))
                 {
-                    new AdjustmentFileDeserializer().ReadAdjustmentFile(library, reader);
+                    new ProfileFileDeserializer().ReadProfile(library, reader);
                 }
             }
             catch (Exception ex)
@@ -295,6 +322,8 @@
                     return new BRecordDeserializer();
                 case "C":
                     return new CRecordDeserializer();
+                case "F":
+                    return new FRecordDeserializer();
                 default:
                     return new GenericRecordDeserializer(recordType);
             }

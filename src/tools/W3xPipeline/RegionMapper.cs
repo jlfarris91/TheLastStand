@@ -16,6 +16,7 @@
     using War3.Net.IO;
     using War3.Net.Maps;
     using War3.Net.Maps.Doodads;
+    using War3.Net.Maps.Pathing;
     using War3.Net.Maps.Regions;
     using War3.Net.Math;
     using War3.Net.Optional;
@@ -36,21 +37,23 @@
         private readonly IReadOnlyEntityLibrary m_objectLibrary;
         private readonly IImageProvider m_imageProvider;
         private readonly IAssetManager m_assetManager;
-
+        private readonly IDataDeserializer<BinaryReader, PathMapFile> m_pathMapFileDeserializer;
         public RegionMapper(ILogger logger,
                             IReadOnlyFileSystem fileSystem,
                             IReadOnlyEntityLibrary objectLibrary,
                             IImageProvider imageProvider,
-                            IAssetManager assetManager)
+                            IAssetManager assetManager,
+                            IDataDeserializer<BinaryReader, PathMapFile> pathMapFileDeserializer)
         {
             m_logger = logger;
             m_fileSystem = fileSystem;
             m_objectLibrary = objectLibrary;
             m_imageProvider = imageProvider;
             m_assetManager = assetManager;
+            m_pathMapFileDeserializer = pathMapFileDeserializer;
         }
 
-        public void FindIslands(PathingMap map)
+        public void FindIslands(PathMap map)
         {
             var openStack = new Stack<int>(Enumerable.Range(0, map.Width*map.Height));
 
@@ -93,14 +96,14 @@
             }
         }
 
-        private int FindLargestIsland(PathingMap pathingMap)
+        private int FindLargestIsland(PathMap pathMap)
         {
             var islandMap = new Dictionary<int, int>();
             int largestIsland = -1;
             int largestIslandCount = -1;
-            foreach (GridCell cell in pathingMap)
+            foreach (GridCell cell in pathMap)
             {
-                int cellIsland = pathingMap.GetIsland(cell.Row, cell.Column);
+                int cellIsland = pathMap.GetIsland(cell.Row, cell.Column);
                 if (cellIsland == -1)
                     continue;
                 if (!islandMap.ContainsKey(cellIsland))
@@ -118,7 +121,7 @@
             return largestIsland;
         }
 
-        public GridSpan[] BuildSpawnRegions(PathingMap pathingMap, GridCell min, GridCell max, int island, int step)
+        public GridSpan[] BuildSpawnRegions(PathMap pathMap, GridCell min, GridCell max, int island, int step)
         {
             var openStack = new Queue<GridCell>();
             var regions = new List<GridSpan>();
@@ -130,9 +133,9 @@
 
             bool IsCellInvalid(int r, int c)
             {
-                return pathingMap.GetIsland(r, c) != island ||
-                       !pathingMap.IsWalkable(r, c) ||
-                       closeStack.Contains(pathingMap.GetIndex(r, c));
+                return pathMap.GetIsland(r, c) != island ||
+                       !pathMap.IsWalkable(r, c) ||
+                       closeStack.Contains(pathMap.GetIndex(r, c));
             }
 
             openStack.Enqueue(min);
@@ -142,7 +145,7 @@
                 GridCell minCell = openStack.Dequeue();
                 var span = new GridSpan(minCell, minCell);
 
-                int cellIndex = pathingMap.GetIndex(minCell.Row, minCell.Column);
+                int cellIndex = pathMap.GetIndex(minCell.Row, minCell.Column);
 
                 if (closeStack.Contains(cellIndex))
                 {
@@ -179,7 +182,7 @@
                         {
                             for (int c = span.Min.Column; c <= span.Max.Column; ++c)
                             {
-                                closeStack.Add(pathingMap.GetIndex(r, c));
+                                closeStack.Add(pathMap.GetIndex(r, c));
                                 spans[r * width + c] = regions.Count;
                             }
                         }
@@ -366,14 +369,15 @@
 
             try
             {
-                PathingMap pathingMap;
                 MapRegions mapRegions;
                 DoodadFile doodads;
+
+                PathMap pathMap;
 
                 using (MpqFileStream file = archive.OpenFile(ARCHIVE_TERRAIN_FILE_PATH))
                 using (var reader = new BinaryReader(file))
                 {
-                    pathingMap = new PathingMapDeserializer().Deserialize(reader);
+                    pathMap = m_pathMapFileDeserializer.Deserialize(reader).Map;
                 }
 
                 using (MpqFileStream file = archive.OpenFile(ARCHIVE_REGION_PLACEMENT_FILE_PATH))
@@ -394,7 +398,7 @@
                     doodads = new DoodadFileBinaryDeserializer().Deserialize(reader);
                 }
 
-                UpdatePathingMap(doodads, pathingMap);
+                UpdatePathingMap(doodads, pathMap);
 
                 m_logger.Log($"Removed {oldSpawnRegions.Length} existing spawn regions in map");
 
@@ -403,18 +407,18 @@
                 m_logger.Log($"Generating new spawn regions...");
 
                 var minCell = new GridCell(0, 0);
-                var maxCell = new GridCell(pathingMap.Width - 1, pathingMap.Height - 1);
+                var maxCell = new GridCell(pathMap.Width - 1, pathMap.Height - 1);
 
-                FindIslands(pathingMap);
-                int largestIsland = FindLargestIsland(pathingMap);
+                FindIslands(pathMap);
+                int largestIsland = FindLargestIsland(pathMap);
 
-                GridSpan[] regionSpans = BuildSpawnRegions(pathingMap, minCell, maxCell, largestIsland, 1);
+                GridSpan[] regionSpans = BuildSpawnRegions(pathMap, minCell, maxCell, largestIsland, 1);
 
                 Region[] newSpawnRegions = regionSpans
                     .Select((span, index) =>
                     {
                         return CreateRegionFromSpan(
-                            pathingMap,
+                            pathMap,
                             span,
                             maxId + index,
                             $"{SPAWN_REGION_NAME_PREFIX}{index}");
@@ -446,7 +450,7 @@
             }
         }
 
-        private void UpdatePathingMap(DoodadFile doodads, PathingMap pathingMap)
+        private void UpdatePathingMap(DoodadFile doodads, PathMap pathingMap)
         {
             foreach (DoodadPlacement doodadPlacement in doodads.Placements.Placements)
             {
@@ -454,7 +458,7 @@
             }
         }
 
-        private void UpdatePathingMap(Placement placement, PathingMap pathingMap)
+        private void UpdatePathingMap(Placement placement, PathMap pathingMap)
         {
             IReadOnlyEntityObject entity = m_objectLibrary.GetEntity(placement.Id);
             if (!(entity is IAffectsPathing affectsPathing))
@@ -466,13 +470,44 @@
 
             m_assetManager.FindAsset(pt)
                 .Map(assetRef => m_imageProvider.GetImage(assetRef))
-                .Do(UpdatePathingMap);
+                .Do(UpdatePathMap);
 
-            void UpdatePathingMap(IImage image)
+            Color GetPixel(IImage image, int x, int y, int div90)
             {
-                int centerCell = pathingMap.WorldToCell(placement.Position.XY());
-                int centerRow = pathingMap.GetRow(centerCell);
-                int centerCol = pathingMap.GetColumn(centerCell);
+                int GetX(int index) { return index % image.Width; }
+                int GetY(int index) { return index / image.Width; }
+                Color GetPixelByIndex(int index) { return image.GetPixel(GetX(index), GetY(index)); }
+                switch (div90)
+                {
+                    case 0: // 0 degrees
+                        return GetPixelByIndex(x * image.Height + y);
+                    case 1: // 90 degrees
+                        return GetPixelByIndex(y * image.Width + (image.Width - 1 - x));
+                    case 2: // 180 degrees
+                        return GetPixelByIndex((image.Width - 1 - x) * image.Height + (image.Height - 1 - y));
+                    case 3: // 270 degrees
+                        return GetPixelByIndex((image.Height - 1 - y) * image.Width + x);
+                    default:
+                        throw new ArgumentOutOfRangeException(nameof(div90));
+                }
+            }
+
+            void UpdatePathMap(IImage image)
+            {
+                Vector2 pos = placement.Position.XZ();
+
+                pos.X -= 0.5f * PathMap.PATH_CELL_PER_CELL * image.Width;
+                pos.Y -= 0.5f * PathMap.PATH_CELL_PER_CELL * image.Height;
+
+                if (image.Width % 2 == 0)
+                {
+                    pos.X += PathMap.PATH_CELL_PER_CELL * 0.5f;
+                }
+
+                if (image.Height % 2 == 0)
+                {
+                    pos.Y += PathMap.PATH_CELL_PER_CELL * 0.5f;
+                }
             
                 float rotDeg;
 
@@ -491,51 +526,52 @@
                     rotDeg = placement.Rotation * Mathf.Rad2Deg;
                 }
 
-                float clampedRotation = Mathf.WrapAngleDegrees((int)(rotDeg / 90.0f) * 90.0f) * Mathf.Deg2Rad;
+                rotDeg = Mathf.WrapAngleDegrees((int)(rotDeg / 90.0f) * 90.0f);
+                int div90 = (int)rotDeg / 90;
+                float rotRad = rotDeg * Mathf.Deg2Rad;
 
-                Matrix3x2 imageToPathingMapMtx = Matrix3x2.CreateRotation(clampedRotation);
+                Matrix3x2 imageToPathMapMtx = Matrix3x2.CreateRotation(rotRad);
 
-                Vector2 imageSizeLS = Vector2.Transform(new Vector2(image.Width, image.Height), imageToPathingMapMtx);
+                int startCell = pathingMap.WorldToCell(pos);
+                int startRow = pathingMap.GetRow(startCell);
+                int startCol = pathingMap.GetColumn(startCell);
 
-                var min = new Vector2((int) (centerCol - imageSizeLS.X / 2), (int) (centerRow - imageSizeLS.Y / 2));
+                imageToPathMapMtx *= Matrix3x2.CreateTranslation(new Vector2(startCol, startRow));
 
-                imageToPathingMapMtx = imageToPathingMapMtx * Matrix3x2.CreateTranslation(min);
-
-                for (int y = 0; y < image.Height; ++y)
+                for (var x = 0; x < image.Width; ++x)
+                for (var y = 0; y < image.Height; ++y)
                 {
-                    for (int x = 0; x < image.Width; ++x)
-                    {
-                        Color pixel = image.GetPixel(x, y);
-                        Vector2 posLS = Vector2.Transform(new Vector2(x, y), imageToPathingMapMtx);
-                        var cell = new GridCell((int) posLS.Y, (int) posLS.X);
-                        pathingMap[cell] = GetPathingValueFromColor(pixel);
-                    }
+                    //Color pixel = image.GetPixel(x, y);
+                    Color pixel = GetPixel(image, x, y, div90);
+                    Vector2 posLS = Vector2.Transform(new Vector2(x, y), imageToPathMapMtx);
+                    int cell = pathingMap.WorldToCell(posLS);
+                    pathingMap[cell] = GetPathingValueFromColor(pixel);
                 }
             }
         }
 
-        private PathingType GetPathingValueFromColor(Color color)
+        private PathType GetPathingValueFromColor(Color color)
         {
-            var pathingType = PathingType.None;
+            var pathingType = PathType.None;
 
-            if (color.R == 255) pathingType = pathingType.SetFlag(PathingType.NotWalkable);
-            if (color.G == 255) pathingType = pathingType.SetFlag(PathingType.NotFlyable);
-            if (color.B == 255) pathingType = pathingType.SetFlag(PathingType.NotBuildable);
+            if (color.R == 255) pathingType = pathingType.SetFlag(PathType.NotWalkable);
+            if (color.G == 255) pathingType = pathingType.SetFlag(PathType.NotFlyable);
+            if (color.B == 255) pathingType = pathingType.SetFlag(PathType.NotBuildable);
 
             return pathingType;
         }
 
-        private Color GetColorFromPathingType(PathingType pathingType)
+        private Color GetColorFromPathingType(PathType pathingType)
         {
             return Color.FromArgb(
                 255,
-                pathingType.HasFlag(PathingType.NotWalkable) ? 255 : 0,
-                pathingType.HasFlag(PathingType.NotFlyable) ? 255 : 0,
-                pathingType.HasFlag(PathingType.NotBuildable) ? 255 : 0
+                pathingType.HasFlag(PathType.NotWalkable) ? 255 : 0,
+                pathingType.HasFlag(PathType.NotFlyable) ? 255 : 0,
+                pathingType.HasFlag(PathType.NotBuildable) ? 255 : 0
                 );
         }
 
-        private static Region CreateRegionFromSpan(PathingMap pathingMap, GridSpan span, int id, string name)
+        private static Region CreateRegionFromSpan(PathMap pathingMap, GridSpan span, int id, string name)
         {
             int minIndex = pathingMap.GetIndex(span.Min.Row, span.Min.Column);
             int maxIndex = pathingMap.GetIndex(span.Max.Row, span.Max.Column);
