@@ -563,6 +563,8 @@
                     Color pixel = image.GetPixel(x, flippedY);
                     Vector2 posWS = Vector2.Transform(new Vector2(x, y), imageToPathMapMtx);
                     int cell = pathMap.WorldToCell(posWS);
+                    if (cell < 0 || cell >= pathMap.Width * pathMap.Height)
+                        continue;
                     pathMap[cell] |= GetPathingValueFromColor(pixel);
                 }
             }
