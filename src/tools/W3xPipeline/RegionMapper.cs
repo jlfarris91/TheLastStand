@@ -493,25 +493,25 @@
                 .Map(assetRef => m_imageProvider.GetImage(assetRef))
                 .Do(UpdatePathMap);
 
-            Color GetPixel(IImage image, int x, int y, int div90)
-            {
-                int GetX(int index) { return index % image.Width; }
-                int GetY(int index) { return index / image.Width; }
-                Color GetPixelByIndex(int index) { return image.GetPixel(GetX(index), GetY(index)); }
-                switch (div90)
-                {
-                    case 0: // 0 degrees
-                        return GetPixelByIndex(x * image.Height + y);
-                    case 1: // 90 degrees
-                        return GetPixelByIndex(y * image.Width + (image.Width - 1 - x));
-                    case 2: // 180 degrees
-                        return GetPixelByIndex((image.Width - 1 - x) * image.Height + (image.Height - 1 - y));
-                    case 3: // 270 degrees
-                        return GetPixelByIndex((image.Height - 1 - y) * image.Width + x);
-                    default:
-                        throw new ArgumentOutOfRangeException(nameof(div90));
-                }
-            }
+            //Color GetPixel(IImage image, int x, int y, int div90)
+            //{
+            //    int GetX(int index) { return index % image.Width; }
+            //    int GetY(int index) { return index / image.Width; }
+            //    Color GetPixelByIndex(int index) { return image.GetPixel(GetX(index), GetY(index)); }
+            //    switch (div90)
+            //    {
+            //        case 0: // 0 degrees
+            //            return GetPixelByIndex(y * image.Width + x);
+            //        case 1: // 90 degrees
+            //            return GetPixelByIndex(y * image.Width + (image.Width - 1 - x));
+            //        case 2: // 180 degrees
+            //            return GetPixelByIndex((image.Width - 1 - x) * image.Height + (image.Height - 1 - y));
+            //        case 3: // 270 degrees
+            //            return GetPixelByIndex((image.Height - 1 - y) * image.Width + x);
+            //        default:
+            //            throw new ArgumentOutOfRangeException(nameof(div90));
+            //    }
+            //}
 
             void UpdatePathMap(IImage image)
             {
@@ -532,40 +532,36 @@
                     rotDeg = placement.Rotation * Mathf.Rad2Deg;
                 }
 
-                rotDeg = Mathf.WrapAngleDegrees((int)(rotDeg / 90.0f) * 90.0f);
-                //int div90 = (int)rotDeg / 90;
+                rotDeg = Mathf.WrapAngleDegrees((int)(rotDeg / 90.0f) * 90.0f + 90.0f);
                 float rotRad = rotDeg * Mathf.Deg2Rad;
 
                 Vector2 pos = placement.Position.XY();
 
+                var imageSize = new Vector2(image.Width, image.Height);
+                Vector2 halfImageSize = imageSize / 2.0f;
+
+                var cellOffset = new Vector2
+                {
+                    X = image.Width % 2 == 0 ? PathMap.PATH_CELL_PER_CELL * 0.5f : 0.0f,
+                    Y = image.Height % 2 == 0 ? PathMap.PATH_CELL_PER_CELL * 0.5f : 0.0f,
+                };
+
                 Matrix3x2 rotMtx = Matrix3x2.CreateRotation(rotRad);
 
-                Vector2 imageSize = new Vector2(image.Width, image.Height);
-                Vector2 imageSizeWS = Vector2.Transform(imageSize / 2.0f, rotMtx) * 2.0f;
-                imageSizeWS = Vector2Utility.Abs(imageSizeWS);
+                cellOffset = Vector2.Transform(cellOffset, rotMtx);
 
-                pos -= imageSizeWS * PathMap.PATH_CELL_SIZE / 2.0f;
-
-                if ((int)imageSizeWS.X % 2 == 0)
-                {
-                    pos.X += PathMap.PATH_CELL_PER_CELL * 0.5f;
-                }
-
-                if ((int)imageSizeWS.Y % 2 == 0)
-                {
-                    pos.Y += PathMap.PATH_CELL_PER_CELL * 0.5f;
-                }
-
-                Matrix3x2 posMtx = Matrix3x2.CreateTranslation(pos);
-
-                Matrix3x2 imageToPathMapMtx = rotMtx * posMtx;
+                Matrix3x2 imageToPathMapMtx =
+                    Matrix3x2.CreateTranslation(-halfImageSize) *
+                    Matrix3x2.CreateScale(PathMap.PATH_CELL_SIZE) *
+                    rotMtx *
+                    Matrix3x2.CreateTranslation(pos + cellOffset);
 
                 for (var y = 0; y < image.Height; ++y)
                 for (var x = 0; x < image.Width; ++x)
                 {
-                    Color pixel = image.GetPixel(x, y);
-                    //Color pixel = GetPixel(image, x, y, div90);
-                    Vector2 posWS = Vector2.Transform(new Vector2(x, y) * PathMap.PATH_CELL_SIZE, imageToPathMapMtx);
+                    int flippedY = image.Height - 1 - y;
+                    Color pixel = image.GetPixel(x, flippedY);
+                    Vector2 posWS = Vector2.Transform(new Vector2(x, y), imageToPathMapMtx);
                     int cell = pathMap.WorldToCell(posWS);
                     pathMap[cell] |= GetPathingValueFromColor(pixel);
                 }

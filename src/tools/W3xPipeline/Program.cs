@@ -1,4 +1,5 @@
-﻿namespace W3xPipeline
+﻿#define REFORGED
+namespace W3xPipeline
 {
     using System;
     using System.IO;
@@ -6,7 +7,6 @@
     using StormLibSharp;
     using War3.Net;
     using War3.Net.Assets;
-    using War3.Net.Core;
     using War3.Net.Data;
     using War3.Net.Data.Units;
     using War3.Net.Doodads;
@@ -22,8 +22,8 @@
     {
         private static ILogger sLogger;
 
-        private static readonly string WAR3_W3MOD_PATH = @"D:\Projects\WarcraftIII\MPQ\war3.w3mod";
-        //private static readonly string WAR3_W3MOD_PATH = @"C:\War3\data\branches\v1.32.1\War3.w3mod";
+        //private static readonly string WAR3_W3MOD_PATH = @"D:\Projects\WarcraftIII\MPQ\war3.w3mod";
+        private static readonly string WAR3_W3MOD_PATH = @"C:\War3\data\branches\v1.32.1\War3.w3mod";
         private static readonly string LOCALE_W3MOD_PATH = Path.Combine(WAR3_W3MOD_PATH, @"_locales\enus.w3mod");
         private static int WAR3_PRI = 100;
         private static int LOCALE_PRI = 200;
