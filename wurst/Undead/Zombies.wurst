@@ -2,7 +2,6 @@ package Zombies
 import GroupUtils
 import GameConstants
 import HumanPlayers
-import UndeadSpawnPoints
 import GameSettings
 import HashMap
 import HashList
@@ -16,23 +15,24 @@ import TlsUnitIds
 import Camp
 import HumanPlayerMetadata
 import UnitMetadata
-import SpawnPointManager
-import Linq
-import SpawnPoint
-import Enumerable
+import UndeadSpawnManager
 
 timer g_SpawnTimer
 HashMap<player, PlayerZombieMetadata> g_PlayerMetadata
 HashMap<unit, Zombie> g_Zombies
 
+// ============================================================================
 public class Zombies
 
+  // --------------------------------------------------------------------------
   static function stopSpawning()
     g_SpawnTimer.pause()
 
+  // --------------------------------------------------------------------------
   static function startSpawning()
     g_SpawnTimer.startPeriodic(ZOMBIES_SPAWN_INTERVAL, function spawnZombiesNearPlayers)
   
+  // --------------------------------------------------------------------------
   static function killAllUndead()
     var ug = getGroup()
     ug.enumUnitsOfPlayer(PLAYER_UNDEAD, null)
@@ -40,10 +40,12 @@ public class Zombies
       u.kill()
     ug.release()
 
+  // --------------------------------------------------------------------------
   static function spawnDayZombiesNearPlayers()
     g_PlayingHumanPlayers.forEach() (player p) ->
       spawnDayZombiesNearPlayer(p)
 
+  // --------------------------------------------------------------------------
   static function spawnDayZombiesNearPlayer(player p)
     let playerMetadata = p.getHumanMetadataRequired()
 
@@ -54,23 +56,23 @@ public class Zombies
     var center = camp.getCenter()
 
     // Clamp the spawn area to the world bounds
-    center = clampToWorldBounds(center, ZOMBIES_DAY_SPAWN_RANGE)
+    center = clampToWorldBounds(center, ZOMBIES_DAY_SPAWN_RANGE_MAX)
 
-    var spawnPoints = g_UndeadSpawnPointManager.getRandomSpawnPointsInRange(
+    var spawnPoints = g_undeadSpawnManager.getRandomSpawnPointsInRange(
       center,
-      ZOMBIES_DAY_SPAWN_RANGE,
+      ZOMBIES_DAY_SPAWN_RANGE_MIN,
+      ZOMBIES_DAY_SPAWN_RANGE_MAX,
       GameSettings.zombies_DaySpawnCountPerPlayer)
 
     var groupSize = GetRandomInt(ZOMBIES_DAY_GROUP_SIZE_MIN, ZOMBIES_DAY_GROUP_SIZE_MAX)
 
-    spawnPoints.forEach() (ISpawnPoint sp) ->
+    for sp in spawnPoints
       // TODO: unit recycler
-      for i = 0 to groupSize - 1
+      for j = 0 to groupSize - 1
         createUnitTLS(
           PLAYER_UNDEAD,
           TlsUnitIds.zombieDay,
-          sp.getPos().x,
-          sp.getPos().y,
+          sp.x, sp.y,
           GetRandomDirectionDeg())
 
     var chance = ZOMBIES_DAY_GROUP_ITEM_CHANCE + (groupSize * ZOMBIES_DAY_GROUP_ITEM_CHANCE)
@@ -80,14 +82,17 @@ public class Zombies
 
     destroy spawnPoints
 
+// ============================================================================
 function isFilterUnitVulnerableStructure() returns bool
   let u = GetFilterUnit()
   return u.isStructure() and not u.isInvulnerable()
 
+// ============================================================================
 function isFilterUnitVulnerableNonStructure() returns bool
   let u = GetFilterUnit()
   return not u.isStructure() and not u.isInvulnerable()
 
+// ============================================================================
 public function getClosestZombieTarget(player p, vec2 pos) returns unit
   var distance = REAL_MAX
   let playerMetadata = p.getHumanMetadataRequired()
@@ -120,6 +125,7 @@ public function getClosestZombieTarget(player p, vec2 pos) returns unit
 
   return target
 
+// ============================================================================
 function spawnZombieNearPlayer(player p, vec2 pos) returns Zombie
   var zombie = createZombie(pos.x, pos.y)
   zombie.targetPlayer = p
@@ -133,6 +139,7 @@ function spawnZombieNearPlayer(player p, vec2 pos) returns Zombie
 
   return zombie
 
+// ============================================================================
 function spawnZombiesNearPlayer(player p)
   let playerMetadata = p.getHumanMetadataRequired()
 
@@ -144,7 +151,7 @@ function spawnZombiesNearPlayer(player p)
   let playerZombieMetadata = g_PlayerMetadata.get(p)
 
   // Clamp the spawn area to the world bounds
-  center = clampToWorldBounds(center, ZOMBIES_SPAWN_RANGE)
+  center = clampToWorldBounds(center, ZOMBIES_SPAWN_RANGE_MAX)
 
   int zombieCount = playerZombieMetadata.zombies.size()
   int max = R2I(GameSettings.zombies_SpawnsMaxPerPlayer)
@@ -156,33 +163,36 @@ function spawnZombiesNearPlayer(player p)
   numberOfSpawnPoints = clamp(max - zombieCount, 1, numberOfSpawnPoints)
 
   if (numberOfSpawnPoints == 1)
-    var sp = g_UndeadSpawnPointManager.getRandomSpawnPointInRange(center, ZOMBIES_SPAWN_RANGE)
-
-    if (sp == null)
+    var sp = g_undeadSpawnManager.getRandomSpawnPointInRange(center, ZOMBIES_SPAWN_RANGE_MIN, ZOMBIES_SPAWN_RANGE_MAX)
+    if (sp == INVALID_SPAWN_POINT)
       error("Couldn't find a zombie spawn points")
-
-    var zombie = spawnZombieNearPlayer(p, sp.getPos())
+    var zombie = spawnZombieNearPlayer(p, sp)
     playerZombieMetadata.zombies.add(zombie)
   else
-    var spawnPoints = g_UndeadSpawnPointManager.getRandomSpawnPointsInRange(
+    var spawnPoints = g_undeadSpawnManager.getRandomSpawnPointsInRange(
       center,
-      ZOMBIES_SPAWN_RANGE,
+      ZOMBIES_SPAWN_RANGE_MIN,
+      ZOMBIES_SPAWN_RANGE_MAX,
       numberOfSpawnPoints)
 
-    if (spawnPoints == null or not spawnPoints.any())
+    if (spawnPoints.isEmpty())
       error("Couldn't find " + I2S(numberOfSpawnPoints) + " zombie spawn points")
 
-    spawnPoints.forEach() (int i, ISpawnPoint sp) ->
-      if (zombieCount + i < max)
-        var zombie = spawnZombieNearPlayer(p, sp.getPos())
+    var zombieIndex = 0
+    for sp in spawnPoints
+      if (zombieCount + zombieIndex < max)
+        var zombie = spawnZombieNearPlayer(p, sp)
         playerZombieMetadata.zombies.add(zombie)
+        zombieIndex++
 
     destroy spawnPoints
 
+// ============================================================================
 function spawnZombiesNearPlayers()
   for p in g_PlayingHumanPlayers
     spawnZombiesNearPlayer(p)
 
+// ============================================================================
 function createZombie(real x, real y) returns Zombie
   var u = createUnitTLS(PLAYER_UNDEAD, TlsUnitIds.zombieNight, x, y, GetRandomDirectionDeg())
   var scale = GetRandomReal(-0.2, 0.2)
@@ -201,6 +211,7 @@ function createZombie(real x, real y) returns Zombie
   g_Zombies.put(u, zombie)
   return zombie
 
+// ============================================================================
 function destroyZombieMetadata(unit u)
   var zombie = g_Zombies.get(u)
   
@@ -237,6 +248,7 @@ function onZombieKilled()
       FX.createGoldCreditEffect(pos, killingPlayer)
       FX.createFoundMaterialsTag(pos, ZOMBIES_MATERIALS_DROP_AMOUNT, killingPlayer)
 
+// ============================================================================
 class PlayerZombieMetadata
   player p
   HashList<Zombie> zombies
@@ -245,6 +257,7 @@ class PlayerZombieMetadata
     this.p = p
     this.zombies = new HashList<Zombie>()
 
+// ============================================================================
 class Zombie
   unit zombieUnit
   player targetPlayer
@@ -255,6 +268,7 @@ class Zombie
   function getPos() returns vec2
     return zombieUnit.getPos()
 
+// ============================================================================
 init
   g_SpawnTimer = CreateTimer()
   g_PlayerMetadata = new HashMap<player, PlayerZombieMetadata>()

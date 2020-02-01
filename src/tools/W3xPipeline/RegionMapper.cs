@@ -5,6 +5,7 @@
     using System.IO;
     using System.Linq;
     using System.Numerics;
+    using System.Text;
     using StormLibSharp;
     using War3.Net;
     using War3.Net.Assets;
@@ -53,6 +54,8 @@
             m_pathMapFileDeserializer = pathMapFileDeserializer;
             m_destructibleLibrary = destructibleLibrary;
         }
+
+        public bool WriteRegionsToArchive { get; private set; }
 
         public void FindIslands(PathMap map)
         {
@@ -413,7 +416,7 @@
                         entity.SetValue(mod.Id, mod.Index, mod.Value);
                     }
                 }
-                
+
                 UpdatePathingMap(doodads, pathMap);
 
                 m_logger.Log($"Removed {oldSpawnRegions.Length} existing spawn regions in map");
@@ -444,16 +447,24 @@
 
                 m_logger.Log($"Generated {newSpawnRegions.Length} new spawn regions in map");
 
-                m_logger.Log("Serializing regions...");
-                using (Stream file = File.Create(tempFileName))
-                using (var writer = new BinaryWriter(file))
+                if (WriteRegionsToArchive)
                 {
-                    new MapRegionsBinarySerializer().Serialize(writer, mapRegions);
-                }
-                m_logger.Log("Done serializing regions");
+                    m_logger.Log("Serializing regions...");
+                    using (Stream file = File.Create(tempFileName))
+                    using (var writer = new BinaryWriter(file))
+                    {
+                        new MapRegionsBinarySerializer().Serialize(writer, mapRegions);
+                    }
 
-                m_logger.Log($"Replacing file {ARCHIVE_REGION_PLACEMENT_FILE_PATH} in mpq");
-                archive.ReplaceFile(tempFileName, ARCHIVE_REGION_PLACEMENT_FILE_PATH);
+                    m_logger.Log("Done serializing regions");
+
+                    m_logger.Log($"Replacing file {ARCHIVE_REGION_PLACEMENT_FILE_PATH} in mpq");
+                    archive.ReplaceFile(tempFileName, ARCHIVE_REGION_PLACEMENT_FILE_PATH);
+                }
+
+                string generatedScriptFilePath = @"D:\Projects\WarcraftIII\TheLastStand\wurst\Spawning\SpawnRegionInit.wurst";
+                string generatedScriptFileContents = GenerateSpawnRegionsWurstScript(mapRegions);
+                File.WriteAllText(generatedScriptFilePath, generatedScriptFileContents);
 
                 m_logger.Log("Done generating spawn regions");
             }
@@ -608,6 +619,33 @@
                 WeatherEffect = 0,
                 Bounds = spanBounds
             };
+        }
+
+        private static string GenerateSpawnRegionsWurstScript(MapRegions regions)
+        {
+            var sb = new StringBuilder();
+
+            const string indentStr = "  ";
+            const string spawnRegionPackageName = "SpawnRegion";
+            const string spawnRegionInitPackageName = "SpawnRegionInit";
+
+            sb.AppendLine("// This file is generated. Any changes will be lost.");
+            sb.AppendLine($"// Last generated {DateTime.Now}");
+            sb.AppendLine($"package {spawnRegionInitPackageName}");
+            sb.AppendLine($"import {spawnRegionPackageName}");
+            sb.AppendLine();
+            sb.AppendLine("public function registerSpawnRegionRects()");
+            sb.AppendLine($"{indentStr}Log.info(\"Creating spawn region...\")");
+
+            int i = 1;
+            foreach (Region region in regions.Regions)
+            {
+                sb.AppendLine($"{indentStr}/* {i++,-4} */ addSpawnRect(Rect({region.Bounds.Min.X}, {region.Bounds.Min.Y}, {region.Bounds.Max.X}, {region.Bounds.Max.Y}))");
+            }
+
+            sb.AppendLine($"{indentStr}Log.info(\"Done creating spawn region.\")");
+
+            return sb.ToString();
         }
     }
 }
