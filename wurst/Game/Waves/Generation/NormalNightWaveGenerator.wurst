@@ -9,12 +9,15 @@ import GameConstants
 import PeriodicWaveActivator
 import TimeOfDayProgress
 import FunctionalField
-import ZombieFields
 import Math
 import SpawnWaveDefinition
 import SpawnWave
 import NightWave
 import Func
+import SingleUnitTypeProvider
+import UnitMetadata
+import HumanPlayerMetadata
+import UndeadUnit
 
 /*
     For each player P
@@ -51,8 +54,11 @@ public class NormalNightWaveGenerator implements IWaveGenerator<NightWave>
     for i=1 to m_totalNights
       let wave = waves.getOrCreateWave(i)
       wave.setTimeOfDayScalePercent(200.0)
-      let spawnWave = generateZombieWave(p, i)
-      wave.addSpawnWave(spawnWave)
+      wave.addSpawnWave(generateZombieWave(p, i))
+
+    for i=0 to m_totalNights step 3
+      let wave = waves.getOrCreateWave(i)
+      wave.addSpawnWave(generateAbomWave(p, i))
     
   // --------------------------------------------------------------------------
   private function generateZombieWave(player p, int night) returns SpawnWave
@@ -122,19 +128,19 @@ public class NormalNightWaveGenerator implements IWaveGenerator<NightWave>
     let damageBaseGameStart = 10
     let damageBaseGameEnd = 30
     let damageBase = lerpInt(damageBaseGameStart, damageBaseGameEnd, currentNightGameProgress)
-    let damageBaseFunc = new FunctionalUnitWeaponIntegerField(UNIT_WEAPON_IF_ATTACK_DAMAGE_BASE, 0)..setValue(damageBase)
+    let damageBaseFunc = new FunctionalUnitWeaponIntegerField(UNIT_WEAPON_IF_ATTACK_DAMAGE_BASE, 1)..setValue(damageBase)
     ufd.add(damageBaseFunc)
 
     let damageNumberOfDiceGameStart = 1
     let damageNumberOfDiceGameEnd = 3
     let damageNumberOfDice = lerpInt(damageNumberOfDiceGameStart, damageNumberOfDiceGameEnd, currentNightGameProgress)
-    let damageNumberOfDiceFunc = new FunctionalUnitWeaponIntegerField(UNIT_WEAPON_IF_ATTACK_DAMAGE_NUMBER_OF_DICE, 0)..setValue(damageNumberOfDice)
+    let damageNumberOfDiceFunc = new FunctionalUnitWeaponIntegerField(UNIT_WEAPON_IF_ATTACK_DAMAGE_NUMBER_OF_DICE, 1)..setValue(damageNumberOfDice)
     ufd.add(damageNumberOfDiceFunc)
 
-    let damageSidesPerDieGameStart = 3
-    let damageSidesPerDieGameEnd = 6
+    let damageSidesPerDieGameStart = 1
+    let damageSidesPerDieGameEnd = 3
     let damageSidesPerDie = lerpInt(damageSidesPerDieGameStart, damageSidesPerDieGameEnd, currentNightGameProgress)
-    let damageSidesPerDieFunc = new FunctionalUnitWeaponIntegerField(UNIT_WEAPON_IF_ATTACK_DAMAGE_SIDES_PER_DIE, 0)..setValue(damageSidesPerDie)
+    let damageSidesPerDieFunc = new FunctionalUnitWeaponIntegerField(UNIT_WEAPON_IF_ATTACK_DAMAGE_SIDES_PER_DIE, 1)..setValue(damageSidesPerDie)
     ufd.add(damageSidesPerDieFunc)
 
     let def = new SpawnWaveDefinition()
@@ -148,3 +154,153 @@ public class NormalNightWaveGenerator implements IWaveGenerator<NightWave>
     ..setUnitModifier(ufd)
 
     return new SpawnWave(def, p)
+  
+  // --------------------------------------------------------------------------
+  private function generateAbomWave(player p, int night) returns SpawnWave
+
+    // The percentage of the game's progress for the current night
+    let currentNightGameProgress = I2R(night) / I2R(m_totalNights)
+
+    // The percentage of the game's progress for the next night
+    let nextNightGameProgress = I2R(night + 1) / I2R(m_totalNights)
+
+    let unitTypeProvider = new SingleUnitTypeProvider()
+    ..setUnitType(TlsUnitIds.abomination)
+
+    let spawnPointProvider = new RandomSpawnPointProvider(g_undeadSpawnManager)
+    ..setMinRange(ABOM_SPAWN_RANGE_MIN)
+    ..setMaxRange(ABOM_SPAWN_RANGE_MAX)
+
+    let activator = new PeriodicWaveActivator()
+    ..setInterval(ABOM_SPAWN_INTERVAL)
+
+    let progress = new NightProgress()
+
+    // This determines the maximum number of alive spawns
+    let maxAlive = lerp(1, 4, currentNightGameProgress).floor()
+    Func1<real, int> getMaxAliveCount = (real _waveProgress) -> 
+      return maxAlive
+
+    // This determines the number of spawn points to spawn enemies used each time the spawner is activated.
+    // The higher the number the more zombies spawned per activation.
+    Func1<real, int> getSpawnsPerActivation = (real waveProgress) ->
+      return 1
+
+    // This determines the number of enemies to spawn at each spawn point when the spawner is activated.
+    Func1<real, real> getSpawnGroupingFactor = (real waveProgress) ->
+      return 0.0
+
+    // These modifiers will run on each unit spawned in the wave
+    // The real value passed in is the wave's current progress
+    let ufd = new AggregateUnitModifier()
+
+    // These are some common zombie fields we always set
+    ufd.add(new AbominationFields())
+    ufd.add(new SetTargetPlayer(p))
+
+    // Each night zombies health will interpolate between the min/max for that night
+    let gameStartMaxHp = 600
+    let gameEndMaxHp = 6000
+    let maxHpMin = lerpInt(gameStartMaxHp, gameEndMaxHp, currentNightGameProgress)
+    let maxHpMax = lerpInt(gameStartMaxHp, gameEndMaxHp, nextNightGameProgress)
+    let maxHpFunc = new MaxHpUnitField()..setFunc() (real waveProgress) ->
+      return lerpInt(maxHpMin, maxHpMax, waveProgress)
+    ufd.add(maxHpFunc)
+
+    // Zombies will get faster as the night goes on
+    // Speed is reset every night
+    let moveSpeed = lerp(125, 175, currentNightGameProgress)
+    let moveSpeedFunc = new FunctionalUnitRealField(UNIT_RF_SPEED)..setFunc() (real t) ->
+      return moveSpeed
+    ufd.add(moveSpeedFunc)
+
+    let armorGameStart = 3.0
+    let armorGameEnd = 20.0
+    let armor = lerp(armorGameStart, armorGameEnd, currentNightGameProgress)
+    let armorFunc = new ArmorUnitField()..setValue(armor)
+    ufd.add(armorFunc)
+
+    let damageBaseGameStart = 40
+    let damageBaseGameEnd = 120
+    let damageBase = lerpInt(damageBaseGameStart, damageBaseGameEnd, currentNightGameProgress)
+    let damageBaseFunc = new FunctionalUnitWeaponIntegerField(UNIT_WEAPON_IF_ATTACK_DAMAGE_BASE, 1)..setValue(damageBase)
+    ufd.add(damageBaseFunc)
+
+    let damageNumberOfDiceGameStart = 4
+    let damageNumberOfDiceGameEnd = 12
+    let damageNumberOfDice = lerpInt(damageNumberOfDiceGameStart, damageNumberOfDiceGameEnd, currentNightGameProgress)
+    let damageNumberOfDiceFunc = new FunctionalUnitWeaponIntegerField(UNIT_WEAPON_IF_ATTACK_DAMAGE_NUMBER_OF_DICE, 1)..setValue(damageNumberOfDice)
+    ufd.add(damageNumberOfDiceFunc)
+
+    let damageSidesPerDieGameStart = 3
+    let damageSidesPerDieGameEnd = 6
+    let damageSidesPerDie = lerpInt(damageSidesPerDieGameStart, damageSidesPerDieGameEnd, currentNightGameProgress)
+    let damageSidesPerDieFunc = new FunctionalUnitWeaponIntegerField(UNIT_WEAPON_IF_ATTACK_DAMAGE_SIDES_PER_DIE, 1)..setValue(damageSidesPerDie)
+    ufd.add(damageSidesPerDieFunc)
+
+    let def = new SpawnWaveDefinition()
+    ..setProgress(progress)
+    ..setMaxAliveCount(getMaxAliveCount)
+    ..setSpawnsPerActivation(getSpawnsPerActivation)
+    ..setSpawnGroupingFactor(getSpawnGroupingFactor)
+    ..setActivator(activator)
+    ..setSpawnPointProvider(spawnPointProvider)
+    ..setUnitTypeProvider(unitTypeProvider)
+    ..setUnitModifier(ufd)
+
+    return new SpawnWave(def, p)
+
+// ============================================================================
+public class ZombieFields implements IFunctionalUnitModifier
+  // --------------------------------------------------------------------------
+  override function apply(unit u, real t)
+    let scale = GetRandomReal(-0.2, 0.2)
+
+    u.setScale(1.0 + scale)
+    u.setTimeScale(1.0 - scale)
+    u.setMoveSpeedPercChange(-scale)
+    u.setAnimation("birth")
+
+    let w = u.getField(UNIT_RF_SHADOW_IMAGE_WIDTH) * (1.0 + scale)
+    let h = u.getField(UNIT_RF_SHADOW_IMAGE_HEIGHT) * (1.0 + scale)
+    u.setField(UNIT_RF_SHADOW_IMAGE_WIDTH, w)
+    u.setField(UNIT_RF_SHADOW_IMAGE_HEIGHT, h)
+
+// ============================================================================
+public class AbominationFields implements IFunctionalUnitModifier
+  // --------------------------------------------------------------------------
+  override function apply(unit u, real t)
+    let scale = GetRandomReal(-0.2, 0.2)
+
+    u.setScale(1.0 + scale)
+    u.setTimeScale(1.0 - scale)
+    u.setMoveSpeedPercChange(-scale)
+    u.setAnimation("birth")
+
+    let w = u.getField(UNIT_RF_SHADOW_IMAGE_WIDTH) * (1.0 + scale)
+    let h = u.getField(UNIT_RF_SHADOW_IMAGE_HEIGHT) * (1.0 + scale)
+    u.setField(UNIT_RF_SHADOW_IMAGE_WIDTH, w)
+    u.setField(UNIT_RF_SHADOW_IMAGE_HEIGHT, h)
+
+// ============================================================================
+public class SetTargetPlayer implements IFunctionalUnitModifier
+  private player m_targetPlayer
+
+  // --------------------------------------------------------------------------
+  construct (player targetPlayer)
+    m_targetPlayer = targetPlayer
+
+  // --------------------------------------------------------------------------
+  override function apply(unit u, real t)
+    let unitMetadata = u.getMetadata() castTo UndeadUnit
+    if (unitMetadata == null)
+      return
+
+    let playerMetadata = m_targetPlayer.getHumanMetadataRequired()
+    if (playerMetadata == null)
+      return
+
+    if (playerMetadata.getIsDead())
+      return
+
+    unitMetadata.setTargetPlayer(m_targetPlayer)

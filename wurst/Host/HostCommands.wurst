@@ -1,6 +1,5 @@
 package HostCommands
 import Commands
-import GameConstants
 import DisplayTextToPlayer
 import Host
 import GroupUtils
@@ -8,9 +7,12 @@ import Ids
 import ErrorHandling
 import HumanPlayerMetadata
 import UnitMetadata
+import GameInstance
 
 constant string COMMAND_DAY = "day"
 constant string COMMAND_NIGHT = "night"
+constant string COMMAND_SKIP_TO_DAY = "skipToDay"
+constant string COMMAND_SKIP_TO_NIGHT = "skipToNight"
 constant string COMMAND_SEE = "see"
 constant string COMMAND_KILL_SELECTED_UNITS = "kill"
 constant string COMMAND_REMOVE_SELECTED_UNITS = "remove"
@@ -19,12 +21,15 @@ constant string COMMAND_CREATE_ITEM = "item"
 constant string COMMAND_CREATE_UNIT = "unit"
 constant string COMMAND_ADD_MATS = "mats"
 
+// ============================================================================
 function startNextDay()
-  SetTimeOfDay(TIME_OF_DAY)
+  g_GameInstance.startNextDay()
 
+// ============================================================================
 function startNextNight()
-  SetTimeOfDay(TIME_OF_NIGHT)
+  g_GameInstance.startNextNight()
 
+// ============================================================================
 function turnOnMapVisibility()
   if (IsFogEnabled())
     displayMessageToPlayer(g_HostPlayer, "Disabled fog of war")
@@ -35,6 +40,7 @@ function turnOnMapVisibility()
     FogEnableOn()
     FogMaskEnableOn()
 
+// ============================================================================
 function killSelectedUnits()
   let ug = getGroup()
   ug.enumUnitsSelected(g_HostPlayer, null)
@@ -42,6 +48,7 @@ function killSelectedUnits()
     u.kill()
   ug.release()
 
+// ============================================================================
 function removeSelectedUnits()
   let ug = getGroup()
   ug.enumUnitsSelected(g_HostPlayer, null)
@@ -49,6 +56,7 @@ function removeSelectedUnits()
     u.remove()
   ug.release()
 
+// ============================================================================
 function moveSelectedUnits()
   let cameraLoc = GetCameraTargetPositionLoc()
   let cameraPos = vec2(GetLocationX(cameraLoc), GetLocationY(cameraLoc))
@@ -59,6 +67,7 @@ function moveSelectedUnits()
   ug.release()
   RemoveLocation(cameraLoc)
 
+// ============================================================================
 function createItemAtCameraPos()
   let cameraLoc = GetCameraTargetPositionLoc()
   let cameraPos = vec2(GetLocationX(cameraLoc), GetLocationY(cameraLoc))
@@ -77,6 +86,7 @@ function createItemAtCameraPos()
 
   RemoveLocation(cameraLoc)
 
+// ============================================================================
 function createUnitAtCameraPos()
   let cameraLoc = GetCameraTargetPositionLoc()
   let cameraPos = vec2(GetLocationX(cameraLoc), GetLocationY(cameraLoc))
@@ -101,6 +111,7 @@ function createUnitAtCameraPos()
 
   RemoveLocation(cameraLoc)
 
+// ============================================================================
 function addMats()
   let args = getCommandArgs()
   let playerIdArg = args.get(0)
@@ -121,8 +132,37 @@ function addMats()
     error("Can't give materials to player \"{0}\"".format(p.getName()))
 
   playerMetadata.giveMaterials(mats)
-  displayMessageToPlayer(p, "Gave {0} materials to {1}".format(I2S(mats), p.getNameColored()))
+  displayMessageToPlayer(g_HostPlayer, "Gave {0} materials to {1}".format(I2S(mats), p.getNameColored()))
 
+// ============================================================================
+function skipToDay()
+  let args = getCommandArgs()
+  let dayArg = args.get(0)
+  
+  let day = dayArg.toInt()
+  if (day == -1)
+    error("Couldn't parse day integer from argument 0 \"{0}\"".format(dayArg))
+    return
+
+  displayMessageToPlayer(g_HostPlayer, "Skipping to day {0}...".format(I2S(day)))
+
+  g_GameInstance.skipToDay(day)
+    
+// ============================================================================
+function skipToNight()
+  let args = getCommandArgs()
+  let nightArg = args.get(0)
+
+  let night = nightArg.toInt()
+  if (night == -1)
+    error("Couldn't parse day integer from argument 0 \"{0}\"".format(nightArg))
+    return
+
+  displayMessageToPlayer(g_HostPlayer, "Skipping to night {0}...".format(I2S(night)))
+
+  g_GameInstance.skipToNight(night)  
+
+// ============================================================================
 init
   registerHostCommand(COMMAND_DAY, function startNextDay)
   registerHostCommand(COMMAND_NIGHT, function startNextNight)
@@ -133,3 +173,5 @@ init
   registerHostCommand(COMMAND_CREATE_ITEM, function createItemAtCameraPos)
   registerHostCommand(COMMAND_CREATE_UNIT, function createUnitAtCameraPos)
   registerHostCommand(COMMAND_ADD_MATS, function addMats)
+  registerHostCommand(COMMAND_SKIP_TO_DAY, function skipToDay)
+  registerHostCommand(COMMAND_SKIP_TO_NIGHT, function skipToNight)

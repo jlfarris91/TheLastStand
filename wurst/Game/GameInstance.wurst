@@ -38,6 +38,22 @@ public class GameInstance extends Runnable
     stop()
 
   // --------------------------------------------------------------------------
+  function getIsDay() returns bool
+    return GetTimeOfDay() >= TIME_OF_DAY and GetTimeOfDay() < TIME_OF_NIGHT
+
+  // --------------------------------------------------------------------------
+  function getIsNight() returns bool
+    return GetTimeOfDay() >= TIME_OF_NIGHT or GetTimeOfDay() < TIME_OF_DAY
+
+  // --------------------------------------------------------------------------
+  function getDay() returns int
+    return m_day
+
+  // --------------------------------------------------------------------------
+  function getNight() returns int
+    return m_night
+
+  // --------------------------------------------------------------------------
   function getDaysSurvived() returns int
     return max(m_night - 1, 0)
 
@@ -46,13 +62,41 @@ public class GameInstance extends Runnable
     return max(m_day - 1, 0)
 
   // --------------------------------------------------------------------------
+  function startNextDay()
+    SetTimeOfDay(TIME_OF_DAY)
+
+  // --------------------------------------------------------------------------
+  function startNextNight()
+    SetTimeOfDay(TIME_OF_NIGHT)
+
+  // --------------------------------------------------------------------------
+  function skipToDay(int day)
+    if (day > getDay())
+      if (getIsDay())
+        startNextNight()
+      else
+        startNextDay()
+      doAfter(0.2) ->
+        skipToDay(day)
+
+  // --------------------------------------------------------------------------
+  function skipToNight(int night)
+    if (night > getNight())
+      if (getIsDay())
+        startNextNight()
+      else
+        startNextDay()
+      doAfter(0.2) ->  
+        skipToNight(night)
+
+  // --------------------------------------------------------------------------
   function reset()
     stop()
     
     m_day = 0
     m_night = 0
-    SetTimeOfDay(0.0)
-    SetTimeOfDayScalePercentBJ(100.0)
+    SetTimeOfDay(TIME_OF_DAY_INITIAL)
+    SetTimeOfDayScalePercentBJ(GAME_SPEED_INITIAL)
 
     start()
 
@@ -96,7 +140,7 @@ public class GameInstance extends Runnable
   private function onDayStart()
     m_day++
 
-    Log.info("Started day " + I2S(m_day))
+    // Log.info("Started day " + I2S(m_day))
 
     PlaySoundBJ(TlsSounds.questCompleted)
 
@@ -108,21 +152,15 @@ public class GameInstance extends Runnable
       let waves = m_playerWaves.getOrCreatePlayerWaves(p)
       waves.getRunner().startDayWave(m_day)
 
-    //Zombies.stopSpawning()
-    //Zombies.killAllUndead()
-    //Zombies.spawnDayZombiesNearPlayers()
-
     Items.spawnItemsNearPlayers()
 
     spawnUnrescuedSurvivorsNearPlayers()
-
-    // TODO: update player stats multiboard
 
   // --------------------------------------------------------------------------
   private function onNightStart()
     m_night++
 
-    Log.info("Started night " + I2S(m_night))
+    // Log.info("Started night " + I2S(m_night))
 
     removeUnrescuedSurvivors()
     Items.removeAllItemsNotNearHumanUnits()
@@ -131,9 +169,6 @@ public class GameInstance extends Runnable
     for p in g_PlayingHumanPlayers
       let waves = m_playerWaves.getOrCreatePlayerWaves(p)
       waves.getRunner().startNightWave(m_night)
-
-    //Zombies.killAllUndead()
-    //Zombies.startSpawning()
 
   // --------------------------------------------------------------------------
   private function respawnDeadPlayers()
@@ -155,7 +190,7 @@ public class GameInstance extends Runnable
   private function initializeWaves()
     m_playerWaves = new PlayerWavesMap()
 
-    Log.info("Generating waves...")
+    // Log.info("Generating waves...")
 
     for p in g_PlayingHumanPlayers
       let playerWaves = m_playerWaves.getOrCreatePlayerWaves(p)
@@ -166,7 +201,7 @@ public class GameInstance extends Runnable
       if (m_dayWaveGenerator != null)
         m_dayWaveGenerator.generateWavesForPlayer(p, playerWaves.getDayWaves())
 
-    Log.info("Done generating waves.")
+    // Log.info("Done generating waves.")
 
   // --------------------------------------------------------------------------
   private function initializeAlliances()  
@@ -185,8 +220,6 @@ public class GameInstance extends Runnable
       SetPlayerAllianceStateBJ(p, PLAYER_UNDEAD, bj_ALLIANCE_UNALLIED)
       // Make raiders treat player as an enemy
       SetPlayerAllianceStateBJ(PLAYER_UNDEAD, p, bj_ALLIANCE_UNALLIED)
-      // Turn off undead shared vision with player (probably unnecessary)
-      SetPlayerAllianceBJ(PLAYER_UNDEAD, ALLIANCE_SHARED_VISION, false, p)
 
   // --------------------------------------------------------------------------
   private function listenForDayEvent()
