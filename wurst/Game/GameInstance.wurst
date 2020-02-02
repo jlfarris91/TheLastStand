@@ -1,6 +1,6 @@
 package GameInstance
 import TimeOfDayEvents
-import Zombies
+// import Zombies
 import Items
 import GameSettings
 import Survivors
@@ -11,6 +11,12 @@ import Heroes
 import AnonymousEvent
 import ClosureTimers
 import TlsSounds
+import PlayerWaves
+import IWaveGenerator
+import NormalNightWaveGenerator
+import DayWave
+import NightWave
+import Runnable
 
 public GameInstance g_GameInstance
 
@@ -18,50 +24,65 @@ constant real TIME_OF_DAY_INITIAL = 5.0
 constant real GAME_SPEED_INITIAL = 50.0
 
 // ============================================================================
-public class GameInstance
-  private int _days
-  private int _nights
-  private AnonymousEventHandler _dayCB
-  private AnonymousEventHandler _nightCB
+public class GameInstance extends Runnable
+  private int m_day
+  private int m_night
+  private AnonymousEventHandler m_dayEventHandler
+  private AnonymousEventHandler m_nightEventHandler
+  private PlayerWavesMap m_playerWaves
+  private IWaveGenerator<DayWave> m_dayWaveGenerator
+  private IWaveGenerator<NightWave> m_nightWaveGenerator
 
   // --------------------------------------------------------------------------
   ondestroy
     stop()
 
   // --------------------------------------------------------------------------
+  function getDaysSurvived() returns int
+    return max(m_night - 1, 0)
+
+  // --------------------------------------------------------------------------
+  function getNightsSurvived() returns int
+    return max(m_day - 1, 0)
+
+  // --------------------------------------------------------------------------
   function reset()
-
     stop()
-
-    _days = 0
-    _nights = 0
+    
+    m_day = 0
+    m_night = 0
     SetTimeOfDay(0.0)
+    SetTimeOfDayScalePercentBJ(100.0)
 
     start()
 
   // --------------------------------------------------------------------------
-  function start()
+  override function onStarted()
+    super.onStarted()
+
+    // These should move to a place that sets up the GameInstance
+    m_dayWaveGenerator = null
+    m_nightWaveGenerator = new NormalNightWaveGenerator()..setTotalNights(28)
 
     initializeGeneral()
     initializeAlliances()
+    initializeWaves()
 
-    _dayCB = g_DayEvent.addListener() () ->
-      onDayStart()
-
-    _nightCB = g_NightEvent.addListener() () ->
-      onNightStart()
+    listenForDayEvent()
+    listenForNightEvent()
 
     nullTimer() ->
       postStart()
 
   // --------------------------------------------------------------------------
-  function stop()
-    
-    if (_dayCB != null)
-      _dayCB = g_DayEvent.removeListener(_dayCB)
+  override function onStopped()
+    super.onStopped()    
 
-    if (_nightCB != null)
-      _nightCB = g_NightEvent.removeListener(_nightCB)
+    unlistenForDayEvent()
+    unlistenForNightEvent()
+
+    destroy m_playerWaves
+    m_playerWaves = null
 
   // --------------------------------------------------------------------------
   private function postStart()
@@ -73,47 +94,46 @@ public class GameInstance
 
   // --------------------------------------------------------------------------
   private function onDayStart()
-    if (_days > 1)
-      _nights++
+    m_day++
+
+    Log.info("Started day " + I2S(m_day))
 
     PlaySoundBJ(TlsSounds.questCompleted)
 
-    Zombies.stopSpawning()
-    Zombies.killAllUndead()
-    Zombies.spawnDayZombiesNearPlayers()
-
-    Items.spawnItemsNearPlayers()
-
     if (GameSettings.allowRespawn)
       respawnDeadPlayers()
+
+    // Start day waves for players
+    for p in g_PlayingHumanPlayers
+      let waves = m_playerWaves.getOrCreatePlayerWaves(p)
+      waves.getRunner().startDayWave(m_day)
+
+    //Zombies.stopSpawning()
+    //Zombies.killAllUndead()
+    //Zombies.spawnDayZombiesNearPlayers()
+
+    Items.spawnItemsNearPlayers()
 
     spawnUnrescuedSurvivorsNearPlayers()
 
     // TODO: update player stats multiboard
 
-    // Have to wait for some reason
-    TriggerSleepAction(1.0)
-    SetTimeOfDayScalePercentBJ(GAME_SPEED_DAY)
-
   // --------------------------------------------------------------------------
   private function onNightStart()
-    _days++
+    m_night++
 
-    GameSettings.zombies_SpawnsPerTick += GameSettings.zombies_SpawnsPerTickInc
-    GameSettings.zombies_SpawnsMaxPerPlayer += GameSettings.zombies_SpawnsMaxPerPlayerInc
+    Log.info("Started night " + I2S(m_night))
 
     removeUnrescuedSurvivors()
     Items.removeAllItemsNotNearHumanUnits()
 
-    Zombies.killAllUndead()
-    Zombies.startSpawning()
+    // Start night waves for players
+    for p in g_PlayingHumanPlayers
+      let waves = m_playerWaves.getOrCreatePlayerWaves(p)
+      waves.getRunner().startNightWave(m_night)
 
-    if (_days > GameSettings.aboms_StartDay)
-      // TODO: Aboms.spawnAboms()
-
-    // Have to wait for some reason
-    TriggerSleepAction(1.0)
-    SetTimeOfDayScalePercentBJ(GAME_SPEED_NIGHT)
+    //Zombies.killAllUndead()
+    //Zombies.startSpawning()
 
   // --------------------------------------------------------------------------
   private function respawnDeadPlayers()
@@ -130,6 +150,23 @@ public class GameInstance
     SetTimeOfDayScalePercentBJ(GAME_SPEED_INITIAL)
     SetTimeOfDay(TIME_OF_DAY_INITIAL)
     FogEnableOn()
+
+  // --------------------------------------------------------------------------
+  private function initializeWaves()
+    m_playerWaves = new PlayerWavesMap()
+
+    Log.info("Generating waves...")
+
+    for p in g_PlayingHumanPlayers
+      let playerWaves = m_playerWaves.getOrCreatePlayerWaves(p)
+
+      if (m_nightWaveGenerator != null)
+        m_nightWaveGenerator.generateWavesForPlayer(p, playerWaves.getNightWaves())
+
+      if (m_dayWaveGenerator != null)
+        m_dayWaveGenerator.generateWavesForPlayer(p, playerWaves.getDayWaves())
+
+    Log.info("Done generating waves.")
 
   // --------------------------------------------------------------------------
   private function initializeAlliances()  
@@ -150,6 +187,26 @@ public class GameInstance
       SetPlayerAllianceStateBJ(PLAYER_UNDEAD, p, bj_ALLIANCE_UNALLIED)
       // Turn off undead shared vision with player (probably unnecessary)
       SetPlayerAllianceBJ(PLAYER_UNDEAD, ALLIANCE_SHARED_VISION, false, p)
+
+  // --------------------------------------------------------------------------
+  private function listenForDayEvent()
+    m_dayEventHandler = g_DayEvent.addListener() () ->
+      onDayStart()
+
+  // --------------------------------------------------------------------------
+  private function unlistenForDayEvent()
+    if (m_dayEventHandler != null)
+      m_dayEventHandler = g_DayEvent.removeListener(m_dayEventHandler)
+
+  // --------------------------------------------------------------------------
+  private function listenForNightEvent()
+    m_nightEventHandler = g_NightEvent.addListener() () ->
+      onNightStart()
+
+  // --------------------------------------------------------------------------
+  private function unlistenForNightEvent()
+    if (m_nightEventHandler != null)
+      m_nightEventHandler = g_NightEvent.removeListener(m_nightEventHandler)
 
 // ============================================================================
 init

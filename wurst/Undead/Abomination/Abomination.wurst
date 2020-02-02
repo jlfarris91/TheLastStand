@@ -3,7 +3,6 @@ import UndeadUnit
 import GroupUtils
 import TlsUnitIds
 import Orders
-import Zombies
 import ClosureEvents
 import TlsAbilityIds
 import UnitMetadata
@@ -16,6 +15,7 @@ import PlayerExtensions
 import ClosureTimers
 import DummyUtils
 import Math
+import UndeadUtility
 
 constant real ABOM_IDLE_RADIUS = 128.0
 constant real ABOM_IDLE_RADIUS_SQ = ABOM_IDLE_RADIUS*ABOM_IDLE_RADIUS
@@ -38,8 +38,6 @@ rect g_minThrowArea
 
 // ============================================================================
 public class Abomination extends UndeadUnit
-
-  private player _targetPlayer
   private unit _holdingZombie
 
   // --------------------------------------------------------------------------
@@ -52,16 +50,6 @@ public class Abomination extends UndeadUnit
     addComponent(stateMachine)
 
     stateMachine.transitionToState("Idle")
-
-    setTargetPlayer(Player(0))
-
-  // --------------------------------------------------------------------------
-  function getTargetPlayer() returns player
-    return _targetPlayer
-
-  // --------------------------------------------------------------------------
-  function setTargetPlayer(player p)
-    _targetPlayer = p
 
   // --------------------------------------------------------------------------
   function getHoldingZombie() returns unit
@@ -128,7 +116,7 @@ public class AbomIdleState extends BaseStateMachineState
 
   // --------------------------------------------------------------------------
   private function attackPlayer()
-    let target = getClosestZombieTarget(_abom.getTargetPlayer(), _abom.getPos())
+    let target = getClosestUndeadTarget(_abom.getTargetPlayer(), _abom.getPos())
     if (target != null)
       //Log.info("[AbomIdleState] Attack closest player unit: " + target.getName())
       _abom.issueTargetOrderById(OrderIds.attack, target)
@@ -248,7 +236,7 @@ public class AbomHoldingState extends BaseStateMachineState
 
   // --------------------------------------------------------------------------
   private function attackPlayer()
-    let target = getClosestZombieTarget(_abom.getTargetPlayer(), _abom.getPos())
+    let target = getClosestUndeadTarget(_abom.getTargetPlayer(), _abom.getPos())
     if (target != null)
       //Log.info("[AbomIdleState] Attack closest player unit: " + target.getName())
       _abom.issueTargetOrderById(OrderIds.attack, target)
@@ -258,7 +246,7 @@ public class AbomHoldingState extends BaseStateMachineState
 
 // ============================================================================
 function isFilterUnitAZombie() returns bool
-  return GetFilterUnit().getTypeId() == TlsUnitIds.zombieNight
+  return GetFilterUnit().isZombie()
 
 // ============================================================================
 function isFilterUnitAValidThrowTarget() returns bool
@@ -271,7 +259,7 @@ function onAbomGrabbedZombie(unit caster, unit target)
   if (abom == null)
     return
 
-  if (target.getTypeId() != TlsUnitIds.zombieNight)
+  if (not target.isZombie())
     return
 
   let stateMachine = abom.getComponent(Type(StateMachineComponent.typeId)) castTo StateMachineComponent

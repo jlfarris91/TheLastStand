@@ -6,35 +6,47 @@ import Events
 import RealtimeComponent
 import Type
 
+// ============================================================================
 public class MovementComponent extends RealtimeComponent
 
-  private vec2 _lastPos
-  private IUnitMetadata _ownerUnit
-  private unit _unit
+  private vec2 m_lastPos
+  private IUnitMetadata m_ownerUnit
+  private GenericArgsEvent<MovementComponent, real> m_unitMovedEvent
 
-  GenericArgsEvent<MovementComponent, real> unitMovedEvent
-
+  // --------------------------------------------------------------------------
   construct(IUnitMetadata owner)
     super(owner)
-    _ownerUnit = owner
-    _unit = owner.getUnit()
+    m_ownerUnit = owner
+    m_unitMovedEvent = new GenericArgsEvent<MovementComponent, real>()
 
-    unitMovedEvent = new GenericArgsEvent<MovementComponent, real>()
-
+  // --------------------------------------------------------------------------
   ondestroy
-    destroy unitMovedEvent
+    destroy m_unitMovedEvent
+    m_unitMovedEvent = null
 
+  // --------------------------------------------------------------------------
+  function getUnitMovedEvent() returns GenericArgsEvent<MovementComponent, real>
+    return m_unitMovedEvent
+
+  // --------------------------------------------------------------------------
   override function onEnabled()
     super.onEnabled()
     registerForUpdate()
 
-  override function onUpdate(real dt)
-    let pos = _unit.getPos()
-    let distanceInMeters = _lastPos.distanceTo(pos) * WORLD_TO_METERS
-    if (distanceInMeters > 0.0)
-      unitMovedEvent.invoke(this, distanceInMeters)
-    _lastPos = pos
+  // --------------------------------------------------------------------------
+  override function onDisabled()
+    super.onDisabled()
+    unregisterForUpdate()
 
+  // --------------------------------------------------------------------------
+  override function onUpdate(real dt)
+    let pos = m_ownerUnit.getUnit().getPos()
+    let distanceInMeters = m_lastPos.distanceTo(pos) * WORLD_TO_METERS
+    if (distanceInMeters > 0.0 and m_unitMovedEvent != null)
+      m_unitMovedEvent.invoke(this, distanceInMeters)
+    m_lastPos = pos
+
+// ============================================================================
 public function IUnitMetadata.getOrAddMovementComponent() returns MovementComponent
   var component = this.getComponent(Type(MovementComponent.typeId)) castTo MovementComponent
   if (component == null)

@@ -1,0 +1,155 @@
+package Backpack
+import Composition
+import UnitMetadata
+import Orders
+import Math
+import RegisterEvents
+import TlsItemIds
+import Type
+import HashMap
+import UnitComponent
+
+constant string MODEL_PATH_BACKPACK = "Items\\BackPack2.mdx"
+constant int BACKPACK_MAX_CAPACITY = 6
+
+HashMap<item, BackpackInventory> g_itemInventoryMap
+
+// ============================================================================
+public class BackpackInventory
+  private item array[BACKPACK_MAX_CAPACITY] m_storedItems
+  private int m_capacity
+  private int m_count
+
+  // --------------------------------------------------------------------------
+  construct()
+    m_capacity = 1
+    m_count = 0
+
+  // --------------------------------------------------------------------------
+  function setCapacity(int capacity)
+    m_capacity = clamp(capacity, 1, BACKPACK_MAX_CAPACITY)
+
+  // --------------------------------------------------------------------------
+  function getCapacity() returns int
+    return m_capacity
+
+  // --------------------------------------------------------------------------
+  function getCount() returns int
+    return m_count
+
+  // --------------------------------------------------------------------------
+  function removeItemFromSlot(int slot) returns item
+    let itm = m_storedItems[slot]
+    m_storedItems[slot] = null
+    m_count--
+    return itm
+
+// ============================================================================
+public class BackpackComponent extends UnitComponent
+  private effect m_backpackEffect
+  private BackpackInventory m_inventory
+  
+  // --------------------------------------------------------------------------
+  construct(IUnitMetadata owner, BackpackInventory inventory)
+    super(owner)
+    m_inventory = inventory
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    hideBackpackModel()
+
+  // --------------------------------------------------------------------------
+  override function onEnabled()
+    super.onEnabled()
+    showBackpackModel()
+
+  // --------------------------------------------------------------------------
+  override function onDisabled()
+    super.onDisabled()
+    hideBackpackModel()
+
+  // --------------------------------------------------------------------------
+  function getIsBackpackVisible() returns bool
+    return m_backpackEffect != null
+
+  // --------------------------------------------------------------------------
+  function openBackpack()
+    let ownerUnit = getOwnerUnit()
+    ownerUnit.issueImmediateOrderById(OrderIds.stop)
+
+  // --------------------------------------------------------------------------
+  function closeBackpack()
+    skip
+
+  // --------------------------------------------------------------------------
+  function emptyBackpack()
+    for i = 0 to BACKPACK_MAX_CAPACITY - 1
+      dropItemFromSlot(i)
+
+  // --------------------------------------------------------------------------
+  function dropItemFromSlot(int _slot)
+    skip
+
+  // --------------------------------------------------------------------------
+  override function onUnitChanged(unit newUnit, unit oldUnit)
+    super.onUnitChanged(newUnit, oldUnit)
+    let wasShowingBackpack = getIsBackpackVisible()
+    hideBackpackModel()
+    if (wasShowingBackpack)
+      showBackpackModel()
+    
+  // --------------------------------------------------------------------------
+  private function showBackpackModel()
+    if (m_backpackEffect != null)
+      let ownerUnit = getOwnerUnit()
+      m_backpackEffect = AddSpecialEffectTarget(MODEL_PATH_BACKPACK, ownerUnit, "chest")
+    m_backpackEffect.setScale(1.5)
+
+  // --------------------------------------------------------------------------
+  private function hideBackpackModel()
+    if (m_backpackEffect != null)
+      m_backpackEffect.destr()
+      m_backpackEffect = null
+
+// ============================================================================
+function onUnitAcquiredItem()
+  let manipulatingUnit = GetManipulatingUnit()
+  let manipulatingItem = GetManipulatedItem()
+
+  if (manipulatingItem.getTypeId() != TlsItemIds.backpack)
+    return
+
+  let unitMetadata = manipulatingUnit.getMetadata()
+  if (unitMetadata == null)
+    return
+
+  var backpackComponent = unitMetadata.getComponent(Type(BackpackComponent.typeId)) castTo BackpackComponent
+
+  // This unit is already wearing a backpack
+  if (backpackComponent != null)
+    return
+
+  let inventory = getOrCreateInventory(manipulatingItem)
+
+  backpackComponent = new BackpackComponent(unitMetadata, inventory)
+  unitMetadata.addComponent(backpackComponent)
+
+  manipulatingUnit.dropItemPoint(manipulatingItem, manipulatingUnit.getPos())
+  manipulatingItem.setPos(ZERO2)
+  manipulatingItem.setVisible(false)
+
+// ============================================================================
+function getOrCreateInventory(item backpack) returns BackpackInventory
+  if (g_itemInventoryMap.has(backpack))
+    return g_itemInventoryMap.get(backpack)
+
+  let inventory = new BackpackInventory()
+  ..setCapacity(6)
+
+  g_itemInventoryMap.put(backpack, inventory)
+  return inventory  
+
+// ============================================================================
+init
+  g_itemInventoryMap = new HashMap<item, BackpackInventory>()
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_PICKUP_ITEM, function onUnitAcquiredItem)

@@ -1,0 +1,150 @@
+package NormalNightWaveGenerator
+import IWaveGenerator
+import WaveCollection
+import RandomUnitTypeProvider
+import RandomSpawnPointProvider
+import TlsUnitIds
+import UndeadSpawnManager
+import GameConstants
+import PeriodicWaveActivator
+import TimeOfDayProgress
+import FunctionalField
+import ZombieFields
+import Math
+import SpawnWaveDefinition
+import SpawnWave
+import NightWave
+import Func
+
+/*
+    For each player P
+      Spawn no more than N zombies
+        Every N seconds
+          Select N spawn locations within a range of R
+            Spawn N zombies at spawn location
+      Once
+        Select N spawn locations within a range of R
+          Spawn N aboms at spawn location
+      Every N seconds
+        Select N spawn locations within a range of R
+          Spawn N crows at spawn location
+*/
+
+// ============================================================================
+public class NormalNightWaveGenerator implements IWaveGenerator<NightWave>
+  private int m_totalNights
+
+  // --------------------------------------------------------------------------
+  function setTotalNights(int value)
+    m_totalNights = value
+
+  // --------------------------------------------------------------------------
+  function getTotalNights() returns int
+    return m_totalNights
+
+  // --------------------------------------------------------------------------
+  // Generate waves here
+  // --------------------------------------------------------------------------
+  override function generateWavesForPlayer(player p, WaveCollection<NightWave> waves)
+
+    // Create a zombie wave for every night
+    for i=1 to m_totalNights
+      let wave = waves.getOrCreateWave(i)
+      wave.setTimeOfDayScalePercent(200.0)
+      let spawnWave = generateZombieWave(p, i)
+      wave.addSpawnWave(spawnWave)
+    
+  // --------------------------------------------------------------------------
+  private function generateZombieWave(player p, int night) returns SpawnWave
+
+    // The percentage of the game's progress for the current night
+    let currentNightGameProgress = I2R(night) / I2R(m_totalNights)
+
+    // The percentage of the game's progress for the next night
+    let nextNightGameProgress = I2R(night + 1) / I2R(m_totalNights)
+
+    let unitTypeProvider = new RandomUnitTypeProvider()
+    ..addUnitType(TlsUnitIds.zombieMale, 1)
+    ..addUnitType(TlsUnitIds.zombieFemale, 1)
+
+    let spawnPointProvider = new RandomSpawnPointProvider(g_undeadSpawnManager)
+    ..setMinRange(ZOMBIES_SPAWN_RANGE_MIN)
+    ..setMaxRange(ZOMBIES_SPAWN_RANGE_MAX)
+
+    let activator = new PeriodicWaveActivator()
+    ..setInterval(ZOMBIES_SPAWN_INTERVAL)
+
+    let progress = new NightProgress()
+
+    // This determines the maximum number of alive spawns
+    let maxAlive = lerpInt(10, 50, currentNightGameProgress)
+    Func1<real, int> getMaxAliveCount = (real _waveProgress) -> 
+      return maxAlive
+
+    // This determines the number of spawn points to spawn enemies used each time the spawner is activated.
+    // The higher the number the more zombies spawned per activation.
+    Func1<real, int> getSpawnsPerActivation = (real waveProgress) ->
+      return lerpInt(1, 10, waveProgress)
+
+    // This determines the number of enemies to spawn at each spawn point when the spawner is activated.
+    Func1<real, real> getSpawnGroupingFactor = (real waveProgress) ->
+      return lerp(0.0, 1.0, waveProgress)
+
+    // These modifiers will run on each unit spawned in the wave
+    // The real value passed in is the wave's current progress
+    let ufd = new AggregateUnitModifier()
+
+    // These are some common zombie fields we always set
+    ufd.add(new ZombieFields())
+    ufd.add(new SetTargetPlayer(p))
+
+    // Each night zombies health will interpolate between the min/max for that night
+    let gameStartMaxHp = 60
+    let gameEndMaxHp = 600
+    let maxHpMin = lerpInt(gameStartMaxHp, gameEndMaxHp, currentNightGameProgress)
+    let maxHpMax = lerpInt(gameStartMaxHp, gameEndMaxHp, nextNightGameProgress)
+    let maxHpFunc = new MaxHpUnitField()..setFunc() (real waveProgress) ->
+      return lerpInt(maxHpMin, maxHpMax, waveProgress)
+    ufd.add(maxHpFunc)
+
+    // Zombies will get faster as the night goes on
+    // Speed is reset to 150 every night
+    let moveSpeedFunc = new FunctionalUnitRealField(UNIT_RF_SPEED)..setFunc() (real t) ->
+      return lerp(150, 200, t)
+    ufd.add(moveSpeedFunc)
+
+    let armorGameStart = 0.0
+    let armorGameEnd = 5.0
+    let armor = lerp(armorGameStart, armorGameEnd, currentNightGameProgress)
+    let armorFunc = new ArmorUnitField()..setValue(armor)
+    ufd.add(armorFunc)
+
+    let damageBaseGameStart = 10
+    let damageBaseGameEnd = 30
+    let damageBase = lerpInt(damageBaseGameStart, damageBaseGameEnd, currentNightGameProgress)
+    let damageBaseFunc = new FunctionalUnitWeaponIntegerField(UNIT_WEAPON_IF_ATTACK_DAMAGE_BASE, 0)..setValue(damageBase)
+    ufd.add(damageBaseFunc)
+
+    let damageNumberOfDiceGameStart = 1
+    let damageNumberOfDiceGameEnd = 3
+    let damageNumberOfDice = lerpInt(damageNumberOfDiceGameStart, damageNumberOfDiceGameEnd, currentNightGameProgress)
+    let damageNumberOfDiceFunc = new FunctionalUnitWeaponIntegerField(UNIT_WEAPON_IF_ATTACK_DAMAGE_NUMBER_OF_DICE, 0)..setValue(damageNumberOfDice)
+    ufd.add(damageNumberOfDiceFunc)
+
+    let damageSidesPerDieGameStart = 3
+    let damageSidesPerDieGameEnd = 6
+    let damageSidesPerDie = lerpInt(damageSidesPerDieGameStart, damageSidesPerDieGameEnd, currentNightGameProgress)
+    let damageSidesPerDieFunc = new FunctionalUnitWeaponIntegerField(UNIT_WEAPON_IF_ATTACK_DAMAGE_SIDES_PER_DIE, 0)..setValue(damageSidesPerDie)
+    ufd.add(damageSidesPerDieFunc)
+
+    let def = new SpawnWaveDefinition()
+    ..setProgress(progress)
+    ..setMaxAliveCount(getMaxAliveCount)
+    ..setSpawnsPerActivation(getSpawnsPerActivation)
+    ..setSpawnGroupingFactor(getSpawnGroupingFactor)
+    ..setActivator(activator)
+    ..setSpawnPointProvider(spawnPointProvider)
+    ..setUnitTypeProvider(unitTypeProvider)
+    ..setUnitModifier(ufd)
+
+    return new SpawnWave(def, p)

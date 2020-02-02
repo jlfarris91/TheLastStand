@@ -1,0 +1,57 @@
+package UndeadUtility
+import UnitExtensions
+import HumanPlayerMetadata
+import GroupUtils
+import UnitMetadataExtensions
+import GameConstants
+
+// ============================================================================
+function isFilterUnitVulnerableStructure() returns bool
+  let u = GetFilterUnit()
+  return u.isStructure() and not u.isInvulnerable()
+
+// ============================================================================
+function isFilterUnitVulnerableNonStructure() returns bool
+  let u = GetFilterUnit()
+  return not u.isStructure() and not u.isInvulnerable()
+
+// ============================================================================
+public function getClosestUndeadTarget(player p, vec2 pos) returns unit
+  var distance = REAL_MAX
+  let playerMetadata = p.getHumanMetadataRequired()
+  unit target = null
+
+  // === Needs cleanup
+  let ug = getGroup()
+  let filter = playerMetadata.getCamp().getIsSecure()
+                ? Condition(function isFilterUnitVulnerableStructure)
+                : Condition(function isFilterUnitVulnerableNonStructure)
+  // === Needs cleanup
+
+  ug.enumUnitsOfPlayer(p, filter)
+
+  for u in ug
+    let d = u.getPos().distanceToSq(pos)
+    if (d < distance)
+      target = u
+      distance = d    
+
+  // === Cleanup
+  DestroyCondition(filter)
+  ug.release()
+  // === Cleanup
+
+  if (target == null)
+    let hero = playerMetadata.getHero()
+    if (hero.isAlive())
+      target = hero.getUnit()
+
+  return target
+  
+// ============================================================================
+public function killAllUndead()
+  let ug = getGroup()
+  ug.enumUnitsOfPlayer(PLAYER_UNDEAD, null)
+  for u in ug
+    u.kill()
+  ug.release()

@@ -1,0 +1,67 @@
+package Zombie
+import UnitMetadata
+import HumanPlayerMetadata
+import GameConstants
+import Math
+import FX
+import Orders
+import UndeadUtility
+import UndeadUnit
+
+// ============================================================================
+public class Zombie extends UndeadUnit
+  private real m_matsDropChance
+
+  // --------------------------------------------------------------------------
+  construct(unit u)
+    super(u)
+    m_matsDropChance = ZOMBIES_MATERIALS_DROP_CHANCE
+
+  // --------------------------------------------------------------------------
+  function getMaterialsDropChance() returns real
+    return m_matsDropChance
+
+  // --------------------------------------------------------------------------
+  function setMaterialsDropChance(real value)
+    m_matsDropChance = value
+
+  // --------------------------------------------------------------------------
+  override function setTargetPlayer(player p) returns bool
+    if (super.setTargetPlayer(p) == false)
+      return false
+    targetClosestUnit()
+    return true
+
+  // --------------------------------------------------------------------------
+  override function onUnitChanged(unit oldUnit, unit newUnit)
+    super.onUnitChanged(oldUnit, newUnit)
+    targetClosestUnit()
+
+  // --------------------------------------------------------------------------
+  override function onKilled()
+    super.onKilled()
+
+    let killingUnit = GetKillingUnit()
+    if (killingUnit == null)
+      return
+
+    let killingPlayer = killingUnit.getOwner()
+
+    if (passesChanceCheck(ZOMBIES_MATERIALS_DROP_CHANCE))
+      let killingPlayerMetadata = killingPlayer.getHumanMetadata()
+      if (killingPlayerMetadata != null)
+        killingPlayerMetadata.giveMaterials(ZOMBIES_MATERIALS_DROP_AMOUNT)
+
+        let pos = this.getPos()
+        FX.createGoldCreditEffect(pos, killingPlayer)
+        FX.createFoundMaterialsTag(pos, ZOMBIES_MATERIALS_DROP_AMOUNT, killingPlayer)
+
+  // --------------------------------------------------------------------------
+  private function targetClosestUnit()
+    let targetPlayer = getTargetPlayer()
+    if (targetPlayer != null)
+      let target = getClosestUndeadTarget(targetPlayer, this.getPos())
+      if (target != null)
+        getUnit().issueTargetOrderById(OrderIds.attackonce, target)
+    else
+      BlzSetUnitRealField(getUnit(), UNIT_RF_ACQUISITION_RANGE, 99999.0)
