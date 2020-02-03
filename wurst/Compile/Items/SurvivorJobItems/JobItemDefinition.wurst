@@ -1,0 +1,214 @@
+package JobItemDefinition
+import public TlsItemDefinition
+import StringExtensions
+import StringBuilder
+import ErrorHandling
+import TlsUnitDefinition
+import DataStringUtility
+
+constant int JOB_ITEM_BASE_ID = 'ratc'
+constant int MAX_JOB_DESC_ITEM_COUNT = 32
+constant colorA ITEM_NAME_COLOR = fromHexString("FF3B97D3")
+constant colorA ITEM_VALUE_COLOR = COLOR_GOLD
+constant colorA ARROW_COLOR = fromHexString("FF6cf542")
+
+// ============================================================================
+public class JobItemDefinition extends TlsItemDefinition
+  construct(int newId)
+    super(newId, JOB_ITEM_BASE_ID)
+    setAbilities("")
+
+// ============================================================================
+public interface IJobDescriptionItem
+  function getName() returns string
+  function getValue(int index) returns string
+  function getValueCount() returns int
+
+// ============================================================================
+public class JobDescriptionItem implements IJobDescriptionItem
+  private string m_name
+  private string array[MAX_JOB_DESC_ITEM_COUNT] m_values
+  private int m_numValues
+
+  // --------------------------------------------------------------------------
+  construct(string name)
+    clear()
+    m_name = name
+
+  // --------------------------------------------------------------------------
+  construct(string name, string value)
+    clear()
+    m_name = name
+    addValue(value)
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    clear()
+
+  // --------------------------------------------------------------------------
+  function clear()
+    m_name = null
+    for i = 0 to MAX_JOB_DESC_ITEM_COUNT - 1
+      m_values[i] = null
+    m_numValues = 0
+
+  // --------------------------------------------------------------------------
+  override function getName() returns string
+    return m_name
+
+  // --------------------------------------------------------------------------
+  override function getValue(int index) returns string
+    return m_values[index]
+  
+  // --------------------------------------------------------------------------
+  override function getValueCount() returns int
+    return m_numValues
+
+  // --------------------------------------------------------------------------
+  function addValue(string value) returns JobDescriptionItem
+    if (m_numValues == MAX_JOB_DESC_ITEM_COUNT)
+      error("Reached limit of number of values " + I2S(MAX_JOB_DESC_ITEM_COUNT))
+    m_values[m_numValues] = value
+    m_numValues++
+    return this
+
+
+// ============================================================================
+/*
+  Sturdy Spears
+
+  A bundle of sturdy spears. Good for killing undead at range.
+
+  [Survivor Job Change]
+  Give to a Survivor to give them new abilities.
+
+  Survivor Male -> Spearman
+
+  Spearman
+  Damage:       18-32
+  Range:        350
+  Abilities:    Ability 1
+                Ability 2
+                Ability 3
+*/
+public class JobItemTooltipBuilder
+  private string m_fromUnitName
+  private string m_toUnitName
+  private string m_desc
+  private IJobDescriptionItem array[MAX_JOB_DESC_ITEM_COUNT] m_items
+  private int m_itemCount
+
+  // --------------------------------------------------------------------------
+  construct()
+    clear()
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    clear()
+
+  // --------------------------------------------------------------------------
+  function setUnits(string fromUnit, string toUnit) returns JobItemTooltipBuilder
+    m_fromUnitName = fromUnit
+    m_toUnitName = toUnit
+    return this
+
+  // --------------------------------------------------------------------------
+  function getItemDescription() returns string
+    return m_desc
+
+  // --------------------------------------------------------------------------
+  function setItemDescription(string desc) returns JobItemTooltipBuilder
+    m_desc = desc
+    return this
+
+  // --------------------------------------------------------------------------
+  function addItem(string name, string value) returns JobItemTooltipBuilder
+    return addItem(new JobDescriptionItem(name, value))
+
+  // --------------------------------------------------------------------------
+  function addItem(IJobDescriptionItem itm) returns JobItemTooltipBuilder
+    if (m_itemCount == MAX_JOB_DESC_ITEM_COUNT)
+      error("Reached limit of job description items " + I2S(MAX_JOB_DESC_ITEM_COUNT))
+    m_items[m_itemCount] = itm
+    m_itemCount++
+    return this
+
+  // --------------------------------------------------------------------------
+  function clear()
+    m_fromUnitName = null
+    m_toUnitName = null
+    m_desc = null
+    for i = 0 to MAX_JOB_DESC_ITEM_COUNT
+      if (m_items[i] != null)
+        destroy m_items[i]
+        m_items[i] = null
+    m_itemCount = 0
+
+  // --------------------------------------------------------------------------
+  function toString() returns string
+    let sb = new StringBuilder()
+
+    if (m_desc != null)
+      sb.appendLine(m_desc)
+      sb.appendLine()
+
+    sb.appendLine("[Survivor Job Change]".colorize(COLOR_GOLD))
+    sb.appendLine("Give this item to a {0} to give them new abilities.".format(m_fromUnitName))
+    sb.appendLine()
+
+    sb.append(m_fromUnitName)
+    sb.append(" => ".colorize(ARROW_COLOR))
+    sb.appendLine(m_toUnitName.colorize(COLOR_GOLD))
+    sb.appendLine()
+
+    sb.appendLine(m_toUnitName)
+
+    let padStr = " "
+    for i = 0 to m_itemCount - 1
+      let itm = m_items[i]
+      
+      sb.append(itm.getName().colorize(ITEM_NAME_COLOR))
+
+      let itemValueCount = itm.getValueCount()
+      if (itemValueCount == 1)
+        sb.appendLine(itm.getValue(0).colorize(ITEM_VALUE_COLOR))
+      else
+        sb.appendLine()
+        for j = 0 to itemValueCount - 1
+          sb.append("- ".padLeft(10, padStr))
+          sb.appendLine(itm.getValue(j).colorize(ITEM_VALUE_COLOR))
+
+    let result = sb.toString()
+    destroy sb
+    return result
+
+  // --------------------------------------------------------------------------
+  function buildTooltipAndDestroy() returns string
+    let tooltip = toString()
+    destroy this
+    return tooltip
+
+  // --------------------------------------------------------------------------
+  static function createDefault(TlsUnitDefinition fromUnit, TlsUnitDefinition toUnit, string tip) returns JobItemTooltipBuilder
+    let builder = new JobItemTooltipBuilder()
+
+    builder.setUnits(fromUnit.getName(), toUnit.getName())
+    builder.setItemDescription(tip)
+
+    let toUnitId = toUnit.getNewId()
+    let toUnitBaseId = toUnit.getBaseId()
+
+    builder.addItem("Health: ", toUnit.getHitPointsMaximumBase().toString())
+
+    if (toUnit.getAttacksEnabled() > 0)
+      builder.addItem("Range: ", toUnit.getAttack1Range().toString())
+      let minDmgStr = getDataString(toUnitId, toUnitBaseId, "mindmg1")
+      let maxDmgStr = getDataString(toUnitId, toUnitBaseId, "maxdmg1")
+      builder.addItem("Damage: ", "{0}-{1}".format(minDmgStr, maxDmgStr))
+      builder.addItem("Attack: ", toUnit.getAttack1AttackType().toString())
+    else
+      builder.addItem("Attack: ", "Does not attack")
+    
+    builder.addItem("Armor: ", toUnit.getArmorType().toString())
+
+    return builder
