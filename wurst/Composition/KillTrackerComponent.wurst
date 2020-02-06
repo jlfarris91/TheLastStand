@@ -1,0 +1,57 @@
+package KillTrackerComponent
+import UnitComponent
+import Events
+import UnitMetadata
+import UnitKilledEvent
+import Type
+
+// ============================================================================
+public class KillTrackerComponent extends UnitComponent
+  private int m_totalKills
+  private AnonymousEventHandler m_onUnitKilledHandler
+
+  GenericArgsEvent<KillTrackerComponent, unit> killedUnitEvent
+
+  // --------------------------------------------------------------------------
+  construct(IUnitMetadata owner)
+    super(owner)
+
+  // --------------------------------------------------------------------------
+  function reset()
+    m_totalKills = 0
+
+  // --------------------------------------------------------------------------
+  protected override function onEnabled()
+    super.onEnabled()
+    m_totalKills = 0
+    listenToKillEvent()
+
+  // --------------------------------------------------------------------------
+  protected override function onDisabled()
+    super.onDisabled()
+    unlistenToKillEvent()
+
+  // --------------------------------------------------------------------------
+  private function onKilledUnit(unit dyingUnit)
+    m_totalKills++
+    killedUnitEvent.invoke(this, dyingUnit)
+
+  // --------------------------------------------------------------------------
+  private function listenToKillEvent()
+    unlistenToKillEvent()
+    m_onUnitKilledHandler = g_unitKilledEvent.addListener() -> 
+      let killingUnit = GetKillingUnit()
+      if (killingUnit == getOwnerUnit())
+        onKilledUnit(GetDyingUnit())
+    
+  // --------------------------------------------------------------------------
+  private function unlistenToKillEvent()
+    if (m_onUnitKilledHandler != null)
+      m_onUnitKilledHandler = g_unitKilledEvent.removeListener(m_onUnitKilledHandler)
+
+// ============================================================================
+public function IUnitMetadata.getOrAddKillTrackerComponent() returns KillTrackerComponent
+  var component = this.getComponent(Type(KillTrackerComponent.typeId)) castTo KillTrackerComponent
+  if (component == null)
+    component = this.addComponent(new KillTrackerComponent(this)) castTo KillTrackerComponent
+  return component
