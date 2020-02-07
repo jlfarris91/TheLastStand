@@ -2,18 +2,99 @@ package UnitExtensions
 import GameConstants
 import GroupUtils
 
+// ============================================================================
 public function unit.isStructure() returns bool
   return this.isType(UNIT_TYPE_STRUCTURE)
 
+// ============================================================================
 public function unit.isHero() returns bool
   return this.isType(UNIT_TYPE_HERO)
 
+// ============================================================================
 public function unit.isOwnedByHumanPlayer() returns bool
   return this.getOwner().getId() < MAX_NUMBER_OF_PLAYERS
 
+// ============================================================================
 public function unit.isSelectedByOwner() returns bool
   let ug = getGroup()
   ug.enumUnitsSelected(this.getOwner(), null)
   let result = IsUnitInGroup(this, ug)
   ug.release()
   return result
+
+// ============================================================================
+public function unit.dropItemById(int itemId, vec2 pos) returns item
+  let itm = this.getItemById(itemId)
+  if (itm != null)
+    this.dropItemPoint(itm, pos)
+  return itm
+
+// ============================================================================
+public function replaceUnitFixedTLS(unit whichUnit, integer newUnitId, integer unitStateMethod) returns unit
+  let oldUnit = whichUnit
+
+  // If we have bogus data, don't attempt the replace.
+  if (oldUnit == null)
+    bj_lastReplacedUnit = oldUnit
+    return oldUnit
+  
+  // Hide the original unit.
+  let wasHidden = IsUnitHidden(oldUnit)
+  ShowUnit(oldUnit, false)
+
+  // Create the replacement unit.
+  unit newUnit
+  if (newUnitId == 'ugol')
+    newUnit = CreateBlightedGoldmine(GetOwningPlayer(oldUnit), GetUnitX(whichUnit), GetUnitY(whichUnit), GetUnitFacing(oldUnit))
+  else
+    newUnit = CreateUnit(GetOwningPlayer(oldUnit), newUnitId, GetUnitX(oldUnit), GetUnitY(oldUnit), GetUnitFacing(oldUnit))
+
+  // Set the unit's life and mana according to the requested method.
+  switch (unitStateMethod)
+    // Set the replacement's current/max life ratio to that of the old unit.
+    // If both units have mana, do the same for mana.    
+    case bj_UNIT_STATE_METHOD_RELATIVE
+      if (GetUnitState(oldUnit, UNIT_STATE_MAX_LIFE) > 0)
+        let oldRatio = GetUnitState(oldUnit, UNIT_STATE_LIFE) / GetUnitState(oldUnit, UNIT_STATE_MAX_LIFE)
+        SetUnitState(newUnit, UNIT_STATE_LIFE, oldRatio * GetUnitState(newUnit, UNIT_STATE_MAX_LIFE))
+      
+      if (GetUnitState(oldUnit, UNIT_STATE_MAX_MANA) > 0)
+        let oldRatio = GetUnitState(oldUnit, UNIT_STATE_MANA) / GetUnitState(oldUnit, UNIT_STATE_MAX_MANA)
+        SetUnitState(newUnit, UNIT_STATE_MANA, oldRatio * GetUnitState(newUnit, UNIT_STATE_MAX_MANA))
+
+    // Set the replacement's current life to that of the old unit.
+    // If the new unit has mana, do the same for mana.
+    case bj_UNIT_STATE_METHOD_ABSOLUTE
+      SetUnitState(newUnit, UNIT_STATE_LIFE, GetUnitState(oldUnit, UNIT_STATE_LIFE))
+      if (GetUnitState(newUnit, UNIT_STATE_MAX_MANA) > 0)
+        SetUnitState(newUnit, UNIT_STATE_MANA, GetUnitState(oldUnit, UNIT_STATE_MANA))
+    
+      // Use max life and mana.
+    case bj_UNIT_STATE_METHOD_MAXIMUM
+      SetUnitState(newUnit, UNIT_STATE_LIFE, GetUnitState(oldUnit, UNIT_STATE_MAX_LIFE))
+      SetUnitState(newUnit, UNIT_STATE_MANA, GetUnitState(oldUnit, UNIT_STATE_MAX_MANA))
+
+  // Mirror properties of the old unit onto the new unit.
+  //PauseUnit(newUnit, IsUnitPaused(oldUnit))
+  SetResourceAmount(newUnit, GetResourceAmount(oldUnit))
+
+  // If both the old and new units are heroes, handle their hero info.
+  if (IsUnitType(oldUnit, UNIT_TYPE_HERO) and IsUnitType(newUnit, UNIT_TYPE_HERO))
+    SetHeroXP(newUnit, GetHeroXP(oldUnit), false)
+
+  // This is the fix - copy items when the unit has an inventory size
+  for i = 0 to bj_MAX_INVENTORY - 1
+    let indexItem = UnitItemInSlot(oldUnit, i)
+    if (indexItem != null)
+      UnitRemoveItem(oldUnit, indexItem)
+      UnitAddItem(newUnit, indexItem)
+
+  // Remove or kill the original unit.  It is sometimes unsafe to remove
+  // hidden units, so kill the original unit if it was previously hidden.
+  if (wasHidden)
+    KillUnit(oldUnit)
+  
+  RemoveUnit(oldUnit)
+
+  bj_lastReplacedUnit = newUnit
+  return newUnit

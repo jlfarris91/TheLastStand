@@ -6,37 +6,38 @@ import TlsUnitIds
 import Composition
 import Type
 import HumanPlayerMetadata
+import UnitMetadata
 
 // ============================================================================
 public interface IOperatableUnit extends ICampUnitMetadata
-  function getOperatingUnit() returns unit
+  function getOperatingUnit() returns IUnitMetadata
   function isOperated() returns bool
-  function canOperate(unit u) returns bool
-  function startOperating(unit u) returns bool
+  function canOperate(IUnitMetadata u) returns bool
+  function startOperating(IUnitMetadata u) returns bool
   function stopOperating()
 
 // ============================================================================
 public abstract class OperatableUnit extends CampUnit implements IOperatableUnit
-  private unit _operatingUnit
+  private IUnitMetadata _operatingUnit
 
   // --------------------------------------------------------------------------
-  construct(ICamp camp, unit u)
-    super(camp, u)
+  construct(ICamp camp)
+    super(camp)
     
   // --------------------------------------------------------------------------
   @inline
   override function getUnit() returns unit
     return super.getUnit()
-
-  // --------------------------------------------------------------------------  
-  @inline
-  override function getCamp() returns ICamp
-    return super.getCamp()
   
   // --------------------------------------------------------------------------
   @inline
   override function setUnit(unit u)
     super.setUnit(u)
+
+  // --------------------------------------------------------------------------  
+  @inline
+  override function getCamp() returns ICamp
+    return super.getCamp()
 
   // --------------------------------------------------------------------------
   @inline
@@ -55,7 +56,7 @@ public abstract class OperatableUnit extends CampUnit implements IOperatableUnit
 
   // --------------------------------------------------------------------------
   @inline
-  override function getOperatingUnit() returns unit
+  override function getOperatingUnit() returns IUnitMetadata
     return this._operatingUnit
 
   // --------------------------------------------------------------------------
@@ -65,11 +66,11 @@ public abstract class OperatableUnit extends CampUnit implements IOperatableUnit
 
   // --------------------------------------------------------------------------
   @inline
-  override function canOperate(unit u) returns bool
+  override function canOperate(IUnitMetadata u) returns bool
     return not this.isOperated() and u.getTypeId() == TlsUnitIds.survivorMale
 
   // --------------------------------------------------------------------------
-  override function startOperating(unit u) returns bool
+  override function startOperating(IUnitMetadata u) returns bool
     if (not this.canOperate(u))
       return false
     this._operatingUnit = u
@@ -90,12 +91,15 @@ public abstract class OperatableUnit extends CampUnit implements IOperatableUnit
 function onOperatingUnitLoaded()
   let transportingUnit = GetTransportUnit()
   let transportedUnit = GetTriggerUnit()
+  let transportedUnitMetadata = transportedUnit.getMetadata()
+  if (transportedUnitMetadata == null)
+    return
   let camp = transportingUnit.getOwnerHumanMetadata().getCamp()
   if (camp == null)
     return
   let operatableUnit = camp.getUnit(transportingUnit) castTo IOperatableUnit
   if (operatableUnit != null)
-    operatableUnit.startOperating(transportedUnit)
+    operatableUnit.startOperating(transportedUnitMetadata)
 
 // ============================================================================
 function onOperatingUnitUnloaded()
@@ -114,7 +118,7 @@ function onOperatingUnitUnloaded()
     return
 
   let operatableUnit = camp.getUnit(orderedUnit) castTo IOperatableUnit
-  if (operatableUnit != null and targetUnit == operatableUnit.getOperatingUnit())
+  if (operatableUnit != null and targetUnit == operatableUnit.getOperatingUnit().getUnit())
     operatableUnit.stopOperating()
 
 // ============================================================================

@@ -1,0 +1,170 @@
+package SurvivorJobComponent
+import UnitComponent
+import UnitMetadata
+import RegisterEvents
+import Events
+import TlsItemIds
+import TlsUnitIds
+import UnitExtensions
+import ClosureTimers
+import FX
+
+AnonymousEvent g_itemAcquired
+AnonymousEvent g_itemDropped
+
+constant string JOB_CHANGE_FX_PATH = "Objects\\Spawnmodels\\Other\\ToonBoom\\ToonBoom.mdl"
+
+// ============================================================================
+public class SurvivorJobComponent extends UnitComponent
+  private AnonymousEventHandler m_itemAcquiredHandler
+  private AnonymousEventHandler m_itemDroppedHandler
+  private bool m_ignoreItemEvents
+
+  // --------------------------------------------------------------------------
+  construct(IUnitMetadata owner)
+    super(owner)
+
+  // --------------------------------------------------------------------------
+  protected override function onEnabled()
+    super.onEnabled()
+    listenToItemAcquired()
+    listenToItemDropped()
+
+  // --------------------------------------------------------------------------
+  protected override function onDisabled()
+    super.onDisabled()
+    unlistenToItemAcquired()
+    unlistenToItemDropped()
+
+  // --------------------------------------------------------------------------
+  private function onItemAcquired(item itm)
+    let unitBeingReplaced = getOwnerUnit()
+    
+    let itmId = itm.getTypeId()
+    if (not itm.isJobItem())
+      return
+
+    int replaceUnitId
+    switch (itmId)
+      case TlsItemIds.huntingRifle
+        replaceUnitId = TlsUnitIds.survivorMarksman
+      case TlsItemIds.basicTools
+        replaceUnitId = TlsUnitIds.survivorBuilder
+      case TlsItemIds.medicalKit
+        replaceUnitId = TlsUnitIds.survivorMedic
+      case TlsItemIds.spears
+        replaceUnitId = TlsUnitIds.survivorSpearman
+      default
+        return
+
+    if (unitBeingReplaced.getTypeId() == replaceUnitId)
+      return
+
+    m_ignoreItemEvents = true
+
+    playJobChangeFX()
+
+    let wasSelected = unitBeingReplaced.isSelectedByOwner()
+    let replacedUnit = replaceUnitTLS(unitBeingReplaced, replaceUnitId, bj_UNIT_STATE_METHOD_RELATIVE)
+    if (wasSelected)
+      SelectUnitAddForPlayer(replacedUnit, replacedUnit.getOwner())
+
+    dropOtherJobItems(itmId)
+
+    m_ignoreItemEvents = false
+
+  // --------------------------------------------------------------------------
+  private function onItemDropped(item itm)
+    let itemTypeId = itm.getTypeId()
+    if (not itm.isJobItem())
+      return
+
+    let unitBeingReplaced = getOwnerUnit()
+    let unitTypeId = unitBeingReplaced.getTypeId()
+
+    bool isValid
+
+    switch (itemTypeId)
+      case TlsItemIds.huntingRifle
+        isValid = unitTypeId == TlsUnitIds.survivorMarksman
+      case TlsItemIds.basicTools
+        isValid = unitTypeId == TlsUnitIds.survivorBuilder
+      case TlsItemIds.medicalKit
+        isValid = unitTypeId == TlsUnitIds.survivorMedic
+      case TlsItemIds.spears
+        isValid = unitTypeId == TlsUnitIds.survivorSpearman
+      default
+        return
+
+    if (not isValid)
+      return
+
+    let itmPos = itm.getPos()
+
+    m_ignoreItemEvents = true
+    
+    let wasSelected = unitBeingReplaced.isSelectedByOwner()
+    let replacedUnit = replaceUnitTLS(unitBeingReplaced, TlsUnitIds.survivorMale, bj_UNIT_STATE_METHOD_RELATIVE)
+    if (wasSelected)
+      SelectUnitAddForPlayer(replacedUnit, replacedUnit.getOwner())
+
+    if (replacedUnit.hasItem(itm))
+      replacedUnit.dropItemPoint(itm, itmPos)
+
+    m_ignoreItemEvents = false  
+
+  // --------------------------------------------------------------------------
+  private function dropOtherJobItems(int exceptId)
+    let ownerUnit = getOwnerUnit()
+    let pos = ownerUnit.getPos()
+    for jobItemId in g_jobItemIds
+      if (jobItemId != exceptId)
+        let itm = ownerUnit.getItemById(jobItemId)
+        if (itm != null)
+          ownerUnit.dropItemPoint(itm, pos)
+
+  // --------------------------------------------------------------------------
+  private function playJobChangeFX()
+    let fx = FX.createEffect(JOB_CHANGE_FX_PATH, getOwnerUnit().getPos())
+    fx.setAlpha(255)
+    fx.setColor(255, 255, 255)
+    fx.setScale(1.0)
+    doAfter(5) ->
+      DestroyEffect(fx)
+
+  // --------------------------------------------------------------------------
+  private function listenToItemAcquired()
+    m_itemAcquiredHandler = g_itemAcquired.addListener() -> 
+      let u = GetManipulatingUnit()
+      if (u == getOwnerUnit() and not m_ignoreItemEvents)
+        onItemAcquired(GetManipulatedItem())
+
+  // --------------------------------------------------------------------------
+  private function unlistenToItemAcquired()
+    m_itemAcquiredHandler = g_itemAcquired.removeListener(m_itemAcquiredHandler)
+
+  // --------------------------------------------------------------------------
+  private function listenToItemDropped()
+    m_itemDroppedHandler = g_itemDropped.addListener() -> 
+      let u = GetManipulatingUnit()
+      if (u == getOwnerUnit() and not m_ignoreItemEvents)
+        onItemDropped(GetManipulatedItem())
+
+  // --------------------------------------------------------------------------
+  private function unlistenToItemDropped()
+    m_itemDroppedHandler = g_itemDropped.removeListener(m_itemDroppedHandler)
+    
+// ============================================================================
+function onItemAcquired()
+  g_itemAcquired.invoke()
+
+// ============================================================================
+function onItemDropped()
+  g_itemDropped.invoke()
+  
+// ============================================================================
+init
+  g_itemAcquired = new AnonymousEvent()
+  g_itemDropped = new AnonymousEvent()
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_PICKUP_ITEM, function onItemAcquired)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_DROP_ITEM, function onItemDropped)

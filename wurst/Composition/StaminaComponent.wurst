@@ -6,9 +6,10 @@ import Type
 import ProgressBar
 import ColorUtility
 import ClosureTimers
+import UnitComponent
 
 // ============================================================================
-public class StaminaComponent extends Component
+public class StaminaComponent extends UnitComponent
 
   private constant real TIME_TO_HIDE_STAMINA_BAR = 3.0
 
@@ -22,24 +23,8 @@ public class StaminaComponent extends Component
   // --------------------------------------------------------------------------
   construct(IUnitMetadata owner)
     super(owner)
-
     staminaChangedEvent = new GenericArgsEvent<StaminaComponent, real>()
     outOfStaminaEvent = new GenericEvent<StaminaComponent>()
-
-    _staminaBar = new ProgressBar()
-    ..setTarget(owner.getUnit())
-    ..setHeight(135.0)
-    ..setOffset(vec2(-14.5, 0))
-    ..setScale(1.2)
-    ..setColor(Colors.gold)
-    ..setPercentageNow(getStamina()/getMaxStamina())
-    ..show(false)
-
-    _staminaChangedEventHandler = staminaChangedEvent.addListener() (StaminaComponent sender, real args) ->
-      let t = getStamina() / getMaxStamina()
-      _staminaBar.setPercentage(t)
-      _staminaBar.show(true)
-      hideStaminaBarDelayed()
 
   // --------------------------------------------------------------------------
   ondestroy
@@ -57,24 +42,57 @@ public class StaminaComponent extends Component
       destroy _staminaBar
 
   // --------------------------------------------------------------------------
+  override function initialize()
+    super.initialize()
+    
+    _staminaBar = new ProgressBar()
+    ..setHeight(135.0)
+    ..setOffset(vec2(-14.5, 0))
+    ..setScale(1.2)
+    ..setColor(Colors.gold)
+    ..show(false)
+
+    _staminaChangedEventHandler = staminaChangedEvent.addListener() (StaminaComponent sender, real args) ->
+      let t = getStamina() / getMaxStamina()
+      _staminaBar.setPercentage(t)
+      _staminaBar.show(true)
+      hideStaminaBarDelayed()
+
+  // --------------------------------------------------------------------------
+  override function onUnitChanged(unit oldUnit, unit newUnit)
+    super.onUnitChanged(oldUnit, newUnit)
+      
+    if (_staminaBar != null)
+      _staminaBar.setTarget(newUnit)
+      _staminaBar.setPercentageNow(getStaminaPercentage())
+
+  // --------------------------------------------------------------------------
   function getStamina() returns real
-    return (_owner castTo IUnitMetadata).getUnit().getMana()
+    let ownerUnit = getOwnerUnit()
+    return ownerUnit != null ? ownerUnit.getMana() : 0.0
 
   // --------------------------------------------------------------------------
   function getMaxStamina() returns real
-    return (_owner castTo IUnitMetadata).getUnit().getMaxMana()
+    let ownerUnit = getOwnerUnit()
+    return ownerUnit != null ? ownerUnit.getMana() : 0.0
+
+  // --------------------------------------------------------------------------
+  function getStaminaPercentage() returns real
+    let current = getStamina()
+    let max = getMaxStamina()
+    return max == 0.0 ? 0.0 : current / max
 
   // --------------------------------------------------------------------------
   function removeStamina(real amount)
-    let u = (_owner castTo IUnitMetadata).getUnit()
-    let originalMana = u.getMana()
+    let ownerUnit = getOwnerUnit()
+    let originalMana = ownerUnit.getMana()
     let remainingMana = RMaxBJ(originalMana - amount, 0.0)
     let actualDelta = originalMana - remainingMana
 
     if (RAbsBJ(actualDelta) <= 0.0)
       return
     
-    u.setMana(remainingMana)
+    ownerUnit.setMana(remainingMana)
     staminaChangedEvent.invoke(this, actualDelta)
 
     if (remainingMana <= 0.0)
