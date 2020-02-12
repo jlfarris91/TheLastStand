@@ -13,10 +13,12 @@ import ClosureTimers
 import TlsSounds
 import PlayerWaves
 import IWaveGenerator
-import NormalNightWaveGenerator
 import DayWave
 import NightWave
 import Runnable
+import NormalNightWaveGenerator
+import NormalDayWaveGenerator
+import StringBuilder
 
 public GameInstance g_GameInstance
 
@@ -105,8 +107,8 @@ public class GameInstance extends Runnable
     super.onStarted()
 
     // These should move to a place that sets up the GameInstance
-    m_dayWaveGenerator = null
-    m_nightWaveGenerator = new NormalNightWaveGenerator()..setTotalNights(28)
+    m_dayWaveGenerator = new NormalDayWaveGenerator()
+    m_nightWaveGenerator = new NormalNightWaveGenerator()
 
     initializeGeneral()
     initializeAlliances()
@@ -127,6 +129,14 @@ public class GameInstance extends Runnable
 
     destroy m_playerWaves
     m_playerWaves = null
+
+    if (m_nightWaveGenerator != null)
+      destroy m_nightWaveGenerator
+      m_nightWaveGenerator = null
+
+    if (m_dayWaveGenerator != null)
+      destroy m_dayWaveGenerator
+      m_dayWaveGenerator = null
 
   // --------------------------------------------------------------------------
   private function postStart()
@@ -202,11 +212,35 @@ public class GameInstance extends Runnable
     for p in g_PlayingHumanPlayers
       let playerWaves = m_playerWaves.getOrCreatePlayerWaves(p)
 
-      if (m_nightWaveGenerator != null)
-        m_nightWaveGenerator.generateWavesForPlayer(p, playerWaves.getNightWaves())
+      Log.info("Generating waves for player " + p.getName() + "...")
 
+      let nightWaves = playerWaves.getNightWaves()
+      if (m_nightWaveGenerator != null)
+        m_nightWaveGenerator.generateWavesForPlayer(p, nightWaves)
+
+      let dayWaves = playerWaves.getDayWaves()
       if (m_dayWaveGenerator != null)
-        m_dayWaveGenerator.generateWavesForPlayer(p, playerWaves.getDayWaves())
+        m_dayWaveGenerator.generateWavesForPlayer(p, dayWaves)
+
+      Log.info("Done generating waves for player " + p.getName())
+      
+      let sb = new LogStringBuilder()
+      
+      Log.info("Day waves: " + I2S(dayWaves.getCount()))
+      for waveId in dayWaves
+        let wave = dayWaves.getLatestWave(waveId)
+        if (wave != null)
+          wave.getDebugString(sb)
+          
+      sb.reset()
+          
+      Log.info("Night waves: " + I2S(nightWaves.getCount()))
+      for waveId in nightWaves
+        let wave = nightWaves.getLatestWave(waveId)
+        if (wave != null)
+          wave.getDebugString(sb)
+
+      destroy sb
 
     // Log.info("Done generating waves.")
 

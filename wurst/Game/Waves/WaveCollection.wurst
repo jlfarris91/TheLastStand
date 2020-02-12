@@ -2,6 +2,7 @@ package WaveCollection
 import HashMap
 import LinkedList
 import ErrorHandling
+import Wave
 
 // ============================================================================
 public abstract class WaveCollection<TWave>
@@ -12,6 +13,10 @@ public abstract class WaveCollection<TWave>
   construct()
     m_waves = new HashMap<int, TWave>()
     m_sortedWaveIndices = new LinkedList<int>()
+
+  // --------------------------------------------------------------------------
+  function getCount() returns int
+    return m_waves.size()
 
   // --------------------------------------------------------------------------
   // Gets the latest available wave whos index is less than or equal to the given index
@@ -56,6 +61,10 @@ public abstract class WaveCollection<TWave>
     return false
 
   // --------------------------------------------------------------------------
+  function iterator() returns LLIterator<int>
+    return m_sortedWaveIndices.iterator()
+
+  // --------------------------------------------------------------------------
   protected abstract function createWave(int _index) returns TWave
     
   // --------------------------------------------------------------------------
@@ -64,8 +73,53 @@ public abstract class WaveCollection<TWave>
     while (iterator.hasNext())
       let current = iterator.next()
       let next = iterator.hasNext() ? iterator.lookahead() : -1
-      if (index >= current and index < next)
+      if (index >= current and (next == -1 or index < next))
         iterator.close()
         return current
     iterator.close()
     return -1
+
+// ============================================================================
+//  TESTS
+// ============================================================================
+
+// ============================================================================
+class FakeWave extends Wave
+  int m_index
+
+  construct(int index)
+    m_index = index
+
+// ============================================================================
+class FakeWaveCollection extends WaveCollection<FakeWave>
+  
+  // --------------------------------------------------------------------------
+  protected override function createWave(int index) returns FakeWave
+    return new FakeWave(index)
+
+// ============================================================================
+//  - getLatestWave(0) returns null
+//  - getLatestWave(2) returns null
+//  - getLatestWave(5) returns wave(5)
+//  - getLatestWave(8) returns wave(5)
+//  - getLatestWave(999) returns wave(5)
+@test function getLatestWave()
+  // arrange
+
+  let waveCollection = new FakeWaveCollection()
+  let wave5 = waveCollection.getOrCreateWave(5)
+
+  // act + assert
+  assertTrue(waveCollection.getLatestWave(0) == null)
+  assertTrue(waveCollection.getLatestWave(2) == null)
+
+  
+  let actualWave5 = waveCollection.getLatestWave(5)
+  assertTrue(actualWave5 != null)
+  assertTrue(actualWave5.m_index == 5)
+
+  // TODO: equality doesn't work?!
+  assertTrue((actualWave5 castTo int) == (wave5 castTo int))
+
+  assertTrue((waveCollection.getLatestWave(8) castTo int) == (wave5 castTo int))
+  assertTrue((waveCollection.getLatestWave(999) castTo int) == (wave5 castTo int))
