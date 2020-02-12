@@ -1,0 +1,145 @@
+package WaveMultiboard
+import BaseMultiboard
+import initlater GameInstance
+import SpawnWave
+import Wave
+import TimerUtils
+import ClosureTimers
+
+constant real INTERVAL_PERIOD = 0.1
+constant int COLUMN_NAME = 0
+constant int COLUMN_VALUE = 1
+constant int ROW_COUNT_PER_SPAWN_WAVE = 9
+
+// ============================================================================
+public class WaveMultiboard extends BaseMultiboard
+  private timer m_timer
+  private Wave m_latestWave
+
+  // --------------------------------------------------------------------------
+  override function show()
+
+    update()
+
+    super.show()
+    
+    if (m_timer == null)
+      m_timer = getTimer()
+      m_timer.doPeriodically(INTERVAL_PERIOD) (CallbackPeriodic cb) ->
+        update()
+    
+  // --------------------------------------------------------------------------
+  override function hide()
+    super.hide()    
+
+    if (m_timer != null)
+      m_timer.release()
+      m_timer = null
+
+  // --------------------------------------------------------------------------
+  function updateLayout()
+
+    m_multiboard.setColumnWidth(COLUMN_NAME, 0.15)
+    m_multiboard.setColumnWidth(COLUMN_VALUE, 0.15)
+
+    MultiboardSetItemStyleBJ(m_multiboard, COLUMN_NAME + 1, 0, true, false)
+    MultiboardSetItemStyleBJ(m_multiboard, COLUMN_VALUE + 1, 0, true, false)
+
+    if (m_latestWave != null)
+      m_multiboard.setRowCount(ROW_COUNT_PER_SPAWN_WAVE * m_latestWave.getSpawnWaves().size())
+
+  // --------------------------------------------------------------------------
+  function update()
+
+    let currentWave = getCurrentWave()
+    if (currentWave != m_latestWave)
+      m_latestWave = currentWave
+      updateLayout()
+
+    if (m_latestWave == null)
+      return
+
+    if (g_GameInstance.getIsDay())
+      m_multiboard.setTitle("Day Wave " + I2S(g_GameInstance.getDay()) + " (" + m_latestWave.getStatusString() +  ")")
+    
+    if (g_GameInstance.getIsNight())
+      m_multiboard.setTitle("Night Wave " + I2S(g_GameInstance.getNight()) + " (" + m_latestWave.getStatusString() +  ")")
+
+    updateRows(m_latestWave)
+
+  // --------------------------------------------------------------------------
+  private function updateRows(Wave wave)
+
+    let spawnWaves = wave.getSpawnWaves()
+
+    var row = 0
+    var index = 0
+    for spawnWave in spawnWaves
+
+      setItemValues(row, "", "===== Spawn Wave " + I2S(index) + " (" + spawnWave.getStatusString() + ") =====")
+      row++
+
+      row = updateSpawnWaveRows(spawnWave, row)
+
+      index++
+
+  // --------------------------------------------------------------------------
+  private function updateSpawnWaveRows(SpawnWave spawnWave, int row) returns int
+    var r = row
+
+    setItemValues(r, "Target Player:", getTargetPlayer().getName())
+    r++
+
+    let waveProgress = spawnWave.getWaveProgress()
+    setItemValues(r, "Progress:", I2S(R2I(waveProgress * 100.0)) + "%")
+    r++
+
+    let numSpawned = spawnWave.getSpawnedCount()
+    let spawnCountMax = spawnWave.getSpawnCountMax(waveProgress)    
+    setItemValues(r, "Spawns:", I2S(numSpawned) + "/" + (spawnCountMax == UNLIMITED ? "Unlimited" : I2S(spawnCountMax)))
+    r++
+
+    let aliveCountMax = spawnWave.getAliveCountMax(waveProgress)
+    let numAlive = spawnWave.getAliveCount()
+    setItemValues(r, "Alive:", I2S(numAlive) + "/" + (aliveCountMax == UNLIMITED ? "Unlimited" : I2S(aliveCountMax)))
+    r++
+
+    let spawnsPerActivation = spawnWave.getSpawnsPerActivation(waveProgress) 
+    let spawnGroupingFactor = spawnWave.getSpawnGroupFactor(waveProgress)
+    let numSpawnGroups = max(R2I(I2R(spawnsPerActivation) * (1.0 - spawnGroupingFactor)), 1)
+    let spawnGroupSize = max(R2I(I2R(spawnsPerActivation) * spawnGroupingFactor), 1)   
+
+    setItemValues(r, "Spawns Per Activation:", I2S(spawnsPerActivation))
+    r++
+
+    setItemValues(r, "Spawn Group Factor:", R2S(spawnGroupingFactor))
+    r++
+
+    setItemValues(r, "Groups:", I2S(numSpawnGroups))
+    r++
+
+    setItemValues(r, "Group Size:", I2S(spawnGroupSize))
+    r++
+
+    return r
+
+  // --------------------------------------------------------------------------
+  private function setItemValues(int row, string name, string value)
+    m_multiboard.setItemValue(row, COLUMN_NAME, name)
+    m_multiboard.setItemValue(row, COLUMN_VALUE, value)
+
+  // --------------------------------------------------------------------------
+  private function getCurrentWave() returns Wave
+    
+    let waves = g_GameInstance.getWaves()
+    let playerWaves = waves.getOrCreatePlayerWaves(getTargetPlayer())
+
+    if (g_GameInstance.getIsDay())
+      let dayWaves = playerWaves.getDayWaves()
+      return dayWaves.getLatestWave(g_GameInstance.getDay())
+    
+    if (g_GameInstance.getIsNight())
+      let nightWaves = playerWaves.getNightWaves()
+      return nightWaves.getLatestWave(g_GameInstance.getNight())
+
+    return null
