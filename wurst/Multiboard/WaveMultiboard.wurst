@@ -9,11 +9,21 @@ import ClosureTimers
 constant real INTERVAL_PERIOD = 0.1
 constant int COLUMN_NAME = 0
 constant int COLUMN_VALUE = 1
-constant int ROW_COUNT_PER_SPAWN_WAVE = 9
+
+constant int SPAWN_WAVE_ROW_TITLE = 0
+constant int SPAWN_WAVE_ROW_PROGRESS = 1
+constant int SPAWN_WAVE_ROW_SPAWNS = 2
+constant int SPAWN_WAVE_ROW_ALIVE = 3
+constant int SPAWN_WAVE_ROW_SPAWNS_PER_ACTIVATION = 4
+constant int SPAWN_WAVE_ROW_SPAWN_GROUP_FACTOR = 5
+constant int SPAWN_WAVE_ROW_GROUP_COUNT = 6
+constant int SPAWN_WAVE_ROW_GROUP_SIZE = 7
+constant int SPAWN_WAVE_ROW_COUNT = 8
 
 // ============================================================================
 public class WaveMultiboard extends BaseMultiboard
   private timer m_timer
+  private player m_player
   private Wave m_latestWave
 
   // --------------------------------------------------------------------------
@@ -37,6 +47,14 @@ public class WaveMultiboard extends BaseMultiboard
       m_timer = null
 
   // --------------------------------------------------------------------------
+  function getPlayer() returns player
+    return m_player
+
+  // --------------------------------------------------------------------------
+  function setPlayer(player p)
+    m_player = p
+
+  // --------------------------------------------------------------------------
   function updateLayout()
 
     m_multiboard.setColumnWidth(COLUMN_NAME, 0.15)
@@ -46,7 +64,11 @@ public class WaveMultiboard extends BaseMultiboard
     MultiboardSetItemStyleBJ(m_multiboard, COLUMN_VALUE + 1, 0, true, false)
 
     if (m_latestWave != null)
-      m_multiboard.setRowCount(ROW_COUNT_PER_SPAWN_WAVE * m_latestWave.getSpawnWaves().size())
+      let spawnWaveCount = m_latestWave.getSpawnWaves().size()
+      if (spawnWaveCount == 0)
+        m_multiboard.setRowCount(1)
+      else
+        m_multiboard.setRowCount(SPAWN_WAVE_ROW_COUNT * spawnWaveCount)
 
   // --------------------------------------------------------------------------
   function update()
@@ -56,14 +78,14 @@ public class WaveMultiboard extends BaseMultiboard
       m_latestWave = currentWave
       updateLayout()
 
-    if (m_latestWave == null)
+    if (m_latestWave == null or getPlayer() == null)
       return
 
     if (g_GameInstance.getIsDay())
-      m_multiboard.setTitle("Day Wave " + I2S(g_GameInstance.getDay()) + " (" + m_latestWave.getStatusString() +  ")")
+      m_multiboard.setTitle("[" + getPlayer().getName() + "] Day Wave " + I2S(g_GameInstance.getDay()) + " (" + m_latestWave.getStatusString() +  ")")
     
     if (g_GameInstance.getIsNight())
-      m_multiboard.setTitle("Night Wave " + I2S(g_GameInstance.getNight()) + " (" + m_latestWave.getStatusString() +  ")")
+      m_multiboard.setTitle("[" + getPlayer().getName() + "] Night Wave " + I2S(g_GameInstance.getNight()) + " (" + m_latestWave.getStatusString() +  ")")
 
     updateRows(m_latestWave)
 
@@ -72,56 +94,37 @@ public class WaveMultiboard extends BaseMultiboard
 
     let spawnWaves = wave.getSpawnWaves()
 
+    if (spawnWaves.isEmpty())
+      setItemValues(0, "No spawn waves", "")
+      return
+
     var row = 0
     var index = 0
     for spawnWave in spawnWaves
-
-      setItemValues(row, "", "===== Spawn Wave " + I2S(index) + " (" + spawnWave.getStatusString() + ") =====")
-      row++
-
-      row = updateSpawnWaveRows(spawnWave, row)
-
-      index++
+      updateSpawnWaveRows(spawnWave, index, row)
+      row += SPAWN_WAVE_ROW_COUNT
+      index += 1
 
   // --------------------------------------------------------------------------
-  private function updateSpawnWaveRows(SpawnWave spawnWave, int row) returns int
-    var r = row
-
-    setItemValues(r, "Target Player:", getTargetPlayer().getName())
-    r++
-
+  private function updateSpawnWaveRows(SpawnWave spawnWave, int spawnWaveIndex, int row)
     let waveProgress = spawnWave.getWaveProgress()
-    setItemValues(r, "Progress:", I2S(R2I(waveProgress * 100.0)) + "%")
-    r++
-
     let numSpawned = spawnWave.getSpawnedCount()
-    let spawnCountMax = spawnWave.getSpawnCountMax(waveProgress)    
-    setItemValues(r, "Spawns:", I2S(numSpawned) + "/" + (spawnCountMax == UNLIMITED ? "Unlimited" : I2S(spawnCountMax)))
-    r++
-
+    let spawnCountMax = spawnWave.getSpawnCountMax(waveProgress)
     let aliveCountMax = spawnWave.getAliveCountMax(waveProgress)
     let numAlive = spawnWave.getAliveCount()
-    setItemValues(r, "Alive:", I2S(numAlive) + "/" + (aliveCountMax == UNLIMITED ? "Unlimited" : I2S(aliveCountMax)))
-    r++
-
-    let spawnsPerActivation = spawnWave.getSpawnsPerActivation(waveProgress) 
+    let spawnsPerActivation = spawnWave.getSpawnsPerActivation(waveProgress)
     let spawnGroupingFactor = spawnWave.getSpawnGroupFactor(waveProgress)
     let numSpawnGroups = max(R2I(I2R(spawnsPerActivation) * (1.0 - spawnGroupingFactor)), 1)
-    let spawnGroupSize = max(R2I(I2R(spawnsPerActivation) * spawnGroupingFactor), 1)   
-
-    setItemValues(r, "Spawns Per Activation:", I2S(spawnsPerActivation))
-    r++
-
-    setItemValues(r, "Spawn Group Factor:", R2S(spawnGroupingFactor))
-    r++
-
-    setItemValues(r, "Groups:", I2S(numSpawnGroups))
-    r++
-
-    setItemValues(r, "Group Size:", I2S(spawnGroupSize))
-    r++
-
-    return r
+    let spawnGroupSize = max(R2I(I2R(spawnsPerActivation) * spawnGroupingFactor), 1)
+    
+    setItemValues(row + SPAWN_WAVE_ROW_TITLE, "Spawn Wave " + I2S(spawnWaveIndex), spawnWave.getStatusString())
+    setItemValues(row + SPAWN_WAVE_ROW_PROGRESS, "Progress", I2S(R2I(waveProgress * 100.0)) + "%")
+    setItemValues(row + SPAWN_WAVE_ROW_SPAWNS, "Spawns", I2S(numSpawned) + "/" + (spawnCountMax == UNLIMITED ? "Unlimited" : I2S(spawnCountMax)))
+    setItemValues(row + SPAWN_WAVE_ROW_ALIVE, "Alive", I2S(numAlive) + "/" + (aliveCountMax == UNLIMITED ? "Unlimited" : I2S(aliveCountMax)))
+    setItemValues(row + SPAWN_WAVE_ROW_SPAWNS_PER_ACTIVATION, "Spawns Per Activation", I2S(spawnsPerActivation))
+    setItemValues(row + SPAWN_WAVE_ROW_SPAWN_GROUP_FACTOR, "Spawn Group Factor", R2S(spawnGroupingFactor))
+    setItemValues(row + SPAWN_WAVE_ROW_GROUP_COUNT, "Groups", I2S(numSpawnGroups))
+    setItemValues(row + SPAWN_WAVE_ROW_GROUP_SIZE, "Group Size", I2S(spawnGroupSize))
 
   // --------------------------------------------------------------------------
   private function setItemValues(int row, string name, string value)
@@ -130,9 +133,16 @@ public class WaveMultiboard extends BaseMultiboard
 
   // --------------------------------------------------------------------------
   private function getCurrentWave() returns Wave
+
+    let wavesOwner = getPlayer()
+    if (wavesOwner == null)
+      return null
     
     let waves = g_GameInstance.getWaves()
-    let playerWaves = waves.getOrCreatePlayerWaves(getTargetPlayer())
+    if (waves == null)
+      return null
+
+    let playerWaves = waves.getOrCreatePlayerWaves(wavesOwner)
 
     if (g_GameInstance.getIsDay())
       let dayWaves = playerWaves.getDayWaves()
