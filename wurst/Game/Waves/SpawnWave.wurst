@@ -21,6 +21,7 @@ public class SpawnWave extends Runnable
   private LinkedList<unit> m_aliveSpawnedUnits
   private GenericArgsEvent<SpawnWave, LinkedList<unit>> m_unitsSpawnedEvent
   private int m_numSpawned
+  private string m_name
 
   // --------------------------------------------------------------------------
   construct(SpawnWaveDefinition def, player targetPlayer)
@@ -36,6 +37,14 @@ public class SpawnWave extends Runnable
     destroy m_unitsSpawnedEvent
     m_definition = null
     m_targetPlayer = null
+
+  // --------------------------------------------------------------------------
+  function setName(string name)
+    m_name = name
+
+  // --------------------------------------------------------------------------
+  function getName() returns string
+    return m_name
 
   // --------------------------------------------------------------------------
   function getTargetPlayer() returns player
@@ -100,12 +109,6 @@ public class SpawnWave extends Runnable
     let spawnsPerActivation = getSpawnsPerActivation(waveProgress)    
     let spawnGroupingFactor = getSpawnGroupFactor(waveProgress)
 
-    let numAlive = m_aliveSpawnedUnits.size()
-    let numSpawnsAvailable = min(aliveCountMax - numAlive, spawnCountMax - m_numSpawned)
-
-    if (numSpawnsAvailable == 0)
-      return
-
     let numSpawnGroups = max(R2I(I2R(spawnsPerActivation) * (1.0 - spawnGroupingFactor)), 1)
     let spawnGroupSize = max(R2I(I2R(spawnsPerActivation) * spawnGroupingFactor), 1)
 
@@ -113,32 +116,41 @@ public class SpawnWave extends Runnable
 
     let spawnedUnits = new LinkedList<unit>()
 
-    // Log.info("=== SpawnWave Activated ===")
-    // Log.info("Progress: " + I2S(R2I(waveProgress * 100.0)) + "%")
-    // Log.info("Spawns: " + I2S(m_numSpawned) + "/" + (spawnCountMax == UNLIMITED ? "Unlimited" : I2S(spawnCountMax)))
-    // Log.info("Alive: " + I2S(numAlive) + "/" + (aliveCountMax == UNLIMITED ? "Unlimited" : I2S(aliveCountMax)))
-    // Log.info("Groups: " + I2S(numSpawnGroups) + " Size: " + I2S(spawnGroupSize))
-    // Log.info("Spawn Points Found: " + I2S(spawnPoints.getCount()))
+    var numSpawnsAvailable = min(aliveCountMax - m_aliveSpawnedUnits.size(), spawnCountMax - m_numSpawned)
 
-    var numSpawnsRemaining = numSpawnsAvailable
-    //Log.info("Spawns: " + I2S(m_numSpawned) + "/" + (spawnCountMax == UNLIMITED ? "Unlimited" : I2S(spawnCountMax)))
-    //Log.info("Alive: " + I2S(numAlive) + "/" + (aliveCountMax == UNLIMITED ? "Unlimited" : I2S(aliveCountMax)))
-    //Log.info("Number of spawns available: " + I2S(numSpawnsRemaining))
-
-    // For each spawn points
+    // For each spawn point
     for sp in spawnPoints
-      // Spawn N units
-      for i = 0 to spawnGroupSize - 1
-        // Until we reach max alive or max spawned
-        if (numSpawnsRemaining > 0)
-          let spawnCount = min(numSpawnsRemaining, spawnGroupSize)
-          let unitTypes = m_definition.getUnitTypeProvider().getUnitTypes(spawnCount)
-          for unitType in unitTypes
-            let spawnedUnit = spawnSingleUnit(unitType, sp)
-            spawnedUnits.add(spawnedUnit)
-            numSpawnsRemaining--
-          destroy unitTypes
+      
+      // Until we reach max alive or max spawned
+      if (numSpawnsAvailable == 0)
+        break
 
+      // Spawn N units to form a group
+      for i = 0 to spawnGroupSize - 1
+
+        // Until we reach max alive or max spawned
+        if (numSpawnsAvailable == 0)
+          break
+
+        let spawnCount = min(numSpawnsAvailable, spawnGroupSize)
+
+        // Sample unit types, one type for each unit in the group
+        let unitTypes = m_definition.getUnitTypeProvider().getUnitTypes(spawnCount)
+        for unitType in unitTypes
+        
+          // Until we reach max alive or max spawned
+          if (numSpawnsAvailable == 0)
+            break
+
+          let spawnedUnit = spawnSingleUnit(unitType, sp)
+          spawnedUnits.add(spawnedUnit)
+
+          numSpawnsAvailable = min(aliveCountMax - m_aliveSpawnedUnits.size(), spawnCountMax - m_numSpawned)
+
+        // Clean up the unitTypes list
+        destroy unitTypes
+
+    // Clean up the spawnPoints list
     destroy spawnPoints
     
     m_unitsSpawnedEvent.invoke(this, spawnedUnits)
@@ -151,8 +163,6 @@ public class SpawnWave extends Runnable
       unitTypeId,
       pos.x, pos.y,
       GetRandomDirectionDeg())
-
-    //Log.info("  Spawned 1 " + spawnedUnit.getName())
 
     var progress = 0.0
     let waveProgresser = m_definition.getProgress()
