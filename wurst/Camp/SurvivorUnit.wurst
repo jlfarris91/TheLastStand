@@ -10,14 +10,23 @@ import TlsUnitIds
 import SurvivorMedicSkill
 import SurvivorSpearmanSkill
 import SurvivorMilitiaSkill
+import CampIncomeProviderComponent
+import SurvivorJobSkill
+import Range
+import SurvivorBuilderSkill
 
 // ============================================================================
 public class Survivor extends CampUnit
   private SkillsComponent m_skillsComponent
+  private CampIncomeProviderComponent m_campIncomeProvider
+
   private SurvivorMarksmanSkill m_marksmanSkill
   private SurvivorSpearmanSkill m_spearmanSkill
   private SurvivorMilitiaSkill m_militiaSkill
   private SurvivorMedicSkill m_medicSkill
+  private SurvivorBuilderSkill m_builderSkill
+  
+  private SurvivorJobSkill m_activeJobSkill
 
   // --------------------------------------------------------------------------
   construct(ICamp camp)
@@ -31,14 +40,23 @@ public class Survivor extends CampUnit
     m_spearmanSkill = m_skillsComponent.getOrAddSurvivorSpearmanSkill()..setIsEnabled(false)
     m_militiaSkill = m_skillsComponent.getOrAddSurvivorMilitiaSkill()..setIsEnabled(false)
     m_medicSkill = m_skillsComponent.getOrAddSurvivorMedicSkill()..setIsEnabled(false)
+    m_builderSkill = m_skillsComponent.getOrAddSurvivorBuilderSkill()..setIsEnabled(false)
 
     addComponent(m_skillsComponent)
+
+    m_campIncomeProvider = this.getOrAddCampIncomeProviderComponent()
+    ..setIncomeBase(0)
+    ..setIncomeNumberOfDice(1)
+    ..setIncomeNumberOfSidesPerDie(3)
+    ..setDuration(rangeReal(15.0, 30.0))
 
   // --------------------------------------------------------------------------
   protected override function onUnitChanged(unit oldUnit, unit newUnit)
     super.onUnitChanged(oldUnit, newUnit)
 
     disableAllSkills()
+    
+    m_campIncomeProvider.setIncomeBase(0)
 
     if (newUnit == null)
       return
@@ -47,20 +65,30 @@ public class Survivor extends CampUnit
 
     switch (newUnitId)
       case TlsUnitIds.survivorMale
+        m_activeJobSkill = m_builderSkill
         onLostJob()
       case TlsUnitIds.survivorMarksman | TlsUnitIds.survivorMarksmanTower
+        m_activeJobSkill = m_marksmanSkill
         onChangeToMarksman()
       case TlsUnitIds.survivorMedic
+        m_activeJobSkill = m_medicSkill
         onChangeToMedic()
       case TlsUnitIds.survivorBuilder
+        m_activeJobSkill = m_builderSkill
         onChangeToBuilder()
       case TlsUnitIds.survivorSpearman
+        m_activeJobSkill = m_spearmanSkill
         onChangeToSpearman()
       case TlsUnitIds.survivorMilitia
+        m_activeJobSkill = m_militiaSkill
         onChangeToMilitia()
       default
         error("Invalid unit type: " + newUnitId.toRawCode())
         return
+
+    if (m_activeJobSkill != null)
+      m_activeJobSkill.setIsEnabled(true)
+      m_campIncomeProvider.setIncomeBase(m_activeJobSkill.getLevel())
 
   // --------------------------------------------------------------------------
   private function disableAllSkills()
@@ -68,6 +96,7 @@ public class Survivor extends CampUnit
     m_medicSkill.setIsEnabled(false)
     m_spearmanSkill.setIsEnabled(false)
     m_militiaSkill.setIsEnabled(false)
+    m_builderSkill.setIsEnabled(false)
 
   // --------------------------------------------------------------------------
   private function onLostJob()
@@ -76,12 +105,10 @@ public class Survivor extends CampUnit
   // --------------------------------------------------------------------------
   private function onChangeToMarksman()
     Log.debug("Changed to Marksman job")
-    m_marksmanSkill.setIsEnabled(true)
 
   // --------------------------------------------------------------------------
   private function onChangeToMedic()
     Log.debug("Changed to Medic job")
-    m_medicSkill.setIsEnabled(true)
     skip
 
   // --------------------------------------------------------------------------
@@ -92,11 +119,9 @@ public class Survivor extends CampUnit
   // --------------------------------------------------------------------------
   private function onChangeToSpearman()
     Log.debug("Changed to Spearman job")
-    m_spearmanSkill.setIsEnabled(true)
     skip
 
   // --------------------------------------------------------------------------
   private function onChangeToMilitia()
     Log.debug("Changed to Militia job")
-    m_militiaSkill.setIsEnabled(true)
     skip

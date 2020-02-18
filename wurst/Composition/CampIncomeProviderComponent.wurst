@@ -1,0 +1,118 @@
+package CampIncomeProviderComponent
+import UnitComponent
+import UnitMetadata
+import Type
+import FX
+import ClosureTimers
+import HumanPlayerMetadata
+import Range
+
+// ============================================================================
+public class CampIncomeProviderComponent extends UnitComponent
+  private int m_incomeNumberOfDice = 1
+  private int m_incomeNumberOfSidesPerDie = 1
+  private int m_incomeBase = 1
+  private rangeReal m_durationRange
+  private CallbackSingle m_callback
+
+  // --------------------------------------------------------------------------
+  construct(IUnitMetadata owner)
+    super(owner)
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    stopDurationTimer()
+
+  // --------------------------------------------------------------------------
+  function getIncomeBase() returns int
+    return m_incomeBase
+
+  // --------------------------------------------------------------------------
+  function setIncomeBase(int value)
+    m_incomeBase = value
+
+  // --------------------------------------------------------------------------
+  function getIncomeNumberOfSidesPerDie() returns int
+    return m_incomeNumberOfSidesPerDie
+
+  // --------------------------------------------------------------------------
+  function setIncomeNumberOfSidesPerDie(int value)
+    m_incomeNumberOfSidesPerDie = value
+
+  // --------------------------------------------------------------------------
+  function getIncomeNumberOfDice() returns int
+    return m_incomeNumberOfDice
+
+  // --------------------------------------------------------------------------
+  function setIncomeNumberOfDice(int value)
+    m_incomeNumberOfDice = value
+
+  // --------------------------------------------------------------------------
+  function getDuration() returns rangeReal
+    return m_durationRange
+
+  // --------------------------------------------------------------------------
+  function setDuration(rangeReal value)
+    m_durationRange = value
+    startDurationTimer()
+
+  // --------------------------------------------------------------------------
+  function setDuration(real value)
+    setDuration(rangeReal(value, value))
+
+  // --------------------------------------------------------------------------
+  function calculateIncomeAmount() returns int
+    let min = m_incomeNumberOfDice
+    let max = m_incomeNumberOfDice * m_incomeNumberOfSidesPerDie
+    return m_incomeBase + GetRandomInt(min, max)
+
+  // --------------------------------------------------------------------------
+  override function onEnabled()
+    super.onEnabled()
+    startDurationTimer()
+
+  // --------------------------------------------------------------------------
+  private function onIncomeDurationTimerExpired()
+    m_callback = null
+
+    if (not getEnabled())
+      return
+    
+    let owningUnit = getOwnerUnit()
+    let owningPlayer = owningUnit.getOwner()
+    let owningPlayerMetadata = owningPlayer.getHumanMetadata()
+
+    let income = calculateIncomeAmount()
+    if (income != 0)
+      owningPlayerMetadata.giveMaterials(income)
+      FX.createGoldCreditEffect(owningUnit.getPos(), owningPlayer)
+      FX.createFoundMaterialsTag(owningUnit.getPos(), income, owningPlayer)
+
+    startDurationTimer()
+
+  // --------------------------------------------------------------------------
+  private function startDurationTimer()
+    stopDurationTimer()
+    if (m_durationRange.min > 0.0 and m_durationRange.max > 0.0)
+      m_callback = doAfter(sampleDuration(), () -> onIncomeDurationTimerExpired())
+
+  // --------------------------------------------------------------------------
+  private function stopDurationTimer()
+    if (m_callback != null)
+      destroy m_callback
+      m_callback = null
+
+  // --------------------------------------------------------------------------
+  private function sampleDuration() returns real
+    return m_durationRange.getRandom()
+
+// ============================================================================
+public function IUnitMetadata.getCampIncomeProviderComponent() returns CampIncomeProviderComponent
+  return this.getComponent(Type(CampIncomeProviderComponent.typeId)) castTo CampIncomeProviderComponent
+
+// ============================================================================
+public function IUnitMetadata.getOrAddCampIncomeProviderComponent() returns CampIncomeProviderComponent
+  var component = this.getCampIncomeProviderComponent()
+  if (component == null)
+    component = this.addComponent(new CampIncomeProviderComponent(this)) castTo CampIncomeProviderComponent
+  return component
