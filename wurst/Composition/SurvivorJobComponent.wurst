@@ -34,26 +34,18 @@ public class SurvivorJobComponent extends UnitComponent
 
   // --------------------------------------------------------------------------
   private function onItemAcquired(item itm)
-    let unitBeingReplaced = getOwnerUnit()
-    
-    let itmId = itm.getTypeId()
     if (not itm.isJobItem())
       return
 
-    int replaceUnitId
-    switch (itmId)
-      case TlsItemIds.huntingRifle
-        replaceUnitId = TlsUnitIds.survivorMarksman
-      case TlsItemIds.basicTools
-        replaceUnitId = TlsUnitIds.survivorBuilder
-      case TlsItemIds.medicalKit
-        replaceUnitId = TlsUnitIds.survivorMedic
-      case TlsItemIds.spears
-        replaceUnitId = TlsUnitIds.survivorSpearman
-      default
-        return
+    let itemType = itm.getTypeId()
+    let unitBeingReplaced = getOwnerUnit()
+    let unitType = unitBeingReplaced.getTypeId()
 
-    if (unitBeingReplaced.getTypeId() == replaceUnitId)
+    let matchingUnitType = getUnitTypeForJobItemType(itemType)
+    if (matchingUnitType == -1)
+      return
+
+    if (unitType == matchingUnitType)
       return
 
     m_ignoreItemEvents = true
@@ -61,41 +53,29 @@ public class SurvivorJobComponent extends UnitComponent
     playJobChangeFX()
 
     let wasSelected = unitBeingReplaced.isSelectedByOwner()
-    let replacedUnit = replaceUnitTLS(unitBeingReplaced, replaceUnitId, bj_UNIT_STATE_METHOD_RELATIVE)
+    let replacedUnit = replaceUnitTLS(unitBeingReplaced, matchingUnitType, bj_UNIT_STATE_METHOD_RELATIVE)
     if (wasSelected)
       SelectUnitAddForPlayer(replacedUnit, replacedUnit.getOwner())
 
-    dropOtherJobItems(itmId)
+    dropOtherJobItems(itemType)
 
     m_ignoreItemEvents = false
 
   // --------------------------------------------------------------------------
   private function onItemDropped(item itm)
-    let itemTypeId = itm.getTypeId()
     if (not itm.isJobItem())
       return
 
+    let droppedItemType = itm.getTypeId()
     let unitBeingReplaced = getOwnerUnit()
-    let unitTypeId = unitBeingReplaced.getTypeId()
+    let unitType = unitBeingReplaced.getTypeId()
 
-    bool isValid
-
-    switch (itemTypeId)
-      case TlsItemIds.huntingRifle
-        isValid = unitTypeId == TlsUnitIds.survivorMarksman
-      case TlsItemIds.basicTools
-        isValid = unitTypeId == TlsUnitIds.survivorBuilder
-      case TlsItemIds.medicalKit
-        isValid = unitTypeId == TlsUnitIds.survivorMedic
-      case TlsItemIds.spears
-        isValid = unitTypeId == TlsUnitIds.survivorSpearman
-      default
-        return
-
-    if (not isValid)
+    let matchingJobItemType = getJobItemTypeForUnitType(unitType)
+    if (matchingJobItemType == -1)
       return
 
-    let itmPos = itm.getPos()
+    if (droppedItemType != matchingJobItemType)
+      return
 
     playJobChangeFX()
 
@@ -107,7 +87,7 @@ public class SurvivorJobComponent extends UnitComponent
       SelectUnitAddForPlayer(replacedUnit, replacedUnit.getOwner())
 
     if (replacedUnit.hasItem(itm))
-      replacedUnit.dropItemPoint(itm, itmPos)
+      replacedUnit.dropItemPoint(itm, replacedUnit.getPos())
 
     m_ignoreItemEvents = false  
 
@@ -151,3 +131,35 @@ public class SurvivorJobComponent extends UnitComponent
   // --------------------------------------------------------------------------
   private function unlistenToItemDropped()
     m_itemDroppedHandler = PlayerUnitEvents.itemDropped.removeListener(m_itemDroppedHandler)
+
+  // --------------------------------------------------------------------------
+  private function getUnitTypeForJobItemType(int itemType) returns int
+    switch (itemType)
+      case TlsItemIds.rustySword
+        return TlsUnitIds.survivorMilitia
+      case TlsItemIds.basicTools
+        return TlsUnitIds.survivorBuilder
+      case TlsItemIds.spears
+        return TlsUnitIds.survivorSpearman
+      case TlsItemIds.medicalKit
+        return TlsUnitIds.survivorMedic
+      case TlsItemIds.huntingRifle
+        return TlsUnitIds.survivorMarksman
+      default
+        return -1
+
+  // --------------------------------------------------------------------------
+  private function getJobItemTypeForUnitType(int unitType) returns int
+    switch (unitType)
+      case TlsUnitIds.survivorMilitia
+        return TlsItemIds.rustySword
+      case TlsUnitIds.survivorBuilder
+        return TlsItemIds.basicTools
+      case TlsUnitIds.survivorSpearman
+        return TlsItemIds.spears
+      case TlsUnitIds.survivorMedic
+        return TlsItemIds.medicalKit
+      case TlsUnitIds.survivorMarksman
+        return TlsItemIds.huntingRifle
+      default
+        return -1

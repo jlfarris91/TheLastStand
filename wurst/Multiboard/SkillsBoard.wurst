@@ -9,15 +9,29 @@ import TimerUtils
 import UnitMetadata
 
 TextProgressBar g_progressBar
-string array[10] g_levelText
-string array[101] g_percentageText
-string g_MaxLevelText
+TextProgressBar g_progressBarDisabled
 
-constant int PROGRESS_BAR_LENGTH = 40
-constant colorA PROGRESS_BAR_FOREGROUND = colorA(0, 170, 0, 255)
-constant colorA PROGRESS_BAR_BACKGROUND = colorA(0, 64, 0, 255)
+string array[10] g_levelText
+string array[10] g_levelTextDisabled
+
+string array[101] g_percentageText
+string array[101] g_percentageTextDisabled
+
+string g_MaxLevelText
+string g_MaxLevelTextDisabled
+
+constant colorA DISABLED_COLOR = colorA(100, 100, 100, 255)
 constant colorA LEVEL_TEXT_COLOR = COLOR_GOLD
 constant colorA MAX_LEVEL_TEXT_COLOR = COLOR_GOLD
+
+constant string MAX_LEVEL_TEXT = "Max"
+constant int PROGRESS_BAR_LENGTH = 40
+
+constant colorA PROGRESS_BAR_FOREGROUND = colorA(0, 170, 0, 255)
+constant colorA PROGRESS_BAR_BACKGROUND = colorA(0, 64, 0, 255)
+
+constant colorA PROGRESS_BAR_DISABLED_FOREGROUND = DISABLED_COLOR
+constant colorA PROGRESS_BAR_DISABLED_BACKGROUND = colorA(50, 50, 50, 255)
 
 // ============================================================================
 public class SkillsBoard
@@ -92,19 +106,26 @@ public class SkillsBoard
     var row = 0
     for skillInstance in skillInstances
       let skill = skillInstance.getSkill()
+      let isEnabled = skillInstance.getIsEnabled()
+
       _multiboard.setItemIcon(row, COLUMN_TITLE, skill.getIconPath())
-      _multiboard.setItemValue(row, COLUMN_TITLE, skill.getName())
+
+      let skillName = isEnabled ? skill.getName() : skill.getName().colorize(DISABLED_COLOR)
+      _multiboard.setItemValue(row, COLUMN_TITLE, skillName)
+
       row++
       
   // --------------------------------------------------------------------------
   private function updateRow(int row, ISkill skillInstance)
     let skill = skillInstance.getSkill()
-    
+
+    let isEnabled = skillInstance.getIsEnabled()
+
     let level = skillInstance.getLevel()
     let nextLevel = level + 1
     let exp = skillInstance.getExperience()
 
-    let levelText = g_levelText[level]
+    let levelText = isEnabled ? g_levelText[level] : g_levelTextDisabled[level]
     _multiboard.setItemValue(row, COLUMN_LEVEL, levelText)
 
     if (level < skill.getMaxLevel())
@@ -113,30 +134,47 @@ public class SkillsBoard
       let maxExp = skill.getLevelRequirement(nextLevel)
       let t = clamp((exp - minExp) / (maxExp - minExp), 0.0, 1.0)
 
-      let percentageBarText = g_progressBar.sample(t)
+      let percentageBarText = isEnabled ? g_progressBar.sample(t) : g_progressBarDisabled.sample(t)
       _multiboard.setItemValue(row, COLUMN_EXPERIENCE_BAR, percentageBarText)
 
       let percentageTextIndex = R2I(t * 100.0)
-      let percentageText = g_percentageText[percentageTextIndex]
+      let percentageText = isEnabled ? g_percentageText[percentageTextIndex] : g_percentageTextDisabled[percentageTextIndex]
       _multiboard.setItemValue(row, COLUMN_EXPERIENCE_PERCENTAGE, percentageText)
 
     else
 
-      let percentageBarText = g_progressBar.sample(1.0)
+      let percentageBarText = isEnabled ? g_progressBar.sample(1.0) : g_progressBarDisabled.sample(1.0)
       _multiboard.setItemValue(row, COLUMN_EXPERIENCE_BAR, percentageBarText)
-      _multiboard.setItemValue(row, COLUMN_EXPERIENCE_PERCENTAGE, g_MaxLevelText)
 
-    let unitsText = skill.getUnits()
-    _multiboard.setItemValue(row, COLUMN_EXPERIENCE_UNITS, I2S(R2I(exp)) + unitsText)
+      let maxLevelText = isEnabled ? g_MaxLevelText : g_MaxLevelTextDisabled
+      _multiboard.setItemValue(row, COLUMN_EXPERIENCE_PERCENTAGE, maxLevelText)
+
+    var unitsText = I2S(R2I(exp)) + skill.getUnits()
+    if (not isEnabled)
+      unitsText = unitsText.colorize(DISABLED_COLOR)
+    _multiboard.setItemValue(row, COLUMN_EXPERIENCE_UNITS, unitsText)
 
 // ============================================================================
 init
-  g_progressBar = new TextProgressBar(PROGRESS_BAR_LENGTH, PROGRESS_BAR_FOREGROUND, PROGRESS_BAR_BACKGROUND)
+  g_progressBar = new TextProgressBar(
+    PROGRESS_BAR_LENGTH,
+    PROGRESS_BAR_FOREGROUND,
+    PROGRESS_BAR_BACKGROUND)
+  
+  g_progressBarDisabled = new TextProgressBar(
+    PROGRESS_BAR_LENGTH,
+    PROGRESS_BAR_DISABLED_FOREGROUND,
+    PROGRESS_BAR_DISABLED_BACKGROUND)
 
   for i = 0 to 10
-    g_levelText[i] = ("Level " + I2S(i)).colorize(LEVEL_TEXT_COLOR)
+    let levelStr = "Level " + I2S(i)
+    g_levelText[i] = levelStr.colorize(LEVEL_TEXT_COLOR)
+    g_levelTextDisabled[i] = levelStr.colorize(DISABLED_COLOR)
 
   for i = 0 to 100
-    g_percentageText[i] = I2S(i) + "%"
+    let percentageStr = I2S(i) + "%"
+    g_percentageText[i] = percentageStr
+    g_percentageTextDisabled[i] = percentageStr.colorize(DISABLED_COLOR)
 
-  g_MaxLevelText = "Max".colorize(MAX_LEVEL_TEXT_COLOR)
+  g_MaxLevelText = MAX_LEVEL_TEXT.colorize(MAX_LEVEL_TEXT_COLOR)
+  g_MaxLevelTextDisabled = MAX_LEVEL_TEXT.colorize(DISABLED_COLOR)

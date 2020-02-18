@@ -1,0 +1,87 @@
+package SurvivorMilitiaSkill
+import Skills
+import UnitMetadata
+import KillTrackerComponent
+import Events
+import SkillsComponent
+import Type
+import Icons
+
+// ============================================================================
+public class SurvivorMilitiaSkillDefinition extends SkillDefinition
+
+  // --------------------------------------------------------------------------
+  override function createInstance(IUnitMetadata u) returns ISkill
+    return new SurvivorMilitiaSkill(this, u)
+
+// ============================================================================
+public class SurvivorMilitiaSkill extends SkillBase
+  private KillTrackerComponent m_killTrackerComponent
+  private GenericArgsEventHandler<KillTrackerComponent, unit> m_onKillEventHandler
+
+  // --------------------------------------------------------------------------
+  construct(SurvivorMilitiaSkillDefinition skill, IUnitMetadata u)
+    super(skill, u)
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    m_killTrackerComponent = null
+
+  // --------------------------------------------------------------------------
+  override function onLevelUp()
+    super.onLevelUp()
+
+  // --------------------------------------------------------------------------
+  override function onReset()
+    super.onReset()
+
+  // --------------------------------------------------------------------------
+  protected override function onEnabled()
+    super.onEnabled()
+
+    if (m_killTrackerComponent == null)
+      m_killTrackerComponent = getUnit().getOrAddKillTrackerComponent()
+
+    listenToKillEvent()
+
+  // --------------------------------------------------------------------------
+  protected override function onDisabled()
+    super.onDisabled()
+    unlistenToKillEvent()
+
+  // --------------------------------------------------------------------------
+  private function onKill()
+    incrementExperience(1.0)
+
+  // --------------------------------------------------------------------------
+  private function listenToKillEvent()
+    unlistenToKillEvent()
+    m_onKillEventHandler = m_killTrackerComponent.killedUnitEvent.addListener() (KillTrackerComponent sender, unit args) ->
+      onKill()
+
+  // --------------------------------------------------------------------------
+  private function unlistenToKillEvent()
+    if (m_onKillEventHandler != null and m_killTrackerComponent != null and m_killTrackerComponent.killedUnitEvent != null)
+      m_killTrackerComponent.killedUnitEvent.removeListener(m_onKillEventHandler)
+      m_onKillEventHandler = null
+
+// ============================================================================
+public function SkillsComponent.getOrAddSurvivorMilitiaSkill() returns SurvivorMilitiaSkill
+  var skill = this.getSkill(Type(SurvivorMilitiaSkill.typeId)) castTo SurvivorMilitiaSkill
+  if (skill == null)
+    skill = this.addSkill(Skills.militia.createInstance(this.getOwner() castTo IUnitMetadata)) castTo SurvivorMilitiaSkill
+  return skill
+  
+// ============================================================================
+init
+  let skillDefinition = new SurvivorMilitiaSkillDefinition()
+  ..setName("Militia")
+  ..setIconPath(Icons.bTNSteelMelee)
+  ..setUnits(" kills")
+  ..setMaxLevel(4)
+  ..setLevelRequirement(1, 0)
+  ..setLevelRequirement(2, 10.0)
+  ..setLevelRequirement(3, 100.0)
+  ..setLevelRequirement(4, 1000.0)
+
+  Skills.militia = skillDefinition
