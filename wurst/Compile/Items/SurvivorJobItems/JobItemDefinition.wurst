@@ -5,6 +5,7 @@ import StringBuilder
 import ErrorHandling
 import TlsUnitDefinition
 import DataStringUtility
+import LinkedList
 
 constant int JOB_ITEM_BASE_ID = 'ratc'
 constant int MAX_JOB_DESC_ITEM_COUNT = 32
@@ -27,30 +28,29 @@ public interface IJobDescriptionItem
 // ============================================================================
 public class JobDescriptionItem implements IJobDescriptionItem
   private string m_name
-  private string array[MAX_JOB_DESC_ITEM_COUNT] m_values
-  private int m_numValues
+  private LinkedList<string> m_values
 
   // --------------------------------------------------------------------------
   construct(string name)
-    clear()
+    m_values = new LinkedList<string>()
     m_name = name
 
   // --------------------------------------------------------------------------
   construct(string name, string value)
-    clear()
+    m_values = new LinkedList<string>()
     m_name = name
     addValue(value)
 
   // --------------------------------------------------------------------------
   ondestroy
     clear()
+    destroy m_values
+    m_values = null
 
   // --------------------------------------------------------------------------
   function clear()
     m_name = null
-    for i = 0 to MAX_JOB_DESC_ITEM_COUNT - 1
-      m_values[i] = null
-    m_numValues = 0
+    m_values.clear()
 
   // --------------------------------------------------------------------------
   override function getName() returns string
@@ -58,20 +58,18 @@ public class JobDescriptionItem implements IJobDescriptionItem
 
   // --------------------------------------------------------------------------
   override function getValue(int index) returns string
-    return m_values[index]
+    return m_values.get(index)
   
   // --------------------------------------------------------------------------
   override function getValueCount() returns int
-    return m_numValues
+    return m_values.size()
 
   // --------------------------------------------------------------------------
   function addValue(string value) returns JobDescriptionItem
-    if (m_numValues == MAX_JOB_DESC_ITEM_COUNT)
+    if (m_values.size() == MAX_JOB_DESC_ITEM_COUNT)
       error("Reached limit of number of values " + I2S(MAX_JOB_DESC_ITEM_COUNT))
-    m_values[m_numValues] = value
-    m_numValues++
+    m_values.add(value)
     return this
-
 
 // ============================================================================
 /*
@@ -95,16 +93,18 @@ public class JobItemTooltipBuilder
   private string m_fromUnitName
   private string m_toUnitName
   private string m_desc
-  private IJobDescriptionItem array[MAX_JOB_DESC_ITEM_COUNT] m_items
-  private int m_itemCount
+  private LinkedList<IJobDescriptionItem> m_items
 
   // --------------------------------------------------------------------------
   construct()
-    clear()
+    m_items = new LinkedList<IJobDescriptionItem>()
 
   // --------------------------------------------------------------------------
-  ondestroy
+  ondestroy 
     clear()
+
+    destroy m_items
+    m_items = null
 
   // --------------------------------------------------------------------------
   function setUnits(string fromUnit, string toUnit) returns JobItemTooltipBuilder
@@ -127,10 +127,9 @@ public class JobItemTooltipBuilder
 
   // --------------------------------------------------------------------------
   function addItem(IJobDescriptionItem itm) returns JobItemTooltipBuilder
-    if (m_itemCount == MAX_JOB_DESC_ITEM_COUNT)
+    if (m_items.size() == MAX_JOB_DESC_ITEM_COUNT)
       error("Reached limit of job description items " + I2S(MAX_JOB_DESC_ITEM_COUNT))
-    m_items[m_itemCount] = itm
-    m_itemCount++
+    m_items.add(itm)
     return this
 
   // --------------------------------------------------------------------------
@@ -138,11 +137,9 @@ public class JobItemTooltipBuilder
     m_fromUnitName = null
     m_toUnitName = null
     m_desc = null
-    for i = 0 to MAX_JOB_DESC_ITEM_COUNT
-      if (m_items[i] != null)
-        destroy m_items[i]
-        m_items[i] = null
-    m_itemCount = 0
+    for itm in m_items
+      destroy itm
+    m_items.clear()
 
   // --------------------------------------------------------------------------
   function toString() returns string
@@ -163,9 +160,7 @@ public class JobItemTooltipBuilder
     sb.appendLine()
 
     let padStr = " "
-    for i = 0 to m_itemCount - 1
-      let itm = m_items[i]
-      
+    for itm in m_items      
       sb.append(itm.getName().colorize(ITEM_NAME_COLOR))
 
       let itemValueCount = itm.getValueCount()
