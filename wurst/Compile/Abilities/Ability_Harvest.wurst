@@ -1,0 +1,53 @@
+package Ability_Harvest
+import AbilityObjEditing
+import TlsAbilityIds
+import ClosureTimers
+import HashList
+import Orders
+import HumanPlayerMetadata
+import FX
+import UnitAnimations
+import RegisterEvents
+
+constant real TREE_HARVEST_INCOME_INTERVAL = UnitAnimations.VillagerMan.attack.duration
+HashList<unit> g_currentlyHarvesting
+
+// ============================================================================
+@compiletime function createAbility()
+  new AbilityDefinitionHarvest(TlsAbilityIds.harvest)
+  ..setName("Harvest")
+  ..setDamagetoTree(1, 1)
+  ..setLumberCapacity(1, 10)
+  ..setLumberCapacity(2, 20)
+  ..setLumberCapacity(3, 30)
+
+// ============================================================================
+function doHarvest()
+  for u in g_currentlyHarvesting
+    let owningPlayer = u.getOwner()
+    let owningPlayerMetadata = owningPlayer.getHumanMetadata()
+    if (owningPlayerMetadata != null)
+      owningPlayerMetadata.giveMaterials(1)
+      FX.createFoundMaterialsTag(u.getPos(), 1, owningPlayer)
+
+// ============================================================================
+function onIssuedTargetOrder()
+  if (GetIssuedOrderId() != OrderIds.harvest)
+    return
+  
+  g_currentlyHarvesting.add(GetTriggerUnit())
+  Log.warn("Unit was issued order to start harvesting")
+
+// ============================================================================
+function asd()
+  if (GetSpellAbilityId() == TlsAbilityIds.harvest)
+    Log.warn("Unit started effects of harvest")
+
+// ============================================================================
+init
+  g_currentlyHarvesting = new HashList<unit>()
+
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ISSUED_TARGET_ORDER, function onIssuedTargetOrder)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_SPELL_EFFECT, function asd)
+  doPeriodically(TREE_HARVEST_INCOME_INTERVAL, (CallbackPeriodic) -> doHarvest())
+
