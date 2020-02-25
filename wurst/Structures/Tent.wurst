@@ -1,0 +1,92 @@
+package Tent
+import Camp
+import Events
+import Notifications
+import ObjectIdGenerator
+import Unit_Notification
+import Icons
+import DisplayTextToPlayer
+import WeightedSet
+import TlsUnitIds
+import UnitMetadata
+import SurvivorSpawnManager
+import ClosureTimers
+import Orders
+
+constant int NOTIFICATION_NEW_SURVIVOR = compiletime(HERO_ID_GEN.next())
+constant real SPAWN_SURVIVOR_RANGE_MIN = 1024.0 * 3.0
+constant real SPAWN_SURVIVOR_RANGE_MAX = 1024.0 * 4.0
+
+// ============================================================================
+@compiletime public function createNewSurvivorNotification()
+  new NotificationDefinition(NOTIFICATION_NEW_SURVIVOR)
+  ..setIconGameInterface(Icons.bTNVillagerMan)
+
+// ============================================================================
+public class Tent extends CampUnit
+  private AnonymousEventHandler m_unitConstructedEventHandler
+
+  // --------------------------------------------------------------------------
+  construct(ICamp camp)
+    super(camp)
+    listenToUnitConstructedEvent()
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    unlistenToUnitConstructedEvent()
+
+  // --------------------------------------------------------------------------
+  private function onConstructed()
+    spawnSurvivorUnit()
+
+  // --------------------------------------------------------------------------
+  private function spawnSurvivorUnit()
+    
+    let u = getUnit()
+    if (u == null)
+      return
+
+    let p = u.getOwner()
+    if (p == null)
+      return
+
+    if (p.getCurrentSupply() >= p.getMaxSupply())
+      return
+  
+    let weightedSet = new WeightedSet<int>()
+    ..add(TlsUnitIds.survivorMale, 40)
+    ..add(TlsUnitIds.survivorMilitia, 4)
+    ..add(TlsUnitIds.survivorSpearman, 2)
+    ..add(TlsUnitIds.survivorMedic, 2)
+    ..add(TlsUnitIds.survivorMarksman, 1)
+
+    let unitId = weightedSet.getRandom()
+
+    let spawnPoint = g_survivorSpawnManager.getRandomSpawnPointInRange(u.getPos(),
+      SPAWN_SURVIVOR_RANGE_MIN,
+      SPAWN_SURVIVOR_RANGE_MAX)
+
+    let survivor = createUnitTLS(p, unitId, spawnPoint, GetRandomDirectionDeg())
+    survivor.issuePointOrderById(OrderIds.move, u.getPos())
+    
+    let message = survivor.getName() + " has joined your camp!"
+    displayMessageToPlayer(p, message)
+    showNotification(p, message) (Notification notification) ->
+      p.selectSingle(survivor)
+      p.setCameraTargetControllerNoZ(survivor, ZERO2, false)
+      doAfter(3.0, () -> p.smartCameraPan(getCamp().getCenter(), 1.0))
+
+  // --------------------------------------------------------------------------
+  private function listenToUnitConstructedEvent()
+    if (m_unitConstructedEventHandler != null)
+      return
+    m_unitConstructedEventHandler = PlayerUnitEvents.unitConstructed.addListener() -> 
+      if (GetConstructedStructure() == getUnit())
+        onConstructed()
+
+  // --------------------------------------------------------------------------
+  private function unlistenToUnitConstructedEvent()
+    if (m_unitConstructedEventHandler == null)
+      return
+    PlayerUnitEvents.unitConstructed.removeListener(m_unitConstructedEventHandler)
+    m_unitConstructedEventHandler = null
