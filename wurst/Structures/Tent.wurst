@@ -12,10 +12,14 @@ import UnitMetadata
 import SurvivorSpawnManager
 import ClosureTimers
 import Orders
+import Math
+import GameConstants
+import MainItemLibrary
+import SurvivorUnit
 
 constant int NOTIFICATION_NEW_SURVIVOR = compiletime(HERO_ID_GEN.next())
-constant real SPAWN_SURVIVOR_RANGE_MIN = 1024.0 * 3.0
-constant real SPAWN_SURVIVOR_RANGE_MAX = 1024.0 * 4.0
+constant real SPAWN_SURVIVOR_RANGE_MIN = 1024.0 * 1.0
+constant real SPAWN_SURVIVOR_RANGE_MAX = 1024.0 * 2.0
 
 // ============================================================================
 @compiletime public function createNewSurvivorNotification()
@@ -62,19 +66,31 @@ public class Tent extends CampUnit
 
     let unitId = weightedSet.getRandom()
 
-    let spawnPoint = g_survivorSpawnManager.getRandomSpawnPointInRange(u.getPos(),
+    let spawnPoint = g_survivorSpawnManager.getRandomSpawnPointInRange(
+      u.getPos(),
       SPAWN_SURVIVOR_RANGE_MIN,
       SPAWN_SURVIVOR_RANGE_MAX)
 
     let survivor = createUnitTLS(p, unitId, spawnPoint, GetRandomDirectionDeg())
     survivor.issuePointOrderById(OrderIds.move, u.getPos())
+
+    // For instance, give the Marksman his Hunting Rifle
+    let jobItemId = getJobItemTypeForUnitType(unitId)
+    if (jobItemId != -1)
+      let itm = g_MainItemLibrary.createItem(jobItemId, survivor.getPos())
+      survivor.addItemHandle(itm)
+
+    if (passesChanceCheck(SURVIVORS_ITEM_CHANCE))
+      g_MainItemLibrary.giveRandomItemToUnit(survivor, SURVIVORS_ITEM_CHANCES)
+
+    let campCenter = getCamp().getCenter()
     
     let message = survivor.getName() + " has joined your camp!"
     displayMessageToPlayer(p, message)
     showNotification(p, message) (Notification notification) ->
       p.selectSingle(survivor)
       p.setCameraTargetControllerNoZ(survivor, ZERO2, false)
-      doAfter(3.0, () -> p.smartCameraPan(getCamp().getCenter(), 1.0))
+      doAfter(3.0, () -> p.smartCameraPan(campCenter, 1.0))
 
   // --------------------------------------------------------------------------
   private function listenToUnitConstructedEvent()

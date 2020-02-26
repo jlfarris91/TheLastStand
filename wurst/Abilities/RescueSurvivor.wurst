@@ -2,47 +2,42 @@ package RescueSurvivor
 import RegisterEvents
 import Orders
 import TlsUnitIds
+import TlsAbilityIds
+import UnitMetadata
+import SurvivorUnit
 
-constant int ABILITY_ID_RESCUE = 'A01H'
 constant int ABILITY_RESCUE_ORDER = Orders.innerfire
 
+// ============================================================================
 function onRescueCast()
   let caster = GetSpellAbilityUnit()
   let target = GetSpellTargetUnit()
 
-  if (target.getTypeId() != TlsUnitIds.survivorMaleUnrescued)
-    return
+  if (target.isRescuableSurvivor())
+    let survivor = replaceUnitTLS(target, TlsUnitIds.survivorMale, bj_UNIT_STATE_METHOD_RELATIVE)
+    survivor.setOwner(caster.getOwner(), true)
+    survivor.issueTargetOrderById(Orders.move, caster)
+  else
+    caster.issueImmediateOrderById(OrderIds.stop)
 
-  let owner = caster.getOwner()
-
-  if (owner.getCurrentSupply() >= owner.getMaxSupply())
-    return
-
-  let itm = target.itemInSlot(0)
-  UnitRemoveItemSwapped(itm, target)
-  target.setOwner(owner, true)
-  
-  let survivor = ReplaceUnitBJ(target, TlsUnitIds.survivorMale, bj_UNIT_STATE_METHOD_RELATIVE)
-  
-  if (itm != null)
-    UnitAddItemSwapped(itm, survivor)
-
-  survivor.issueTargetOrderById(Orders.move, caster)
-
-  owner.addLumber(1)
-
+// ============================================================================
 function onRightClick()
   let order = GetIssuedOrderId()
   let orderedUnit = GetOrderedUnit()
   let targetUnit = GetOrderTargetUnit()
 
   if (order != Orders.smart or
-      orderedUnit.getTypeId() != TlsUnitIds.hero or
-      targetUnit.getTypeId() != TlsUnitIds.survivorMaleUnrescued)
+      not targetUnit.isRescuableSurvivor())
+    return
+
+  if (not orderedUnit.hasAbility(TlsAbilityIds.rescueSurvivorHero) and
+      not orderedUnit.hasAbility(TlsAbilityIds.rescueSurvivorUnit))
     return
 
   orderedUnit.issueTargetOrderById(ABILITY_RESCUE_ORDER, targetUnit)
 
+// ============================================================================
 init
-  registerSpellEffectEvent(ABILITY_ID_RESCUE, function onRescueCast)
+  registerSpellEffectEvent(TlsAbilityIds.rescueSurvivorHero, function onRescueCast)
+  registerSpellEffectEvent(TlsAbilityIds.rescueSurvivorUnit, function onRescueCast)
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ISSUED_UNIT_ORDER, function onRightClick)
