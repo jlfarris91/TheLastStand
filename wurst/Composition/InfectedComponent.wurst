@@ -1,0 +1,150 @@
+package InfectedComponent
+import UnitMetadata
+import UnitComponent
+import LinkedList
+import Doodads
+import Abilities
+import Units
+import AttachmentPoints
+import LinkedListExtensions
+import TlsAbilityIds
+import Type
+
+constant real EGG_SACK_EFFECT_SCALE = 0.3
+constant string EGG_SACK_EFFECT_MODEL_PATH = Doodads.eggSack0
+
+constant real POISON_EFFECT_SCALE = 1.0
+constant string POISON_EFFECT_MODEL_PATH = Abilities.poisonStingTarget
+
+constant real DISEASE_CLOUD_EFFECT_SCALE = 1.0
+constant string DISEASE_CLOUD_EFFECT_MODEL_PATH = Units.plagueCloudTarget
+
+constant int MIN_NUM_EFFECTS = 2
+constant int MAX_NUM_EFFECTS = 4
+constant real MIN_FX_SCALE = 0.15
+constant real MAX_FX_SCALE = 0.35
+
+LinkedList<string> g_randomEffectModelPaths
+LinkedList<string> g_attachmentPoints
+
+// ============================================================================
+public class InfectedComponent extends UnitComponent
+
+  private LinkedList<effect> m_effects
+  private bool m_isVisible
+
+  // --------------------------------------------------------------------------
+  construct(IUnitMetadata owner)
+    super(owner)
+    m_effects = new LinkedList<effect>()
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    hide()
+    destroy m_effects
+
+  // --------------------------------------------------------------------------
+  override function onEnabled()
+    super.onEnabled()
+    enableInfectedWoundAbility()
+    show()
+
+  // --------------------------------------------------------------------------
+  override function onDisabled()
+    super.onDisabled()
+    disableInfectedWoundAbility()
+    hide()
+
+  // --------------------------------------------------------------------------
+  function show()
+    if (getIsVisible())
+      return
+
+    let targetUnit = getOwnerUnit()
+    if (targetUnit == null)
+      return
+  
+    m_effects.add(createEggSackEffect(targetUnit))
+    m_effects.add(createDiseaseCloudEffect(targetUnit))
+    m_effects.add(createPoisonEffect(targetUnit))
+      
+    // Add some extra egg sacks for effect
+    let numEffects = GetRandomInt(MIN_NUM_EFFECTS, MAX_NUM_EFFECTS)
+    for i = 0 to numEffects - 1
+      m_effects.add(createRandomAttachedEffect(targetUnit))
+
+    m_isVisible = true
+
+  // --------------------------------------------------------------------------
+  function hide()
+    if (not getIsVisible())
+      return
+
+    for fx in m_effects
+      fx.destr()
+    m_effects.clear()
+
+    m_isVisible = false
+
+  // --------------------------------------------------------------------------
+  function getIsVisible() returns bool
+    return m_isVisible
+
+  // --------------------------------------------------------------------------
+  private function enableInfectedWoundAbility()
+    let ownerUnit = getOwnerUnit()
+    if (ownerUnit != null)
+      ownerUnit.addAbility(TlsAbilityIds.infectedWound)
+      
+  // --------------------------------------------------------------------------
+  private function disableInfectedWoundAbility()
+    let ownerUnit = getOwnerUnit()
+    if (ownerUnit != null)
+      ownerUnit.removeAbility(TlsAbilityIds.infectedWound)
+
+  // --------------------------------------------------------------------------
+  private function createRandomAttachedEffect(unit targetUnit) returns effect
+    let modelPath = g_randomEffectModelPaths.getRandom()
+    let attachmentPoint = g_attachmentPoints.getRandom()
+    let fx = AddSpecialEffectTargetUnitBJ(attachmentPoint, targetUnit, modelPath)
+    ..setScale(GetRandomReal(MIN_FX_SCALE, MAX_FX_SCALE))
+    return fx
+
+  // --------------------------------------------------------------------------
+  private function createEggSackEffect(unit targetUnit) returns effect
+    let fx = AddSpecialEffectTargetUnitBJ(AttachmentPoints.chest, targetUnit, EGG_SACK_EFFECT_MODEL_PATH)
+    ..setScale(EGG_SACK_EFFECT_SCALE)
+    return fx
+
+  // --------------------------------------------------------------------------
+  private function createDiseaseCloudEffect(unit targetUnit) returns effect
+    let fx = AddSpecialEffectTargetUnitBJ(AttachmentPoints.chest, targetUnit, DISEASE_CLOUD_EFFECT_MODEL_PATH)
+    ..setScale(DISEASE_CLOUD_EFFECT_SCALE)
+    return fx
+  
+  // --------------------------------------------------------------------------
+  private function createPoisonEffect(unit targetUnit) returns effect
+    let fx = AddSpecialEffectTargetUnitBJ(AttachmentPoints.chest, targetUnit, POISON_EFFECT_MODEL_PATH)
+    ..setScale(POISON_EFFECT_SCALE)
+    return fx
+
+// ============================================================================
+public function IUnitMetadata.getOrAddInfectedComponent() returns InfectedComponent
+  var component = this.getComponent(Type(InfectedComponent.typeId)) castTo InfectedComponent
+  if (component == null)
+    component = this.addComponent(new InfectedComponent(this)) castTo InfectedComponent
+  return component
+
+// ============================================================================
+init
+  g_randomEffectModelPaths = new LinkedList<string>()
+  g_randomEffectModelPaths.add(Doodads.eggSack0)
+  g_randomEffectModelPaths.add(Doodads.eggSack1)
+
+  g_attachmentPoints = new LinkedList<string>()
+  g_attachmentPoints.add(AttachmentPoints.head)
+  g_attachmentPoints.add(AttachmentPoints.foot)
+  g_attachmentPoints.add(SpecialAttachmentPoints.rightHand)
+  g_attachmentPoints.add(SpecialAttachmentPoints.leftHand)
+  g_attachmentPoints.add(SpecialAttachmentPoints.rightFoot)
+  g_attachmentPoints.add(SpecialAttachmentPoints.leftFoot)

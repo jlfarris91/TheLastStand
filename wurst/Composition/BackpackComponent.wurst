@@ -1,0 +1,106 @@
+package BackpackComponent
+import UnitComponent
+import BackpackInventory
+import UnitMetadata
+import Orders
+import TlsItemIds
+import Type
+import RegisterEvents
+
+constant string MODEL_PATH_BACKPACK = "Items\\BackPack2.mdx"
+
+// ============================================================================
+public class BackpackComponent extends UnitComponent
+  private effect m_backpackEffect
+  private BackpackInventory m_inventory
+  
+  // --------------------------------------------------------------------------
+  construct(IUnitMetadata owner, BackpackInventory inventory)
+    super(owner)
+    m_inventory = inventory
+    m_backpackEffect = null
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    hideBackpackModel()
+
+  // --------------------------------------------------------------------------
+  override function onEnabled()
+    super.onEnabled()
+    showBackpackModel()
+
+  // --------------------------------------------------------------------------
+  override function onDisabled()
+    super.onDisabled()
+    hideBackpackModel()
+
+  // --------------------------------------------------------------------------
+  function getIsBackpackVisible() returns bool
+    return m_backpackEffect != null
+
+  // --------------------------------------------------------------------------
+  function openBackpack()
+    let ownerUnit = getOwnerUnit()
+    ownerUnit.issueImmediateOrderById(OrderIds.stop)
+
+  // --------------------------------------------------------------------------
+  function closeBackpack()
+    skip
+
+  // --------------------------------------------------------------------------
+  function emptyBackpack()
+    for i = 0 to BACKPACK_MAX_CAPACITY - 1
+      dropItemFromSlot(i)
+
+  // --------------------------------------------------------------------------
+  function dropItemFromSlot(int _slot)
+    skip
+    
+  // --------------------------------------------------------------------------
+  private function showBackpackModel()
+    if (m_backpackEffect != null)
+      return
+    let ownerUnit = getOwnerUnit()
+    if (ownerUnit == null)
+      return
+    m_backpackEffect = AddSpecialEffectTargetUnitBJ("chest", ownerUnit, MODEL_PATH_BACKPACK)
+    ..setScale(1.5)
+    ..setAlpha(255)
+
+  // --------------------------------------------------------------------------
+  private function hideBackpackModel()
+    if (m_backpackEffect == null)
+      return
+    m_backpackEffect.destr()
+    m_backpackEffect = null
+
+// ============================================================================
+function onUnitAcquiredItem()
+  let manipulatingUnit = GetManipulatingUnit()
+  let manipulatingItem = GetManipulatedItem()
+
+  if (manipulatingItem.getTypeId() != TlsItemIds.backpack)
+    return
+
+  let unitMetadata = manipulatingUnit.getMetadata()
+  if (unitMetadata == null)
+    return
+
+  var backpackComponent = unitMetadata.getComponent(Type(BackpackComponent.typeId)) castTo BackpackComponent
+
+  // This unit is already wearing a backpack
+  if (backpackComponent != null)
+    return
+
+  let inventory = getOrCreateBackpackInventory(manipulatingItem)
+
+  backpackComponent = new BackpackComponent(unitMetadata, inventory)
+  unitMetadata.addComponent(backpackComponent)
+
+  manipulatingUnit.dropItemPoint(manipulatingItem, manipulatingUnit.getPos())
+  manipulatingItem.setPos(ZERO2)
+  manipulatingItem.setVisible(false)
+
+// ============================================================================
+init
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_PICKUP_ITEM, function onUnitAcquiredItem)
