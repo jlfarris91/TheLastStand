@@ -16,7 +16,7 @@ public class SprintComponent extends UnitComponent
   private real _staminaCost = 0
   private int _level = 1
   private bool _isSprinting
-  private GenericArgsEventHandler<MovementComponent, real> _onUnitMovedHandler
+  private Action2<MovementComponent, real> _onUnitMovedHandler
 
   GenericEvent<SprintComponent> startedSprintingEvent
   GenericEvent<SprintComponent> stoppedSprintingEvent
@@ -98,10 +98,8 @@ public class SprintComponent extends UnitComponent
     u.setAbilityLevel(TlsAbilityIds.stopSprinting, _level)
     u.setMoveSpeed(baseSpeed + _sprintSpeed)
 
-    _onUnitMovedHandler = _movement.getUnitMovedEvent().addListener() (MovementComponent sender, real distanceInMeters) ->
-      onUnitMoved(distanceInMeters)
-
-    startedSprintingEvent.invoke(this)
+    listenToUnitMovedEvent()
+    startedSprintingEvent.call(this)
 
   // --------------------------------------------------------------------------
   function stopSprinting()
@@ -117,9 +115,8 @@ public class SprintComponent extends UnitComponent
     u.setAbilityLevel(TlsAbilityIds.sprint, _level)
     u.setMoveSpeed(baseSpeed)
     
-    _onUnitMovedHandler = _movement.getUnitMovedEvent().removeListener(_onUnitMovedHandler)
-
-    stoppedSprintingEvent.invoke(this)
+    unlistenToUnitMovedEvent()
+    stoppedSprintingEvent.call(this)
 
   // --------------------------------------------------------------------------
   function exhaustUnit()
@@ -133,6 +130,20 @@ public class SprintComponent extends UnitComponent
     if (_stamina.getStamina() < totalStaminaCost)
       stopSprinting()
       exhaustUnit()
+
+  // --------------------------------------------------------------------------
+  private function listenToUnitMovedEvent()
+    unlistenToUnitMovedEvent()
+    if (_onUnitMovedHandler == null)
+      _onUnitMovedHandler = _movement.getUnitMovedEvent().add() (MovementComponent sender, real distanceInMeters) ->
+        onUnitMoved(distanceInMeters)
+
+  // --------------------------------------------------------------------------
+  private function unlistenToUnitMovedEvent()
+    if (_onUnitMovedHandler != null)
+      _movement.getUnitMovedEvent().remove(_onUnitMovedHandler)
+      destroy _onUnitMovedHandler
+      _onUnitMovedHandler = null
 
 // ============================================================================
 public function IUnitMetadata.getOrAddSprintComponent() returns SprintComponent

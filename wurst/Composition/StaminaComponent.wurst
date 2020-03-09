@@ -14,7 +14,7 @@ public class StaminaComponent extends UnitComponent
   private constant real TIME_TO_HIDE_STAMINA_BAR = 3.0
 
   private ProgressBar _staminaBar
-  private GenericArgsEventHandler<StaminaComponent, real> _staminaChangedEventHandler
+  private Action2<StaminaComponent, real> _staminaChangedEventHandler
   private timer _hideStaminaBarTimer
 
   GenericArgsEvent<StaminaComponent, real> staminaChangedEvent
@@ -32,8 +32,7 @@ public class StaminaComponent extends UnitComponent
       _hideStaminaBarTimer.destr()
       _hideStaminaBarTimer = null
 
-    if (_staminaChangedEventHandler != null)
-      _staminaChangedEventHandler = staminaChangedEvent.removeListener(_staminaChangedEventHandler)
+    unlistenToStaminaChangedEvent()
 
     destroy outOfStaminaEvent
     destroy staminaChangedEvent
@@ -52,11 +51,7 @@ public class StaminaComponent extends UnitComponent
     ..setColor(Colors.gold)
     ..show(false)
 
-    _staminaChangedEventHandler = staminaChangedEvent.addListener() (StaminaComponent sender, real args) ->
-      let t = getStamina() / getMaxStamina()
-      _staminaBar.setPercentage(t)
-      _staminaBar.show(true)
-      hideStaminaBarDelayed()
+    listenToStaminaChangedEvent()
 
   // --------------------------------------------------------------------------
   override function onEnabled()
@@ -102,10 +97,10 @@ public class StaminaComponent extends UnitComponent
       return
     
     ownerUnit.setMana(remainingMana)
-    staminaChangedEvent.invoke(this, actualDelta)
+    staminaChangedEvent.call(this, actualDelta)
 
     if (remainingMana <= 0.0)
-      outOfStaminaEvent.invoke(this)
+      outOfStaminaEvent.call(this)
 
   // --------------------------------------------------------------------------
   private function hideStaminaBarDelayed()
@@ -116,6 +111,23 @@ public class StaminaComponent extends UnitComponent
     _hideStaminaBarTimer.doAfter(TIME_TO_HIDE_STAMINA_BAR) () ->
       _staminaBar.show(false)
       _hideStaminaBarTimer.destr()
+
+  // --------------------------------------------------------------------------
+  private function listenToStaminaChangedEvent()
+    unlistenToStaminaChangedEvent()
+    if (_staminaChangedEventHandler == null)
+      _staminaChangedEventHandler = staminaChangedEvent.add() (StaminaComponent sender, real args) ->
+        let t = getStamina() / getMaxStamina()
+        _staminaBar.setPercentage(t)
+        _staminaBar.show(true)
+        hideStaminaBarDelayed()
+
+  // --------------------------------------------------------------------------
+  private function unlistenToStaminaChangedEvent()
+    if (_staminaChangedEventHandler != null)
+      staminaChangedEvent.remove(_staminaChangedEventHandler)
+      destroy _staminaChangedEventHandler
+      _staminaChangedEventHandler = null
 
 // ============================================================================
 public function IUnitMetadata.getOrAddStaminaComponent() returns StaminaComponent

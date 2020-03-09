@@ -16,7 +16,7 @@ public constant int UNLIMITED = 99999
 // ============================================================================
 public class SpawnWave extends Runnable
   private SpawnWaveDefinition m_definition
-  private GenericEventHandler<IWaveActivator> m_onActivatedHandler
+  private Action1<IWaveActivator> m_onActivatedHandler
   private player m_targetPlayer
   private LinkedList<unit> m_aliveSpawnedUnits
   private GenericArgsEvent<SpawnWave, LinkedList<unit>> m_unitsSpawnedEvent
@@ -154,7 +154,7 @@ public class SpawnWave extends Runnable
     // Clean up the spawnPoints list
     destroy spawnPoints
     
-    m_unitsSpawnedEvent.invoke(this, spawnedUnits)
+    m_unitsSpawnedEvent.call(this, spawnedUnits)
     destroy spawnedUnits
 
   // --------------------------------------------------------------------------
@@ -203,7 +203,7 @@ public class SpawnWave extends Runnable
     var aliveCountMax = UNLIMITED
     let getAliveCountMax = m_definition.getMaxAliveCount()
     if (getAliveCountMax != null)
-      aliveCountMax = getAliveCountMax.execute(waveProgress)
+      aliveCountMax = getAliveCountMax.call(waveProgress)
     return clamp(aliveCountMax, 0, UNLIMITED)
 
   // --------------------------------------------------------------------------
@@ -211,7 +211,7 @@ public class SpawnWave extends Runnable
     var spawnCountMax = UNLIMITED
     let getSpawnPointMax = m_definition.getMaxSpawnCount()
     if (getSpawnPointMax != null)
-      spawnCountMax = getSpawnPointMax.execute(waveProgress)
+      spawnCountMax = getSpawnPointMax.call(waveProgress)
     return clamp(spawnCountMax, 0, UNLIMITED)
 
   // --------------------------------------------------------------------------
@@ -219,7 +219,7 @@ public class SpawnWave extends Runnable
     var spawnGroupingFactor = 0.0
     let getSpawnGroupingFactor = m_definition.getSpawnGroupingFactor()
     if (getSpawnGroupingFactor != null)
-      spawnGroupingFactor = getSpawnGroupingFactor.execute(waveProgress)
+      spawnGroupingFactor = getSpawnGroupingFactor.call(waveProgress)
     return clamp01(spawnGroupingFactor)
 
   // --------------------------------------------------------------------------
@@ -227,17 +227,23 @@ public class SpawnWave extends Runnable
     var spawnsPerActivation = 1
     let getSpawnsPerActivation = m_definition.getSpawnsPerActivation()
     if (getSpawnsPerActivation != null)
-      spawnsPerActivation = getSpawnsPerActivation.execute(waveProgress)
+      spawnsPerActivation = getSpawnsPerActivation.call(waveProgress)
     return clamp(spawnsPerActivation, 0, 1000)
 
   // --------------------------------------------------------------------------
   private function listenToActivatedEvent()
-    let activator = m_definition.getActivator()
-    m_onActivatedHandler = activator.getActivatedEvent().addListener() (IWaveActivator sender) ->
-      onActivated()
+    unlistenToActivatedEvent()
+    if (m_onActivatedHandler == null)
+      let activator = m_definition.getActivator()
+      m_onActivatedHandler = activator.getActivatedEvent().add() (IWaveActivator sender) ->
+        onActivated()
 
   // --------------------------------------------------------------------------
   private function unlistenToActivatedEvent()
     if (m_onActivatedHandler != null)
+      if (m_definition != null)
+        let activator = m_definition.getActivator()
+        if (activator != null)
+          activator.getActivatedEvent().remove(m_onActivatedHandler)
       destroy m_onActivatedHandler
       m_onActivatedHandler = null

@@ -29,7 +29,7 @@ public class LootableUnit extends UnitMetadata
   private real _searchDuration
   private bool _isBeingLooted
   private int _cooldown
-  private AnonymousEventHandler _dayCB
+  private Action _dayCB
 
   // --------------------------------------------------------------------------
   construct()
@@ -153,13 +153,15 @@ public class LootableUnit extends UnitMetadata
   // --------------------------------------------------------------------------
   private function startListeningToDayEvent()
     stopListeningToDayEvent()
-    _dayCB = GameEvents.dayStartEvent.addListener() () ->
-      decrementCooldown()
+
+    if (_dayCB == null)
+      _dayCB = GameEvents.dayStartEvent.add(() -> decrementCooldown())
 
   // --------------------------------------------------------------------------
   private function stopListeningToDayEvent()
     if (_dayCB != null)
-      GameEvents.dayStartEvent.removeListener(_dayCB)
+      GameEvents.dayStartEvent.remove(_dayCB)
+      destroy _dayCB
       _dayCB = null
 
 // ============================================================================
@@ -185,7 +187,7 @@ class LootOperation
   private IUnitMetadata _lootingUnit
   private LootableUnit _lootable
   private ProgressBarTag _progressBar
-  private AnonymousEventHandler _updateHandler
+  private Action _updateHandler
   private real _elapsed
   private real _duration
 
@@ -214,12 +216,16 @@ class LootOperation
 
   // --------------------------------------------------------------------------
   private function registerForUpdate()
-    _updateHandler = g_UpdateProgressBarsEvent.addListener() () ->
-      update()
+    unregisterForUpdate()
+    if (_updateHandler == null)
+      _updateHandler = g_UpdateProgressBarsEvent.add(() -> update())
 
   // --------------------------------------------------------------------------
   private function unregisterForUpdate()
-    _updateHandler = g_UpdateProgressBarsEvent.removeListener(_updateHandler)
+    if (_updateHandler != null)
+      g_UpdateProgressBarsEvent.remove(_updateHandler)
+      destroy _updateHandler
+      _updateHandler = null
 
   // --------------------------------------------------------------------------
   private function update()
@@ -246,5 +252,5 @@ init
   g_UpdateProgressBarsEvent = new AnonymousEvent()
 
   doPeriodically(PROGRESS_BAR_UPDATE_PERIOD) (CallbackPeriodic cb) ->
-    g_UpdateProgressBarsEvent.invoke()
+    g_UpdateProgressBarsEvent.call()
     
