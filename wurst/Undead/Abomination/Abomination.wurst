@@ -1,32 +1,19 @@
 package Abomination
 import UndeadUnit
-import GroupUtils
 import TlsUnitIds
 import Orders
 import ClosureEvents
 import TlsAbilityIds
 import UnitMetadata
-import StateMachine
 import StateMachineComponent
-import ErrorHandling
-import UnitExtensions
-import PlayerExtensions
 import ClosureTimers
 import DummyUtils
-import Math
-import UndeadUtility
-import FX
 import Units
+import Zombie
 
-constant real ABOM_IDLE_RADIUS = 128.0
-constant real ABOM_IDLE_RADIUS_SQ = ABOM_IDLE_RADIUS*ABOM_IDLE_RADIUS
-constant real ABOM_IDLE_TIME_TO_GRAB = 10.0
-constant real ABOM_HOLD_DURATION = 3.0
-constant real ABOM_MIN_THROW_RANGE = 400.0
-constant real ABOM_MAX_THROW_RANGE = 700.0
-constant real ABOM_GRABBING_ZOMBIE_TIMEOUT = 5.0
+import initlater AbomIdleState
+import initlater AbomHoldingState
 
-constant int ABOM_THROW_ORDER_ID = OrderIds.flare
 constant real ABOM_THROW_PROJ_DURATION = 1.0
 constant real ABOM_THROW_ANIM_DURATION = 1.0
 constant real ABOM_THROW_ANIM_PROJECTILE_POINT = 0.5
@@ -36,9 +23,6 @@ constant real ABOM_ANIM_GRAB_DURATION = 0.6
 constant int ABOM_ANIM_GRAB_INDEX = 2
 
 constant string ABOM_THROW_DUST_EFFECT = "Objects\\Spawnmodels\\Undead\\ImpaleTargetDust\\ImpaleTargetDust.mdl"
-constant string ABOM_TARGET_INDICATOR_EFFECT = "Abilities\\Spells\\NightElf\\TrueshotAura\\TrueshotAura.mdl"
-
-rect g_minThrowArea
 
 // ============================================================================
 public class Abomination extends UndeadUnit
@@ -74,6 +58,7 @@ public class Abomination extends UndeadUnit
   override function onKilled()
     super.onKilled()
     stopStateMachine()
+    dropZombie()
 
   // --------------------------------------------------------------------------
   override function setTargetPlayer(player p) returns bool
@@ -99,235 +84,17 @@ public class Abomination extends UndeadUnit
       removeComponent(m_stateMachine)
       m_stateMachine = null
 
-// ==========================================================================
-public class AbomIdleState extends BaseStateMachineState
-  private Abomination _abom
-  private real _time
-  private vec2 _lastPos
-  private bool _grabbingZombie
-  private real _grabbingZombieTimer
+  // --------------------------------------------------------------------------
+  function dropZombie()
+    dropZombieAtPos(getUnit().getPos(), GetRandomDirectionDeg().asAngleDegrees())
 
   // --------------------------------------------------------------------------
-  construct(Abomination abom, IStateMachine machine)
-    super(machine)
-    _abom = abom
-
-  // --------------------------------------------------------------------------
-  override function getName() returns string
-    return "Idle"
-
-  // --------------------------------------------------------------------------
-  override function enter()
-    _time = 0.0
-    _lastPos = _abom.getPos()
-    _grabbingZombie = false
-    _grabbingZombieTimer = ABOM_GRABBING_ZOMBIE_TIMEOUT
-
-    _abom.addAbility(TlsAbilityIds.abomGrabZombie)
-
-    attackPlayer()
-
-  // --------------------------------------------------------------------------
-  override function exit()
-    _time = 0.0
-    _lastPos = vec2(0.0, 0.0)
-    _grabbingZombie = false
-    _grabbingZombieTimer = ABOM_GRABBING_ZOMBIE_TIMEOUT
-
-    _abom.removeAbility(TlsAbilityIds.abomGrabZombie)
-
-  // --------------------------------------------------------------------------
-  override function update(real dt)
-    _time += dt
-
-    let currentPos = _abom.getPos()
-    let distanceSq = currentPos.distanceToSq(_lastPos)
-
-    if (distanceSq > ABOM_IDLE_RADIUS_SQ)
-      _time = 0.0
-      _lastPos = currentPos
-
-    if (_time > ABOM_IDLE_TIME_TO_GRAB and not _grabbingZombie)
-      _grabbingZombie = tryGrabZombie()
-      if (_grabbingZombie)
-        _grabbingZombieTimer = ABOM_GRABBING_ZOMBIE_TIMEOUT
-      else
-        _time -= ABOM_IDLE_TIME_TO_GRAB
-        attackPlayer()
-
-    // Give up if the abom couldn't grab a zombie in the given time
-    if (_grabbingZombie)
-      _grabbingZombieTimer -= dt
-      if (_grabbingZombieTimer <= 0)
-        Log.debug("[AbomIdleState] Gave up trying to grab zombie")
-        _grabbingZombie = false
-
-  // --------------------------------------------------------------------------
-  private function attackPlayer()
-    let targetPlayer = _abom.getTargetPlayer()
-    if (targetPlayer == null)
-      return
-
-    let target = getClosestUndeadTarget(targetPlayer, _abom.getPos())
-    if (target != null)
-      Log.debug("[AbomIdleState] Attack closest player unit: " + target.getName())
-      _abom.issueTargetOrderById(OrderIds.attack, target)
-    else
-      Log.debug("[AbomIdleState] Found no player unit to attack")
-      _abom.setField(UNIT_RF_ACQUISITION_RANGE, REAL_MAX)
-
-  // --------------------------------------------------------------------------
-  private function tryGrabZombie() returns bool
-
-    // === These need to be cleaned up
-    let g = getGroup()
-    let filter = Condition(function isFilterUnitAZombie)
-    // ===
-
-    g.enumUnitsInRange(_abom.getPos(), 512.0, filter)
-    let target = g.getRandomUnit()
-
-    // === Cleanup
-    DestroyCondition(filter)
-    g.release()
-    // ===
-
-    if (target == null)
-      Log.debug("[AbomIdleState] Found no zombie nearby")
-      return false
-
-    Log.debug("[AbomIdleState] Grab zombie: " + target.getName())
-    _abom.issueTargetOrderById(OrderIds.charm, target)
-    return true    
-
-// ============================================================================
-public class AbomHoldingState extends BaseStateMachineState
-  private Abomination _abom
-  private real _timer
-  private bool _threwZombie
-  private effect _targetIndicatorEffect
-
-  // --------------------------------------------------------------------------
-  construct(Abomination abom, IStateMachine machine)
-    super(machine)
-    _abom = abom
-
-  // --------------------------------------------------------------------------
-  ondestroy
-    hideTargetIndicator()
-
-  // --------------------------------------------------------------------------
-  override function getName() returns string
-    return "HoldingZombie"
-
-  // --------------------------------------------------------------------------
-  override function enter()
-    _timer = 0.0
-    _threwZombie = false
-
-    let zombie = _abom.getHoldingZombie()
+  function dropZombieAtPos(vec2 pos, angle facingAngle)
+    let zombie = getHoldingZombie()
     if (zombie == null)
-      error("Expected Abomination to be holding a zombie when entering this state")
-
-    if (zombie.isFemaleZombie())
-      _abom.addAbility(TlsAbilityIds.holdingZombieFemale)
-    else
-      _abom.addAbility(TlsAbilityIds.holdingZombieMale)
-
-    _abom.addAbility(TlsAbilityIds.abomThrowZombie)
-
-  // --------------------------------------------------------------------------
-  override function exit()
-    _timer = 0.0
-    _threwZombie = false
-    _abom.removeAbility(TlsAbilityIds.holdingZombieFemale)
-    _abom.removeAbility(TlsAbilityIds.holdingZombieMale)
-    _abom.removeAbility(TlsAbilityIds.abomThrowZombie)
-    hideTargetIndicator()
-
-  // --------------------------------------------------------------------------
-  override function update(real dt)
-    _timer += dt
-
-    if (_timer >= ABOM_HOLD_DURATION and not _threwZombie)
-      _threwZombie = tryThrowZombie()
-      if (_threwZombie == false)
-        _timer -= ABOM_HOLD_DURATION
-        attackPlayer()
-
-  // --------------------------------------------------------------------------
-  private function tryThrowZombie() returns bool
-    let target = findThrowTarget()
-    if (target == null)
-      Log.debug("[AbomHoldingState] Found no target to throw zombie at")
-      hideTargetIndicator()
-      return false
-
-    Log.debug("[AbomHoldingState] Found target to throw zombie at: " + target.getName())
-
-    let currentPos = _abom.getPos()
-    let targetPos = target.getPos()
-    let throwRange = _abom.getThrowRange()
-    let angle = currentPos.angleTo(targetPos)
-    var dist = currentPos.distanceTo(targetPos)
-    dist = clamp(dist, ABOM_MIN_THROW_RANGE, throwRange)
-
-    let finalPos = currentPos.polarOffset(angle, dist)
-    _abom.issuePointOrderById(ABOM_THROW_ORDER_ID, finalPos)
-
-    showTargetIndicator(finalPos)
-
-    return true
-
-  // --------------------------------------------------------------------------
-  private function findThrowTarget() returns unit
-    // === These must be cleaned up
-    let ug = getGroup()
-    let cond = Condition(function isFilterUnitAValidThrowTarget)
-    g_minThrowArea = _abom.getPos().withRadiusRect(ABOM_MIN_THROW_RANGE)
-    // ===
-
-    ug.enumUnitsInRange(_abom.getPos(), ABOM_MAX_THROW_RANGE, cond)
-    let target = ug.getRandomUnit()
-
-    // === Cleanup
-    RemoveRect(g_minThrowArea)
-    DestroyCondition(cond)
-    ug.release()
-    // ===
-
-    return target
-
-  // --------------------------------------------------------------------------
-  private function attackPlayer()
-    let target = getClosestUndeadTarget(_abom.getTargetPlayer(), _abom.getPos())
-    if (target != null)
-      Log.debug("[AbomIdleState] Attack closest player unit: " + target.getName())
-      _abom.issueTargetOrderById(OrderIds.attack, target)
-    else
-      Log.debug("[AbomIdleState] Found no player unit to attack")
-      _abom.setField(UNIT_RF_ACQUISITION_RANGE, REAL_MAX)
-
-  // --------------------------------------------------------------------------
-  private function showTargetIndicator(vec2 pos)
-    hideTargetIndicator()
-    _targetIndicatorEffect = FX.createEffect(ABOM_TARGET_INDICATOR_EFFECT, pos)
-
-  // --------------------------------------------------------------------------
-  private function hideTargetIndicator()
-    if (_targetIndicatorEffect != null)
-      _targetIndicatorEffect.destr()
-      _targetIndicatorEffect = null
-
-// ============================================================================
-function isFilterUnitAZombie() returns bool
-  let u = GetFilterUnit()
-  return u.isZombie() and u.isAlive()
-
-// ============================================================================
-function isFilterUnitAValidThrowTarget() returns bool
-  let target = GetFilterUnit()
-  return not target.isStructure() and target.getOwner().isHumanPlayer() and not g_minThrowArea.contains(target.getPos())
+      return
+    setHoldingZombie(null)
+    moveAndUnhideZombie(zombie, pos, facingAngle)
 
 // ============================================================================
 function onAbomGrabbedZombie(unit caster, unit target)
@@ -372,7 +139,8 @@ function onAbomThrowZombie(unit caster)
 
   let zombie = abom.getHoldingZombie()
   if (zombie == null)
-    error("Expected Abomination to be holding a zombie when entering this state")
+    Log.warn("Expected Abomination to be holding a zombie when entering this state")
+    return
 
   let throwStartPos = caster.getPos()
   var throwEndPos = EventData.getSpellTargetPos()
@@ -400,31 +168,64 @@ function onAbomThrowZombie(unit caster)
   // Start the animation for throwing the held zombie
   abom.setAnimation(ABOM_THROW_ANIM_INDEX)
   doAfter(ABOM_THROW_ANIM_DURATION) () ->
-    stateMachine.transitionToState("Idle")
+    // Get the statemachine again here in case the abom dies before this is called
+    let stateMachine2 = getAliveAbomStateMachine(caster)
+    if (stateMachine2 != null)
+      stateMachine2.transitionToState("Idle")
 
   // At the peak of the throw animation order the dummy to attack ground
-  doAfter(ABOM_THROW_ANIM_PROJECTILE_POINT) ->
+  doAfter(ABOM_THROW_ANIM_PROJECTILE_POINT) ->    
     dummyCaster.issuePointOrderById(OrderIds.attackground, throwEndPos)
+    
+    // Get the abom metadata again here in case the abom dies before this is called
+    let abom2 = getAliveAbom(caster)
+    if (abom2 != null)
 
-    let projectileDuration = rangeScalar * ABOM_THROW_PROJ_DURATION
-    doAfter(projectileDuration) () ->
-      // cleanup casters
-      dummyCaster.remove()
-      dummyTarget.remove()
+      let projectileDuration = rangeScalar * ABOM_THROW_PROJ_DURATION
+      doAfter(projectileDuration) () ->
+        // cleanup casters
+        dummyCaster.remove()
+        dummyTarget.remove()
 
-      // create a dust effect
-      addEffect(ABOM_THROW_DUST_EFFECT, throwEndPos)
-      ..setScale(0.5)
-      ..setColor(50, 50, 50)
-      ..setAlpha(100)
-      ..destr()
+        // create a dust effect
+        addEffect(ABOM_THROW_DUST_EFFECT, throwEndPos)
+        ..setScale(0.5)
+        ..setColor(50, 50, 50)
+        ..setAlpha(100)
+        ..destr()
 
-      // move and unhide the actual zombie unit
-      zombie.setInvulnerable(false)
-      zombie.setPos(throwEndPos)
-      zombie.setFacing(facingAngle)
-      zombie.setAnimation("birth")
-      zombie.show()
+        // Get the abom metadata again here in case the abom dies before this is called
+        let abom3 = getAliveAbom(caster)
+        if (abom3 != null)
+          // move and unhide the actual zombie unit
+          abom3.dropZombieAtPos(throwEndPos, facingAngle)
+        else
+          moveAndUnhideZombie(zombie, throwEndPos, facingAngle)
+
+    else
+      moveAndUnhideZombie(zombie, throwEndPos, facingAngle)
+
+// ==========================================================================
+function getAliveAbom(unit abom) returns Abomination
+  if (not abom.isAlive())
+    return null
+  return abom.getMetadata() castTo Abomination
+
+// ==========================================================================
+function getAliveAbomStateMachine(unit abom) returns StateMachineComponent
+  let abomMetadata = getAliveAbom(abom)
+  return abomMetadata != null ? abomMetadata.getStateMachine() : null
+
+// ==========================================================================
+function moveAndUnhideZombie(unit zombie, vec2 pos, angle facingAngle)
+  if (zombie == null)
+    return
+  // move and unhide the actual zombie unit
+  zombie.setInvulnerable(false)
+  zombie.setPos(pos)
+  zombie.setFacing(facingAngle)
+  zombie.setAnimation("birth")
+  zombie.show()
 
 // ==========================================================================
 init

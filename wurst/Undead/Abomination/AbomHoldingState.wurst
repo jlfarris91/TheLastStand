@@ -1,0 +1,146 @@
+package AbomHoldingState
+import StateMachine
+import Abomination
+import TlsAbilityIds
+import Zombie
+import ErrorHandling
+import UnitMetadata
+import Math
+import GroupUtils
+import FX
+import UndeadUtility
+import Orders
+import UnitExtensions
+import PlayerExtensions
+
+constant real ABOM_MIN_THROW_RANGE = 400.0
+constant real ABOM_MAX_THROW_RANGE = 700.0
+constant real ABOM_HOLD_DURATION = 3.0
+constant int ABOM_THROW_ORDER_ID = OrderIds.flare
+constant string ABOM_TARGET_INDICATOR_EFFECT = "Abilities\\Spells\\NightElf\\TrueshotAura\\TrueshotAura.mdl"
+
+rect g_minThrowArea
+
+// ============================================================================
+public class AbomHoldingState extends BaseStateMachineState
+  private Abomination _abom
+  private real _timer
+  private bool _threwZombie
+  private effect _targetIndicatorEffect
+
+  // --------------------------------------------------------------------------
+  construct(Abomination abom, IStateMachine machine)
+    super(machine)
+    _abom = abom
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    hideTargetIndicator()
+
+  // --------------------------------------------------------------------------
+  override function getName() returns string
+    return "HoldingZombie"
+
+  // --------------------------------------------------------------------------
+  override function enter()
+    _timer = 0.0
+    _threwZombie = false
+
+    let zombie = _abom.getHoldingZombie()
+    if (zombie == null)
+      error("Expected Abomination to be holding a zombie when entering this state")
+
+    if (zombie.isFemaleZombie())
+      _abom.addAbility(TlsAbilityIds.holdingZombieFemale)
+    else
+      _abom.addAbility(TlsAbilityIds.holdingZombieMale)
+
+    _abom.addAbility(TlsAbilityIds.abomThrowZombie)
+
+  // --------------------------------------------------------------------------
+  override function exit()
+    _timer = 0.0
+    _threwZombie = false
+    _abom.removeAbility(TlsAbilityIds.holdingZombieFemale)
+    _abom.removeAbility(TlsAbilityIds.holdingZombieMale)
+    _abom.removeAbility(TlsAbilityIds.abomThrowZombie)
+    hideTargetIndicator()
+
+  // --------------------------------------------------------------------------
+  override function update(real dt)
+    _timer += dt
+
+    if (_timer >= ABOM_HOLD_DURATION and not _threwZombie)
+      _threwZombie = tryThrowZombie()
+      if (_threwZombie == false)
+        _timer -= ABOM_HOLD_DURATION
+        attackPlayer()
+
+  // --------------------------------------------------------------------------
+  private function tryThrowZombie() returns bool
+    let target = findThrowTarget()
+    if (target == null)
+      Log.debug("[AbomHoldingState] Found no target to throw zombie at")
+      hideTargetIndicator()
+      return false
+
+    Log.debug("[AbomHoldingState] Found target to throw zombie at: " + target.getName())
+
+    let currentPos = _abom.getPos()
+    let targetPos = target.getPos()
+    let throwRange = _abom.getThrowRange()
+    let angle = currentPos.angleTo(targetPos)
+    var dist = currentPos.distanceTo(targetPos)
+    dist = clamp(dist, ABOM_MIN_THROW_RANGE, throwRange)
+
+    let finalPos = currentPos.polarOffset(angle, dist)
+    _abom.issuePointOrderById(ABOM_THROW_ORDER_ID, finalPos)
+
+    showTargetIndicator(finalPos)
+
+    return true
+
+  // --------------------------------------------------------------------------
+  private function findThrowTarget() returns unit
+    // === These must be cleaned up
+    let ug = getGroup()
+    let cond = Condition(function isFilterUnitAValidThrowTarget)
+    g_minThrowArea = _abom.getPos().withRadiusRect(ABOM_MIN_THROW_RANGE)
+    // ===
+
+    ug.enumUnitsInRange(_abom.getPos(), ABOM_MAX_THROW_RANGE, cond)
+    let target = ug.getRandomUnit()
+
+    // === Cleanup
+    RemoveRect(g_minThrowArea)
+    DestroyCondition(cond)
+    ug.release()
+    // ===
+
+    return target
+
+  // --------------------------------------------------------------------------
+  private function attackPlayer()
+    let target = getClosestUndeadTarget(_abom.getTargetPlayer(), _abom.getPos())
+    if (target != null)
+      Log.debug("[AbomIdleState] Attack closest player unit: " + target.getName())
+      _abom.issueTargetOrderById(OrderIds.attack, target)
+    else
+      Log.debug("[AbomIdleState] Found no player unit to attack")
+      _abom.setField(UNIT_RF_ACQUISITION_RANGE, REAL_MAX)
+
+  // --------------------------------------------------------------------------
+  private function showTargetIndicator(vec2 pos)
+    hideTargetIndicator()
+    _targetIndicatorEffect = FX.createEffect(ABOM_TARGET_INDICATOR_EFFECT, pos)
+
+  // --------------------------------------------------------------------------
+  private function hideTargetIndicator()
+    if (_targetIndicatorEffect != null)
+      _targetIndicatorEffect.destr()
+      _targetIndicatorEffect = null
+
+// ============================================================================
+function isFilterUnitAValidThrowTarget() returns bool
+  let target = GetFilterUnit()
+  return not target.isStructure() and target.getOwner().isHumanPlayer() and not g_minThrowArea.contains(target.getPos())

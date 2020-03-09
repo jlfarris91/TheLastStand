@@ -1,0 +1,115 @@
+package AbomIdleState
+import StateMachine
+import Abomination
+import UnitMetadata
+import TlsAbilityIds
+import UndeadUtility
+import Orders
+import GroupUtils
+import Zombie
+
+constant real ABOM_IDLE_RADIUS = 128.0
+constant real ABOM_IDLE_RADIUS_SQ = ABOM_IDLE_RADIUS*ABOM_IDLE_RADIUS
+constant real ABOM_IDLE_TIME_TO_GRAB = 10.0
+constant real ABOM_GRABBING_ZOMBIE_TIMEOUT = 5.0
+
+// ==========================================================================
+public class AbomIdleState extends BaseStateMachineState
+  private Abomination _abom
+  private real _time
+  private vec2 _lastPos
+  private bool _grabbingZombie
+  private real _grabbingZombieTimer
+
+  // --------------------------------------------------------------------------
+  construct(Abomination abom, IStateMachine machine)
+    super(machine)
+    _abom = abom
+
+  // --------------------------------------------------------------------------
+  override function getName() returns string
+    return "Idle"
+
+  // --------------------------------------------------------------------------
+  override function enter()
+    _time = 0.0
+    _lastPos = _abom.getPos()
+    _grabbingZombie = false
+    _grabbingZombieTimer = ABOM_GRABBING_ZOMBIE_TIMEOUT
+
+    _abom.addAbility(TlsAbilityIds.abomGrabZombie)
+
+    attackPlayer()
+
+  // --------------------------------------------------------------------------
+  override function exit()
+    _time = 0.0
+    _lastPos = vec2(0.0, 0.0)
+    _grabbingZombie = false
+    _grabbingZombieTimer = ABOM_GRABBING_ZOMBIE_TIMEOUT
+
+    _abom.removeAbility(TlsAbilityIds.abomGrabZombie)
+
+  // --------------------------------------------------------------------------
+  override function update(real dt)
+    _time += dt
+
+    let currentPos = _abom.getPos()
+    let distanceSq = currentPos.distanceToSq(_lastPos)
+
+    if (distanceSq > ABOM_IDLE_RADIUS_SQ)
+      _time = 0.0
+      _lastPos = currentPos
+
+    if (_time > ABOM_IDLE_TIME_TO_GRAB and not _grabbingZombie)
+      _grabbingZombie = tryGrabZombie()
+      if (_grabbingZombie)
+        _grabbingZombieTimer = ABOM_GRABBING_ZOMBIE_TIMEOUT
+      else
+        _time -= ABOM_IDLE_TIME_TO_GRAB
+        attackPlayer()
+
+    // Give up if the abom couldn't grab a zombie in the given time
+    if (_grabbingZombie)
+      _grabbingZombieTimer -= dt
+      if (_grabbingZombieTimer <= 0)
+        Log.debug("[AbomIdleState] Gave up trying to grab zombie")
+        _grabbingZombie = false
+
+  // --------------------------------------------------------------------------
+  private function attackPlayer()
+    let targetPlayer = _abom.getTargetPlayer()
+    if (targetPlayer == null)
+      return
+
+    let target = getClosestUndeadTarget(targetPlayer, _abom.getPos())
+    if (target != null)
+      Log.debug("[AbomIdleState] Attack closest player unit: " + target.getName())
+      _abom.issueTargetOrderById(OrderIds.attack, target)
+    else
+      Log.debug("[AbomIdleState] Found no player unit to attack")
+      _abom.setField(UNIT_RF_ACQUISITION_RANGE, REAL_MAX)
+
+  // --------------------------------------------------------------------------
+  private function tryGrabZombie() returns bool
+
+    // === These need to be cleaned up
+    let g = getGroup()
+    let filter = Condition(function isFilterUnitAZombie)
+    // ===
+
+    g.enumUnitsInRange(_abom.getPos(), 512.0, filter)
+    let target = g.getRandomUnit()
+
+    // === Cleanup
+    DestroyCondition(filter)
+    g.release()
+    // ===
+
+    if (target == null)
+      Log.debug("[AbomIdleState] Found no zombie nearby")
+      return false
+
+    Log.debug("[AbomIdleState] Grab zombie: " + target.getName())
+    _abom.issueTargetOrderById(OrderIds.charm, target)
+    return true
