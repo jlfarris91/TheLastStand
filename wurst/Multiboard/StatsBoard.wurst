@@ -1,0 +1,92 @@
+package StatsBoard
+import StatsComponent
+import ClosureTimers
+import TimerUtils
+import UnitMetadata
+import Statistic
+
+// ============================================================================
+public class StatsBoard
+  private constant int NUMBER_OF_COLUMNS = 2
+  private constant int COLUMN_TITLE = 0
+  private constant int COLUMN_VALUE = 1
+
+  private IUnitMetadata m_unit
+  private multiboard m_multiboard
+  private StatsComponent m_statsComponent
+  private timer m_timer
+
+  // --------------------------------------------------------------------------
+  construct(StatsComponent statsComponent, string title)
+    m_statsComponent = statsComponent
+    m_unit = statsComponent.getOwner()
+    m_multiboard = CreateMultiboardBJ(NUMBER_OF_COLUMNS, 0, title)
+    hide()
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    hide()
+    DestroyMultiboard(m_multiboard)
+    m_statsComponent = null
+    m_unit = null
+
+  // --------------------------------------------------------------------------
+  function isShowing() returns bool
+    return m_multiboard.isDisplayed()
+
+  // --------------------------------------------------------------------------
+  function show()
+    m_multiboard.show(m_unit.getUnit().getOwner())
+
+    if (m_timer == null)
+      m_timer = getTimer()
+      m_timer.doPeriodically(1.0) (CallbackPeriodic cb) ->
+        update()
+
+  // --------------------------------------------------------------------------
+  function hide()
+    m_multiboard.hide()
+
+    if (m_timer != null)
+      m_timer.release()
+      m_timer = null
+
+  // --------------------------------------------------------------------------
+  function update()
+    if (m_statsComponent == null)
+      return
+      
+    let stats = m_statsComponent.getStats()
+    if (stats == null)
+      return
+
+    var row = 0
+    for stat in stats
+      updateRow(row, stat)
+      row++
+
+  // --------------------------------------------------------------------------
+  function updateMultiboardRows()
+
+    let stats = m_statsComponent.getStats()
+    if (stats == null)
+      return
+
+    m_multiboard.setRowCount(stats.size())
+
+    m_multiboard.setColumnWidth(COLUMN_TITLE, 0.1)
+    m_multiboard.setColumnWidth(COLUMN_VALUE, 0.1)
+
+    MultiboardSetItemStyleBJ(m_multiboard, COLUMN_TITLE + 1, 0, true, true)
+    MultiboardSetItemStyleBJ(m_multiboard, COLUMN_VALUE + 1, 0, true, false)
+
+    var row = 0
+    for stat in stats
+      m_multiboard.setItemIcon(row, COLUMN_TITLE, stat.getIcon())
+      m_multiboard.setItemValue(row, COLUMN_TITLE, stat.getName())
+      m_multiboard.setItemValue(row, COLUMN_VALUE, stat.getValueAsString() + " " + stat.getUnits())
+      row++
+      
+  // --------------------------------------------------------------------------
+  private function updateRow(int row, IStatistic stat)
+    m_multiboard.setItemValue(row, COLUMN_VALUE, stat.getValueAsString() + " " + stat.getUnits())

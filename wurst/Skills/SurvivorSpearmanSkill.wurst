@@ -1,11 +1,16 @@
 package SurvivorSpearmanSkill
 import Skills
 import UnitMetadata
-import KillTrackerComponent
 import Events
 import SkillsComponent
 import Type
 import SurvivorJobSkill
+import SurvivorStats
+import Statistic
+import PropertyEvents
+import StatsComponent
+
+constant real EXP_PER_KILL = 10.0
 
 // ============================================================================
 public class SurvivorSpearmanSkillDefinition extends SkillDefinition
@@ -16,16 +21,12 @@ public class SurvivorSpearmanSkillDefinition extends SkillDefinition
 
 // ============================================================================
 public class SurvivorSpearmanSkill extends SurvivorJobSkill
-  private KillTrackerComponent m_killTrackerComponent
-  private Action2<KillTrackerComponent, unit> m_onKillEventHandler
+  private StatsComponent m_statsComponent
+  private Action3<string, int, int> m_onStatChangingHandler
 
   // --------------------------------------------------------------------------
   construct(SurvivorSpearmanSkillDefinition skill, IUnitMetadata u)
     super(skill, u)
-
-  // --------------------------------------------------------------------------
-  ondestroy
-    m_killTrackerComponent = null
 
   // --------------------------------------------------------------------------
   override function onLevelUp()
@@ -38,35 +39,38 @@ public class SurvivorSpearmanSkill extends SurvivorJobSkill
   // --------------------------------------------------------------------------
   protected override function onEnabled()
     super.onEnabled()
-
-    if (m_killTrackerComponent == null)
-      m_killTrackerComponent = getUnit().getOrAddKillTrackerComponent()
-
-    listenToKillEvent()
+    m_statsComponent = getUnit().getStatsComponent()
+    listenToKillsStatChanged()
 
   // --------------------------------------------------------------------------
   protected override function onDisabled()
     super.onDisabled()
-    unlistenToKillEvent()
+    unlistenToUnitKilledEvent()
+    m_statsComponent = null
 
   // --------------------------------------------------------------------------
-  private function onKill()
-    incrementExperience(1.0)
+  private function listenToKillsStatChanged()
+    unlistenToUnitKilledEvent()
+
+    let stat = getKillsStatistic()
+    if (stat != null)
+      m_onStatChangingHandler = stat.getValueChangingEvent().add() (string propertyName, integer oldValue, integer newValue) ->
+        if (propertyName == "Value")
+          let numberOfKills = newValue - oldValue
+          incrementExperience(numberOfKills * EXP_PER_KILL)
 
   // --------------------------------------------------------------------------
-  private function listenToKillEvent()
-    unlistenToKillEvent()
-    if (m_onKillEventHandler == null)
-      m_onKillEventHandler = m_killTrackerComponent.killedUnitEvent.add() (KillTrackerComponent sender, unit args) ->
-        onKill()
+  private function unlistenToUnitKilledEvent()
+    if (m_onStatChangingHandler != null)
+      let stat = getKillsStatistic()
+      if (stat != null)
+        stat.getValueChangingEvent().remove(m_onStatChangingHandler)
+      destroy m_onStatChangingHandler
+      m_onStatChangingHandler = null
 
   // --------------------------------------------------------------------------
-  private function unlistenToKillEvent()
-    if (m_onKillEventHandler != null)
-      if (m_killTrackerComponent != null and m_killTrackerComponent.killedUnitEvent != null)
-        m_killTrackerComponent.killedUnitEvent.remove(m_onKillEventHandler)
-      destroy m_onKillEventHandler
-      m_onKillEventHandler = null
+  private function getKillsStatistic() returns IntStatistic
+    return m_statsComponent.getStatistic(SurvivorStats.kills) castTo IntStatistic
 
 // ============================================================================
 public function SkillsComponent.getOrAddSurvivorSpearmanSkill() returns SurvivorSpearmanSkill

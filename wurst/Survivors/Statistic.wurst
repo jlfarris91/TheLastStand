@@ -4,7 +4,7 @@ import PropertyEvents
 
 // ============================================================================
 public interface IStatistic
-  function getValueChangedEvent() returns PropertyChangedEvent<Statistic>
+  function getValueChangedEvent() returns PropertyChangedEvent
   function getName() returns string
   function setName(string name)
   function getUnits() returns string
@@ -13,38 +13,31 @@ public interface IStatistic
   function setIcon(string icon)
   function getTooltip() returns string
   function setTooltip(string tooltip)
+  function getValueAsString() returns string
 
 // ============================================================================
-public class Statistic<TValue> implements IStatistic
-  protected string m_name
-  protected string m_units
-  protected string m_icon
-  protected string m_tooltip
-  protected TValue m_value
+public abstract class StatisticBase implements IStatistic
+  private string m_name
+  private string m_units
+  private string m_icon
+  private string m_tooltip
 
-  protected PropertyChangingEvent<Statistic, TValue> m_valueChangingEvent
-  protected PropertyChangedEvent<Statistic> m_valueChangedEvent
+  protected PropertyChangedEvent m_valueChangedEvent
 
   // --------------------------------------------------------------------------
   construct(string name)
     setName(name)
     setTooltip("Missing tooltip")
     setIcon(Icons.bTNSelectHeroOff)
-
-    m_valueChangingEvent = new PropertyChangingEvent<Statistic, TValue>()
-    m_valueChangedEvent = new PropertyChangedEvent<Statistic>()
+    
+    m_valueChangedEvent = new PropertyChangedEvent()
 
   // --------------------------------------------------------------------------
   ondestroy
     destroy m_valueChangedEvent
-    destroy m_valueChangingEvent
 
   // --------------------------------------------------------------------------
-  function getValueChangingEvent() returns PropertyChangingEvent<Statistic, TValue>
-    return m_valueChangingEvent
-
-  // --------------------------------------------------------------------------
-  override function getValueChangedEvent() returns PropertyChangedEvent<Statistic>
+  override function getValueChangedEvent() returns PropertyChangedEvent
     return m_valueChangedEvent
 
   // --------------------------------------------------------------------------
@@ -79,101 +72,90 @@ public class Statistic<TValue> implements IStatistic
   override function setTooltip(string tooltip)
     m_tooltip = tooltip
 
+// ============================================================================
+public class RealStatistic extends StatisticBase
+  private real m_value
+
+  private RealPropertyChangingEvent m_valueChangingEvent
+
   // --------------------------------------------------------------------------
-  function getValue() returns TValue
+  construct(string name)
+    super(name)
+
+    m_value = 0.0
+    m_valueChangingEvent = new RealPropertyChangingEvent()
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    destroy m_valueChangingEvent
+
+  // --------------------------------------------------------------------------
+  function getValueChangingEvent() returns RealPropertyChangingEvent
+    return m_valueChangingEvent
+
+  // --------------------------------------------------------------------------
+  override function getValueAsString() returns string
+    return m_value.toString()
+
+  // --------------------------------------------------------------------------
+  function getValue() returns real
     return m_value
 
   // --------------------------------------------------------------------------
-  function setValue(TValue value)
+  function setValue(real value)
+    if (m_value != value)      
+      m_valueChangingEvent.call("Value", m_value, value)
+      m_value = value
+      m_valueChangedEvent.call("Value")
 
-    if (m_value == value)
-      return
-    
-    let changingArgs = new PropertyChangingEventArgs("Value", m_value, value)
-    m_valueChangingEvent.call(this, changingArgs)
-    destroy changingArgs
+  // --------------------------------------------------------------------------
+  function increment(real value)
+    setValue(getValue() + value)
 
-    m_value = value
+  // --------------------------------------------------------------------------
+  function decrement(real value)
+    increment(-value)
 
-    m_valueChangedEvent.call(this, "Value")
+// ============================================================================
+public class IntStatistic extends StatisticBase
+  private int m_value
 
+  private IntPropertyChangingEvent m_valueChangingEvent
 
-// // ============================================================================
-// public class GenericStatistic extends Statistic<Union>
+  // --------------------------------------------------------------------------
+  construct(string name)
+    super(name)
 
-//   // --------------------------------------------------------------------------
-//   construct(string name)
-//     super(name)
+    m_value = 0
+    m_valueChangingEvent = new IntPropertyChangingEvent()
 
-//   // --------------------------------------------------------------------------
-//   ondestroy
-//     destroy m_value
+  // --------------------------------------------------------------------------
+  ondestroy
+    destroy m_valueChangingEvent
 
-//   // --------------------------------------------------------------------------
-//   function getReal() returns real
-//     return getValue().getReal()
+  // --------------------------------------------------------------------------
+  function getValueChangingEvent() returns IntPropertyChangingEvent
+    return m_valueChangingEvent
 
-//   // --------------------------------------------------------------------------
-//   function getInt() returns int
-//     return getValue().getInt()
+  // --------------------------------------------------------------------------
+  override function getValueAsString() returns string
+    return m_value.toString()
 
-//   // --------------------------------------------------------------------------
-//   function getString() returns string
-//     return getValue().getString()
+  // --------------------------------------------------------------------------
+  function getValue() returns int
+    return m_value
 
-//   // --------------------------------------------------------------------------
-//   function setReal(real value)
-//     let oldValue = m_value.getReal()
-//     if (oldValue == value)
-//       return
-      
-//     let newUnion = new Union()
-//     ..setReal(value)
-    
-//     let changingArgs = new PropertyChangingEventArgs("Value", m_value, newUnion)
-//     m_valueChangingEvent.call(this, changingArgs)
-//     destroy changingArgs
+  // --------------------------------------------------------------------------
+  function setValue(int value)
+    if (m_value != value)
+      m_valueChangingEvent.call("Value", m_value, value)
+      m_value = value
+      m_valueChangedEvent.call("Value")
 
-//     m_value.setReal(newUnion.getReal())
+  // --------------------------------------------------------------------------
+  function increment(int value)
+    setValue(getValue() + value)
 
-//     destroy newUnion
-
-//     m_valueChangedEvent.call(this, "Value")
-
-//   // --------------------------------------------------------------------------
-//   function setInt(int value)
-//     let oldValue = m_value.getInt()
-//     if (oldValue == value)
-//       return
-      
-//     let newUnion = new Union()
-//     ..setInt(value)
-    
-//     let changingArgs = new PropertyChangingEventArgs("Value", m_value, newUnion)
-//     m_valueChangingEvent.call(this, changingArgs)
-//     destroy changingArgs
-
-//     m_value.setInt(newUnion.getInt())
-
-//     destroy newUnion
-
-//     m_valueChangedEvent.call(this, "Value")
-
-//   // --------------------------------------------------------------------------
-//   function setString(string value)
-//     let oldValue = m_value.getString()
-//     if (oldValue == value)
-//       return
-      
-//     let newUnion = new Union()
-//     ..setString(value)
-    
-//     let changingArgs = new PropertyChangingEventArgs("Value", m_value, newUnion)
-//     m_valueChangingEvent.call(this, changingArgs)
-//     destroy changingArgs
-
-//     m_value.setString(newUnion.getString())
-
-//     destroy newUnion
-
-//     m_valueChangedEvent.call(this, "Value")
+  // --------------------------------------------------------------------------
+  function decrement(int value)
+    increment(-value)

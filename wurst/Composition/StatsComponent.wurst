@@ -1,64 +1,75 @@
 package StatsComponent
 import UnitComponent
 import UnitMetadata
-import SurvivorStats
-import Icons
+import StatisticsCollection
 import Type
 import Composition
-import DistanceTraveledStat
-
-// ============================================================================
-public class Stats
-  static constant string kills              = "kills"
-  static constant string assists            = "assists"
-  static constant string damageDealt        = "damageDealt"
-  static constant string healthHealed       = "healthHealed"
-  static constant string distanceTraveled   = "distanceTraveled"
+import Statistic
+import ClosureTimers
+import RegisterEvents
+import initlater StatsBoard
 
 // ============================================================================
 public class StatsComponent extends UnitComponent
-  private SurvivorStats m_stats
+  private StatisticsCollection m_stats
+  private StatsBoard m_statsBoard
 
   // --------------------------------------------------------------------------
   construct(IUnitMetadata owner)
     super(owner)
-
-    m_stats = new SurvivorStats()
-
-    m_stats.addStatistic(Stats.kills, new DistanceTraveledStat(owner))
     
-    m_stats.createIntStatistic(Stats.kills, "Kills", 0)
-    ..setIcon(Icons.bTNBattleStations)
-    ..setUnits("kills")
-    ..setTooltip("The number of enemies killed by getting the last hit")
-    
-    m_stats.createIntStatistic(Stats.assists, "Assists", 0)
-    ..setIcon(Icons.bTNImmolationOff)
-    ..setUnits("assists")
-    ..setTooltip("The number of enemies killed with the help of this Survivor")
+    // m_stats.createIntStatistic(Stats.assists, "Assists", 0)
+    // ..setIcon(Icons.bTNImmolationOff)
+    // ..setUnits("assists")
+    // ..setTooltip("The number of enemies killed with the help of this Survivor")
 
-    m_stats.createRealStatistic(Stats.damageDealt, "Damage Dealt", 0.0)
-    ..setIcon(Icons.bTNSteelMelee)
-    ..setUnits("damage")
-    ..setTooltip("The total amount of damage dealt")
+    // m_stats.createRealStatistic(Stats.damageDealt, "Damage Dealt", 0.0)
+    // ..setIcon(Icons.bTNSteelMelee)
+    // ..setUnits("damage")
+    // ..setTooltip("The total amount of damage dealt")
 
-    m_stats.createRealStatistic(Stats.healthHealed, "HP Healed", 0.0)
-    ..setIcon(Icons.bTNStatUp)
-    ..setUnits("hp")
-    ..setTooltip("The amount of health healed")
-
-    m_stats.createRealStatistic(Stats.distanceTraveled, "Distance Traveled", 0.0)
-    ..setIcon(Icons.bTNBootsOfSpeed)
-    ..setUnits("meters")
-    ..setTooltip("The meters traveled")
+    // m_stats.createRealStatistic(Stats.healthHealed, "HP Healed", 0.0)
+    // ..setIcon(Icons.bTNStatUp)
+    // ..setUnits("hp")
+    // ..setTooltip("The amount of health healed")
 
   // --------------------------------------------------------------------------
   ondestroy
     destroy m_stats
 
   // --------------------------------------------------------------------------
-  function getStats() returns SurvivorStats
+  override function initialize()
+    super.initialize()
+    m_statsBoard = new StatsBoard(this, "Stats")
+    m_statsBoard.updateMultiboardRows()
+    
+  // --------------------------------------------------------------------------
+  function show()
+    if (not m_statsBoard.isShowing())
+      m_statsBoard.updateMultiboardRows()
+      m_statsBoard.update()
+      m_statsBoard.show()
+    
+  // --------------------------------------------------------------------------
+  function hide()
+    if (m_statsBoard.isShowing())
+      m_statsBoard.hide()
+
+  // --------------------------------------------------------------------------
+  function getStats() returns StatisticsCollection
     return m_stats
+
+  // --------------------------------------------------------------------------
+  function setStats(StatisticsCollection stats)
+    m_stats = stats
+
+  // --------------------------------------------------------------------------
+  function getStatistic(string key) returns IStatistic
+    return m_stats.getStatistic(key)
+
+  // --------------------------------------------------------------------------
+  function addStatistic(string key, IStatistic statistic)
+    m_stats.addStatistic(key, statistic)
 
 // ============================================================================
 public function IUnitMetadata.getStatsComponent() returns StatsComponent
@@ -70,3 +81,35 @@ public function IUnitMetadata.getOrAddStatsComponent() returns StatsComponent
   if (component == null)
     component = this.addComponent(new StatsComponent(this)) castTo StatsComponent
   return component
+
+// ============================================================================
+function onUnitSelected()
+  let u = GetTriggerUnit()
+  let metadata = u.getMetadata()
+  if (metadata == null)
+    return
+  let statsComponent = metadata.getStatsComponent()
+  if (statsComponent == null)
+    return
+  statsComponent.show()
+
+// ============================================================================
+function onUnitDeselected()
+  let u = GetTriggerUnit()
+  let metadata = u.getMetadata()
+  if (metadata == null)
+    return
+  let statsComponent = metadata.getStatsComponent()
+  if (statsComponent == null)
+    return
+  statsComponent.hide()
+
+// ============================================================================
+function delayedInit()
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_SELECTED, function onUnitSelected)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_DESELECTED, function onUnitDeselected)
+
+// ============================================================================
+init
+  doAfter(1.0) () ->
+    delayedInit()
