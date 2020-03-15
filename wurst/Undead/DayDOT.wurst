@@ -1,0 +1,51 @@
+package DayDOT
+import Events
+import ClosureTimers
+import GameConstants
+import GroupUtils
+
+CallbackPeriodic g_timer
+boolexpr g_filter = Filter(function filterUnitTakesDamageDuringDay)
+constant string DOT_EFFECT_MODEL_PATH = "Environment\\UndeadBuildingFire\\UndeadSmallBuildingFire2.mdl"
+constant real DOT_EFFECT_SCALE = 1.0
+
+// ============================================================================
+function onDayStart()
+
+  addDotFireEffectToAllUndead()
+
+  g_timer = doPeriodically(DAY_TIME_DOT_INTERVAL) (CallbackPeriodic cb) ->
+    periodicallyDamageUndead()
+
+// ============================================================================
+function onDayEnd()
+  if (g_timer != null)
+    destroy g_timer
+    g_timer = null
+
+// ============================================================================
+function periodicallyDamageUndead()
+  let undeadUnits = getGroup()
+  undeadUnits.enumUnitsOfPlayer(PLAYER_UNDEAD, g_filter)
+  for u from undeadUnits
+    u.subHP(u.getMaxHP() * DAY_TIME_DOT_PERCENT)
+  undeadUnits.release()
+
+// ============================================================================
+function addDotFireEffectToAllUndead()
+  let undeadUnits = getGroup()
+  undeadUnits.enumUnitsOfPlayer(PLAYER_UNDEAD, g_filter)
+  for u from undeadUnits
+    AddSpecialEffectTargetUnitBJ("chest", u, DOT_EFFECT_MODEL_PATH)
+    ..setScale(DOT_EFFECT_SCALE)
+  undeadUnits.release()
+
+// ============================================================================
+function filterUnitTakesDamageDuringDay() returns bool
+  let u = GetFilterUnit()
+  return u.isAlive() and not u.isInvulnerable()
+
+// ============================================================================
+init
+  GameEvents.dayStartEvent.add(() -> onDayStart())
+  GameEvents.dayEndEvent.add(() -> onDayEnd())
