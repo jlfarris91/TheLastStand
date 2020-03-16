@@ -1,18 +1,25 @@
 package RandomSpawnPointProvider
 import Spawning
 import ISpawnPointProvider
+import ErrorHandling
+
+constant int RETRY_COUNT = 10
 
 // ============================================================================
 public class RandomSpawnPointProvider implements ISpawnPointProvider
   private ISpawnManager m_spawnPointManager
   private real m_rangeMin
   private real m_rangeMax
+  private real m_resizeMinFactor
+  private real m_resizeMaxFactor
 
   // --------------------------------------------------------------------------
   construct(ISpawnManager spawnPointManager)
     m_spawnPointManager = spawnPointManager
     m_rangeMin = 0.0
     m_rangeMax = 0.0
+    m_resizeMinFactor = 1.1
+    m_resizeMaxFactor = 1.2
 
   // --------------------------------------------------------------------------
   function setRange(real min, real max)
@@ -36,9 +43,52 @@ public class RandomSpawnPointProvider implements ISpawnPointProvider
     m_rangeMax = range
 
   // --------------------------------------------------------------------------
+  private function growRange()
+    m_rangeMin *= m_resizeMinFactor
+    m_rangeMax *= m_resizeMaxFactor
+    Log.debug("Grew spawn point provider range!")
+
+  // --------------------------------------------------------------------------
   override function getSpawnPoint(vec2 center) returns vec2
-    return m_spawnPointManager.getRandomSpawnPointInRange(center, m_rangeMin, m_rangeMax)
+    vec2 spawnPoint = ZERO2
+
+    for i = 0 to RETRY_COUNT - 1
+      spawnPoint = m_spawnPointManager.getRandomSpawnPointInRange(center, m_rangeMin, m_rangeMax)
+      
+      // Found a point no need to resize range
+      if (spawnPoint != INVALID_SPAWN_POINT)
+        break
+      
+      // Could not find a spawn point within the range, grow the range and try again
+      growRange()
+
+    if (spawnPoint == INVALID_SPAWN_POINT)
+      error("Resized range " + RETRY_COUNT.toString() + " times and still could not find a spawn point")
+
+    return spawnPoint
 
   // --------------------------------------------------------------------------
   override function getSpawnPoints(vec2 center, int count) returns SpawnPointCollection
-    return m_spawnPointManager.getRandomSpawnPointsInRange(center, m_rangeMin, m_rangeMax, count)
+    
+    let result = new SpawnPointCollection()
+
+    for i = 0 to RETRY_COUNT - 1
+      let remainingCount = max(count - result.getCount(), 0)
+      if (remainingCount == 0)
+        break
+
+      let spawnPoints = m_spawnPointManager.getRandomSpawnPointsInRange(center, m_rangeMin, m_rangeMax, remainingCount)
+      for sp in spawnPoints
+        result.pushPoint(sp)
+      destroy spawnPoints
+
+      if (result.getCount() == count)
+        break
+      
+      // Could not find enough spawn points within the range, grow the range and try again
+      growRange()
+
+    if (result.getCount() != count)
+      error("Resized range " + RETRY_COUNT.toString() + " times and still could not find enough spawn points")
+
+    return result
