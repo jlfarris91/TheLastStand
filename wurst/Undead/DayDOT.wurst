@@ -1,30 +1,25 @@
 package DayDOT
 import Events
-import ClosureTimers
 import GameConstants
 import GroupUtils
 
-CallbackPeriodic g_timer
 boolexpr g_filter = Filter(function filterUnitTakesDamageDuringDay)
 constant string DOT_EFFECT_MODEL_PATH = "Environment\\UndeadBuildingFire\\UndeadSmallBuildingFire2.mdl"
 constant real DOT_EFFECT_SCALE = 1.0
+timer g_timer
 
 // ============================================================================
 function onDayStart()
-
   addDotFireEffectToAllUndead()
 
-  g_timer = doPeriodically(DAY_TIME_DOT_INTERVAL) (CallbackPeriodic cb) ->
-    periodicallyDamageUndead()
+  g_timer.startPeriodic(DAY_TIME_DOT_INTERVAL, function onPeriodicTimer)
 
 // ============================================================================
 function onDayEnd()
-  if (g_timer != null)
-    destroy g_timer
-    g_timer = null
+  g_timer.pause()
 
 // ============================================================================
-function periodicallyDamageUndead()
+function damageAllUndead()
   let undeadUnits = getGroup()
   undeadUnits.enumUnitsOfPlayer(PLAYER_UNDEAD, g_filter)
   for u from undeadUnits
@@ -46,6 +41,13 @@ function filterUnitTakesDamageDuringDay() returns bool
   return u.isAlive() and not u.isInvulnerable()
 
 // ============================================================================
+function onPeriodicTimer()
+  damageAllUndead()
+
+// ============================================================================
 init
+  g_timer = CreateTimer()
+  g_timer.pause()
+
   GameEvents.dayStartEvent.add(() -> onDayStart())
   GameEvents.dayEndEvent.add(() -> onDayEnd())
