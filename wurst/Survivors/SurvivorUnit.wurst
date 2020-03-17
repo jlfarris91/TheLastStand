@@ -1,0 +1,177 @@
+package SurvivorUnit
+import Camp
+import SurvivorJobComponent
+import SkillsComponent
+import SurvivorMarksmanSkill
+import Skills
+import TlsUnitIds
+import SurvivorMedicSkill
+import SurvivorSpearmanSkill
+import SurvivorMilitiaSkill
+import SurvivorJobSkill
+import SurvivorBuilderSkill
+import GameConstants
+import SurvivorStats
+import Statistic
+import Icons
+import SurvivorDataComponent
+import HashMap
+
+import DistanceTraveledStatistic
+import KillsStatistic
+import DaysSurvivedStatisticComponent
+import NightsSurvivedStatisticComponent
+import SurvivorData
+import SurvivorNames
+import SurvivorJobIds
+
+// ============================================================================
+public class Survivor extends CampUnit
+  private SkillsComponent m_skillsComponent
+  private HashMap<string, SurvivorJobSkill> m_jobSkills  
+  private SurvivorJobSkill m_activeJobSkill
+
+  // --------------------------------------------------------------------------
+  construct(ICamp camp)
+    super(camp)
+    m_jobSkills = new HashMap<string, SurvivorJobSkill>()
+    initialize()
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    destroy m_jobSkills
+    m_jobSkills = null
+    m_activeJobSkill = null
+    m_skillsComponent = null
+
+  // --------------------------------------------------------------------------
+  protected override function onUnitChanged(unit oldUnit, unit newUnit)
+    super.onUnitChanged(oldUnit, newUnit)
+
+    if (m_activeJobSkill != null)
+      m_activeJobSkill.setIsEnabled(false)
+
+    m_activeJobSkill = null
+
+    if (newUnit == null)
+      return
+
+    let newUnitId = newUnit.getTypeId()
+    let jobId = getJobIdForUnitType(newUnitId)
+    m_activeJobSkill = getJobSkill(jobId)
+
+    if (m_activeJobSkill != null)
+      m_activeJobSkill.setIsEnabled(true)
+
+  // --------------------------------------------------------------------------
+  private function registerJobSkill(string jobId, SurvivorJobSkill skill)
+    m_jobSkills.put(jobId, skill)
+
+  // --------------------------------------------------------------------------
+  private function getJobSkill(string jobId) returns SurvivorJobSkill
+    return m_jobSkills.get(jobId)
+
+  // --------------------------------------------------------------------------
+  private function initialize()
+
+    let owningUnit = getUnit()
+    let owningPlayer = owningUnit.getOwner()
+
+    let survivorData = new SurvivorData()
+    survivorData.setName(getRandomSurvivorNameForPlayer(owningPlayer))
+
+    initializeStats(survivorData)
+
+    addComponent(new SurvivorJobComponent(this))
+
+    let survivorDataComponent = this.getOrAddSurvivorDataComponent()
+    survivorDataComponent.setSurvivorData(survivorData)    
+
+    m_skillsComponent = new SkillsComponent(this)
+    addComponent(m_skillsComponent)
+
+    initializeJobSkills()
+
+  // --------------------------------------------------------------------------
+  private function initializeJobSkills()
+    registerJobSkill(SurvivorJobIds.builder,  m_skillsComponent.getOrAddSurvivorBuilderSkill()  ..setIsEnabled(false))
+    registerJobSkill(SurvivorJobIds.militia,  m_skillsComponent.getOrAddSurvivorMilitiaSkill()  ..setIsEnabled(false))
+    registerJobSkill(SurvivorJobIds.spearman, m_skillsComponent.getOrAddSurvivorSpearmanSkill() ..setIsEnabled(false))
+    registerJobSkill(SurvivorJobIds.medic,    m_skillsComponent.getOrAddSurvivorMedicSkill()    ..setIsEnabled(false))
+    registerJobSkill(SurvivorJobIds.marksman, m_skillsComponent.getOrAddSurvivorMarksmanSkill() ..setIsEnabled(false))
+
+  // --------------------------------------------------------------------------
+  private function initializeStats(SurvivorData survivorData)
+
+    // Kills
+    let killsStat = new IntStatistic("Kills")
+    ..setIcon(Icons.bTNBattleStations)
+    ..setUnits("kills")
+    ..setTooltip("The number of enemies killed by getting the last hit")
+
+    survivorData.addStatistic(SurvivorStats.kills, killsStat)
+    addComponent(new KillsStatisticComponent(this))
+
+    // Distance traveled
+    let distanceTraveledStat = new RealStatistic("Distance Traveled")
+    ..setIcon(Icons.bTNBootsOfSpeed)
+    ..setUnits("meters")
+    ..setTooltip("The meters traveled")
+
+    survivorData.addStatistic(SurvivorStats.distanceTraveled, distanceTraveledStat)
+    addComponent(new DistanceTraveledStatisticComponent(this))
+
+    // Days survived
+    let daysSurvivedStat = new IntStatistic("Days Survived")
+    ..setIcon(Icons.bTNFarSight)
+    ..setUnits("days")
+    ..setTooltip("The number of days survived")
+
+    survivorData.addStatistic(SurvivorStats.daysSurvived, daysSurvivedStat)
+    addComponent(new DaysSurvivedStatisticComponent(this))
+
+    // Nights survived
+    let nightsSurvivedStat = new IntStatistic("Nights Survived")
+    ..setIcon(Icons.bTNAnimateDead)
+    ..setUnits("nights")
+    ..setTooltip("The number of nights survived")
+
+    survivorData.addStatistic(SurvivorStats.nightsSurvived, nightsSurvivedStat)
+    addComponent(new NightsSurvivedStatisticComponent(this))
+
+    // m_stats.createIntStatistic(Stats.assists, "Assists", 0)
+    // ..setIcon(Icons.bTNImmolationOff)
+    // ..setUnits("assists")
+    // ..setTooltip("The number of enemies killed with the help of this Survivor")
+
+    // m_stats.createRealStatistic(Stats.damageDealt, "Damage Dealt", 0.0)
+    // ..setIcon(Icons.bTNSteelMelee)
+    // ..setUnits("damage")
+    // ..setTooltip("The total amount of damage dealt")
+
+    // m_stats.createRealStatistic(Stats.healthHealed, "HP Healed", 0.0)
+    // ..setIcon(Icons.bTNStatUp)
+    // ..setUnits("hp")
+    // ..setTooltip("The amount of health healed")
+
+// ============================================================================
+public function unit.isSurvivor() returns bool
+  let targetTypeId = this.getTypeId()
+  return  targetTypeId == TlsUnitIds.survivorMale or
+          targetTypeId == TlsUnitIds.survivorBuilder or
+          targetTypeId == TlsUnitIds.survivorMarksman or
+          targetTypeId == TlsUnitIds.survivorMedic or
+          targetTypeId == TlsUnitIds.survivorMilitia or
+          targetTypeId == TlsUnitIds.survivorSpearman
+
+// ============================================================================
+public function unit.isRescuedSurvivor() returns bool
+  return this.isSurvivor() and this.getOwner() != PLAYER_VILLAGERS
+
+// ============================================================================
+public function unit.isUnrescuedSurvivor() returns bool
+  return this.isSurvivor() and this.getOwner() == PLAYER_VILLAGERS
+
+// ============================================================================
+public function unit.isRescuableSurvivor() returns bool
+  return this.isUnrescuedSurvivor()
