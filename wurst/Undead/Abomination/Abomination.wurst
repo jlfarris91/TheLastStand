@@ -13,6 +13,8 @@ import Zombie
 
 import initlater AbomIdleState
 import initlater AbomHoldingState
+import UndeadTargetingComponent
+import Events
 
 constant real ABOM_THROW_PROJ_DURATION = 1.0
 constant real ABOM_THROW_ANIM_DURATION = 1.0
@@ -28,9 +30,15 @@ constant string ABOM_THROW_DUST_EFFECT = "Objects\\Spawnmodels\\Undead\\ImpaleTa
 public class Abomination extends UndeadUnit
   private unit _holdingZombie
   private StateMachineComponent m_stateMachine
+  private Action1<UndeadTargetingComponent> m_targetPlayerChangedEvent
+
+  // --------------------------------------------------------------------------
+  construct()
+    listenToTargetPlayerChangedEvent()
 
   // --------------------------------------------------------------------------
   ondestroy
+    unlistenToTargetPlayerChangedEvent()
     stopStateMachine()
 
   // --------------------------------------------------------------------------
@@ -61,13 +69,6 @@ public class Abomination extends UndeadUnit
     dropZombie()
 
   // --------------------------------------------------------------------------
-  override function setTargetPlayer(player p) returns bool
-    let didSet = super.setTargetPlayer(p)
-    if (didSet)
-      startStateMachine()
-    return didSet
-
-  // --------------------------------------------------------------------------
   private function startStateMachine()
     stopStateMachine()
     
@@ -95,6 +96,23 @@ public class Abomination extends UndeadUnit
       return
     setHoldingZombie(null)
     moveAndUnhideZombie(zombie, pos, facingAngle)
+
+  // --------------------------------------------------------------------------
+  private function listenToTargetPlayerChangedEvent()
+    unlistenToTargetPlayerChangedEvent()
+    let undeadTargetComponent = this.getOrAddUndeadTargetingComponent()
+    if (undeadTargetComponent != null)
+      m_targetPlayerChangedEvent = undeadTargetComponent.getTargetPlayerChangedEvent().add() (UndeadTargetingComponent comp) ->
+        startStateMachine()
+
+  // --------------------------------------------------------------------------
+  private function unlistenToTargetPlayerChangedEvent()
+    if (m_targetPlayerChangedEvent != null)
+      let undeadTargetComponent = this.getUndeadTargetingComponent()
+      if (undeadTargetComponent != null)
+        undeadTargetComponent.getTargetPlayerChangedEvent().remove(m_targetPlayerChangedEvent)
+      destroy m_targetPlayerChangedEvent
+      m_targetPlayerChangedEvent = null      
 
 // ============================================================================
 function onAbomGrabbedZombie(unit caster, unit target)
