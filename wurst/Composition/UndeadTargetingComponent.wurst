@@ -1,0 +1,104 @@
+package UndeadTargetingComponent
+import UnitComponent
+import UnitMetadata
+import UndeadUtility
+import Orders
+import HumanPlayerMetadata
+import Type
+import Events
+
+// ============================================================================
+public class UndeadTargetingComponent extends UnitComponent
+  private player m_targetPlayer
+  private GenericEvent<UndeadTargetingComponent> m_targetPlayerChangedEvent
+
+  // --------------------------------------------------------------------------
+  construct(IUnitMetadata owner)
+    super(owner)
+    m_targetPlayer = null
+    m_targetPlayerChangedEvent = new GenericEvent<UndeadTargetingComponent>()
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    destroy m_targetPlayerChangedEvent
+    m_targetPlayerChangedEvent = null
+
+  // --------------------------------------------------------------------------
+  function getTargetPlayerChangedEvent() returns GenericEvent<UndeadTargetingComponent>
+    return m_targetPlayerChangedEvent
+
+  // --------------------------------------------------------------------------
+  function getTargetPlayer() returns player
+    return m_targetPlayer
+
+  // --------------------------------------------------------------------------
+  function setTargetPlayer(player p) returns bool
+    if (p == m_targetPlayer)
+      return false
+    m_targetPlayer = p
+    raiseTargetPlayerChangedEvent()
+    issueOrderTargetingPlayer()
+    return true
+
+  // --------------------------------------------------------------------------
+  function issueOrderTargetingPlayer()
+
+    if (tryTargetClosestUnit())
+      Log.debug("[UndeadTargetingComponent] Found target to attack")
+      return
+
+    if (tryTargetCampCenter())
+      Log.debug("[UndeadTargetingComponent] Could not find target unit, attack-moving to camp center")
+      return
+
+    Log.debug("[UndeadTargetingComponent] Found no player unit to attack")
+    increaseAcquisitionRange()
+
+  // --------------------------------------------------------------------------
+  protected function tryTargetClosestUnit() returns bool
+    let targetPlayer = getTargetPlayer()
+    if (targetPlayer == null)
+      return false
+
+    let undeadUnit = getOwnerUnit()
+
+    let target = getClosestUndeadTarget(targetPlayer, undeadUnit.getPos())
+    if (target != null)
+      undeadUnit.issuePointOrderById(OrderIds.attack, target.getPos())
+      return true
+
+    return false
+
+  // --------------------------------------------------------------------------
+  protected function tryTargetCampCenter() returns bool    
+    let targetPlayer = getTargetPlayer()
+    if (targetPlayer == null)
+      return false
+
+    let playerMetadata = targetPlayer.getHumanMetadata()
+    if (playerMetadata == null or playerMetadata.getIsDead())
+      return false
+
+    let campCenter = playerMetadata.getCamp().getCenter()
+    let undeadUnit = getOwnerUnit()
+    undeadUnit.issuePointOrderById(OrderIds.attack, campCenter)
+    return true
+
+  // --------------------------------------------------------------------------
+  protected function increaseAcquisitionRange()
+    getOwnerUnit().setField(UNIT_RF_ACQUISITION_RANGE, REAL_MAX)
+
+  // --------------------------------------------------------------------------
+  private function raiseTargetPlayerChangedEvent()
+    m_targetPlayerChangedEvent.call(this)
+
+// ============================================================================
+public function IUnitMetadata.getUndeadTargetingComponent() returns UndeadTargetingComponent
+  return this.getComponent(Type(UndeadTargetingComponent.typeId)) castTo UndeadTargetingComponent
+
+// ============================================================================
+public function IUnitMetadata.getOrAddUndeadTargetingComponent() returns UndeadTargetingComponent
+  var component = this.getUndeadTargetingComponent()
+  if (component == null)
+    component = this.addComponent(new UndeadTargetingComponent(this)) castTo UndeadTargetingComponent
+  return component

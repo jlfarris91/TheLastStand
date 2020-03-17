@@ -1,0 +1,197 @@
+package Grenade
+import ClosureEvents
+import TlsAbilityIds
+import DummyCaster
+import AbilityObjEditing
+import Icons
+import Abilities
+import ObjectIdGenerator
+import DummyUnit
+import Orders
+import FX
+import ClosureTimers
+import GroupUtils
+import Math
+import ObjectIds
+import OnUnitEnterLeave
+import Interpolation
+import InstantDummyCaster
+import SoundUtils
+
+constant int GRENADE_DUMMY_CASTER_THROW_ABIL_ID = compiletime(ABIL_ID_GEN.next()) // 'A046'
+constant int GRENADE_DUMMY_CASTER_STOMP_ABIL_ID = compiletime(ABIL_ID_GEN.next())
+constant int GRENADE_DUMMY_CASTER_UNIT_ID = compiletime(UNIT_ID_GEN.next()) // 'h01E'
+
+constant real GRENADE_RANGE = 700.0
+constant real GRENADE_AOE = 300.0
+constant real GRENADE_FULL_DAMAGE = 500.0
+constant real GRENADE_CHARGE_DURATION = 0.75
+constant real GRENADE_STUN_DURATION = 3.0
+constant boolexpr GRENADE_DAMAGE_TARGETS_FILTER = Filter(function isFilterUnitGrenadeDamageTarget)
+
+SoundDefinition g_GrenadeExplosionSoundDef
+
+// ============================================================================
+public class ThrowGrenadeItemAbilityDefinition extends AbilityDefinitionTinkererSummonFactoryLevel0
+
+  // --------------------------------------------------------------------------
+  construct(int newId)
+    super(newId)
+
+    setName("Throw Grenade")
+    
+    setButtonPositionNormalX(0)
+    setButtonPositionNormalY(0)
+
+    setIconNormal(Icons.bTNHealthStone)
+    setMissileArc(0.5)
+    setMissileArt(Abilities.boatMissile)
+    setMissileHomingEnabled(false)
+    setMissileSpeed(500)
+
+    setFactoryUnitID(1, GRENADE_DUMMY_CASTER_UNIT_ID.toRawCode())
+    setLeashRange(1, 0.0)
+    setSpawnInterval(1, 300.0)
+    setSpawnUnitDuration(1, 0.0)
+    setSpawnUnitOffset(1, 99999.0)
+
+    setAreaofEffect(1, GRENADE_AOE)
+    setBuffs(1, "_")
+    setCastRange(1, GRENADE_RANGE)
+    setCooldown(1, 0.0)
+    setDurationHero(1, 0)
+    setDurationNormal(1, 0)
+    setHeroAbility(false)
+    setManaCost(1, 0)
+
+
+// ============================================================================
+public class GrenadeStompAbilityDefinition extends AbilityDefinitionWarStompcreep
+
+  // --------------------------------------------------------------------------
+  construct(int newId)
+    super(newId)
+
+    setName("Grenade Stomp Effect")
+
+    setDamage(1, 0)
+    setTerrainDeformationDurationms(1, 500)
+    setAreaofEffect(1, GRENADE_AOE)
+    setDurationHero(1, GRENADE_STUN_DURATION)
+    setDurationNormal(1, GRENADE_STUN_DURATION)
+    setHeroAbility(false)
+    setManaCost(1, 0)
+
+
+// ============================================================================
+public class GrenadeDummyUnitDefinition extends DummyUnitDefinition
+
+  // --------------------------------------------------------------------------
+  construct(int newId)
+    super(newId)
+    setName("Dummy Grenade")
+    setNormalAbilities(commaList(
+      AbilityIds.warStomp,
+      AbilityIds.invulnerable,
+      AbilityIds.locust,
+      DISABLE_AUTO_ACQUIRE_ATTACK_TARGETS_ABILITY_ID))
+
+// ============================================================================
+function onAbilityCast()
+  let abilityId = EventData.getSpellAbilityId()
+
+  if (abilityId != TlsAbilityIds.throwGrenade)
+    return
+
+  let caster = EventData.getSpellAbilityUnit()
+  let targetPos = EventData.getSpellTargetPos()
+
+  new DummyCaster()
+  ..owner(caster.getOwner())
+  ..origin(caster.getPos())
+  ..castPoint(GRENADE_DUMMY_CASTER_THROW_ABIL_ID, 1, OrderIds.summonfactory, targetPos)
+
+  ResetUnitAnimation(caster)
+  caster.setAnimation("spell")
+
+// ============================================================================
+function onUnitEnter()
+  let enteringUnit = getEnterLeaveUnit()
+
+  if (enteringUnit.getTypeId() != GRENADE_DUMMY_CASTER_UNIT_ID)
+    return
+
+  let pos = enteringUnit.getPos()
+
+  let preExplosionFx1 = FX.createEffect(Abilities.disenchantSpecialArt, pos)
+  ..setScale(2.0)
+
+  let preExplosionFx2 = FX.createEffect(Abilities.flameStrikeTarget, pos)
+  ..setScale(0.8)
+
+  doAfter(GRENADE_CHARGE_DURATION) () ->
+    preExplosionFx1.destr()
+    preExplosionFx2.destr()
+    doExplosion(pos, enteringUnit)
+    enteringUnit.remove()
+
+// ============================================================================
+function doExplosion(vec2 pos, unit damageSource)
+
+  //g_GrenadeExplosionSoundDef.playOnPoint(pos.withTerrainZ())
+
+  let explosionFx1 = FX.createEffect(Abilities.darkPortalTarget, pos)
+  ..setScale(1.0)
+  doAfter(5.0, () -> explosionFx1.destr())
+
+  let explosionFx2 = FX.createEffect(Abilities.flakTarget, pos)
+  ..setScale(4.0)
+  doAfter(5.0, () -> explosionFx2.destr())
+
+  let explosionFx3 = FX.createEffect(Abilities.fanOfKnivesCaster, pos)
+  ..setScale(0.8)
+  doAfter(5.0, () -> explosionFx3.destr())
+
+  let damageGroup = getGroup()
+  damageGroup.enumUnitsInRange(pos, GRENADE_AOE, GRENADE_DAMAGE_TARGETS_FILTER)
+
+  // Do war stomp to stun enemies
+  InstantDummyCaster.castImmediate(
+    damageSource.getOwner(),
+    GRENADE_DUMMY_CASTER_STOMP_ABIL_ID,
+    1,
+    OrderIds.stomp,
+    pos)
+
+  for targetUnit from damageGroup
+    let targetPos = targetUnit.getPos()
+    let distance = targetPos.distanceTo(pos)
+    let distanceT = clamp01(distance / GRENADE_AOE)
+    let damage = linear(GRENADE_FULL_DAMAGE, 0.0, distanceT)
+    explosionDamageTarget(targetUnit, damageSource, damage)
+
+  damageGroup.release()
+
+// ============================================================================
+function explosionDamageTarget(unit targetUnit, unit damageSource, real damage)
+  damageSource.damageTarget(targetUnit, damage, ATTACK_TYPE_NORMAL)
+  if (targetUnit.getHP() - damage <= 0)
+    targetUnit.explode()
+
+// ============================================================================
+function isFilterUnitGrenadeDamageTarget() returns bool
+  let u = GetFilterUnit()
+  return u.isAlive()
+
+// ============================================================================
+@compiletime function create()
+  new ThrowGrenadeItemAbilityDefinition(GRENADE_DUMMY_CASTER_THROW_ABIL_ID)
+  new GrenadeStompAbilityDefinition(GRENADE_DUMMY_CASTER_STOMP_ABIL_ID)
+  new GrenadeDummyUnitDefinition(GRENADE_DUMMY_CASTER_UNIT_ID)
+  
+// ============================================================================
+init
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_SPELL_CAST, function onAbilityCast)
+  onEnter(function onUnitEnter)
+
+  g_GrenadeExplosionSoundDef = new SoundDefinition("Sounds\\GrenadeExplosion.flac", false, true)
