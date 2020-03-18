@@ -1,20 +1,12 @@
 package SurvivorUnit
 import Camp
 import SurvivorJobComponent
-import SkillsComponent
-import SurvivorMarksmanSkill
-import Skills
 import TlsUnitIds
-import SurvivorMedicSkill
-import SurvivorSpearmanSkill
-import SurvivorMilitiaSkill
-import SurvivorJobSkill
-import SurvivorBuilderSkill
 import GameConstants
 import SurvivorStats
 import Statistic
 import Icons
-import SurvivorDataComponent
+import SurvivorComponent
 import HashMap
 
 import DistanceTraveledStatistic
@@ -25,24 +17,29 @@ import SurvivorData
 import SurvivorNames
 import SurvivorJobIds
 
+import BuilderJobComponent
+import MilitiaJobComponent
+import SpearmanJobComponent
+import MedicJobComponent
+import MarksmanJobComponent
+import SurvivorJobChangeComponent
+
 // ============================================================================
 public class Survivor extends CampUnit
-  private SkillsComponent m_skillsComponent
-  private HashMap<string, SurvivorJobSkill> m_jobSkills  
-  private SurvivorJobSkill m_activeJobSkill
+  private HashMap<string, SurvivorJobComponent> m_jobComponents
+  private SurvivorJobComponent m_activeJobComponent
 
   // --------------------------------------------------------------------------
   construct(ICamp camp)
     super(camp)
-    m_jobSkills = new HashMap<string, SurvivorJobSkill>()
+    m_jobComponents = new HashMap<string, SurvivorJobComponent>()
     initialize()
 
   // --------------------------------------------------------------------------
   ondestroy
-    destroy m_jobSkills
-    m_jobSkills = null
-    m_activeJobSkill = null
-    m_skillsComponent = null
+    destroy m_jobComponents
+    m_jobComponents = null
+    m_activeJobComponent = null
 
   // --------------------------------------------------------------------------
   protected override function onUnitChanged(unit oldUnit, unit newUnit)
@@ -51,20 +48,20 @@ public class Survivor extends CampUnit
     if (oldUnit != null)
       saveOldJobStats(oldUnit)
 
-    if (m_activeJobSkill != null)
-      m_activeJobSkill.setIsEnabled(false)
+    if (m_activeJobComponent != null)
+      m_activeJobComponent.setEnabled(false)
 
-    m_activeJobSkill = null
+    m_activeJobComponent = null
 
     if (newUnit == null)
       return
 
     let newUnitId = newUnit.getTypeId()
     let jobId = getJobIdForUnitType(newUnitId)
-    m_activeJobSkill = getJobSkill(jobId)
+    m_activeJobComponent = getJobComponent(jobId)
 
-    if (m_activeJobSkill != null)
-      m_activeJobSkill.setIsEnabled(true)
+    if (m_activeJobComponent != null)
+      m_activeJobComponent.setEnabled(true)
 
     loadNewJobStats(newUnit)
 
@@ -72,7 +69,7 @@ public class Survivor extends CampUnit
   private function saveOldJobStats(unit theUnit)
     let unitTypeId = theUnit.getTypeId()
     let jobId = getJobIdForUnitType(unitTypeId)
-    let survivorDataComp = this.getSurvivorDataComponent()
+    let survivorDataComp = this.getSurvivorComponent()
     let survivorData = survivorDataComp.getSurvivorData()
 
     let jobData = survivorData.getJobData(jobId)
@@ -84,7 +81,7 @@ public class Survivor extends CampUnit
   private function loadNewJobStats(unit theUnit)
     let unitTypeId = theUnit.getTypeId()
     let jobId = getJobIdForUnitType(unitTypeId)
-    let survivorDataComp = this.getSurvivorDataComponent()
+    let survivorDataComp = this.getSurvivorComponent()
     let survivorData = survivorDataComp.getSurvivorData()
 
     theUnit.setProperName(survivorData.getName())
@@ -94,12 +91,12 @@ public class Survivor extends CampUnit
       theUnit.setXp(jobData.getExperience(), false)
 
   // --------------------------------------------------------------------------
-  private function registerJobSkill(string jobId, SurvivorJobSkill skill)
-    m_jobSkills.put(jobId, skill)
+  private function registerJobComponent(string jobId, SurvivorJobComponent comp)
+    m_jobComponents.put(jobId, comp)
 
   // --------------------------------------------------------------------------
-  private function getJobSkill(string jobId) returns SurvivorJobSkill
-    return m_jobSkills.get(jobId)
+  private function getJobComponent(string jobId) returns SurvivorJobComponent
+    return m_jobComponents.get(jobId)
 
   // --------------------------------------------------------------------------
   private function initialize()
@@ -112,23 +109,16 @@ public class Survivor extends CampUnit
 
     initializeStats(survivorData)
 
-    addComponent(new SurvivorJobComponent(this))
+    addComponent(new SurvivorJobChangeComponent(this))
 
-    let survivorDataComponent = this.getOrAddSurvivorDataComponent()
-    survivorDataComponent.setSurvivorData(survivorData)    
+    let survivorDataComponent = this.getOrAddSurvivorComponent()
+    survivorDataComponent.setSurvivorData(survivorData)
 
-    m_skillsComponent = new SkillsComponent(this)
-    addComponent(m_skillsComponent)
-
-    initializeJobSkills()
-
-  // --------------------------------------------------------------------------
-  private function initializeJobSkills()
-    registerJobSkill(SurvivorJobIds.builder,  m_skillsComponent.getOrAddSurvivorBuilderSkill()  ..setIsEnabled(false))
-    registerJobSkill(SurvivorJobIds.militia,  m_skillsComponent.getOrAddSurvivorMilitiaSkill()  ..setIsEnabled(false))
-    registerJobSkill(SurvivorJobIds.spearman, m_skillsComponent.getOrAddSurvivorSpearmanSkill() ..setIsEnabled(false))
-    registerJobSkill(SurvivorJobIds.medic,    m_skillsComponent.getOrAddSurvivorMedicSkill()    ..setIsEnabled(false))
-    registerJobSkill(SurvivorJobIds.marksman, m_skillsComponent.getOrAddSurvivorMarksmanSkill() ..setIsEnabled(false))
+    registerJobComponent(SurvivorJobIds.builder,  this.getOrAddBuilderJobComponent()  ..setEnabled(false))
+    registerJobComponent(SurvivorJobIds.militia,  this.getOrAddMilitiaJobComponent()  ..setEnabled(false))
+    registerJobComponent(SurvivorJobIds.spearman, this.getOrAddSpearmanJobComponent() ..setEnabled(false))
+    registerJobComponent(SurvivorJobIds.medic,    this.getOrAddMedicJobComponent()    ..setEnabled(false))
+    registerJobComponent(SurvivorJobIds.marksman, this.getOrAddMarksmanJobComponent() ..setEnabled(false))
 
   // --------------------------------------------------------------------------
   private function initializeStats(SurvivorData survivorData)
