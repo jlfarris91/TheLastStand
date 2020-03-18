@@ -635,7 +635,7 @@
             sb.AppendLine($"import {spawnRegionPackageName}");
             sb.AppendLine();
             sb.AppendLine("public function registerSpawnRegionRects()");
-            sb.AppendLine($"{indentStr}Log.info(\"Creating spawn region...\")");
+            sb.AppendLine($"{indentStr}Log.debug(\"Creating spawn region...\")");
 
             int i = 1;
             foreach (Region region in regions.Regions)
@@ -643,7 +643,7 @@
                 sb.AppendLine($"{indentStr}/* {i++,-4} */ addSpawnRect(Rect({region.Bounds.Min.X}, {region.Bounds.Min.Y}, {region.Bounds.Max.X}, {region.Bounds.Max.Y}))");
             }
 
-            sb.AppendLine($"{indentStr}Log.info(\"Done creating spawn region.\")");
+            sb.AppendLine($"{indentStr}Log.debug(\"Done creating spawn region.\")");
 
             return sb.ToString();
         }
