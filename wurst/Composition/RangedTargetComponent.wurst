@@ -2,9 +2,11 @@ package RangedTargetComponent
 import UnitComponent
 import DamageEvent
 import UnitMetadata
-import Type
-import FX
 import GameConstants
+import RangedTargetXpReceieverComponent
+import RegisterEvents
+import TlsUnitIds
+import Orders
 
 // ============================================================================
 public class RangedTargetComponent extends UnitComponent
@@ -26,17 +28,25 @@ public class RangedTargetComponent extends UnitComponent
   
   // --------------------------------------------------------------------------
   private function onDamaged()
-    let source = DamageEvent.getSource()
     let target = DamageEvent.getTarget()
-
     if (target != getOwnerUnit())
       return
 
+    let source = DamageEvent.getSource()
     if (source.getOwner() == PLAYER_UNDEAD)
       return
     
     DamageEvent.setAmount(0)
-    FX.createFoundMaterialsTag(source.getPos(), 1, source.getOwner())
+
+    let sourceMetadata = source.getMetadata()
+    if (sourceMetadata == null)
+      return
+
+    let xpReciever = sourceMetadata.getRangedTargetXpRecieverComponent()
+    if (xpReciever == null or not xpReciever.getEnabled())
+      return
+
+    source.addXp(xpReciever.getXpPerHit(), true)
 
   // --------------------------------------------------------------------------
   private function listenToDamageEvent()
@@ -49,10 +59,39 @@ public class RangedTargetComponent extends UnitComponent
     if (m_onDamagedHandler != null)
       destroy m_onDamagedHandler
       m_onDamagedHandler = null
-      
+
+// ============================================================================
+public function IUnitMetadata.getRangedTargetComponent() returns RangedTargetComponent
+  return this.getComponent(Type(RangedTargetComponent.typeId)) castTo RangedTargetComponent
+
 // ============================================================================
 public function IUnitMetadata.getOrAddRangedTargetComponent() returns RangedTargetComponent
-  var component = this.getComponent(Type(RangedTargetComponent.typeId)) castTo RangedTargetComponent
+  var component = this.getRangedTargetComponent()
   if (component == null)
     component = this.addComponent(new RangedTargetComponent(this)) castTo RangedTargetComponent
   return component
+
+// ============================================================================
+function onUnitIssuedTargetOrder()
+  let orderId = GetIssuedOrderId()
+  if (orderId != OrderIds.smart)
+    return
+
+  let targetUnit = GetOrderTargetUnit()
+  if (targetUnit.getTypeId() != TlsUnitIds.rangedTarget)
+    return
+
+  let orderedUnit = GetOrderedUnit()
+  let orderedMetadata = orderedUnit.getMetadata()
+  if (orderedMetadata == null)
+    return
+
+  let xpReciever = orderedMetadata.getRangedTargetXpRecieverComponent()
+  if (xpReciever == null or not xpReciever.getEnabled())
+    return
+
+  orderedUnit.issueTargetOrderById(OrderIds.attack, targetUnit)
+
+// ============================================================================
+init
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ISSUED_TARGET_ORDER, function onUnitIssuedTargetOrder)
