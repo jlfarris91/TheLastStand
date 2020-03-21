@@ -526,7 +526,7 @@
 
             void UpdatePathMap(IImage image)
             {
-                m_logger.Log($"UpdatingPathMap: {entity.Id} {pt}");float rotDeg;
+                float rotDeg;
 
                 if (entity is DoodadEntity doodadEntity &&
                     !doodadEntity.FixedRotation.IsApproximatelyEqual(-1.0f))

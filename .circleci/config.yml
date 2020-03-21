@@ -1,10 +1,23 @@
 version: 2.1
 
+orbs:
+  win: circleci/windows@2.2.0
+
+environment:
+  MapName: The Last Stand ${CIRCLE_BUILD_NUM}
+
 jobs:
   build:
+    executor:
+      name: win/default
 
     docker:
       - image: frotty/wurstscript
+
+    environment:
+      Version_Major: "0"
+      Version_Minor: "1"
+      Version_Patch: $(CIRCLE_BUILD_NUM)
 
     steps:
       - checkout
@@ -18,9 +31,30 @@ jobs:
           command: grill install
 
       - run:
-          name: Test
+          name: Run Wurst Tests
           command: grill test
 
       - run:
-          name: Build Map
-          command: grill build .\\TheLastStand.w3x
+          name: Prepare Build
+          shell: powershell.exe
+          command: |
+            Push-Location build
+            .\GenerateWurstBuildFile.ps1
+            Get-Content ..\wurst.build
+            Pop-Location
+
+      - run:
+          name: Run Map Pipeline
+          shell: powershell.exe
+          command: |
+            Push-Location build
+            .\RunPipeline.ps1
+            Pop-Location
+
+      - run:
+          name: Wurst Map Build
+          shell: powershell.exe
+          command: |
+            Push-Location build
+            .\RunWurstBuild.ps1
+            Pop-Location
