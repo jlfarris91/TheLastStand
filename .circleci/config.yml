@@ -3,58 +3,76 @@ version: 2.1
 orbs:
   win: circleci/windows@2.2.0
 
-environment:
-  MapName: The Last Stand ${CIRCLE_BUILD_NUM}
-
 jobs:
   build:
-    executor:
-      name: win/default
-
-    docker:
-      - image: frotty/wurstscript
-
-    environment:
-      Version_Major: "0"
-      Version_Minor: "1"
-      Version_Patch: $(CIRCLE_BUILD_NUM)
+    executor: win/default
 
     steps:
       - checkout
 
       - run:
-          name: Update Wurst
-          command: grill install wurstscript
+          name: Setup Environment
+          command: |
+            [System.Environment]::SetEnvironmentVariable("Version_Major", 0)
+            [System.Environment]::SetEnvironmentVariable("Version_Minor", 1)
+            [System.Environment]::SetEnvironmentVariable("Version_Patch", [System.Environment]::GetEnvironmentVariable("CIRCLE_BUILD_NUM"))
+
+      - run:
+          name: Install Wurst
+          command: |
+            $pathWithWurst = "{0};{1}\.wurst\" -f [System.Environment]::GetEnvironmentVariable("Path", [EnvironmentVariableTarget]::Machine), $env:USERPROFILE
+            [System.Environment]::SetEnvironmentVariable("Path", $pathWithWurst, [EnvironmentVariableTarget]::Machine)
+            java -jar .\build\WurstSetup.jar install wurstscript
 
       - run:
           name: Install Dependencies
           command: grill install
 
       - run:
-          name: Run Wurst Tests
-          command: grill test
+          name: Fake War3 Install
+          command: |
+            Push-Location build
+            .\FakeWar3Install.ps1
+            Pop-Location
+
+      # - run:
+      #     name: Run Wurst Tests
+      #     command: grill test
 
       - run:
           name: Prepare Build
-          shell: powershell.exe
           command: |
             Push-Location build
             .\GenerateWurstBuildFile.ps1
             Get-Content ..\wurst.build
             Pop-Location
 
-      - run:
-          name: Run Map Pipeline
-          shell: powershell.exe
-          command: |
-            Push-Location build
-            .\RunPipeline.ps1
-            Pop-Location
+      # - run:
+      #     name: Run Map Pipeline
+      #     command: |
+      #       Push-Location build
+      #       .\RunPipeline.ps1
+      #       Pop-Location
 
       - run:
           name: Wurst Map Build
-          shell: powershell.exe
           command: |
             Push-Location build
             .\RunWurstBuild.ps1
             Pop-Location
+
+      - run:
+          name: Prepare Artifacts
+          command: |
+            Push-Location build
+            .\PrepareArtifacts.ps1
+            Pop-Location
+
+            $compilerLogPath = "{0}\.wurst\logs\compiler.log" -f $env:USERPROFILE
+            Get-Content ($compilerLogPath) | Out-File -FilePath ./_artifacts/compiler.log
+
+            $setupLogPath = "{0}\.wurst\logs\setup.log" -f $env:USERPROFILE
+            Get-Content ($setupLogPath) | Out-File -FilePath ./_artifacts/setup.log
+
+      - store_artifacts:
+          path: ./_artifacts/

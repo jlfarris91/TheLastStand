@@ -1,10 +1,10 @@
 ﻿namespace W3xPipeline
 {
     using System;
+    using System.Collections.Generic;
     using System.IO;
     using System.Linq;
     using StormLibSharp;
-    using War3.Net;
     using War3.Net.Assets;
     using War3.Net.Data;
     using War3.Net.Data.Units;
@@ -21,9 +21,6 @@
     {
         private static ILogger sLogger;
 
-        private static readonly string WAR3_W3MOD_PATH = @"D:\Projects\WarcraftIII\MPQ\Dump\war3.w3mod";
-        //private static readonly string WAR3_W3MOD_PATH = @"C:\War3\data\branches\v1.32.1\War3.w3mod";
-        private static readonly string LOCALE_W3MOD_PATH = Path.Combine(WAR3_W3MOD_PATH, @"_locales\enus.w3mod");
         private static int WAR3_PRI = 100;
         private static int LOCALE_PRI = 200;
         private static int MAP_PRI = 300;
@@ -38,18 +35,23 @@
             {
                 args = ProgramArgs.Parse(rawArgs);
 
-                sLogger.Log($"Map directory: {args.InputMapDirectory.FullName}");
+                sLogger.Log("----- Program Args -----");
+                sLogger.Log($"Source Map directory: {args.SourceMapDirectory.FullName}");
                 sLogger.Log($"Output file path: {args.OutputMapFile.FullName}");
                 sLogger.Log($"Intermediate dir: {args.IntermediateDirectory.FullName}");
+                sLogger.Log($"Output Spawn Region Script File: {args.OutputSpawnRegionScriptFile.FullName}");
+                sLogger.Log($"War3 Archive dir: {args.W3ModBasePath.FullName}");
+
+                if (args.OutputListFilePath != null)
+                    sLogger.Log($"Output List File: {args.OutputListFilePath.FullName}");
+
+                sLogger.Log("------------------------");
             }
             catch (Exception ex)
             {
                 sLogger.Log($"Failed to parse arguments: {ex.Message}");
                 Environment.Exit(-1);
             }
-
-            MpqArchive war3Archive = null;
-            MpqArchive war3XArchive = null;
 
             // Services
             var fileSystem = new LayeredFileSystem();
@@ -60,18 +62,33 @@
             var pathMapFileBinaryDeserializer = new PathMapFileBinaryDeserializer(v => new PathMapBinaryDeserializer());
             var pathMapFileBinarySerializer = new PathMapFileBinarySerializer(v => new PathMapBinarySerializer());
 
+            var referencedFilePaths = new List<string>();
+
+            void RecordReferencedPath(string path)
+            {
+                if (!string.IsNullOrEmpty(path))
+                {
+                    referencedFilePaths.Add(path);
+                }
+            }
+
+            string mapName = Path.GetFileNameWithoutExtension(args.OutputMapFile.Name);
+            string mapExt = args.SourceMapDirectory.Extension.ToLower();
+
+            string intermediateMpqPath = Path.Combine(args.IntermediateDirectory.FullName, mapName);
+            if (!intermediateMpqPath.ToLower().EndsWith(mapExt))
+                intermediateMpqPath = intermediateMpqPath.Trim('.') + mapExt;
+
+            string outputMapFile = args.OutputMapFile.FullName;
+            if (!outputMapFile.ToLower().EndsWith(mapExt))
+                outputMapFile = outputMapFile.Trim('.') + mapExt;
+
             try
             {
-                fileSystem.AddSystem(new WindowsFileSystem(new DirectoryInfo(WAR3_W3MOD_PATH)), WAR3_PRI);
-                fileSystem.AddSystem(new WindowsFileSystem(new DirectoryInfo(LOCALE_W3MOD_PATH)), LOCALE_PRI);
-
-                if (!args.InputMapDirectory.Exists)
+                if (!args.SourceMapDirectory.Exists)
                 {
-                    throw new DirectoryNotFoundException($"Could not locate map folder {args.InputMapDirectory}");
+                    throw new DirectoryNotFoundException($"Could not locate map folder {args.SourceMapDirectory}");
                 }
-
-                string mapName = Path.GetFileNameWithoutExtension(args.OutputMapFile.Name);
-                string mapExt = args.InputMapDirectory.Extension.ToLower();
 
                 if (!mapExt.EndsWith("w3x") && !mapExt.EndsWith("w3m"))
                 {
@@ -83,10 +100,20 @@
                     Directory.CreateDirectory(args.IntermediateDirectory.FullName);
                 }
 
-                string intermediateMpqPath = Path.Combine(args.IntermediateDirectory.FullName, mapName);
-                intermediateMpqPath = Path.ChangeExtension(intermediateMpqPath, mapExt);
+                string baseWar3ArchivePath = args.W3ModBasePath.FullName;
+                string localizedArchivePath = Path.Combine(baseWar3ArchivePath, @"_locales\enus.w3mod");
 
-                string outputMapFile = Path.ChangeExtension(args.OutputMapFile.FullName, mapExt);
+                // Mount the base war3 archive
+                sLogger.Log($"Mounting archive '{baseWar3ArchivePath}' at priority {WAR3_PRI}");
+                fileSystem.AddSystem(
+                    new RecordReferencedWindowsFileSystem(new DirectoryInfo(baseWar3ArchivePath), RecordReferencedPath),
+                    WAR3_PRI);
+
+                // Mount the localized archive
+                sLogger.Log($"Mounting archive '{localizedArchivePath}' at priority {LOCALE_PRI}");
+                fileSystem.AddSystem(
+                    new RecordReferencedWindowsFileSystem(new DirectoryInfo(localizedArchivePath),
+                        RecordReferencedPath), LOCALE_PRI);
 
                 if (File.Exists(intermediateMpqPath))
                 {
@@ -97,7 +124,7 @@
                 sLogger.Log($"Creating intermediate archive {intermediateMpqPath}");
 
                 FileInfo[] filesToAdd =
-                    args.InputMapDirectory.EnumerateFiles("*.*", SearchOption.AllDirectories).ToArray();
+                    args.SourceMapDirectory.EnumerateFiles("*.*", SearchOption.AllDirectories).ToArray();
 
                 // Create the map file
                 using (MpqArchive newMapArchive = MpqArchive.CreateNew(
@@ -107,28 +134,38 @@
                     MpqFileStreamAttributes.None,
                     filesToAdd.Length))
                 {
+                    // Add each file from the source map dir into the archive
                     foreach (FileInfo fileInfo in filesToAdd)
                     {
-                        string archiveFilePath = MakeRelativeToDirectory(args.InputMapDirectory, fileInfo);
+                        string archiveFilePath =
+                            MakeRelativeToDirectory(args.SourceMapDirectory.FullName, fileInfo.FullName);
                         newMapArchive.AddFileFromDisk(fileInfo.FullName, archiveFilePath);
                         sLogger.Log($"Added file {fileInfo.FullName} -> {archiveFilePath}");
                     }
 
                     // Map archive is now done being loaded
+                    sLogger.Log($"Mounting archive '{intermediateMpqPath}' at priority {MAP_PRI}");
                     fileSystem.AddSystem(new MpqFileSystem(newMapArchive), MAP_PRI);
                     entityLibrary.AddLibrary(ReadDoodadLibrary(fileSystem));
 
-                    var destructibleLibrary = (DestructibleLibrary)ReadDestructibleLibrary(fileSystem);
+                    // Build the entity library
+                    var destructibleLibrary = (DestructibleLibrary) ReadDestructibleLibrary(fileSystem);
                     entityLibrary.AddLibrary(destructibleLibrary);
 
-                    var unitLibrary = (UnitLibrary)ReadUnitLibrary(fileSystem);
+                    var unitLibrary = (UnitLibrary) ReadUnitLibrary(fileSystem);
                     entityLibrary.AddLibrary(unitLibrary);
 
                     var objects = new IPipelineObject[]
                     {
                         new PathMapBuildabilityModifier(pathMapFileBinaryDeserializer, pathMapFileBinarySerializer),
-                        new RegionMapper(sLogger, fileSystem, entityLibrary, imageProvider, assetManager, pathMapFileBinaryDeserializer, destructibleLibrary),
-                        //new SpawnPointGenerator(sLogger)
+                        new RegionMapper(sLogger,
+                            fileSystem,
+                            entityLibrary,
+                            imageProvider,
+                            assetManager,
+                            pathMapFileBinaryDeserializer,
+                            destructibleLibrary,
+                            args.OutputSpawnRegionScriptFile.FullName)
                     };
 
                     // Run all of the pipeline steps
@@ -153,6 +190,18 @@
 
                 sLogger.Log($"Moving intermediate map {intermediateMpqPath} -> {outputMapFile}");
                 File.Copy(intermediateMpqPath, outputMapFile);
+
+                // Write distinct referenced paths to output list file
+                if (args.OutputListFilePath != null)
+                {
+                    string[] distinctReferencedPaths = referencedFilePaths.Select(absolutePath =>
+                            MakeRelativeToDirectory(args.W3ModBasePath.FullName, absolutePath))
+                        .Distinct().ToArray();
+
+                    sLogger.Log(
+                        $"Writing {distinctReferencedPaths.Length} referenced files to path: {args.OutputListFilePath.FullName}");
+                    File.WriteAllLines(args.OutputListFilePath.FullName, distinctReferencedPaths);
+                }
             }
             catch (Exception ex)
             {
@@ -161,8 +210,11 @@
             }
             finally
             {
-                DisposeUtility.SafeDispose(ref war3XArchive);
-                DisposeUtility.SafeDispose(ref war3Archive);
+                if (File.Exists(intermediateMpqPath))
+                {
+                    sLogger.Log($"Deleting intermediate map {intermediateMpqPath}");
+                    File.Delete(intermediateMpqPath);
+                }
             }
 
             sLogger.Log("Succeeded.");
@@ -185,9 +237,9 @@
             return null;
         }
 
-        private static string MakeRelativeToDirectory(DirectoryInfo dir, FileInfo file)
+        private static string MakeRelativeToDirectory(string dir, string file)
         {
-            return file.FullName.Replace(dir.FullName, string.Empty).Trim('\\');
+            return file.Replace(dir, string.Empty).Replace('/', '\\').Trim('\\');
         }
 
         private static IEntityLibrary ReadDoodadLibrary(IReadOnlyFileSystem fileSystem)

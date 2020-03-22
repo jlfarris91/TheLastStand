@@ -37,6 +37,7 @@
         private readonly IAssetManager m_assetManager;
         private readonly IDataDeserializer<BinaryReader, PathMapFile> m_pathMapFileDeserializer;
         private readonly DestructibleLibrary m_destructibleLibrary;
+        private readonly string m_generatedScriptFile;
 
         public RegionMapper(ILogger logger,
                             IReadOnlyFileSystem fileSystem,
@@ -44,7 +45,8 @@
                             IImageProvider imageProvider,
                             IAssetManager assetManager,
                             IDataDeserializer<BinaryReader, PathMapFile> pathMapFileDeserializer,
-                            DestructibleLibrary destructibleLibrary)
+                            DestructibleLibrary destructibleLibrary,
+                            string generatedScriptFile)
         {
             m_logger = logger;
             m_fileSystem = fileSystem;
@@ -53,6 +55,7 @@
             m_assetManager = assetManager;
             m_pathMapFileDeserializer = pathMapFileDeserializer;
             m_destructibleLibrary = destructibleLibrary;
+            m_generatedScriptFile = generatedScriptFile;
         }
 
         public bool WriteRegionsToArchive { get; private set; }
@@ -462,9 +465,8 @@
                     archive.ReplaceFile(tempFileName, ARCHIVE_REGION_PLACEMENT_FILE_PATH);
                 }
 
-                string generatedScriptFilePath = @"D:\Projects\WarcraftIII\TheLastStand\wurst\Spawning\SpawnRegionInit.wurst";
                 string generatedScriptFileContents = GenerateSpawnRegionsWurstScript(mapRegions);
-                File.WriteAllText(generatedScriptFilePath, generatedScriptFileContents);
+                File.WriteAllText(m_generatedScriptFile, generatedScriptFileContents);
 
                 m_logger.Log("Done generating spawn regions");
             }
