@@ -1,0 +1,75 @@
+package IncreaseAcquisitionRangeWhileStillComponent
+import UnitMetadata
+import UnitComponent
+import RealtimeUnitComponent
+
+constant real MOVE_THRESHOLD = 64.0
+constant real STAND_STILL_DURATION = 3.0
+constant real INCREASE_RANGE_SCALAR = 2.0
+constant real MAX_RANGE = 4096.0
+
+// ============================================================================
+public class IncreaseAcquisitionRangeWhileStillComponent extends RealtimeUnitComponent
+  private vec2 m_lastPos
+  private real m_distanceMoved
+  private real m_timeStill
+
+  // --------------------------------------------------------------------------
+  construct(IUnitMetadata owner)
+    super(owner)
+
+  // --------------------------------------------------------------------------
+  override function onEnabled()
+    super.onEnabled()
+    registerForUpdate()
+    m_lastPos = getOwnerUnit().getPos()
+    m_distanceMoved = 0.0
+    m_timeStill = 0.0
+
+  // --------------------------------------------------------------------------
+  override function onDisabled()
+    super.onDisabled()
+    unregisterForUpdate()
+
+  // --------------------------------------------------------------------------
+  override function onUpdate(real dt)
+    super.onUpdate(dt)
+    let currentPos = getOwnerUnit().getPos()
+    m_distanceMoved += currentPos.distanceTo(m_lastPos)
+    if (m_distanceMoved > MOVE_THRESHOLD)
+      onMovedBeyondThreshold()
+    else
+      onStandingStill(dt)
+    m_lastPos = currentPos
+
+  // --------------------------------------------------------------------------
+  function onMovedBeyondThreshold()
+    m_timeStill = 0.0
+    m_distanceMoved -= MOVE_THRESHOLD
+
+  // --------------------------------------------------------------------------
+  function onStandingStill(real dt)
+    m_timeStill += dt
+    if (m_timeStill >= STAND_STILL_DURATION)
+      onStillInterval()
+      m_timeStill -= STAND_STILL_DURATION
+
+  // --------------------------------------------------------------------------
+  function onStillInterval()
+    let ownerUnit = getOwnerUnit()
+    let newRange = min(GetUnitAcquireRange(ownerUnit) * INCREASE_RANGE_SCALAR, MAX_RANGE)
+    SetUnitAcquireRange(ownerUnit, newRange)
+    if (newRange == MAX_RANGE)
+      setEnabled(false)
+
+// ============================================================================
+public function IUnitMetadata.getIncreaseAcquisitionRangeWhileStillComponent() returns IncreaseAcquisitionRangeWhileStillComponent
+  return this.getComponent(Type(IncreaseAcquisitionRangeWhileStillComponent.typeId)) castTo IncreaseAcquisitionRangeWhileStillComponent
+
+// ============================================================================
+public function IUnitMetadata.getOrAddIncreaseAcquisitionRangeWhileStillComponent() returns IncreaseAcquisitionRangeWhileStillComponent
+  var component = this.getIncreaseAcquisitionRangeWhileStillComponent()
+  if (component == null)
+    component = this.addComponent(new IncreaseAcquisitionRangeWhileStillComponent(this)) castTo IncreaseAcquisitionRangeWhileStillComponent
+  return component
+  
