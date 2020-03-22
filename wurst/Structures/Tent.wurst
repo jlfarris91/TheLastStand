@@ -1,23 +1,8 @@
 package Tent
 import Camp
 import Events
-import ObjectIdGenerator
-import DisplayTextToPlayer
-import WeightedSet
-import TlsUnitIds
 import UnitMetadata
-import SurvivorSpawnManager
-import Orders
-import MainItemLibrary
-import RandomSpawnPointProvider
-import SurvivorJobIds
-import SurvivorComponent
-import StringExtensions
-import ColorUtility
-
-constant int NOTIFICATION_NEW_SURVIVOR = compiletime(HERO_ID_GEN.next())
-constant real SPAWN_SURVIVOR_RANGE_MIN = 1024.0 * 1.0
-constant real SPAWN_SURVIVOR_RANGE_MAX = 1024.0 * 2.0
+import Survivors
 
 // ============================================================================
 public class Tent extends CampUnit
@@ -34,70 +19,7 @@ public class Tent extends CampUnit
 
   // --------------------------------------------------------------------------
   private function onConstructed()
-    spawnSurvivorUnit()
-
-  // --------------------------------------------------------------------------
-  private function spawnSurvivorUnit()
-    
-    let u = getUnit()
-    if (u == null)
-      return
-
-    let p = u.getOwner()
-    if (p == null)
-      return
-
-    if (p.getCurrentSupply() >= p.getMaxSupply())
-      return
-  
-    let weightedSet = new WeightedSet<int>()
-    ..add(TlsUnitIds.survivorMale, 40)
-    ..add(TlsUnitIds.survivorMilitia, 4)
-    ..add(TlsUnitIds.survivorSpearman, 2)
-    ..add(TlsUnitIds.survivorMedic, 2)
-    ..add(TlsUnitIds.survivorMarksman, 1)
-
-    let unitId = weightedSet.getRandom()
-
-    let spawnPoint = getSpawnPoint(u.getPos())
-
-    let survivor = createUnitTLS(p, unitId, spawnPoint, GetRandomDirectionDeg())
-    let survivorMetadata = survivor.getMetadataRequired()
-
-    let jobId = getJobIdForUnitType(unitId)
-    if (jobId != SurvivorJobIds.none)
-      // For instance, give the Marksman his Hunting Rifle
-      let itemId = getItemTypeForJobId(jobId)
-      if (itemId != -1)
-        let itm = g_MainItemLibrary.createItem(itemId, survivor.getPos())
-        survivor.addItemHandle(itm)
-
-    // TODO: give them a non-job item
-    //if (passesChanceCheck(SURVIVORS_ITEM_CHANCE))
-    //  g_MainItemLibrary.giveRandomItemToUnit(survivor, SURVIVORS_ITEM_CHANCES)
-
-    let survivorUnit = survivorMetadata.getUnit()
-    survivorUnit.issuePointOrderById(OrderIds.move, u.getPos())
-
-    let survivorDataComponent = survivorMetadata.getSurvivorComponent()
-    let survivorData = survivorDataComponent.getSurvivorData()
-    
-    let message = survivorMetadata.getName().colorize(Colors.gold) + " " + survivorData.getName() + " has joined your camp!"
-    displayMessageToPlayer(p, message)
-
-  // --------------------------------------------------------------------------
-  private function getSpawnPoint(vec2 pos) returns vec2
-
-    // Use RandomSpawnPointProvider since it automatically grows the range
-    // if no spawn point could be found
-    let spawnPointProvider = new RandomSpawnPointProvider(g_survivorSpawnManager)
-    ..setRange(SPAWN_SURVIVOR_RANGE_MIN, SPAWN_SURVIVOR_RANGE_MAX)
-
-    let spawnPoint = spawnPointProvider.getSpawnPoint(pos)
-
-    destroy spawnPointProvider
-
-    return spawnPoint
+    spawnSurvivorUnitForPlayer(this.getOwner())
 
   // --------------------------------------------------------------------------
   private function listenToUnitConstructedEvent()

@@ -12,6 +12,14 @@ import UnitMetadata
 import SurvivorSpawnManager
 import RandomSpawnPointProvider
 import SpawnPointCollection
+import WeightedSet
+import DisplayTextToPlayer
+import StringExtensions
+import SurvivorComponent
+import Orders
+import ColorUtility
+import SurvivorJobIds
+import ErrorHandling
 
 // ============================================================================
 public function removeUnrescuedSurvivors()
@@ -64,3 +72,70 @@ function getNearbySpawnPoints(vec2 pos, int count) returns SpawnPointCollection
   destroy spawnPointProvider
 
   return spawnPoints
+  
+// ============================================================================
+public function spawnSurvivorUnitForPlayer(player p) returns unit
+
+  if (p == null)
+    error("Argument 'p' cannot be null")
+    return null
+
+  let playerMetadata = p.getHumanMetadataRequired()
+  if (playerMetadata.getIsDead())
+    return null
+
+  if (p.getCurrentSupply() >= p.getMaxSupply())
+    return null
+
+  let camp = playerMetadata.getCamp()
+
+  let weightedSet = new WeightedSet<int>()
+  ..add(TlsUnitIds.survivorMale, 40)
+  ..add(TlsUnitIds.survivorMilitia, 4)
+  ..add(TlsUnitIds.survivorSpearman, 2)
+  ..add(TlsUnitIds.survivorMedic, 2)
+  ..add(TlsUnitIds.survivorMarksman, 1)
+
+  let unitId = weightedSet.getRandom()
+
+  let spawnPoint = getSpawnPoint(camp.getCenter())
+
+  let survivor = createUnitTLS(p, unitId, spawnPoint, GetRandomDirectionDeg())
+  let survivorMetadata = survivor.getMetadataRequired()
+
+  let jobId = getJobIdForUnitType(unitId)
+  if (jobId != SurvivorJobIds.none)
+    // For instance, give the Marksman his Hunting Rifle
+    let itemId = getItemTypeForJobId(jobId)
+    if (itemId != -1)
+      let itm = g_MainItemLibrary.createItem(itemId, survivor.getPos())
+      survivor.addItemHandle(itm)
+
+  // TODO: give them a non-job item
+  //if (passesChanceCheck(SURVIVORS_ITEM_CHANCE))
+  //  g_MainItemLibrary.giveRandomItemToUnit(survivor, SURVIVORS_ITEM_CHANCES)
+
+  let survivorUnit = survivorMetadata.getUnit()
+  survivorUnit.issuePointOrderById(OrderIds.move, camp.getCenter())
+
+  let survivorDataComponent = survivorMetadata.getSurvivorComponent()
+  let survivorData = survivorDataComponent.getSurvivorData()
+  
+  let message = survivorMetadata.getName().colorize(Colors.gold) + " " + survivorData.getName() + " has joined your camp!"
+  displayMessageToPlayer(p, message)
+
+  return survivorUnit
+
+// --------------------------------------------------------------------------
+function getSpawnPoint(vec2 pos) returns vec2
+
+  // Use RandomSpawnPointProvider since it automatically grows the range
+  // if no spawn point could be found
+  let spawnPointProvider = new RandomSpawnPointProvider(g_survivorSpawnManager)
+  ..setRange(SPAWN_SURVIVOR_RANGE_MIN, SPAWN_SURVIVOR_RANGE_MAX)
+
+  let spawnPoint = spawnPointProvider.getSpawnPoint(pos)
+
+  destroy spawnPointProvider
+
+  return spawnPoint
