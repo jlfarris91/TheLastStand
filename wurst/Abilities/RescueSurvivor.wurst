@@ -2,7 +2,11 @@ package RescueSurvivor
 import RegisterEvents
 import Orders
 import TlsAbilityIds
-import SurvivorUnit
+import GameConstants
+import LootableTypes
+import Abilities
+import ClosureTimers
+import FX
 
 constant int ABILITY_RESCUE_ORDER = Orders.innerfire
 
@@ -13,9 +17,17 @@ function onRescueCast()
   
   caster.issueImmediateOrderById(OrderIds.stop)
 
-  if (target.isRescuableSurvivor())
-    target.setOwner(caster.getOwner(), true)
-    target.issueTargetOrderById(Orders.move, caster)
+  // Can only rescue non-lootable units owned by villagers
+  if (not target.isRescuableUnit())
+    return
+
+  target.setOwner(caster.getOwner(), true)
+  target.issueTargetOrderById(Orders.move, caster)
+
+  let fx = FX.createEffect(Abilities.ancestralSpiritCaster, target.getPos())
+  fx.setScale(0.7)
+  fx.setTimeScale(2.0)
+  doAfter(3.0, () -> fx.destr())
 
 // ============================================================================
 function onRightClick()
@@ -23,8 +35,7 @@ function onRightClick()
   let orderedUnit = GetOrderedUnit()
   let targetUnit = GetOrderTargetUnit()
 
-  if (order != Orders.smart or
-      not targetUnit.isUnrescuedSurvivor())
+  if (order != Orders.smart or not targetUnit.isRescuableUnit())
     return
 
   if (not orderedUnit.hasAbility(TlsAbilityIds.rescueSurvivorHero) and
@@ -32,6 +43,10 @@ function onRightClick()
     return
 
   orderedUnit.issueTargetOrderById(ABILITY_RESCUE_ORDER, targetUnit)
+
+// ============================================================================
+function unit.isRescuableUnit() returns bool
+  return not this.isLootableUnitType() and this.getOwner() == PLAYER_VILLAGERS
 
 // ============================================================================
 init
