@@ -5,12 +5,10 @@ import TlsAbilityIds
 import Events
 import ExhaustComponent
 import MovementComponent
-import StaminaComponent
 
 // ============================================================================
 public class SprintComponent extends UnitComponent
   private MovementComponent _movement
-  private StaminaComponent _stamina
   private real _sprintSpeed = 0
   private real _staminaCost = 0
   private int _level = 1
@@ -29,8 +27,14 @@ public class SprintComponent extends UnitComponent
   // --------------------------------------------------------------------------
   ondestroy
     stopSprinting()
+    
     destroy startedSprintingEvent
+    startedSprintingEvent = null
+
     destroy stoppedSprintingEvent
+    stoppedSprintingEvent = null
+
+    _movement = null
 
   // --------------------------------------------------------------------------
   function getIsSprinting() returns bool
@@ -65,7 +69,6 @@ public class SprintComponent extends UnitComponent
     super.onEnabled()
 
     _movement = getOwner().getOrAddMovementComponent()
-    _stamina = getOwner().getOrAddStaminaComponent()
 
     let u = getOwnerUnit()
     if (u.getAbilityLevel(TlsAbilityIds.sprint) <= 0)
@@ -81,7 +84,6 @@ public class SprintComponent extends UnitComponent
       u.removeAbility(TlsAbilityIds.sprint)
 
     _movement = null
-    _stamina = null
 
   // --------------------------------------------------------------------------
   function startSprinting()
@@ -124,23 +126,29 @@ public class SprintComponent extends UnitComponent
 
   // --------------------------------------------------------------------------
   private function onUnitMoved(real distanceInMeters)
+    let u = getOwnerUnit()
     let totalStaminaCost = distanceInMeters * _staminaCost
-    _stamina.removeStamina(totalStaminaCost)
-    if (_stamina.getStamina() < totalStaminaCost)
+    u.subMana(totalStaminaCost)
+    if (u.getMana() < totalStaminaCost)
       stopSprinting()
       exhaustUnit()
 
   // --------------------------------------------------------------------------
   private function listenToUnitMovedEvent()
     unlistenToUnitMovedEvent()
-    if (_onUnitMovedHandler == null)
-      _onUnitMovedHandler = _movement.getUnitMovedEvent().add() (MovementComponent sender, real distanceInMeters) ->
-        onUnitMoved(distanceInMeters)
+    if (_onUnitMovedHandler == null and _movement != null)
+      let unitMovedEvent = _movement.getUnitMovedEvent()
+      if (unitMovedEvent != null)
+        _onUnitMovedHandler = unitMovedEvent.add() (MovementComponent sender, real distanceInMeters) ->
+          onUnitMoved(distanceInMeters)
 
   // --------------------------------------------------------------------------
   private function unlistenToUnitMovedEvent()
     if (_onUnitMovedHandler != null)
-      _movement.getUnitMovedEvent().remove(_onUnitMovedHandler)
+      if (_movement != null)
+        let unitMovedEvent = _movement.getUnitMovedEvent()
+        if (unitMovedEvent != null)
+          unitMovedEvent.remove(_onUnitMovedHandler)
       destroy _onUnitMovedHandler
       _onUnitMovedHandler = null
 
