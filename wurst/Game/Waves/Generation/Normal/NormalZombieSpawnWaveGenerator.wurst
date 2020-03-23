@@ -1,7 +1,4 @@
-package NormalZombieNightWaveGenerator
-import NightWave
-import IWaveGenerator
-import WaveCollection
+package NormalZombieSpawnWaveGenerator
 import SpawnWave
 import UndeadSpawnManager
 import RandomSpawnPointProvider
@@ -15,40 +12,27 @@ import Func
 import FunctionalField
 import SpawnWaveDefinition
 import SetTargetPlayerModifier
+import ZombieSetupModifier
+import GrantResourcesToKillingPlayerModifier
+import Range
+import IGameWaveProgress
+import ISpawnWaveGenerator
 
 // ============================================================================
-public class NormalZombieNightWaveGenerator implements IWaveGenerator<NightWave>
-  private int m_totalNights
+public class NormalZombieSpawnWaveGenerator implements ISpawnWaveGenerator
 
   // --------------------------------------------------------------------------
-  function setTotalNights(int value)
-    m_totalNights = value
-
-  // --------------------------------------------------------------------------
-  function getTotalNights() returns int
-    return m_totalNights
-
-  // --------------------------------------------------------------------------
-  override function generateWavesForPlayer(player p, WaveCollection<NightWave> waves)
-
-    // Create a zombie wave for every night
-    for i=1 to m_totalNights
-      let wave = waves.getOrCreateWave(i)
-      wave.setTimeOfDayScalePercent(200.0)
-      wave.addSpawnWave(createWave(p, i))
-
-  // --------------------------------------------------------------------------
-  private function createWave(player p, int night) returns SpawnWave
+  override function generateSpawnWave(player p, IGameWaveProgress gameProgress) returns SpawnWave
 
     // The percentage of the game's progress for the current night
-    let currentNightGameProgress = I2R(night) / I2R(m_totalNights)
+    let currentNightGameProgress = gameProgress.getCurrentGameProgress()
 
     // The percentage of the game's progress for the next night
-    let nextNightGameProgress = I2R(night + 1) / I2R(m_totalNights)
+    let nextNightGameProgress = gameProgress.getNextGameProgress()
 
     let unitTypeProvider = new RandomUnitTypeProvider()
-    ..addUnitType(TlsUnitIds.zombieMale, 1)
-    ..addUnitType(TlsUnitIds.zombieFemale, 1)
+    ..addUnitType(TlsUnitIds.Undead.zombieMale, 1)
+    ..addUnitType(TlsUnitIds.Undead.zombieFemale, 1)
 
     let spawnPointProvider = new RandomSpawnPointProvider(g_undeadSpawnManager)
     ..setMinRange(ZOMBIES_SPAWN_RANGE_MIN)
@@ -78,7 +62,7 @@ public class NormalZombieNightWaveGenerator implements IWaveGenerator<NightWave>
     let ufd = new AggregateUnitModifier()
 
     // These are some common zombie fields we always set
-    ufd.add(new ZombieFields())
+    ufd.add(new ZombieSetupModifier())
     ufd.add(new SetTargetPlayerModifier(p))
 
     // Each night zombies health will interpolate between the min/max for that night
@@ -120,6 +104,12 @@ public class NormalZombieNightWaveGenerator implements IWaveGenerator<NightWave>
     let damageSidesPerDieFunc = new FunctionalUnitWeaponIntegerField(UNIT_WEAPON_IF_ATTACK_DAMAGE_SIDES_PER_DIE, 1)..setValue(damageSidesPerDie)
     ufd.add(damageSidesPerDieFunc)
 
+    // Configure the unit to give the killing player materials
+    let grantMaterialsMod = new GrantResourcesToKillingPlayerModifier()
+    grantMaterialsMod.setMaterialsChanceFunc((real t) -> ZOMBIES_MATERIALS_DROP_CHANCE)
+    grantMaterialsMod.setMaterialsAmountRangeFunc((real t) -> ZOMBIES_MATERIALS_DROP_AMOUNT.toRange())
+    ufd.add(grantMaterialsMod)
+
     let def = new SpawnWaveDefinition()
     ..setProgress(progress)
     ..setMaxAliveCount(getMaxAliveCount)
@@ -131,19 +121,3 @@ public class NormalZombieNightWaveGenerator implements IWaveGenerator<NightWave>
     ..setUnitModifier(ufd)
 
     return new SpawnWave(def, p)..setName("Zombies")
-
-// ============================================================================
-public class ZombieFields implements IFunctionalUnitModifier
-  // --------------------------------------------------------------------------
-  override function apply(unit u, real t)
-    let scale = GetRandomReal(-0.2, 0.2)
-
-    u.setScale(1.0 + scale)
-    u.setTimeScale(1.0 - scale)
-    u.setMoveSpeedPercChange(-scale)
-    u.setAnimation("birth")
-
-    let w = u.getField(UNIT_RF_SHADOW_IMAGE_WIDTH) * (1.0 + scale)
-    let h = u.getField(UNIT_RF_SHADOW_IMAGE_HEIGHT) * (1.0 + scale)
-    u.setField(UNIT_RF_SHADOW_IMAGE_WIDTH, w)
-    u.setField(UNIT_RF_SHADOW_IMAGE_HEIGHT, h)

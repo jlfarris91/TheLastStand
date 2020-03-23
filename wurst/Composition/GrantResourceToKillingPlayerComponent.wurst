@@ -1,0 +1,113 @@
+package GrantResourceToKillingPlayerComponent
+import UnitComponent
+import UnitMetadata
+import Events
+import Math
+import FX
+import Range
+import HumanPlayerMetadata
+
+// ============================================================================
+public class GrantResourceToKillingPlayerComponent extends UnitComponent
+  private Action m_unitKilledHandler
+  private real m_matsChance = 0
+  private rangeInt m_matsAmountRange = INT_RANGE_ZERO
+  private real m_goldChance = 0
+  private rangeInt m_goldAmountRange = INT_RANGE_ZERO
+
+  // --------------------------------------------------------------------------
+  construct(IUnitMetadata owner)
+    super(owner)
+
+  // --------------------------------------------------------------------------
+  override function onEnabled()
+    super.onEnabled()
+    listenForKilledEvent()
+
+  // --------------------------------------------------------------------------
+  override function onDisabled()
+    super.onDisabled()
+    unlistenForKilledEvent()
+
+  // --------------------------------------------------------------------------
+  function getMaterialsChance() returns real
+    return m_matsChance
+
+  // --------------------------------------------------------------------------
+  function setMaterialsChance(real value)
+    m_matsChance = value
+
+  // --------------------------------------------------------------------------
+  function getMaterialsAmountRange() returns rangeInt
+    return m_matsAmountRange
+
+  // --------------------------------------------------------------------------
+  function setMaterialsAmountRange(rangeInt range)
+    m_matsAmountRange = range
+
+  // --------------------------------------------------------------------------
+  function getGoldChance() returns real
+    return m_goldChance
+
+  // --------------------------------------------------------------------------
+  function setGoldChance(real value)
+    m_goldChance = value
+
+  // --------------------------------------------------------------------------
+  function getGoldAmountRange() returns rangeInt
+    return m_goldAmountRange
+
+  // --------------------------------------------------------------------------
+  function setGoldAmountRange(rangeInt range)
+    m_goldAmountRange = range
+
+  // --------------------------------------------------------------------------
+  private function listenForKilledEvent()
+    unlistenForKilledEvent()
+    m_unitKilledHandler = PlayerUnitEvents.unitKilled.add(() -> onKilled())
+
+  // --------------------------------------------------------------------------
+  private function unlistenForKilledEvent()
+    if (m_unitKilledHandler != null)
+      PlayerUnitEvents.unitKilled.remove(m_unitKilledHandler)
+      destroy m_unitKilledHandler
+      m_unitKilledHandler = null
+
+  // --------------------------------------------------------------------------
+  private function onKilled()
+    if (GetDyingUnit() != this.getOwnerUnit())
+      return
+
+    let killingUnit = GetKillingUnit()
+    if (killingUnit == null)
+      return
+
+    let killingPlayer = killingUnit.getOwner()
+    let killingPlayerMetadata = killingPlayer.getHumanMetadata()
+    if (killingPlayerMetadata == null)
+      return
+
+    let pos = this.getOwnerUnit().getPos()
+
+    if (passesChanceCheck(m_matsChance))
+      let matsGranted = m_matsAmountRange.getRandom()
+      killingPlayerMetadata.giveMaterials(matsGranted)
+      FX.createFoundMaterialsEffect(pos, killingPlayer)
+      FX.createFoundMaterialsTag(pos, matsGranted, killingPlayer)
+
+    if (passesChanceCheck(m_goldChance))
+      let goldGranted = m_goldAmountRange.getRandom()
+      killingPlayerMetadata.giveGold(goldGranted)
+      FX.createFoundGoldEffect(pos, killingPlayer)
+      FX.createFoundGoldTag(pos, goldGranted, killingPlayer)
+
+// ============================================================================
+public function IUnitMetadata.getGrantResourceToKillingPlayerComponent() returns GrantResourceToKillingPlayerComponent
+  return this.getComponent(Type(GrantResourceToKillingPlayerComponent.typeId)) castTo GrantResourceToKillingPlayerComponent
+
+// ============================================================================
+public function IUnitMetadata.getOrAddGrantResourceToKillingPlayerComponent() returns GrantResourceToKillingPlayerComponent
+  var component = this.getGrantResourceToKillingPlayerComponent()
+  if (component == null)
+    component = this.addComponent(new GrantResourceToKillingPlayerComponent(this)) castTo GrantResourceToKillingPlayerComponent
+  return component

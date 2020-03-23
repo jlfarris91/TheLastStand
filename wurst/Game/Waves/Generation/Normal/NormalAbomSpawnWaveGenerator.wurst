@@ -1,7 +1,4 @@
-package NormalAbomNightWaveGenerator
-import NightWave
-import IWaveGenerator
-import WaveCollection
+package NormalAbomSpawnWaveGenerator
 import SpawnWave
 import UndeadSpawnManager
 import RandomSpawnPointProvider
@@ -15,37 +12,24 @@ import FunctionalField
 import SpawnWaveDefinition
 import SingleUnitTypeProvider
 import SetTargetPlayerModifier
+import ISpawnWaveGenerator
+import IGameWaveProgress
+import AbomSetupModifier
 
 // ============================================================================
-public class NormalAbomNightWaveGenerator implements IWaveGenerator<NightWave>
-  private int m_totalNights
+public class NormalAbomSpawnWaveGenerator implements ISpawnWaveGenerator
 
   // --------------------------------------------------------------------------
-  function setTotalNights(int value)
-    m_totalNights = value
+  override function generateSpawnWave(player p, IGameWaveProgress gameProgress) returns SpawnWave
 
-  // --------------------------------------------------------------------------
-  function getTotalNights() returns int
-    return m_totalNights
-
-  // --------------------------------------------------------------------------
-  override function generateWavesForPlayer(player p, WaveCollection<NightWave> waves)
-
-    for i=0 to m_totalNights step 3
-      let wave = waves.getOrCreateWave(i)
-      wave.addSpawnWave(createWave(p, i))
-
-  // --------------------------------------------------------------------------
-  private function createWave(player p, int night) returns SpawnWave
-  
     // The percentage of the game's progress for the current night
-    let currentNightGameProgress = I2R(night) / I2R(m_totalNights)
+    let currentNightGameProgress = gameProgress.getCurrentGameProgress()
 
     // The percentage of the game's progress for the next night
-    let nextNightGameProgress = I2R(night + 1) / I2R(m_totalNights)
+    let nextNightGameProgress = gameProgress.getNextGameProgress()
 
     let unitTypeProvider = new SingleUnitTypeProvider()
-    ..setUnitType(TlsUnitIds.abomination)
+    ..setUnitType(TlsUnitIds.Undead.abomination)
 
     let spawnPointProvider = new RandomSpawnPointProvider(g_undeadSpawnManager)
     ..setMinRange(ABOM_SPAWN_RANGE_MIN)
@@ -59,15 +43,14 @@ public class NormalAbomNightWaveGenerator implements IWaveGenerator<NightWave>
 
     // This determines the maximum number of aboms to spawn in a night
     let maxSpawns = lerp(1, 5, currentNightGameProgress).floor()
-    Func1<real, int> getMaxSpawnCount = (real _waveProgress) -> 
-      return maxSpawns
+    Func1<real, int> getMaxSpawnCount = (real _waveProgress) -> maxSpawns
 
     // These modifiers will run on each unit spawned in the wave
     // The real value passed in is the wave's current progress
     let ufd = new AggregateUnitModifier()
 
     // These are some common zombie fields we always set
-    ufd.add(new AbominationFields())
+    ufd.add(new AbominationSetupModifier())
     ufd.add(new SetTargetPlayerModifier(p))
 
     // Each night zombies health will interpolate between the min/max for that night
@@ -117,20 +100,3 @@ public class NormalAbomNightWaveGenerator implements IWaveGenerator<NightWave>
     ..setUnitModifier(ufd)
 
     return new SpawnWave(def, p)..setName("Aboms")
-
-
-// ============================================================================
-public class AbominationFields implements IFunctionalUnitModifier
-  // --------------------------------------------------------------------------
-  override function apply(unit u, real t)
-    let scale = GetRandomReal(-0.2, 0.2)
-
-    u.setScale(1.0 + scale)
-    u.setTimeScale(1.0 - scale)
-    u.setMoveSpeedPercChange(-scale)
-    u.setAnimation("birth")
-
-    let w = u.getField(UNIT_RF_SHADOW_IMAGE_WIDTH) * (1.0 + scale)
-    let h = u.getField(UNIT_RF_SHADOW_IMAGE_HEIGHT) * (1.0 + scale)
-    u.setField(UNIT_RF_SHADOW_IMAGE_WIDTH, w)
-    u.setField(UNIT_RF_SHADOW_IMAGE_HEIGHT, h)

@@ -98,7 +98,6 @@ public class SpawnWave extends Runnable
 
     let playerMetadata = p.getHumanMetadataRequired()
     if (playerMetadata.getIsDead())
-      Log.debug("[SpawnWave.onActivated] SpawnWave was activated for dead player " + playerMetadata.getName())
       return
 
     let camp = playerMetadata.getCamp()
@@ -113,13 +112,13 @@ public class SpawnWave extends Runnable
     let numSpawnGroups = max(R2I(I2R(spawnsPerActivation) * (1.0 - spawnGroupingFactor)), 1)
     let spawnGroupSize = max(R2I(I2R(spawnsPerActivation) * spawnGroupingFactor), 1)
 
-    let spawnPoints =  m_definition.getSpawnPointProvider().getSpawnPoints(center, numSpawnGroups)
+    let spawnPoints = m_definition.getSpawnPointProvider().getSpawnPoints(center, numSpawnGroups)
     if (spawnPoints.getCount() == 0)
       error("[SpawnWave.onActivated] Found no spawn points!")
 
     let spawnedUnits = new LinkedList<unit>()
 
-    var numSpawnsAvailable = min(aliveCountMax - m_aliveSpawnedUnits.size(), spawnCountMax - m_numSpawned)
+    var numSpawnsAvailable = getNumSpawnsAvailable(aliveCountMax, spawnCountMax)
 
     // For each spawn point
     for sp in spawnPoints
@@ -148,7 +147,7 @@ public class SpawnWave extends Runnable
           let spawnedUnit = spawnSingleUnit(unitType, sp)
           spawnedUnits.add(spawnedUnit)
 
-          numSpawnsAvailable = min(aliveCountMax - m_aliveSpawnedUnits.size(), spawnCountMax - m_numSpawned)
+          numSpawnsAvailable = getNumSpawnsAvailable(aliveCountMax, spawnCountMax)
 
         // Clean up the unitTypes list
         destroy unitTypes
@@ -158,6 +157,18 @@ public class SpawnWave extends Runnable
     
     m_unitsSpawnedEvent.call(this, spawnedUnits)
     destroy spawnedUnits
+
+  // --------------------------------------------------------------------------
+  private function getNumSpawnsAvailable(int aliveCountMax, int spawnCountMax) returns int
+    let numSpawnsAvailable = min(aliveCountMax - m_aliveSpawnedUnits.size(), spawnCountMax - m_numSpawned)
+
+    if (m_numSpawned >= spawnCountMax)
+      Log.debug("[SpawnWave.onActivated] Reached max number of spawns for wave")
+
+    if (m_aliveSpawnedUnits.size() >= aliveCountMax)
+      Log.debug("[SpawnWave.onActivated] Reached max number of concurrent alive")
+
+    return numSpawnsAvailable
 
   // --------------------------------------------------------------------------
   private function spawnSingleUnit(int unitTypeId, vec2 pos) returns unit

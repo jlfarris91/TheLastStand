@@ -1,0 +1,110 @@
+package NormalCrowSpawnWaveGenerator
+import SpawnWave
+import UndeadSpawnManager
+import RandomSpawnPointProvider
+import SingleUnitTypeProvider
+import TlsUnitIds
+import GameConstants
+import PeriodicWaveActivator
+import TimeOfDayProgress
+import Math
+import Func
+import FunctionalField
+import SpawnWaveDefinition
+import SetTargetPlayerModifier
+import Range
+import ISpawnWaveGenerator
+import IGameWaveProgress
+import CrowSetupModifier
+import GrantResourcesToKillingPlayerModifier
+
+// ============================================================================
+public class NormalCrowSpawnWaveGenerator implements ISpawnWaveGenerator
+
+  // --------------------------------------------------------------------------
+  override function generateSpawnWave(player p, IGameWaveProgress gameProgress) returns SpawnWave
+
+    // The percentage of the game's progress for the current night
+    let currentNightGameProgress = gameProgress.getCurrentGameProgress()
+
+    let unitTypeProvider = new SingleUnitTypeProvider()
+    ..setUnitType(TlsUnitIds.Undead.crow)
+
+    let spawnPointProvider = new RandomSpawnPointProvider(g_undeadSpawnManager)
+    ..setMinRange(CROW_SPAWN_RANGE_MIN)
+    ..setMaxRange(CROW_SPAWN_RANGE_MAX)
+
+    let activator = new PeriodicWaveActivator()
+    ..setInterval(CROW_SPAWN_INTERVAL)
+
+    let progress = new NightProgress()
+
+    // This determines the maximum number of alive spawns
+    Func1<real, int> getMaxAliveCount = (real _waveProgress) -> lerpInt(1, 4, currentNightGameProgress)
+
+    // This determines the number of spawn points to spawn enemies used each time the spawner is activated.
+    // The higher the number the more are spawned per activation.
+    Func1<real, int> getSpawnsPerActivation = (real waveProgress) -> lerpInt(2, 4, waveProgress)
+
+    // Always spawn crows individually
+    Func1<real, real> getSpawnGroupingFactor = (real waveProgress) -> 0.0
+
+    // These modifiers will run on each unit spawned in the wave
+    // The real value passed in is the wave's current progress
+    let ufd = new AggregateUnitModifier()
+
+    // These are some common fields we always set
+    ufd.add(new CrowSetupModifier())
+    ufd.add(new SetTargetPlayerModifier(p))
+
+    // Health
+    ufd.add(new MaxHpUnitField()..setValue(lerpInt(60, 600, currentNightGameProgress)))
+
+    // Movement speed
+    ufd.add(new FunctionalUnitRealField(UNIT_RF_SPEED)..setValue(300))
+
+    // Armor
+    let armorGameStart = 0.0
+    let armorGameEnd = 5.0
+    let armor = lerp(armorGameStart, armorGameEnd, currentNightGameProgress)
+    let armorFunc = new ArmorUnitField()..setValue(armor)
+    ufd.add(armorFunc)
+
+    // Damage base
+    let damageBaseGameStart = 6
+    let damageBaseGameEnd = 30
+    let damageBase = lerpInt(damageBaseGameStart, damageBaseGameEnd, currentNightGameProgress)
+    let damageBaseFunc = new FunctionalUnitWeaponIntegerField(UNIT_WEAPON_IF_ATTACK_DAMAGE_BASE, 1)..setValue(damageBase)
+    ufd.add(damageBaseFunc)
+
+    // Damage number of dice
+    let damageNumberOfDiceGameStart = 1
+    let damageNumberOfDiceGameEnd = 3
+    let damageNumberOfDice = lerpInt(damageNumberOfDiceGameStart, damageNumberOfDiceGameEnd, currentNightGameProgress)
+    let damageNumberOfDiceFunc = new FunctionalUnitWeaponIntegerField(UNIT_WEAPON_IF_ATTACK_DAMAGE_NUMBER_OF_DICE, 1)..setValue(damageNumberOfDice)
+    ufd.add(damageNumberOfDiceFunc)
+
+    // Damage sides per die
+    let damageSidesPerDieGameStart = 1
+    let damageSidesPerDieGameEnd = 3
+    let damageSidesPerDie = lerpInt(damageSidesPerDieGameStart, damageSidesPerDieGameEnd, currentNightGameProgress)
+    let damageSidesPerDieFunc = new FunctionalUnitWeaponIntegerField(UNIT_WEAPON_IF_ATTACK_DAMAGE_SIDES_PER_DIE, 1)..setValue(damageSidesPerDie)
+    ufd.add(damageSidesPerDieFunc)
+
+    // Configure the unit to give the killing player materials
+    let grantMaterialsMod = new GrantResourcesToKillingPlayerModifier()
+    grantMaterialsMod.setMaterialsChanceFunc((real t) -> CROW_MATERIALS_DROP_CHANCE)
+    grantMaterialsMod.setMaterialsAmountRangeFunc((real t) -> CROW_MATERIALS_DROP_AMOUNT.toRange())
+    ufd.add(grantMaterialsMod)
+
+    let def = new SpawnWaveDefinition()
+    ..setProgress(progress)
+    ..setMaxAliveCount(getMaxAliveCount)
+    ..setSpawnsPerActivation(getSpawnsPerActivation)
+    ..setSpawnGroupingFactor(getSpawnGroupingFactor)
+    ..setActivator(activator)
+    ..setSpawnPointProvider(spawnPointProvider)
+    ..setUnitTypeProvider(unitTypeProvider)
+    ..setUnitModifier(ufd)
+
+    return new SpawnWave(def, p)..setName("Crows")
