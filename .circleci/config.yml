@@ -13,9 +13,7 @@ jobs:
       - run:
           name: Setup Environment
           command: |
-            [System.Environment]::SetEnvironmentVariable("Version_Major", 0)
-            [System.Environment]::SetEnvironmentVariable("Version_Minor", 1)
-            [System.Environment]::SetEnvironmentVariable("Version_Patch", [System.Environment]::GetEnvironmentVariable("CIRCLE_BUILD_NUM"))
+            choco install GitVersion.Portable
 
       - run:
           name: Install Wurst
@@ -25,15 +23,7 @@ jobs:
             java -jar .\build\WurstSetup.jar install wurstscript
 
       - run:
-          name: Install Dependencies
-          command: grill install
-
-      - run:
-          name: Run Wurst Tests
-          command: grill test
-
-      - run:
-          name: Prepare Build
+          name: Generate Wurst Build Configuration
           command: |
             Push-Location build
             .\GenerateWurstBuildFile.ps1
@@ -41,11 +31,19 @@ jobs:
             Pop-Location
 
       - run:
+          name: Install Dependencies
+          command: grill install
+
+      - run:
           name: Run Map Pipeline
           command: |
             Push-Location build
             .\RunPipeline.ps1
             Pop-Location
+
+      - run:
+          name: Run Wurst Tests
+          command: grill test
 
       - run:
           name: Wurst Map Build
@@ -61,11 +59,40 @@ jobs:
             .\PrepareArtifacts.ps1
             Pop-Location
 
-            $compilerLogPath = "{0}\.wurst\logs\compiler.log" -f $env:USERPROFILE
-            Get-Content ($compilerLogPath) | Out-File -FilePath ./_artifacts/compiler.log
-
-            $setupLogPath = "{0}\.wurst\logs\setup.log" -f $env:USERPROFILE
-            Get-Content ($setupLogPath) | Out-File -FilePath ./_artifacts/setup.log
-
       - store_artifacts:
           path: ./_artifacts/
+
+  publish-github-release:
+    docker:
+      - image: cibuilds/github:0.10
+    steps:
+      - attach_workspace:
+          at: ./_artifacts
+      - run:
+          name: "Publish Release on GitHub"
+          command: |
+            VERSION=$(my-binary --version)
+            ghr -t ${GITHUB_TOKEN} -u ${CIRCLE_PROJECT_USERNAME} -r ${CIRCLE_PROJECT_REPONAME} -c ${CIRCLE_SHA1} -delete ${VERSION} ./artifacts/
+
+workflows:
+  version: 2
+  main:
+    jobs:
+      - build:
+          filters:
+            branches:
+              only:
+                - master
+                - develop
+            tags:
+              only: /^\d+\.\d+\.\d+$/
+      - publish-github-release:
+          requires:
+            - build
+          filters:
+            branches:
+              only:
+                - master
+                - develop
+            tags:
+              only: /^\d+\.\d+\.\d+$/
