@@ -32,7 +32,7 @@ if ($env:CI -eq "true") { $env:IsLocalBuild = 0 }
 $env:MapAuthor = "Ozymandias"
 
 $VersionInfo = [PSCustomObject](GitVersion | ConvertFrom-Json)
-$env:MapVersion = "v{0}" -f $VersionInfo.FullSemVer
+$env:MapVersion = "v{0}" -f $VersionInfo.MajorMinorPatch
 
 $env:SourceMapFileName = "TheLastStand.w3x"
 
