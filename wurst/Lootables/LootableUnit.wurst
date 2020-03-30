@@ -9,6 +9,7 @@ import LootableReward
 import ErrorHandling
 import Events
 import Vector
+import Pool
 
 constant int ABILITY_ID_LOOTABLE = 'A02C'
 constant colorA LOOTABLE_COLOR = colorA(255, 255, 255, 255)
@@ -20,8 +21,8 @@ constant colorA PROGRESS_BAR_BACKGROUND = colorA(0, 64, 0, 255)
 constant real PROGRESS_BAR_UPDATE_PERIOD = 0.1
 
 TextProgressBar g_LootOperationProgressBar
-AnonymousEvent g_UpdateProgressBarsEvent
 Vector<LootableUnit> g_lootableUnits
+Pool<LootOperation> g_activeOperations
 
 // ============================================================================
 public class LootableUnit extends UnitMetadata
@@ -168,7 +169,7 @@ class LootOperation
   private IUnitMetadata _lootingUnit
   private LootableUnit _lootable
   private ProgressBarTag _progressBar
-  private MulticastRegistration _updateHandler
+  private poolHandle _poolHandle
   private real _elapsed
   private real _duration
 
@@ -198,17 +199,20 @@ class LootOperation
   // --------------------------------------------------------------------------
   private function registerForUpdate()
     unregisterForUpdate()
-    if (_updateHandler == null)
-      _updateHandler = g_UpdateProgressBarsEvent.register(() -> update())
+    _poolHandle = g_activeOperations.reserve(this)
 
   // --------------------------------------------------------------------------
   private function unregisterForUpdate()
-    if (_updateHandler != null)
-      destroy _updateHandler
-      _updateHandler = null
+    if (_poolHandle == INVALID_POOL_HANDLE)
+      return
+    
+    if (g_activeOperations.isHandleValid(_poolHandle))
+      g_activeOperations.release(_poolHandle)
+    
+    _poolHandle = INVALID_POOL_HANDLE
 
   // --------------------------------------------------------------------------
-  private function update()
+  function update()
     _elapsed += PROGRESS_BAR_UPDATE_PERIOD
 
     if (_progressBar != null)
@@ -232,12 +236,19 @@ function onDayStart()
     lootableUnit.decrementCooldown()
 
 // ============================================================================
+function updateProgressBars()
+  for ph in g_activeOperations
+    if (g_activeOperations.isHandleValid(ph))
+      let lootOperation = g_activeOperations.get(ph)
+      if(lootOperation != null)
+        lootOperation.update()
+
+// ============================================================================
 init
   g_LootOperationProgressBar = new TextProgressBar(PROGRESS_BAR_LENGTH, PROGRESS_BAR_FOREGROUND, PROGRESS_BAR_BACKGROUND)
-  g_UpdateProgressBarsEvent = new AnonymousEvent()
   g_lootableUnits = new Vector<LootableUnit>(256)
+  g_activeOperations = new Pool<LootOperation>(32)
 
   registerDayEvent(function onDayStart)
 
-  doPeriodically(PROGRESS_BAR_UPDATE_PERIOD) (CallbackPeriodic cb) ->
-    g_UpdateProgressBarsEvent.call()
+  doPeriodically(PROGRESS_BAR_UPDATE_PERIOD, (cb) -> updateProgressBars())
