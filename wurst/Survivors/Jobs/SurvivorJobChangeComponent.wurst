@@ -1,13 +1,12 @@
 package SurvivorJobChangeComponent
 import UnitComponent
-import UnitMetadata
-import Events
 import TlsItemIds
 import TlsUnitIds
 import UnitExtensions
 import ClosureTimers
 import FX
 import SurvivorJobIds
+import RegisterEvents
 
 constant string JOB_CHANGE_FX_PATH = "Objects\\Spawnmodels\\Other\\ToonBoom\\ToonBoom.mdl"
 
@@ -15,8 +14,6 @@ item array g_tempInventory
 
 // ============================================================================
 public class SurvivorJobChangeComponent extends UnitComponent
-  private Action m_itemAcquiredHandler
-  private Action m_itemDroppedHandler
   private bool m_ignoreItemEvents
 
   // --------------------------------------------------------------------------
@@ -24,97 +21,7 @@ public class SurvivorJobChangeComponent extends UnitComponent
     super(owner)
 
   // --------------------------------------------------------------------------
-  protected override function onEnabled()
-    super.onEnabled()
-    listenToItemAcquired()
-    listenToItemDropped()
-
-  // --------------------------------------------------------------------------
-  protected override function onDisabled()
-    super.onDisabled()
-    unlistenToItemAcquired()
-    unlistenToItemDropped()
-
-  // --------------------------------------------------------------------------
-  private function onItemAcquired(item itm)
-    if (not itm.isJobItem())
-      return
-
-    let itemType = itm.getTypeId()
-    let unitBeingReplaced = getOwnerUnit()
-    let unitType = unitBeingReplaced.getTypeId()
-
-    let jobId = getJobIdForItemType(itemType)
-    if (jobId == SurvivorJobIds.none)
-      return
-
-    let matchingUnitType = getUnitTypeForJobId(jobId)
-    if (matchingUnitType == -1)
-      return
-
-    if (unitType == matchingUnitType)
-      return
-
-    m_ignoreItemEvents = true
-
-    playJobChangeFX()
-
-    let wasSelected = unitBeingReplaced.isSelectedByOwner()
-    let replacedUnit = replaceUnitTLS(unitBeingReplaced, matchingUnitType, bj_UNIT_STATE_METHOD_RELATIVE)
-    if (wasSelected)
-      SelectUnitAddForPlayer(replacedUnit, replacedUnit.getOwner())
-
-    dropOtherJobItems(itemType)
-
-    m_ignoreItemEvents = false
-
-  // --------------------------------------------------------------------------
-  private function onItemDropped(item itm)
-    if (not itm.isJobItem())
-      return
-
-    let unitBeingReplaced = getOwnerUnit()
-    if (not unitBeingReplaced.isAlive())
-      return
-
-    let droppedItemType = itm.getTypeId()
-    let unitType = unitBeingReplaced.getTypeId()
-
-    let jobId = getJobIdForUnitType(unitType)
-    if (jobId == SurvivorJobIds.none)
-      return
-
-    let matchingJobItemType = getItemTypeForJobId(jobId)
-    if (matchingJobItemType == -1)
-      return
-
-    if (droppedItemType != matchingJobItemType)
-      return
-
-    playJobChangeFX()
-
-    m_ignoreItemEvents = true
-
-    for i = 0 to bj_MAX_INVENTORY - 1
-      let indexItem = UnitItemInSlot(unitBeingReplaced, i)
-      if (indexItem != null)
-        g_tempInventory[i] = indexItem == itm ? null : indexItem
-        UnitRemoveItemFromSlot(unitBeingReplaced, i)
-    
-    let wasSelected = unitBeingReplaced.isSelectedByOwner()
-    let replacedUnit = replaceUnitTLS(unitBeingReplaced, TlsUnitIds.Survivors.survivorMale, bj_UNIT_STATE_METHOD_RELATIVE)
-    if (wasSelected)
-      SelectUnitAddForPlayer(replacedUnit, replacedUnit.getOwner())
-
-    for i = 0 to bj_MAX_INVENTORY - 1
-      let indexItem = g_tempInventory[i]
-      if (indexItem != null)
-        UnitAddItem(replacedUnit, indexItem)
-
-    m_ignoreItemEvents = false  
-
-  // --------------------------------------------------------------------------
-  private function dropOtherJobItems(int exceptId)
+  function dropOtherJobItems(int exceptId)
     let ownerUnit = getOwnerUnit()
     let pos = ownerUnit.getPos()
     for jobItemId in g_jobItemIds
@@ -124,7 +31,7 @@ public class SurvivorJobChangeComponent extends UnitComponent
           ownerUnit.dropItemPoint(itm, pos)
 
   // --------------------------------------------------------------------------
-  private function playJobChangeFX()
+  function playJobChangeFX()
     let fx = FX.createEffect(JOB_CHANGE_FX_PATH, getOwnerUnit().getPos())
     fx.setAlpha(255)
     fx.setColor(255, 255, 255)
@@ -133,35 +40,133 @@ public class SurvivorJobChangeComponent extends UnitComponent
       DestroyEffect(fx)
 
   // --------------------------------------------------------------------------
-  private function listenToItemAcquired()
-    unlistenToItemAcquired()
-
-    if (m_itemAcquiredHandler == null)
-      m_itemAcquiredHandler = PlayerUnitEvents.itemAcquired.add() -> 
-        let u = GetManipulatingUnit()
-        if (u == getOwnerUnit() and not m_ignoreItemEvents)
-          onItemAcquired(GetManipulatedItem())
+  function getIgnoringItemEvents() returns bool
+    return m_ignoreItemEvents
 
   // --------------------------------------------------------------------------
-  private function unlistenToItemAcquired()
-    if (m_itemAcquiredHandler != null)
-      PlayerUnitEvents.itemAcquired.remove(m_itemAcquiredHandler)
-      destroy m_itemAcquiredHandler
-      m_itemAcquiredHandler = null
+  function setIgnoreItemEvents(bool value)
+    m_ignoreItemEvents = value
 
-  // --------------------------------------------------------------------------
-  private function listenToItemDropped()
-    unlistenToItemDropped()
+// ============================================================================
+public function IUnitMetadata.getSurvivorJobChangeComponent() returns SurvivorJobChangeComponent
+  return this.getComponent(Type(SurvivorJobChangeComponent.typeId)) castTo SurvivorJobChangeComponent
 
-    if (m_itemDroppedHandler == null)
-      m_itemDroppedHandler = PlayerUnitEvents.itemDropped.add() -> 
-        let u = GetManipulatingUnit()
-        if (u == getOwnerUnit() and not m_ignoreItemEvents)
-          onItemDropped(GetManipulatedItem())
+// ============================================================================
+public function IUnitMetadata.getOrAddSurvivorJobChangeComponent() returns SurvivorJobChangeComponent
+  var component = this.getSurvivorJobChangeComponent()
+  if (component == null)
+    component = this.addComponent(new SurvivorJobChangeComponent(this)) castTo SurvivorJobChangeComponent
+  return component
 
-  // --------------------------------------------------------------------------
-  private function unlistenToItemDropped()
-    if (m_itemDroppedHandler != null)
-      PlayerUnitEvents.itemDropped.remove(m_itemDroppedHandler)
-      destroy m_itemDroppedHandler
-      m_itemDroppedHandler = null
+// ============================================================================
+function onPickupItem()
+
+  let manipulatingUnit = GetManipulatingUnit()
+  let metadata = manipulatingUnit.getMetadata()
+  if (metadata == null)
+    return
+
+  let comp = metadata.getSurvivorJobChangeComponent()
+  if (comp == null or not comp.getEnabled())
+    return
+
+  if (comp.getIgnoringItemEvents())
+    return
+
+  let itm = GetManipulatedItem()
+
+  if (not itm.isJobItem())
+    return
+
+  let itemType = itm.getTypeId()
+  let unitBeingReplaced = manipulatingUnit
+  let unitType = unitBeingReplaced.getTypeId()
+
+  let jobId = getJobIdForItemType(itemType)
+  if (jobId == SurvivorJobIds.none)
+    return
+
+  let matchingUnitType = getUnitTypeForJobId(jobId)
+  if (matchingUnitType == -1)
+    return
+
+  if (unitType == matchingUnitType)
+    return
+
+  comp.setIgnoreItemEvents(true)
+
+  comp.playJobChangeFX()
+
+  let wasSelected = unitBeingReplaced.isSelectedByOwner()
+  let replacedUnit = replaceUnitTLS(unitBeingReplaced, matchingUnitType, bj_UNIT_STATE_METHOD_RELATIVE)
+  if (wasSelected)
+    SelectUnitAddForPlayer(replacedUnit, replacedUnit.getOwner())
+
+  comp.dropOtherJobItems(itemType)
+
+  comp.setIgnoreItemEvents(false)
+
+// ============================================================================
+function onDropItem()
+
+  let manipulatingUnit = GetManipulatingUnit()
+  let metadata = manipulatingUnit.getMetadata()
+  if (metadata == null)
+    return
+
+  let comp = metadata.getSurvivorJobChangeComponent()
+  if (comp == null or not comp.getEnabled())
+    return
+
+  if (comp.getIgnoringItemEvents())
+    return
+
+  let itm = GetManipulatedItem()
+
+  if (not itm.isJobItem())
+    return
+
+  let unitBeingReplaced = manipulatingUnit
+  if (not unitBeingReplaced.isAlive())
+    return
+
+  let droppedItemType = itm.getTypeId()
+  let unitType = unitBeingReplaced.getTypeId()
+
+  let jobId = getJobIdForUnitType(unitType)
+  if (jobId == SurvivorJobIds.none)
+    return
+
+  let matchingJobItemType = getItemTypeForJobId(jobId)
+  if (matchingJobItemType == -1)
+    return
+
+  if (droppedItemType != matchingJobItemType)
+    return
+
+  comp.playJobChangeFX()
+
+  comp.setIgnoreItemEvents(true)
+
+  for i = 0 to bj_MAX_INVENTORY - 1
+    let indexItem = UnitItemInSlot(unitBeingReplaced, i)
+    if (indexItem != null)
+      g_tempInventory[i] = indexItem == itm ? null : indexItem
+      UnitRemoveItemFromSlot(unitBeingReplaced, i)
+  
+  let wasSelected = unitBeingReplaced.isSelectedByOwner()
+  let replacedUnit = replaceUnitTLS(unitBeingReplaced, TlsUnitIds.Survivors.survivorMale, bj_UNIT_STATE_METHOD_RELATIVE)
+  if (wasSelected)
+    SelectUnitAddForPlayer(replacedUnit, replacedUnit.getOwner())
+
+  for i = 0 to bj_MAX_INVENTORY - 1
+    let indexItem = g_tempInventory[i]
+    if (indexItem != null)
+      UnitAddItem(replacedUnit, indexItem)
+
+  comp.setIgnoreItemEvents(false)
+
+// ============================================================================
+init
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_PICKUP_ITEM, function onPickupItem)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_DROP_ITEM, function onDropItem)

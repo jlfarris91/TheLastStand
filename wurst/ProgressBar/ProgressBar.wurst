@@ -1,9 +1,9 @@
 package ProgressBar
 import UnitPool
 import ClosureTimers
-import Events
 import Unit_ProgressBar
 import Math
+import Pool
 
 constant player PROGRESS_BAR_OWNER = DUMMY_PLAYER
 constant real PROGRESS_BAR_UPDATE_PROGRESS_INTERVAL = ANIMATION_PERIOD//0.01
@@ -11,8 +11,8 @@ constant real PROGRESS_BAR_UPDATE_POSITION_INTERVAL = ANIMATION_PERIOD
 constant int DEATH_ANIMATION_INDEX = 0
 constant int ZERO_ANIMATION_INDEX = 1
 
-AnonymousEvent g_updateProgressBarProgressEvent
-AnonymousEvent g_updateProgressBarPositionEvent
+Pool<ProgressBar> g_activeProgressBarsVisualUpdate
+Pool<ProgressBar> g_activeProgressBarsPositionUpdate
 
 // ============================================================================
 public class ProgressBar
@@ -28,8 +28,8 @@ public class ProgressBar
   private real _targetAlpha
   private real _alphaSpeed
 
-  private Action _updateProgressCb
-  private Action _updatePositionCb
+  private poolHandle m_visualUpdateHandle
+  private poolHandle m_positionUpdateHandle
 
   // --------------------------------------------------------------------------
   construct()
@@ -144,11 +144,16 @@ public class ProgressBar
     _currentValue = 0.0
 
   // --------------------------------------------------------------------------
-  private function updateVisuals(real dt)
+  function updateVisuals(real dt)
     let doneUpdatingProgress = updateProgress(dt)
     let doneUpdatingAlpha = updateAlpha(dt)
     if (doneUpdatingProgress and doneUpdatingAlpha)
       unregisterForVisualUpdate()
+        
+  // --------------------------------------------------------------------------
+  function updatePosition()
+    if (_target != null)
+      setPos(_target.getPos())
 
   // --------------------------------------------------------------------------
   private function updateProgress(real dt) returns bool
@@ -175,11 +180,6 @@ public class ProgressBar
       return true
 
     return false
-        
-  // --------------------------------------------------------------------------
-  private function updatePosition()
-    if (_target != null)
-      setPos(_target.getPos())
 
   // --------------------------------------------------------------------------
   private function setAnimationIndexByPercentage(real t)
@@ -189,30 +189,32 @@ public class ProgressBar
   // --------------------------------------------------------------------------
   private function registerForVisualUpdate()
     unregisterForVisualUpdate()
-    if (_updateProgressCb == null)
-      _updateProgressCb = () -> updateVisuals(PROGRESS_BAR_UPDATE_PROGRESS_INTERVAL)
-      g_updateProgressBarProgressEvent.add(_updateProgressCb)
+    m_visualUpdateHandle = g_activeProgressBarsVisualUpdate.reserve(this)
 
   // --------------------------------------------------------------------------
   private function unregisterForVisualUpdate()
-    if (_updateProgressCb != null)
-      g_updateProgressBarProgressEvent.remove(_updateProgressCb)
-      destroy _updateProgressCb
-      _updateProgressCb = null
+    if (m_visualUpdateHandle == INVALID_POOL_HANDLE)
+      return
+    
+    if (g_activeProgressBarsVisualUpdate.isHandleValid(m_visualUpdateHandle))
+      g_activeProgressBarsVisualUpdate.release(m_visualUpdateHandle)
+
+    m_visualUpdateHandle = INVALID_POOL_HANDLE
 
   // --------------------------------------------------------------------------
   private function registerForPositionUpdate()
     unregisterForPositionUpdate()
-    if (_updatePositionCb == null)
-      _updatePositionCb = () -> updatePosition()
-      g_updateProgressBarPositionEvent.add(_updatePositionCb)
+    m_positionUpdateHandle = g_activeProgressBarsPositionUpdate.reserve(this)
 
   // --------------------------------------------------------------------------
   private function unregisterForPositionUpdate()
-    if (_updatePositionCb != null)
-      g_updateProgressBarPositionEvent.remove(_updatePositionCb)
-      destroy _updatePositionCb
-      _updatePositionCb = null
+    if (m_positionUpdateHandle == INVALID_POOL_HANDLE)
+      return
+    
+    if (g_activeProgressBarsPositionUpdate.isHandleValid(m_positionUpdateHandle))
+      g_activeProgressBarsPositionUpdate.release(m_positionUpdateHandle)
+
+    m_positionUpdateHandle = INVALID_POOL_HANDLE
 
 // ============================================================================
 function getDummyUnit(int unitId) returns unit
@@ -225,12 +227,19 @@ function releaseDummyUnit(unit u)
   
 // ============================================================================
 init
-  g_updateProgressBarProgressEvent = new AnonymousEvent()
-  g_updateProgressBarPositionEvent = new AnonymousEvent()
+  g_activeProgressBarsVisualUpdate = new Pool<ProgressBar>(32)
+  g_activeProgressBarsPositionUpdate = new Pool<ProgressBar>(32)
 
   doPeriodically(PROGRESS_BAR_UPDATE_PROGRESS_INTERVAL) (CallbackPeriodic cb) ->
-    g_updateProgressBarProgressEvent.call()
+    for ph in g_activeProgressBarsVisualUpdate
+      if (g_activeProgressBarsVisualUpdate.isHandleValid(ph))
+        let progressBar = g_activeProgressBarsVisualUpdate.get(ph)
+        if (progressBar != null)
+          progressBar.updateVisuals(PROGRESS_BAR_UPDATE_PROGRESS_INTERVAL)
   
   doPeriodically(PROGRESS_BAR_UPDATE_POSITION_INTERVAL) (CallbackPeriodic cb) ->
-    g_updateProgressBarPositionEvent.call()   
-    
+    for ph in g_activeProgressBarsPositionUpdate
+      if (g_activeProgressBarsPositionUpdate.isHandleValid(ph))
+        let progressBar = g_activeProgressBarsPositionUpdate.get(ph)
+        if (progressBar != null)
+          progressBar.updateVisuals(PROGRESS_BAR_UPDATE_POSITION_INTERVAL)

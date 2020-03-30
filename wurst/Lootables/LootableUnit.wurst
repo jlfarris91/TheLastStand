@@ -8,6 +8,7 @@ import ClosureTimers
 import LootableReward
 import ErrorHandling
 import Events
+import Vector
 
 constant int ABILITY_ID_LOOTABLE = 'A02C'
 constant colorA LOOTABLE_COLOR = colorA(255, 255, 255, 255)
@@ -20,6 +21,7 @@ constant real PROGRESS_BAR_UPDATE_PERIOD = 0.1
 
 TextProgressBar g_LootOperationProgressBar
 AnonymousEvent g_UpdateProgressBarsEvent
+Vector<LootableUnit> g_lootableUnits
 
 // ============================================================================
 public class LootableUnit extends UnitMetadata
@@ -27,7 +29,6 @@ public class LootableUnit extends UnitMetadata
   private real _searchDuration
   private bool _isBeingLooted
   private int _cooldown
-  private Action _dayCB
 
   // --------------------------------------------------------------------------
   construct()
@@ -44,8 +45,6 @@ public class LootableUnit extends UnitMetadata
       destroy reward
     destroy _rewards
     _rewards = null
-
-    stopListeningToDayEvent()
     
   // --------------------------------------------------------------------------
   override function onUnitChanged(unit oldUnit, unit newUnit)
@@ -138,7 +137,6 @@ public class LootableUnit extends UnitMetadata
     this.getUnit().removeAbility(ABILITY_ID_LOOTABLE)
     this.getUnit().setVertexColor(LOOTED_COLOR)
     UnitRemoveType(this.getUnit(), UNIT_TYPE_ANCIENT)
-    startListeningToDayEvent()
 
   // --------------------------------------------------------------------------
   private function onLootable()
@@ -146,21 +144,6 @@ public class LootableUnit extends UnitMetadata
     this.getUnit().setVertexColor(LOOTABLE_COLOR)
     // Makes the unit targettable by the search ability
     UnitAddType(this.getUnit(), UNIT_TYPE_ANCIENT)
-    stopListeningToDayEvent()
-
-  // --------------------------------------------------------------------------
-  private function startListeningToDayEvent()
-    stopListeningToDayEvent()
-
-    if (_dayCB == null)
-      _dayCB = GameEvents.dayStartEvent.add(() -> decrementCooldown())
-
-  // --------------------------------------------------------------------------
-  private function stopListeningToDayEvent()
-    if (_dayCB != null)
-      GameEvents.dayStartEvent.remove(_dayCB)
-      destroy _dayCB
-      _dayCB = null
 
 // ============================================================================
 public class EnterableLootable extends LootableUnit
@@ -185,7 +168,7 @@ class LootOperation
   private IUnitMetadata _lootingUnit
   private LootableUnit _lootable
   private ProgressBarTag _progressBar
-  private Action _updateHandler
+  private MulticastRegistration _updateHandler
   private real _elapsed
   private real _duration
 
@@ -216,12 +199,11 @@ class LootOperation
   private function registerForUpdate()
     unregisterForUpdate()
     if (_updateHandler == null)
-      _updateHandler = g_UpdateProgressBarsEvent.add(() -> update())
+      _updateHandler = g_UpdateProgressBarsEvent.register(() -> update())
 
   // --------------------------------------------------------------------------
   private function unregisterForUpdate()
     if (_updateHandler != null)
-      g_UpdateProgressBarsEvent.remove(_updateHandler)
       destroy _updateHandler
       _updateHandler = null
 
@@ -245,10 +227,17 @@ function startLootOperation(IUnitMetadata lootingUnit, LootableUnit lootable, re
   return new LootOperation(lootingUnit, lootable, duration)
 
 // ============================================================================
+function onDayStart()
+  for lootableUnit in g_lootableUnits
+    lootableUnit.decrementCooldown()
+
+// ============================================================================
 init
   g_LootOperationProgressBar = new TextProgressBar(PROGRESS_BAR_LENGTH, PROGRESS_BAR_FOREGROUND, PROGRESS_BAR_BACKGROUND)
   g_UpdateProgressBarsEvent = new AnonymousEvent()
+  g_lootableUnits = new Vector<LootableUnit>(256)
+
+  registerDayEvent(function onDayStart)
 
   doPeriodically(PROGRESS_BAR_UPDATE_PERIOD) (CallbackPeriodic cb) ->
     g_UpdateProgressBarsEvent.call()
-    
