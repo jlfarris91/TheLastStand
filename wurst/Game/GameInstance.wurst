@@ -27,8 +27,6 @@ constant real GAME_SPEED_INITIAL = 100.0
 public class GameInstance extends Runnable
   private int m_day
   private int m_night
-  private Action m_dayEventHandler
-  private Action m_nightEventHandler
   private PlayerWavesMap m_playerWaves
   private IWaveGenerator<DayWave> m_dayWaveGenerator
   private IWaveGenerator<NightWave> m_nightWaveGenerator
@@ -123,18 +121,12 @@ public class GameInstance extends Runnable
     initializeAlliances()
     initializeWaves()
 
-    listenForDayEvent()
-    listenForNightEvent()
-
     doAfter(1.0) ->
       postStart()
 
   // --------------------------------------------------------------------------
   override function onStopped()
-    super.onStopped()    
-
-    unlistenForDayEvent()
-    unlistenForNightEvent()
+    super.onStopped()
 
     destroy m_playerWaves
     m_playerWaves = null
@@ -168,7 +160,7 @@ public class GameInstance extends Runnable
     p.setLumber(GameSettings.startingMaterials)
 
   // --------------------------------------------------------------------------
-  private function onDayStart()
+  function startDay()
     m_day++
 
     Log.debug("Started day " + I2S(m_day))
@@ -192,7 +184,7 @@ public class GameInstance extends Runnable
         doAfter(duration, () -> spawnSurvivorUnitForPlayer(p))
 
   // --------------------------------------------------------------------------
-  private function onNightStart()
+  function startNight()
     m_night++
 
     Log.debug("Started night " + I2S(m_night))
@@ -265,39 +257,20 @@ public class GameInstance extends Runnable
       // Make raiders treat player as an enemy
       SetPlayerAllianceStateBJ(PLAYER_UNDEAD, p, bj_ALLIANCE_UNALLIED)
 
-  // --------------------------------------------------------------------------
-  private function listenForDayEvent()
-    unlistenForDayEvent()
+// ============================================================================
+function onDayStart()
+  g_GameInstance.startDay()
 
-    if (m_dayEventHandler == null)
-      m_dayEventHandler = GameEvents.dayStartEvent.add() () ->
-        onDayStart()
-
-  // --------------------------------------------------------------------------
-  private function unlistenForDayEvent()
-    if (m_dayEventHandler != null)
-      GameEvents.dayStartEvent.remove(m_dayEventHandler)
-      destroy m_dayEventHandler
-      m_dayEventHandler = null
-
-  // --------------------------------------------------------------------------
-  private function listenForNightEvent()
-    unlistenForNightEvent()
-
-    if (m_nightEventHandler == null)
-      m_nightEventHandler = GameEvents.nightStartEvent.add() () ->
-        onNightStart()
-
-  // --------------------------------------------------------------------------
-  private function unlistenForNightEvent()
-    if (m_nightEventHandler != null)
-      GameEvents.nightStartEvent.remove(m_nightEventHandler)
-      destroy m_nightEventHandler
-      m_nightEventHandler = null
+// ============================================================================
+function onNightStart()
+  g_GameInstance.startNight()
 
 // ============================================================================
 init
   g_GameInstance = new GameInstance()
+
+  registerDayEvent(function onDayStart)
+  registerNightEvent(function onNightStart)
 
   doAfter(0.1) ->
     g_GameInstance.start()

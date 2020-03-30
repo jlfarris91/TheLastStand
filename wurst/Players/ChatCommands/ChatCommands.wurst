@@ -1,0 +1,56 @@
+package ChatCommands
+import StringUtils
+import TriggerExtensions
+import LinkedList
+import public IChatCommandHandler
+import PriorityList
+
+constant string COMMAND_PREFIX = "-"
+
+trigger g_chatMessageTrigger
+LinkedList<string> g_commandArgs
+PriorityList<IChatCommandHandler> g_commandHandlers
+string g_commandStr
+
+// ============================================================================
+function parseChatCommand()
+  let fullChatString = GetEventPlayerChatString()
+  let p = GetTriggerPlayer()
+  let commandStr = fullChatString.substring(1, fullChatString.length())
+
+  let args = commandStr.split(" ")
+  g_commandArgs.clear()
+  for i = 0 to args.size() - 1
+    g_commandArgs.add(args.get(i))
+  destroy args
+
+  if (g_commandArgs.isEmpty())
+    return
+
+  g_commandStr = g_commandArgs.getFirst()
+  g_commandArgs.remove(g_commandStr)
+
+  for chatCommandHandler in g_commandHandlers
+    if (chatCommandHandler.handleChatCommand(p, g_commandStr))
+      break
+
+// ============================================================================
+public function getChatCommandString() returns string
+  return g_commandStr
+
+// ============================================================================
+public function getChatCommandArgs() returns LinkedList<string>
+  return g_commandArgs
+
+// ============================================================================
+public function registerChatCommandHandler(IChatCommandHandler handler, int priority)
+  g_commandHandlers.add(handler, priority)
+
+// ============================================================================
+init 
+  g_chatMessageTrigger = CreateTrigger()
+  g_chatMessageTrigger.registerAnyPlayerChatEvent(COMMAND_PREFIX, false)
+  g_chatMessageTrigger.addAction(function parseChatCommand)
+
+  g_commandHandlers = new PriorityList<IChatCommandHandler>()
+  g_commandArgs = new LinkedList<string>()

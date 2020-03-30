@@ -1,0 +1,72 @@
+package NightsSurvivedStat
+import Statistic
+import UnitComponent
+import Events
+import SurvivorStats
+import SurvivorComponent
+import Pool
+
+Pool<NightsSurvivedStat> g_activeComponents
+
+// ============================================================================
+public class NightsSurvivedStat extends UnitComponent
+  private SurvivorComponent m_survivorDataComponent
+  private poolHandle m_poolHandle
+
+  // --------------------------------------------------------------------------
+  construct(IUnitMetadata owner)
+    super(owner)
+
+  // --------------------------------------------------------------------------
+  override protected function onEnabled()
+    super.onEnabled()
+    m_survivorDataComponent = getOwner().getOrAddSurvivorComponent()
+
+    if (m_poolHandle == INVALID_POOL_HANDLE)
+      m_poolHandle = g_activeComponents.reserve(this)
+
+  // --------------------------------------------------------------------------
+  override protected function onDisabled()
+    super.onDisabled()
+    
+    if (g_activeComponents.isHandleValid(m_poolHandle))
+      g_activeComponents.release(m_poolHandle)
+    m_poolHandle = INVALID_POOL_HANDLE
+
+    m_survivorDataComponent = null
+
+  // --------------------------------------------------------------------------
+  function registerNightSurvived()
+    let stats = m_survivorDataComponent.getSurvivorData()
+    if (stats == null)
+      return
+
+    let stat = stats.getStatistic(SurvivorStats.nightsSurvived) castTo IntStatistic
+    if (stat == null)
+      return
+
+    stat.increment(1)
+
+// ============================================================================
+public function IUnitMetadata.getNightsSurvivedStat() returns NightsSurvivedStat
+  return this.getComponent(Type(NightsSurvivedStat.typeId)) castTo NightsSurvivedStat
+
+// ============================================================================
+public function IUnitMetadata.getOrAddNightsSurvivedStat() returns NightsSurvivedStat
+  var component = this.getNightsSurvivedStat()
+  if (component == null)
+    component = this.addComponent(new NightsSurvivedStat(this)) castTo NightsSurvivedStat
+  return component
+
+// ============================================================================
+function onNightEnd()
+  for ph in g_activeComponents
+    if (g_activeComponents.isHandleValid(ph))
+      let comp = g_activeComponents.get(ph)
+      if (comp != null and comp.getEnabled())
+        comp.registerNightSurvived()
+
+// ============================================================================
+init
+  g_activeComponents = new Pool<NightsSurvivedStat>(128)
+  registerDayEvent(function onNightEnd)

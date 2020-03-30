@@ -1,14 +1,19 @@
 package RealtimeUnitComponent
-import Events
 import UnitComponent
-import UnitMetadata
 import ClosureTimers
+import Pool
 
-AnonymousEvent g_updateEvent
+Pool<RealtimeUnitComponent> g_realtimeComponents
+Pool<RealtimeUnitComponent> g_fastComponents
+Pool<RealtimeUnitComponent> g_backgroundComponents
 
 // ============================================================================
 public abstract class RealtimeUnitComponent extends UnitComponent
-  private Action m_updateHandler
+  private poolHandle m_poolHandle
+
+  static constant real REALTIME_UPDATE_INTERVAL = ANIMATION_PERIOD
+  static constant real FAST_UPDATE_INTERVAL = 0.1
+  static constant real BACKGROUND_UPDATE_INTERVAL = 0.4
 
   // --------------------------------------------------------------------------
   construct(IUnitMetadata owner)
@@ -19,33 +24,67 @@ public abstract class RealtimeUnitComponent extends UnitComponent
     unregisterForUpdate()
 
   // --------------------------------------------------------------------------
+  function update(real _dt)
+    skip
+
+  // --------------------------------------------------------------------------
   protected override function onDisabled()
     super.onDisabled()
     unregisterForUpdate()
 
   // --------------------------------------------------------------------------
-  protected function registerForUpdate()
+  protected function registerForRealtimeUpdate()
     unregisterForUpdate()
+    m_poolHandle = g_realtimeComponents.reserve(this)
 
-    if (m_updateHandler == null)
-      m_updateHandler = g_updateEvent.add() () -> 
-        onUpdate(ANIMATION_PERIOD)
+  // --------------------------------------------------------------------------
+  protected function registerForFastUpdate()
+    unregisterForUpdate()
+    m_poolHandle = g_fastComponents.reserve(this)
+
+  // --------------------------------------------------------------------------
+  protected function registerForBackgroundUpdate()
+    unregisterForUpdate()
+    m_poolHandle = g_backgroundComponents.reserve(this)
 
   // --------------------------------------------------------------------------
   protected function unregisterForUpdate()
-    if (m_updateHandler != null)
-      g_updateEvent.remove(m_updateHandler)
-      destroy m_updateHandler
-      m_updateHandler = null
+    if (m_poolHandle == INVALID_POOL_HANDLE)
+      return
 
-  // --------------------------------------------------------------------------
-  protected function onUpdate(real _dt)
-    skip
+    if (g_realtimeComponents.isHandleValid(m_poolHandle))
+      g_realtimeComponents.release(m_poolHandle)
+    
+    if (g_fastComponents.isHandleValid(m_poolHandle))
+      g_fastComponents.release(m_poolHandle)
+    
+    if (g_backgroundComponents.isHandleValid(m_poolHandle))
+      g_backgroundComponents.release(m_poolHandle)
+
+    m_poolHandle = INVALID_POOL_HANDLE
+
+// ============================================================================
+function updateComponents(Pool<RealtimeUnitComponent> pool, real dt)
+  for ph in pool
+    if (pool.isHandleValid(ph))
+      let comp = pool.get(ph)
+      if (comp != null)
+        comp.update(dt)
 
 // ============================================================================
 init
-  g_updateEvent = new AnonymousEvent()
+  g_realtimeComponents = new Pool<RealtimeUnitComponent>(256)
+  g_fastComponents = new Pool<RealtimeUnitComponent>(512)
+  g_backgroundComponents = new Pool<RealtimeUnitComponent>(1024)
 
-  let t = CreateTimer()
-  t.doPeriodically(ANIMATION_PERIOD) (CallbackPeriodic cb) ->
-    g_updateEvent.call()
+  let animationTimer = CreateTimer()
+  animationTimer.doPeriodically(RealtimeUnitComponent.REALTIME_UPDATE_INTERVAL) (CallbackPeriodic cb) ->
+    updateComponents(g_realtimeComponents, RealtimeUnitComponent.REALTIME_UPDATE_INTERVAL)
+
+  let fastTimer = CreateTimer()
+  fastTimer.doPeriodically(RealtimeUnitComponent.FAST_UPDATE_INTERVAL) (CallbackPeriodic cb) ->
+    updateComponents(g_fastComponents, RealtimeUnitComponent.FAST_UPDATE_INTERVAL)
+
+  let backgroundTimer = CreateTimer()
+  backgroundTimer.doPeriodically(RealtimeUnitComponent.BACKGROUND_UPDATE_INTERVAL) (CallbackPeriodic cb) ->
+    updateComponents(g_backgroundComponents, RealtimeUnitComponent.BACKGROUND_UPDATE_INTERVAL)
