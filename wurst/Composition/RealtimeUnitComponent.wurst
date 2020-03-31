@@ -1,27 +1,46 @@
 package RealtimeUnitComponent
 import UnitComponent
 import ClosureTimers
-import Pool
+import LinkedList
 
-Pool<RealtimeUnitComponent> g_realtimeComponents
-Pool<RealtimeUnitComponent> g_fastComponents
-Pool<RealtimeUnitComponent> g_backgroundComponents
+LinkedList<RealtimeUnitComponent> g_backgroundComponents
+LinkedList<RealtimeUnitComponent> g_slowComponents
+LinkedList<RealtimeUnitComponent> g_fastComponents
+LinkedList<RealtimeUnitComponent> g_realtimeComponents
+
+// ============================================================================
+public enum UpdatePriority
+  Idle
+  Background
+  Slow
+  Fast
+  Realtime
 
 // ============================================================================
 public abstract class RealtimeUnitComponent extends UnitComponent
-  private poolHandle m_poolHandle
-
-  static constant real REALTIME_UPDATE_INTERVAL = ANIMATION_PERIOD
+  static constant real BACKGROUND_UPDATE_INTERVAL = 1.0
+  static constant real SLOW_UPDATE_INTERVAL = 0.4
   static constant real FAST_UPDATE_INTERVAL = 0.1
-  static constant real BACKGROUND_UPDATE_INTERVAL = 0.4
+  static constant real REALTIME_UPDATE_INTERVAL = ANIMATION_PERIOD
+
+  private UpdatePriority m_updatePriority
 
   // --------------------------------------------------------------------------
   construct(IUnitMetadata owner)
     super(owner)
+    m_updatePriority = UpdatePriority.Idle
 
   // --------------------------------------------------------------------------
   ondestroy
     unregisterForUpdate()
+
+  // --------------------------------------------------------------------------
+  function getUpdatePriority() returns UpdatePriority
+    return m_updatePriority
+
+  // --------------------------------------------------------------------------
+  function getIsUpdating() returns bool
+    return m_updatePriority != UpdatePriority.Idle
 
   // --------------------------------------------------------------------------
   function update(real _dt)
@@ -33,58 +52,59 @@ public abstract class RealtimeUnitComponent extends UnitComponent
     unregisterForUpdate()
 
   // --------------------------------------------------------------------------
-  protected function registerForRealtimeUpdate()
+  protected function registerForUpdate(UpdatePriority priority)
     unregisterForUpdate()
-    m_poolHandle = g_realtimeComponents.reserve(this)
-
-  // --------------------------------------------------------------------------
-  protected function registerForFastUpdate()
-    unregisterForUpdate()
-    m_poolHandle = g_fastComponents.reserve(this)
-
-  // --------------------------------------------------------------------------
-  protected function registerForBackgroundUpdate()
-    unregisterForUpdate()
-    m_poolHandle = g_backgroundComponents.reserve(this)
+    switch (m_updatePriority)
+      case UpdatePriority.Background
+        g_backgroundComponents.add(this)
+      case UpdatePriority.Slow
+        g_slowComponents.add(this)
+      case UpdatePriority.Fast
+        g_fastComponents.add(this)
+      case UpdatePriority.Realtime
+        g_realtimeComponents.add(this)
+      default
+        skip
+    m_updatePriority = priority
 
   // --------------------------------------------------------------------------
   protected function unregisterForUpdate()
-    if (m_poolHandle == INVALID_POOL_HANDLE)
-      return
-
-    if (g_realtimeComponents.isHandleValid(m_poolHandle))
-      g_realtimeComponents.release(m_poolHandle)
-    
-    if (g_fastComponents.isHandleValid(m_poolHandle))
-      g_fastComponents.release(m_poolHandle)
-    
-    if (g_backgroundComponents.isHandleValid(m_poolHandle))
-      g_backgroundComponents.release(m_poolHandle)
-
-    m_poolHandle = INVALID_POOL_HANDLE
+    switch (m_updatePriority)
+      case UpdatePriority.Realtime
+        g_realtimeComponents.remove(this)
+      case UpdatePriority.Fast
+        g_fastComponents.remove(this)
+      case UpdatePriority.Background
+        g_backgroundComponents.remove(this)
+      default
+        skip
+    m_updatePriority = UpdatePriority.Idle
 
 // ============================================================================
-function updateComponents(Pool<RealtimeUnitComponent> pool, real dt)
-  for ph in pool
-    if (pool.isHandleValid(ph))
-      let comp = pool.get(ph)
-      if (comp != null)
-        comp.update(dt)
+function updateComponents(LinkedList<RealtimeUnitComponent> activeComponents, real dt)
+  for comp in activeComponents
+    if (comp != null and comp.getEnabled())
+      comp.update(dt)
 
 // ============================================================================
 init
-  g_realtimeComponents = new Pool<RealtimeUnitComponent>(256)
-  g_fastComponents = new Pool<RealtimeUnitComponent>(512)
-  g_backgroundComponents = new Pool<RealtimeUnitComponent>(1024)
+  g_backgroundComponents = new LinkedList<RealtimeUnitComponent>()
+  g_slowComponents = new LinkedList<RealtimeUnitComponent>()
+  g_fastComponents = new LinkedList<RealtimeUnitComponent>()
+  g_realtimeComponents = new LinkedList<RealtimeUnitComponent>()
 
-  let animationTimer = CreateTimer()
-  animationTimer.doPeriodically(RealtimeUnitComponent.REALTIME_UPDATE_INTERVAL) (CallbackPeriodic cb) ->
-    updateComponents(g_realtimeComponents, RealtimeUnitComponent.REALTIME_UPDATE_INTERVAL)
+  let backgroundTimer = CreateTimer()
+  backgroundTimer.doPeriodically(RealtimeUnitComponent.BACKGROUND_UPDATE_INTERVAL) (CallbackPeriodic cb) ->
+    updateComponents(g_backgroundComponents, RealtimeUnitComponent.BACKGROUND_UPDATE_INTERVAL)
+
+  let slowTimer = CreateTimer()
+  slowTimer.doPeriodically(RealtimeUnitComponent.SLOW_UPDATE_INTERVAL) (CallbackPeriodic cb) ->
+    updateComponents(g_slowComponents, RealtimeUnitComponent.SLOW_UPDATE_INTERVAL)
 
   let fastTimer = CreateTimer()
   fastTimer.doPeriodically(RealtimeUnitComponent.FAST_UPDATE_INTERVAL) (CallbackPeriodic cb) ->
     updateComponents(g_fastComponents, RealtimeUnitComponent.FAST_UPDATE_INTERVAL)
 
-  let backgroundTimer = CreateTimer()
-  backgroundTimer.doPeriodically(RealtimeUnitComponent.BACKGROUND_UPDATE_INTERVAL) (CallbackPeriodic cb) ->
-    updateComponents(g_backgroundComponents, RealtimeUnitComponent.BACKGROUND_UPDATE_INTERVAL)
+  let realtimeTimer = CreateTimer()
+  realtimeTimer.doPeriodically(RealtimeUnitComponent.REALTIME_UPDATE_INTERVAL) (CallbackPeriodic cb) ->
+    updateComponents(g_realtimeComponents, RealtimeUnitComponent.REALTIME_UPDATE_INTERVAL)

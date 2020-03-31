@@ -16,10 +16,9 @@ public constant int UNLIMITED = 99999
 // ============================================================================
 public class SpawnWave extends Runnable
   private SpawnWaveDefinition m_definition
-  private MulticastRegistration m_onActivatedHandler
+  private Action m_onActivatedHandler
   private player m_targetPlayer
   private LinkedList<unit> m_aliveSpawnedUnits
-  private GenericArgsEvent<SpawnWave, LinkedList<unit>> m_unitsSpawnedEvent
   private int m_numSpawned
   private string m_name
 
@@ -27,14 +26,12 @@ public class SpawnWave extends Runnable
   construct(SpawnWaveDefinition def, player targetPlayer)
     m_definition = def
     m_aliveSpawnedUnits = new LinkedList<unit>()
-    m_unitsSpawnedEvent = new GenericArgsEvent<SpawnWave, LinkedList<unit>>()
     setTargetPlayer(targetPlayer)
 
   // --------------------------------------------------------------------------
   ondestroy
     unlistenToActivatedEvent()
     destroy m_aliveSpawnedUnits
-    destroy m_unitsSpawnedEvent
     m_definition = null
     m_targetPlayer = null
 
@@ -57,10 +54,6 @@ public class SpawnWave extends Runnable
   // --------------------------------------------------------------------------
   function getDefinition() returns SpawnWaveDefinition
     return m_definition
-
-  // --------------------------------------------------------------------------
-  function getUnitsSpawnedEvent() returns GenericArgsEvent<SpawnWave, LinkedList<unit>>
-    return m_unitsSpawnedEvent
 
   // --------------------------------------------------------------------------
   override function onStarted()
@@ -116,8 +109,6 @@ public class SpawnWave extends Runnable
     if (spawnPoints.getCount() == 0)
       error("[SpawnWave.onActivated] Found no spawn points!")
 
-    let spawnedUnits = new LinkedList<unit>()
-
     var numSpawnsAvailable = getNumSpawnsAvailable(aliveCountMax, spawnCountMax)
 
     // For each spawn point
@@ -144,8 +135,7 @@ public class SpawnWave extends Runnable
           if (numSpawnsAvailable == 0)
             break
 
-          let spawnedUnit = spawnSingleUnit(unitType, sp)
-          spawnedUnits.add(spawnedUnit)
+          spawnSingleUnit(unitType, sp)
 
           numSpawnsAvailable = getNumSpawnsAvailable(aliveCountMax, spawnCountMax)
 
@@ -154,9 +144,6 @@ public class SpawnWave extends Runnable
 
     // Clean up the spawnPoints list
     destroy spawnPoints
-    
-    m_unitsSpawnedEvent.call(this, spawnedUnits)
-    destroy spawnedUnits
 
   // --------------------------------------------------------------------------
   private function getNumSpawnsAvailable(int aliveCountMax, int spawnCountMax) returns int
@@ -248,7 +235,7 @@ public class SpawnWave extends Runnable
     unlistenToActivatedEvent()
     if (m_onActivatedHandler == null)
       let activator = m_definition.getActivator()
-      m_onActivatedHandler = activator.getActivatedEvent().register() (IWaveActivator sender) ->
+      m_onActivatedHandler = activator.getActivatedEvent().register() () ->
         onActivated()
 
   // --------------------------------------------------------------------------

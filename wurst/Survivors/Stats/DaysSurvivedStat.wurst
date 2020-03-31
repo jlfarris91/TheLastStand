@@ -1,17 +1,16 @@
 package DaysSurvivedStat
 import Statistic
 import UnitComponent
-import Events
 import SurvivorStats
 import SurvivorComponent
-import Pool
+import TimeOfDay
+import LinkedList
 
-Pool<DaysSurvivedStat> g_activeComponents
+LinkedList<DaysSurvivedStat> g_activeComponents
 
 // ============================================================================
 public class DaysSurvivedStat extends UnitComponent
   private SurvivorComponent m_survivorDataComponent
-  private poolHandle m_poolHandle
 
   // --------------------------------------------------------------------------
   construct(IUnitMetadata owner)
@@ -21,18 +20,12 @@ public class DaysSurvivedStat extends UnitComponent
   override protected function onEnabled()
     super.onEnabled()
     m_survivorDataComponent = getOwner().getOrAddSurvivorComponent()
-
-    if (m_poolHandle == INVALID_POOL_HANDLE)
-      m_poolHandle = g_activeComponents.reserve(this)
+    g_activeComponents.add(this)
 
   // --------------------------------------------------------------------------
   override protected function onDisabled()
     super.onDisabled()
-    
-    if (g_activeComponents.isHandleValid(m_poolHandle))
-      g_activeComponents.release(m_poolHandle)
-    m_poolHandle = INVALID_POOL_HANDLE
-
+    g_activeComponents.remove(this)
     m_survivorDataComponent = null
 
   // --------------------------------------------------------------------------
@@ -60,13 +53,11 @@ public function IUnitMetadata.getOrAddDaysSurvivedStat() returns DaysSurvivedSta
 
 // ============================================================================
 function onDayEnd()
-  for ph in g_activeComponents
-    if (g_activeComponents.isHandleValid(ph))
-      let comp = g_activeComponents.get(ph)
-      if (comp != null and comp.getEnabled())
-        comp.registerDaySurvived()
+  for comp in g_activeComponents
+    if (comp != null and comp.getEnabled())
+      comp.registerDaySurvived()  
 
 // ============================================================================
 init
-  g_activeComponents = new Pool<DaysSurvivedStat>(128)
+  g_activeComponents = new LinkedList<DaysSurvivedStat>()
   registerNightEvent(function onDayEnd)

@@ -7,9 +7,8 @@ import UnitMetadata
 import ClosureTimers
 import LootableReward
 import ErrorHandling
-import Events
-import Vector
-import Pool
+import TimeOfDay
+import LinkedList
 
 constant int ABILITY_ID_LOOTABLE = 'A02C'
 constant colorA LOOTABLE_COLOR = colorA(255, 255, 255, 255)
@@ -21,8 +20,8 @@ constant colorA PROGRESS_BAR_BACKGROUND = colorA(0, 64, 0, 255)
 constant real PROGRESS_BAR_UPDATE_PERIOD = 0.1
 
 TextProgressBar g_LootOperationProgressBar
-Vector<LootableUnit> g_lootableUnits
-Pool<LootOperation> g_activeOperations
+LinkedList<LootableUnit> g_lootableUnits
+LinkedList<LootOperation> g_activeOperations
 
 // ============================================================================
 public class LootableUnit extends UnitMetadata
@@ -171,7 +170,6 @@ class LootOperation
   private IUnitMetadata _lootingUnit
   private LootableUnit _lootable
   private ProgressBarTag _progressBar
-  private poolHandle _poolHandle
   private real _elapsed
   private real _duration
 
@@ -201,17 +199,11 @@ class LootOperation
   // --------------------------------------------------------------------------
   private function registerForUpdate()
     unregisterForUpdate()
-    _poolHandle = g_activeOperations.reserve(this)
+    g_activeOperations.add(this)
 
   // --------------------------------------------------------------------------
   private function unregisterForUpdate()
-    if (_poolHandle == INVALID_POOL_HANDLE)
-      return
-    
-    if (g_activeOperations.isHandleValid(_poolHandle))
-      g_activeOperations.release(_poolHandle)
-    
-    _poolHandle = INVALID_POOL_HANDLE
+    g_activeOperations.remove(this)
 
   // --------------------------------------------------------------------------
   function update()
@@ -239,17 +231,14 @@ function onDayStart()
 
 // ============================================================================
 function updateProgressBars()
-  for ph in g_activeOperations
-    if (g_activeOperations.isHandleValid(ph))
-      let lootOperation = g_activeOperations.get(ph)
-      if(lootOperation != null)
-        lootOperation.update()
+  for operation in g_activeOperations
+    operation.update()
 
 // ============================================================================
 init
   g_LootOperationProgressBar = new TextProgressBar(PROGRESS_BAR_LENGTH, PROGRESS_BAR_FOREGROUND, PROGRESS_BAR_BACKGROUND)
-  g_lootableUnits = new Vector<LootableUnit>(256)
-  g_activeOperations = new Pool<LootOperation>(32)
+  g_lootableUnits = new LinkedList<LootableUnit>()
+  g_activeOperations = new LinkedList<LootOperation>()
 
   registerDayEvent(function onDayStart)
 

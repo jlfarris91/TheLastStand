@@ -7,21 +7,21 @@ import MovementComponent
 
 // ============================================================================
 public class SprintComponent extends UnitComponent
-  private MovementComponent _movement
-  private real _sprintSpeed = 0
-  private real _staminaCost = 0
-  private int _level = 1
-  private bool _isSprinting
-  private MulticastRegistration _onUnitMovedHandler
+  private MovementComponent m_movement
+  private real m_sprintSpeed = 0
+  private real m_staminaCost = 0
+  private int m_level = 1
+  private bool m_isSprinting
+  private Action1<real> m_onUnitMovedHandler
 
-  GenericEvent<SprintComponent> startedSprintingEvent
-  GenericEvent<SprintComponent> stoppedSprintingEvent
+  Event startedSprintingEvent
+  Event stoppedSprintingEvent
 
   // --------------------------------------------------------------------------
   construct(IUnitMetadata owner)
     super(owner)
-    startedSprintingEvent = new GenericEvent<SprintComponent>()
-    stoppedSprintingEvent = new GenericEvent<SprintComponent>()
+    startedSprintingEvent = new Event()
+    stoppedSprintingEvent = new Event()
 
   // --------------------------------------------------------------------------
   ondestroy
@@ -33,46 +33,46 @@ public class SprintComponent extends UnitComponent
     destroy stoppedSprintingEvent
     stoppedSprintingEvent = null
 
-    _movement = null
+    m_movement = null
 
   // --------------------------------------------------------------------------
   function getIsSprinting() returns bool
-    return _isSprinting
+    return m_isSprinting
 
   // --------------------------------------------------------------------------
   function setSprintSpeed(real sprintSpeed)
-    _sprintSpeed = sprintSpeed
+    m_sprintSpeed = sprintSpeed
 
   // --------------------------------------------------------------------------
   function getSprintSpeed() returns real
-    return _sprintSpeed
+    return m_sprintSpeed
 
   // --------------------------------------------------------------------------
   function setStaminaCost(real staminaCost)
-    _staminaCost = staminaCost
+    m_staminaCost = staminaCost
 
   // --------------------------------------------------------------------------
   function getStaminaCost() returns real
-    return _staminaCost
+    return m_staminaCost
 
   // --------------------------------------------------------------------------
   function setLevel(int level)
-    _level = level
+    m_level = level
 
   // --------------------------------------------------------------------------
   function getLevel() returns int
-    return _level
+    return m_level
 
   // --------------------------------------------------------------------------
   protected override function onEnabled()
     super.onEnabled()
 
-    _movement = getOwner().getOrAddMovementComponent()
+    m_movement = getOwner().getOrAddMovementComponent()
 
     let u = getOwnerUnit()
     if (u.getAbilityLevel(TlsAbilityIds.sprint) <= 0)
       u.addAbility(TlsAbilityIds.sprint)
-    u.setAbilityLevel(TlsAbilityIds.sprint, _level)
+    u.setAbilityLevel(TlsAbilityIds.sprint, m_level)
 
   // --------------------------------------------------------------------------
   protected override function onDisabled()
@@ -82,41 +82,41 @@ public class SprintComponent extends UnitComponent
     if (u.getAbilityLevel(TlsAbilityIds.sprint) > 0)
       u.removeAbility(TlsAbilityIds.sprint)
 
-    _movement = null
+    m_movement = null
 
   // --------------------------------------------------------------------------
   function startSprinting()
-    if (_isSprinting)
+    if (m_isSprinting)
       return
 
-    _isSprinting = true
+    m_isSprinting = true
 
     let u = getOwnerUnit()
     let baseSpeed = u.getDefaultMovespeed()
     u.removeAbility(TlsAbilityIds.sprint)
     u.addAbility(TlsAbilityIds.stopSprinting)
-    u.setAbilityLevel(TlsAbilityIds.stopSprinting, _level)
-    u.setMoveSpeed(baseSpeed + _sprintSpeed)
+    u.setAbilityLevel(TlsAbilityIds.stopSprinting, m_level)
+    u.setMoveSpeed(baseSpeed + m_sprintSpeed)
 
     listenToUnitMovedEvent()
-    startedSprintingEvent.call(this)
+    startedSprintingEvent.call()
 
   // --------------------------------------------------------------------------
   function stopSprinting()
-    if (not _isSprinting)
+    if (not m_isSprinting)
       return
 
-    _isSprinting = false
+    m_isSprinting = false
 
     let u = getOwnerUnit()
     let baseSpeed = u.getDefaultMovespeed()
     u.removeAbility(TlsAbilityIds.stopSprinting)
     u.addAbility(TlsAbilityIds.sprint)
-    u.setAbilityLevel(TlsAbilityIds.sprint, _level)
+    u.setAbilityLevel(TlsAbilityIds.sprint, m_level)
     u.setMoveSpeed(baseSpeed)
     
     unlistenToUnitMovedEvent()
-    stoppedSprintingEvent.call(this)
+    stoppedSprintingEvent.call()
 
   // --------------------------------------------------------------------------
   function exhaustUnit()
@@ -126,7 +126,7 @@ public class SprintComponent extends UnitComponent
   // --------------------------------------------------------------------------
   private function onUnitMoved(real distanceInMeters)
     let u = getOwnerUnit()
-    let totalStaminaCost = distanceInMeters * _staminaCost
+    let totalStaminaCost = distanceInMeters * m_staminaCost
     u.subMana(totalStaminaCost)
     if (u.getMana() < totalStaminaCost)
       stopSprinting()
@@ -135,17 +135,29 @@ public class SprintComponent extends UnitComponent
   // --------------------------------------------------------------------------
   private function listenToUnitMovedEvent()
     unlistenToUnitMovedEvent()
-    if (_onUnitMovedHandler == null and _movement != null)
-      let unitMovedEvent = _movement.getUnitMovedEvent()
-      if (unitMovedEvent != null)
-        _onUnitMovedHandler = unitMovedEvent.register() (MovementComponent sender, real distanceInMeters) ->
-          onUnitMoved(distanceInMeters)
+
+    let unitMovedEvent = getUnitMovedEvent()
+    if (unitMovedEvent == null)
+      return
+
+    m_onUnitMovedHandler = unitMovedEvent.register() (real distanceInMeters) ->
+      onUnitMoved(distanceInMeters)
 
   // --------------------------------------------------------------------------
   private function unlistenToUnitMovedEvent()
-    if (_onUnitMovedHandler != null)
-      destroy _onUnitMovedHandler
-      _onUnitMovedHandler = null
+    if (m_onUnitMovedHandler == null)
+      return
+
+    let unitMovedEvent = getUnitMovedEvent()
+    if (unitMovedEvent != null)      
+      unitMovedEvent.unregister(m_onUnitMovedHandler)
+
+    destroy m_onUnitMovedHandler
+    m_onUnitMovedHandler = null
+
+  // --------------------------------------------------------------------------
+  private function getUnitMovedEvent() returns Event1<real>
+    return m_movement == null ? null : m_movement.getUnitMovedEvent()
 
 // ============================================================================
 public function IUnitMetadata.getOrAddSprintComponent() returns SprintComponent

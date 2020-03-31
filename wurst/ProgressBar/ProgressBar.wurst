@@ -3,7 +3,7 @@ import UnitPool
 import ClosureTimers
 import Unit_ProgressBar
 import Math
-import Pool
+import LinkedList
 
 constant player PROGRESS_BAR_OWNER = DUMMY_PLAYER
 constant real PROGRESS_BAR_UPDATE_PROGRESS_INTERVAL = ANIMATION_PERIOD//0.01
@@ -11,8 +11,8 @@ constant real PROGRESS_BAR_UPDATE_POSITION_INTERVAL = ANIMATION_PERIOD
 constant int DEATH_ANIMATION_INDEX = 0
 constant int ZERO_ANIMATION_INDEX = 1
 
-Pool<ProgressBar> g_activeProgressBarsVisualUpdate
-Pool<ProgressBar> g_activeProgressBarsPositionUpdate
+LinkedList<ProgressBar> g_updateVisuals
+LinkedList<ProgressBar> g_updatePositions
 
 // ============================================================================
 public class ProgressBar
@@ -27,9 +27,6 @@ public class ProgressBar
   private real _currentAlpha
   private real _targetAlpha
   private real _alphaSpeed
-
-  private poolHandle m_visualUpdateHandle
-  private poolHandle m_positionUpdateHandle
 
   // --------------------------------------------------------------------------
   construct()
@@ -189,32 +186,20 @@ public class ProgressBar
   // --------------------------------------------------------------------------
   private function registerForVisualUpdate()
     unregisterForVisualUpdate()
-    m_visualUpdateHandle = g_activeProgressBarsVisualUpdate.reserve(this)
+    g_updateVisuals.add(this)
 
   // --------------------------------------------------------------------------
   private function unregisterForVisualUpdate()
-    if (m_visualUpdateHandle == INVALID_POOL_HANDLE)
-      return
-    
-    if (g_activeProgressBarsVisualUpdate.isHandleValid(m_visualUpdateHandle))
-      g_activeProgressBarsVisualUpdate.release(m_visualUpdateHandle)
-
-    m_visualUpdateHandle = INVALID_POOL_HANDLE
+    g_updateVisuals.remove(this)
 
   // --------------------------------------------------------------------------
   private function registerForPositionUpdate()
     unregisterForPositionUpdate()
-    m_positionUpdateHandle = g_activeProgressBarsPositionUpdate.reserve(this)
+    g_updatePositions.add(this)
 
   // --------------------------------------------------------------------------
   private function unregisterForPositionUpdate()
-    if (m_positionUpdateHandle == INVALID_POOL_HANDLE)
-      return
-    
-    if (g_activeProgressBarsPositionUpdate.isHandleValid(m_positionUpdateHandle))
-      g_activeProgressBarsPositionUpdate.release(m_positionUpdateHandle)
-
-    m_positionUpdateHandle = INVALID_POOL_HANDLE
+    g_updatePositions.remove(this)
 
 // ============================================================================
 function getDummyUnit(int unitId) returns unit
@@ -227,19 +212,15 @@ function releaseDummyUnit(unit u)
   
 // ============================================================================
 init
-  g_activeProgressBarsVisualUpdate = new Pool<ProgressBar>(32)
-  g_activeProgressBarsPositionUpdate = new Pool<ProgressBar>(32)
+  g_updateVisuals = new LinkedList<ProgressBar>()
+  g_updatePositions = new LinkedList<ProgressBar>()
 
   doPeriodically(PROGRESS_BAR_UPDATE_PROGRESS_INTERVAL) (CallbackPeriodic cb) ->
-    for ph in g_activeProgressBarsVisualUpdate
-      if (g_activeProgressBarsVisualUpdate.isHandleValid(ph))
-        let progressBar = g_activeProgressBarsVisualUpdate.get(ph)
-        if (progressBar != null)
-          progressBar.updateVisuals(PROGRESS_BAR_UPDATE_PROGRESS_INTERVAL)
+    for progressBar in g_updateVisuals
+      if (progressBar != null)
+        progressBar.updateVisuals(PROGRESS_BAR_UPDATE_PROGRESS_INTERVAL)
   
   doPeriodically(PROGRESS_BAR_UPDATE_POSITION_INTERVAL) (CallbackPeriodic cb) ->
-    for ph in g_activeProgressBarsPositionUpdate
-      if (g_activeProgressBarsPositionUpdate.isHandleValid(ph))
-        let progressBar = g_activeProgressBarsPositionUpdate.get(ph)
-        if (progressBar != null)
-          progressBar.updateVisuals(PROGRESS_BAR_UPDATE_POSITION_INTERVAL)
+    for progressBar in g_updatePositions
+      if (progressBar != null)
+        progressBar.updateVisuals(PROGRESS_BAR_UPDATE_POSITION_INTERVAL)
