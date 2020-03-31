@@ -34,6 +34,10 @@ $env:MapAuthor = "Ozymandias"
 $VersionInfo = [PSCustomObject](GitVersion | ConvertFrom-Json)
 $env:MapVersion = "v{0}" -f $VersionInfo.MajorMinorPatch
 
+if ($VersionInfo.BranchName -eq "develop") {
+  $env:MapVersion = "{0}.{1}" -f $env:MapVersion, $VersionInfo.PreReleaseTag
+}
+
 $env:SourceMapFileName = "TheLastStand.w3x"
 
 $env:MapName = "The Last Stand"
