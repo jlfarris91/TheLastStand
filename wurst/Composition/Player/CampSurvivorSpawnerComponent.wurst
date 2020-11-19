@@ -1,0 +1,110 @@
+package CampSurvivorSpawnerComponent
+import PlayerComponent
+import TentComponent
+import UnitMetadata
+import RegisterEvents
+import LinkedList
+import ClosureTimers
+import GameConstants
+import initlater HumanPlayerMetadata
+import initlater SurvivorUnit
+import initlater Survivors
+import initlater GameInstance
+
+LinkedList<CampSurvivorSpawnerComponent> g_activeComponents
+trigger g_trigger
+group g_tempGroup
+
+// ============================================================================
+public class CampSurvivorSpawnerComponent extends PlayerComponent
+
+  // --------------------------------------------------------------------------
+  construct (HumanPlayerMetadata owner)
+    super(owner)
+
+  // --------------------------------------------------------------------------
+  override function onEnabled()
+    super.onEnabled()
+    g_activeComponents.add(this)
+
+  // --------------------------------------------------------------------------
+  override function onDisabled()
+    super.onDisabled()
+    g_activeComponents.remove(this)
+
+// ============================================================================
+public function HumanPlayerMetadata.getCampSurvivorSpawnerComponent() returns CampSurvivorSpawnerComponent
+  return this.getComponent(CampSurvivorSpawnerComponent.typeId.toTypeInfo()) castTo CampSurvivorSpawnerComponent
+
+// ============================================================================
+public function HumanPlayerMetadata.getOrAddCampSurvivorSpawnerComponent() returns CampSurvivorSpawnerComponent
+  var component = this.getCampSurvivorSpawnerComponent()
+  if (component == null)
+    component = this.addComponent(new CampSurvivorSpawnerComponent(this)) castTo CampSurvivorSpawnerComponent
+  return component
+
+// ============================================================================
+function onUnitConstructed()
+
+  let constructedUnit = GetConstructedStructure()
+  let metadata = constructedUnit.getMetadata()
+  if (metadata == null)
+    return
+
+  let tentComponent = metadata.getTentComponent()
+  if (tentComponent == null or not tentComponent.getEnabled())
+    return
+
+  let p = constructedUnit.getOwner()
+  trySpawnSurvivorForPlayer(p)
+
+// ============================================================================
+function trySpawnSurvivorForPlayer(player p)
+  if (countNumberOfConstructedTentsOwnedByPlayer(p) <= countNumberOfSurvivorsOwnedByPlayer(p))
+    return
+  
+  let survivorUnit = spawnSurvivorUnitForPlayer(p)
+  if (survivorUnit == null)
+    Log.error("Could not spawn survivor for player")
+
+// ============================================================================
+public function countNumberOfConstructedTentsOwnedByPlayer(player p) returns int
+  g_tempGroup.clear()
+  g_tempGroup.enumUnitsOfPlayer(p, null)
+  var count = 0
+  for u from g_tempGroup
+    let metadata = u.getMetadata()
+    if (metadata != null and metadata.hasComponent(TentComponent.typeId))
+      let tentComponent = metadata.getTentComponent()
+      if (tentComponent != null and tentComponent.getIsConstructed())
+        count++
+  return count
+
+// ============================================================================
+public function countNumberOfSurvivorsOwnedByPlayer(player p) returns int
+  g_tempGroup.clear()
+  g_tempGroup.enumUnitsOfPlayer(p, null)
+  var count = 0
+  for u from g_tempGroup
+    if (u.isSurvivor())
+      count++
+  return count
+
+// ============================================================================
+function doSpawnSurvivorsForCamp()
+
+  if (not g_GameInstance.getIsDay())
+    return
+
+  for comp in g_activeComponents
+    if (comp != null and comp.getEnabled())
+      trySpawnSurvivorForPlayer(comp.getOwnerPlayer())
+
+// ============================================================================
+init
+  g_tempGroup = CreateGroup()
+  g_activeComponents = new LinkedList<CampSurvivorSpawnerComponent>()
+
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_CONSTRUCT_FINISH, function onUnitConstructed)
+
+  doPeriodically(SPAWN_SURVIVOR_AT_DAY_INTERVAL, (CallbackPeriodic cb) -> doSpawnSurvivorsForCamp())

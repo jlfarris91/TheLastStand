@@ -5,9 +5,12 @@ import HumanPlayers
 import ErrorHandling
 import initlater Camp
 import GameConstants
+import ClosureEvents
+
+import CampSurvivorSpawnerComponent
 
 // ============================================================================
-public class HumanPlayerMetadata extends BasePlayerMetadata
+public class HumanPlayerMetadata extends PlayerMetadata
   private int _kills
   private IUnitMetadata _hero
   private ICamp _camp
@@ -31,11 +34,11 @@ public class HumanPlayerMetadata extends BasePlayerMetadata
 
   // --------------------------------------------------------------------------
   function getMaterials() returns int
-    return GetPlayerState(_player, PLAYER_STATE_RESOURCE_LUMBER)
+    return GetPlayerState(getPlayer(), PLAYER_STATE_RESOURCE_LUMBER)
 
   // --------------------------------------------------------------------------
   function setMaterials(int value)
-    SetPlayerState(_player, PLAYER_STATE_RESOURCE_LUMBER, value)
+    SetPlayerState(getPlayer(), PLAYER_STATE_RESOURCE_LUMBER, value)
   
   // --------------------------------------------------------------------------
   function giveMaterials(int value)
@@ -47,11 +50,11 @@ public class HumanPlayerMetadata extends BasePlayerMetadata
 
   // --------------------------------------------------------------------------
   function getGold() returns int
-    return GetPlayerState(_player, PLAYER_STATE_RESOURCE_GOLD)
+    return GetPlayerState(getPlayer(), PLAYER_STATE_RESOURCE_GOLD)
 
   // --------------------------------------------------------------------------
   function setGold(int value)
-    SetPlayerState(_player, PLAYER_STATE_RESOURCE_GOLD, value)
+    SetPlayerState(getPlayer(), PLAYER_STATE_RESOURCE_GOLD, value)
   
   // --------------------------------------------------------------------------
   function giveGold(int value)
@@ -73,22 +76,6 @@ public class HumanPlayerMetadata extends BasePlayerMetadata
   function setHero(IUnitMetadata hero)
     _hero = hero
 
-  // --------------------------------------------------------------------------
-  override protected function onPlayerLeftGame()
-    super.onPlayerLeftGame()
-
-    g_PlayingHumanPlayers.remove(_player)
-
-    if (_hero != null)
-      _hero.remove()
-
-    if (_camp != null)
-      let campTent = _camp.getCampTent()
-      if (campTent != null)
-        campTent.kill()
-
-      _camp.giveAllUnitsToPlayer(PLAYER_VILLAGERS)
-
 // ============================================================================
 public function player.getHumanMetadata() returns HumanPlayerMetadata
   return this.getMetadata() castTo HumanPlayerMetadata
@@ -107,7 +94,28 @@ public function unit.getOwnerHumanMetadata() returns HumanPlayerMetadata
 // ============================================================================
 function initializePlayerMetadata(player p)
   let metadata = new HumanPlayerMetadata(p)
+  ..getOrAddCampSurvivorSpawnerComponent()
   registerPlayerMetadata(metadata)
+
+// ============================================================================
+function onPlayerLeftGame()
+  let leavingPlayer = GetTriggerPlayer()
+  let metadata = leavingPlayer.getHumanMetadata()
+  if (metadata == null)
+    return
+
+  g_PlayingHumanPlayers.remove(leavingPlayer)
+
+  let hero = metadata.getHero()
+  if (hero != null)
+    hero.remove()
+
+  let camp = metadata.getCamp()
+  if (camp != null)
+    let campTent = camp.getCampTent()
+    if (campTent != null)
+      campTent.kill()
+    camp.giveAllUnitsToPlayer(PLAYER_VILLAGERS)
 
 // ============================================================================
 init
@@ -115,3 +123,5 @@ init
     initializePlayerMetadata(p)
 
   initializePlayerMetadata(PLAYER_VILLAGERS)
+
+  EventListener.add(EVENT_PLAYER_LEAVE, () -> onPlayerLeftGame())
