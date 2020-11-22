@@ -1,15 +1,139 @@
 package SpikesComponent
-import FX
-import ClosureTimers
 import UnitComponent
+import TlsUnitIds
+import TlsAbilityIds
 import RegisterEvents
+import TimerUtils
+import ClosureTimers
+import FX
+import Abilities
+import Buildings
+
+constant real SPIKE4FX_TIMESCALE_DEFAULT = 1.0
+constant real SPIKE4FX_TIMESCALE_ATTACK = 5.0
+constant real SPIKE4_ATTACKTIMER_DURATION = 1.0
 
 // ============================================================================
 public class SpikesComponent extends UnitComponent
+  private timer spike4AttackTimer
+  private effect spike3FX
+  private effect spike4FX
 
   // --------------------------------------------------------------------------
   construct (IUnitMetadata owner)
     super(owner)
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    destroySpikes3FX()
+    destroySpikes4FX()
+    releaseSpike4AttackTimer()
+
+  // --------------------------------------------------------------------------
+  override function onEnabled()
+    super.onEnabled()
+    update()
+
+  // --------------------------------------------------------------------------
+  override function onDisabled()
+    super.onDisabled()
+
+    let ownerUnit = getOwnerUnit()
+    ownerUnit.removeAbility(TlsAbilityIds.spikeAura)
+
+    destroySpikes3FX()
+    releaseSpike4AttackTimer()
+
+  // --------------------------------------------------------------------------
+  function update()
+    let ownerUnit = getOwnerUnit()
+    let ownerUnitId = ownerUnit.getTypeId()
+
+    if (ownerUnitId == TlsUnitIds.spikes[3])
+      createSpikes3FX()
+
+    if (ownerUnitId == TlsUnitIds.spikes[4])
+      // Hide the unit and show fx instead. The unit is still selectable.
+      ownerUnit.setVertexColor(colorA(0, 0, 0, 0))
+      destroySpikes3FX()
+      createSpikes4FX()
+      resetSpike4FXAnimation()
+
+    if (not ownerUnit.hasAbility(TlsAbilityIds.spikeAura))
+      ownerUnit.addAbility(TlsAbilityIds.spikeAura)
+
+    let ownerUnitLvl = getOwnerUnitLevel() + 1
+    ownerUnit.setAbilityLevel(TlsAbilityIds.spikeAura, ownerUnitLvl)
+
+  // --------------------------------------------------------------------------
+  function onUnitAttackedBySpikes4()
+    playSpike4AttackAnimation()
+    initializeSpike4AttackTimer()
+    spike4AttackTimer.doAfter(SPIKE4_ATTACKTIMER_DURATION) -> 
+      resetSpike4FXAnimation()
+
+  // --------------------------------------------------------------------------
+  private function createSpikes3FX()
+    if (spike3FX != null)
+      return
+    let ownerUnit = getOwnerUnit()
+    spike3FX = FX.createEffect(Abilities.sentinelMissile, ownerUnit.getPos())
+    // TODO: possible desync here?
+    spike3FX.setZ(ownerUnit.getLocalZ() + 64.0)
+    spike3FX.setColor(100, 50, 50)
+
+  // --------------------------------------------------------------------------
+  private function destroySpikes3FX()
+    if (spike3FX != null)
+      spike3FX.destr()
+      spike3FX = null
+
+  // --------------------------------------------------------------------------
+  private function createSpikes4FX()
+    if (spike4FX != null)
+      return
+    let ownerUnit = getOwnerUnit()
+    spike4FX = FX.createEffect(Buildings.slaughterHouse1, ownerUnit.getPos())
+    // TODO: possible desync here?
+    spike4FX.setZ(ownerUnit.getLocalZ() - 50.0)
+    spike4FX.addSubAnimation(SUBANIM_TYPE_WORK)
+    spike4FX.playAnimation(ANIM_TYPE_STAND)
+    spike4FX.setColor(50, 50, 50)
+    spike4FX.setScale(0.6)
+    resetSpike4FXAnimation()
+
+  // --------------------------------------------------------------------------
+  private function destroySpikes4FX()
+    if (spike4FX != null)
+      spike4FX.destr()
+      spike4FX = null
+
+  // --------------------------------------------------------------------------
+  private function playSpike4AttackAnimation()
+    spike4FX.setTimeScale(SPIKE4FX_TIMESCALE_ATTACK)
+
+  // --------------------------------------------------------------------------
+  private function resetSpike4FXAnimation()
+    spike4FX.setTimeScale(SPIKE4FX_TIMESCALE_DEFAULT)
+
+  // --------------------------------------------------------------------------
+  private function initializeSpike4AttackTimer()
+    if (spike4AttackTimer == null)
+      spike4AttackTimer = getTimer()
+
+  // --------------------------------------------------------------------------
+  private function releaseSpike4AttackTimer()    
+    if (spike4AttackTimer != null)
+      spike4AttackTimer.release()
+      spike4AttackTimer = null
+
+  // --------------------------------------------------------------------------
+  function getOwnerUnitLevel() returns int
+    let ownerUnitId = getOwnerUnit().getTypeId()
+    for i = 0 to 4
+      if (ownerUnitId == TlsUnitIds.spikes[i])
+        return i
+    return 0
 
 // ============================================================================
 public function IUnitMetadata.getSpikesComponent() returns SpikesComponent
@@ -23,33 +147,30 @@ public function IUnitMetadata.getOrAddSpikesComponent() returns SpikesComponent
   return component
 
 // ============================================================================
-function onUnitDamaged()
-
-  let damagingUnit = GetEventDamageSource()
-  let damagingUnitMetadata = damagingUnit.getMetadata()
-  if (damagingUnitMetadata == null)
-    return
-
-  let spikes = damagingUnitMetadata.getSpikesComponent()
-  if (spikes == null or not spikes.getEnabled())
-    return
-
-  let damagedUnit = GetTriggerUnit()
-
-  damagingUnit.subHP(GetEventDamage())
-
-  let spikesPos = damagingUnit.getPos()
-  let damagedPos = damagedUnit.getPos()
+function onUpgradeFinished()
+  let upgradedUnit = GetTriggerUnit()
   
-  let fxPos = ((spikesPos + damagedPos) / 2.0)
+  let metadata = upgradedUnit.getMetadata()
+  if (metadata == null)
+    return
 
-  let fx = FX.createEffect("Abilities\\Weapons\\Rifle\\RifleImpact.mdl", fxPos)
-  fx.setAlpha(255)
-  fx.setColor(255, 255, 255)
-  fx.setScale(0.8)
-  doAfter(2) ->
-    DestroyEffect(fx)
+  let spikesComponent = metadata.getSpikesComponent()
+  if (spikesComponent == null or not spikesComponent.getEnabled())
+    return
+
+  spikesComponent.update()
+
+// ============================================================================
+function onUnitAttackedBySpikes4()
+  let attackingUnit = GetAttacker()
+  if (attackingUnit.getTypeId() != TlsUnitIds.spikes[4])
+    return
+  let spikesComponent = attackingUnit.getMetadata().getSpikesComponent()
+  if (spikesComponent == null or not spikesComponent.getEnabled())
+    return
+  spikesComponent.onUnitAttackedBySpikes4()
 
 // ============================================================================
 init
-  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_DAMAGED, function onUnitDamaged)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_UPGRADE_FINISH, function onUpgradeFinished)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ATTACKED, function onUnitAttackedBySpikes4)
