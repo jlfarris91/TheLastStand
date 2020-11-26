@@ -11,8 +11,6 @@ import ErrorHandling
 import ClosureEvents
 import Math
 
-public constant int UNLIMITED = 99999
-
 // ============================================================================
 public class SpawnWave extends Runnable
   private SpawnWaveDefinition m_definition
@@ -20,7 +18,6 @@ public class SpawnWave extends Runnable
   private player m_targetPlayer
   private LinkedList<unit> m_aliveSpawnedUnits
   private int m_numSpawned
-  private string m_name
 
   // --------------------------------------------------------------------------
   construct(SpawnWaveDefinition def, player targetPlayer)
@@ -34,14 +31,6 @@ public class SpawnWave extends Runnable
     destroy m_aliveSpawnedUnits
     m_definition = null
     m_targetPlayer = null
-
-  // --------------------------------------------------------------------------
-  function setName(string name)
-    m_name = name
-
-  // --------------------------------------------------------------------------
-  function getName() returns string
-    return m_name
 
   // --------------------------------------------------------------------------
   function getTargetPlayer() returns player
@@ -97,10 +86,10 @@ public class SpawnWave extends Runnable
     let center = camp.getCenter()
 
     let waveProgress = getWaveProgress()
-    let aliveCountMax = getAliveCountMax(waveProgress)
-    let spawnCountMax = getSpawnCountMax(waveProgress)    
-    let spawnsPerActivation = getSpawnsPerActivation(waveProgress)    
-    let spawnGroupingFactor = getSpawnGroupFactor(waveProgress)
+    let aliveCountMax = m_definition.getMaxAliveCount(waveProgress)
+    let spawnCountMax = m_definition.getMaxSpawnCount(waveProgress)    
+    let spawnsPerActivation = m_definition.getSpawnsPerActivation(waveProgress)    
+    let spawnGroupingFactor = m_definition.getSpawnGroupingFactor(waveProgress)
 
     let numSpawnGroups = max(R2I(I2R(spawnsPerActivation) * (1.0 - spawnGroupingFactor)), 1)
     let spawnGroupSize = max(R2I(I2R(spawnsPerActivation) * spawnGroupingFactor), 1)
@@ -151,9 +140,11 @@ public class SpawnWave extends Runnable
 
     if (m_numSpawned >= spawnCountMax)
       Log.debug("[SpawnWave.onActivated] Reached max number of spawns for wave")
+      return 0
 
     if (m_aliveSpawnedUnits.size() >= aliveCountMax)
       Log.debug("[SpawnWave.onActivated] Reached max number of concurrent alive")
+      return 0
 
     return numSpawnsAvailable
 
@@ -170,7 +161,11 @@ public class SpawnWave extends Runnable
     if (waveProgresser != null)
       progress = waveProgresser.getProgress()
 
-    let unitModifier = m_definition.getUnitModifier()
+    let commonUnitModifier = m_definition.getCommonUnitModifier()
+    if (commonUnitModifier != null)
+      commonUnitModifier.apply(spawnedUnit, progress)
+
+    let unitModifier = m_definition.getUnitModifier(unitTypeId)
     if (unitModifier != null)
       unitModifier.apply(spawnedUnit, progress)
 
@@ -197,38 +192,6 @@ public class SpawnWave extends Runnable
     if (getProgress != null)
       waveProgress = getProgress.getProgress()
     return clamp01(waveProgress)
-
-  // --------------------------------------------------------------------------
-  function getAliveCountMax(real waveProgress) returns int
-    var aliveCountMax = UNLIMITED
-    let getAliveCountMax = m_definition.getMaxAliveCount()
-    if (getAliveCountMax != null)
-      aliveCountMax = getAliveCountMax.call(waveProgress)
-    return clamp(aliveCountMax, 0, UNLIMITED)
-
-  // --------------------------------------------------------------------------
-  function getSpawnCountMax(real waveProgress) returns int
-    var spawnCountMax = UNLIMITED
-    let getSpawnPointMax = m_definition.getMaxSpawnCount()
-    if (getSpawnPointMax != null)
-      spawnCountMax = getSpawnPointMax.call(waveProgress)
-    return clamp(spawnCountMax, 0, UNLIMITED)
-
-  // --------------------------------------------------------------------------
-  function getSpawnGroupFactor(real waveProgress) returns real
-    var spawnGroupingFactor = 0.0
-    let getSpawnGroupingFactor = m_definition.getSpawnGroupingFactor()
-    if (getSpawnGroupingFactor != null)
-      spawnGroupingFactor = getSpawnGroupingFactor.call(waveProgress)
-    return clamp01(spawnGroupingFactor)
-
-  // --------------------------------------------------------------------------
-  function getSpawnsPerActivation(real waveProgress) returns int
-    var spawnsPerActivation = 1
-    let getSpawnsPerActivation = m_definition.getSpawnsPerActivation()
-    if (getSpawnsPerActivation != null)
-      spawnsPerActivation = getSpawnsPerActivation.call(waveProgress)
-    return clamp(spawnsPerActivation, 0, 1000)
 
   // --------------------------------------------------------------------------
   private function listenToActivatedEvent()

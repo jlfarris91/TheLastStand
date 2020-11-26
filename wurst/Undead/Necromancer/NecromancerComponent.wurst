@@ -1,0 +1,58 @@
+package NecromancerComponent
+import UnitComponent
+import TlsAbilityIds
+import ClosureTimers
+
+constant string RAISEDEAD_IMMEDIATEORDERSTR = "instant" // don't ask me why
+
+// ============================================================================
+public class NecromancerComponent extends UnitComponent
+  private CallbackPeriodic castTimer
+
+  // --------------------------------------------------------------------------
+  construct (IUnitMetadata owner)
+    super(owner)
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    if (castTimer != null)
+      destroy castTimer
+      castTimer = null
+
+  // --------------------------------------------------------------------------
+  override function onEnabled()
+    super.onEnabled()
+
+    let ownerUnit = getOwnerUnit()
+    if (not ownerUnit.hasAbility(TlsAbilityIds.necromancerRaiseDead))
+      ownerUnit.addAbility(TlsAbilityIds.necromancerRaiseDead)
+
+    let lvl = ownerUnit.getAbilityLevel(TlsAbilityIds.necromancerRaiseDead)
+    let cooldown = ownerUnit.getAbilityCooldown(TlsAbilityIds.necromancerRaiseDead, lvl) + 1.0
+
+    castTimer = doPeriodically(cooldown) (CallbackPeriodic cb) ->
+      attemptCast()
+
+  // --------------------------------------------------------------------------
+  override function onDisabled()
+    super.onDisabled()
+
+    let ownerUnit = getOwnerUnit()
+    if (ownerUnit.hasAbility(TlsAbilityIds.necromancerRaiseDead))
+      ownerUnit.removeAbility(TlsAbilityIds.necromancerRaiseDead)
+
+  // --------------------------------------------------------------------------
+  private function attemptCast()
+    let ownerUnit = getOwnerUnit()
+    ownerUnit.issueImmediateOrder(RAISEDEAD_IMMEDIATEORDERSTR)
+
+// ============================================================================
+public function IUnitMetadata.getNecromancerComponent() returns NecromancerComponent
+  return this.getComponent(typeInfo(NecromancerComponent.typeId)) castTo NecromancerComponent
+
+// ============================================================================
+public function IUnitMetadata.getOrAddNecromancerComponent() returns NecromancerComponent
+  var component = this.getNecromancerComponent()
+  if (component == null)
+    component = this.addComponent(new NecromancerComponent(this)) castTo NecromancerComponent
+  return component
