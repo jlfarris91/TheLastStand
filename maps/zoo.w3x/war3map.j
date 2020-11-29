@@ -1,8 +1,6 @@
 globals
     // Generated
 trigger gg_trg_Melee_Initialization= null
-trigger gg_trg_Untitled_Trigger_001= null
-trigger gg_trg_Untitled_Trigger_002= null
 
 
 //JASSHelper struct globals:
@@ -50,6 +48,7 @@ function CreateBuildingsForPlayer0 takes nothing returns nothing
     local trigger t
     local real life
 
+    set u=BlzCreateUnitWithSkin(p, 'h00B', 1472.0, - 2560.0, 270.000, 'h00B')
     set u=BlzCreateUnitWithSkin(p, 'h00A', 1536.0, - 2048.0, 270.000, 'h00A')
     set u=BlzCreateUnitWithSkin(p, 'h000', 1248.0, 672.0, 270.000, 'h000')
     set u=BlzCreateUnitWithSkin(p, 'h002', 1440.0, 1120.0, 270.000, 'h002')
@@ -70,26 +69,26 @@ function CreateUnitsForPlayer0 takes nothing returns nothing
     local real life
 
     set u=BlzCreateUnitWithSkin(p, 'n008', 92.2, - 2354.3, 262.727, 'n008')
-    set u=BlzCreateUnitWithSkin(p, 'n009', 230.1, - 2347.4, - 87.945, 'n009')
-    set u=BlzCreateUnitWithSkin(p, 'n00A', 385.2, - 2350.7, - 88.094, 'n00A')
+    set u=BlzCreateUnitWithSkin(p, 'n009', 230.1, - 2347.4, 272.055, 'n009')
+    set u=BlzCreateUnitWithSkin(p, 'n00A', 385.2, - 2350.7, 271.906, 'n00A')
     set u=BlzCreateUnitWithSkin(p, 'u003', 95.8, - 2562.1, 267.324, 'u003')
-    set u=BlzCreateUnitWithSkin(p, 'u004', 239.7, - 1977.8, - 88.812, 'u004')
-    set u=BlzCreateUnitWithSkin(p, 'u000', 91.9, - 1802.7, - 87.496, 'u000')
+    set u=BlzCreateUnitWithSkin(p, 'u004', 239.7, - 1977.8, 271.189, 'u004')
+    set u=BlzCreateUnitWithSkin(p, 'u000', 91.9, - 1802.7, 272.504, 'u000')
     set u=BlzCreateUnitWithSkin(p, 'nmdm', 96.8, - 1113.4, 270.493, 'nmdm')
     set u=BlzCreateUnitWithSkin(p, 'u005', 391.3, - 1969.0, 267.885, 'u005')
-    set u=BlzCreateUnitWithSkin(p, 'ucry', 93.8, - 2811.5, - 85.684, 'ucry')
+    set u=BlzCreateUnitWithSkin(p, 'ucry', 93.8, - 2811.5, 274.316, 'ucry')
     set u=BlzCreateUnitWithSkin(p, 'ushd', 94.7, - 2999.7, 263.049, 'ushd')
-    set u=BlzCreateUnitWithSkin(p, 'nenf', 1149.4, - 1365.5, - 83.961, 'nenf')
+    set u=BlzCreateUnitWithSkin(p, 'nenf', 1149.4, - 1365.5, 276.039, 'nenf')
     set u=BlzCreateUnitWithSkin(p, 'nbld', 1258.8, - 1386.6, 300.013, 'nbld')
-    set u=BlzCreateUnitWithSkin(p, 'nban', 957.4, - 1359.5, - 81.165, 'nban')
-    set u=BlzCreateUnitWithSkin(p, 'nrog', 1042.2, - 1362.0, - 84.091, 'nrog')
+    set u=BlzCreateUnitWithSkin(p, 'nban', 957.4, - 1359.5, 278.835, 'nban')
+    set u=BlzCreateUnitWithSkin(p, 'nrog', 1042.2, - 1362.0, 275.909, 'nrog')
     set u=BlzCreateUnitWithSkin(p, 'ninc', 105.4, - 3146.8, 269.998, 'ninc')
     set u=BlzCreateUnitWithSkin(p, 'hpea', 332.8, 1065.3, 270.919, 'hpea')
     set u=BlzCreateUnitWithSkin(p, 'hmil', 329.9, 898.1, 271.085, 'hmil')
     set u=BlzCreateUnitWithSkin(p, 'hrif', 332.8, 482.5, 270.382, 'hrif')
     set u=BlzCreateUnitWithSkin(p, 'hmpr', 589.9, 1606.4, 258.112, 'hmpr')
     set u=BlzCreateUnitWithSkin(p, 'Hvwd', 587.6, 1731.6, 256.725, 'Hvwd')
-    set u=BlzCreateUnitWithSkin(p, 'ninm', 285.3, - 3132.9, - 84.985, 'ninm')
+    set u=BlzCreateUnitWithSkin(p, 'ninm', 285.3, - 3132.9, 275.015, 'ninm')
     set u=BlzCreateUnitWithSkin(p, 'nemi', 455.1, 1596.3, 269.046, 'nemi')
     set u=BlzCreateUnitWithSkin(p, 'nchp', 330.6, 1610.7, 269.243, 'nchp')
     set u=BlzCreateUnitWithSkin(p, 'nhef', 193.1, 1717.9, 277.368, 'nhef')
@@ -97,15 +96,14 @@ function CreateUnitsForPlayer0 takes nothing returns nothing
     set u=BlzCreateUnitWithSkin(p, 'nhew', 329.1, 1478.5, 270.456, 'nhew')
     set u=BlzCreateUnitWithSkin(p, 'nbee', 457.5, 1487.1, 270.595, 'nbee')
     set u=BlzCreateUnitWithSkin(p, 'nmed', 461.4, 608.4, 267.781, 'nmed')
-    call SetUnitState(u, UNIT_STATE_MANA, 0)
     set u=BlzCreateUnitWithSkin(p, 'nhea', 457.9, 1736.2, 253.660, 'nhea')
-    set u=BlzCreateUnitWithSkin(p, 'nina', 497.1, - 3150.1, - 84.430, 'nina')
+    set u=BlzCreateUnitWithSkin(p, 'nina', 497.1, - 3150.1, 275.570, 'nina')
     set u=BlzCreateUnitWithSkin(p, 'n004', - 522.1, - 1532.6, 271.109, 'n004')
     set u=BlzCreateUnitWithSkin(p, 'n004', - 2047.4, - 1531.8, 271.109, 'n004')
     set u=BlzCreateUnitWithSkin(p, 'ugho', 92.8, - 861.6, 275.244, 'ugho')
     set u=BlzCreateUnitWithSkin(p, 'n004', - 1024.7, - 1530.7, 271.109, 'n004')
     set u=BlzCreateUnitWithSkin(p, 'ugar', 239.6, - 1085.8, 268.559, 'ugar')
-    set u=BlzCreateUnitWithSkin(p, 'nsko', 79.5, - 1259.7, - 86.780, 'nsko')
+    set u=BlzCreateUnitWithSkin(p, 'nsko', 79.5, - 1259.7, 273.221, 'nsko')
     set u=BlzCreateUnitWithSkin(p, 'hrrh', 327.1, 1346.5, 271.138, 'hrrh')
     set u=BlzCreateUnitWithSkin(p, 'zmar', 467.5, 485.5, 269.222, 'zmar')
     set u=BlzCreateUnitWithSkin(p, 'nvlk', 40.8, 1013.5, 279.817, 'nvlk')
@@ -115,7 +113,7 @@ function CreateUnitsForPlayer0 takes nothing returns nothing
     set u=BlzCreateUnitWithSkin(p, 'nvil', 225.9, 1063.5, 266.697, 'nvil')
     set u=BlzCreateUnitWithSkin(p, 'nwiz', 328.9, 611.1, 268.322, 'nwiz')
     set u=BlzCreateUnitWithSkin(p, 'nvil', 240.6, 770.9, 266.697, 'nvil')
-    set u=BlzCreateUnitWithSkin(p, 'nsog', 219.6, - 1270.2, - 85.952, 'nsog')
+    set u=BlzCreateUnitWithSkin(p, 'nsog', 219.6, - 1270.2, 274.048, 'nsog')
     set u=BlzCreateUnitWithSkin(p, 'nsoc', 383.0, - 1258.6, 265.702, 'nsoc')
     set u=BlzCreateUnitWithSkin(p, 'nvl2', 184.1, 716.6, 269.385, 'nvl2')
     set u=BlzCreateUnitWithSkin(p, 'nass', 461.8, 730.5, 271.834, 'nass')
@@ -127,6 +125,7 @@ function CreateUnitsForPlayer0 takes nothing returns nothing
     set u=BlzCreateUnitWithSkin(p, 'nvlk', 57.1, 586.6, 279.817, 'nvlk')
     set u=BlzCreateUnitWithSkin(p, 'nvk2', 113.6, 640.5, 270.224, 'nvk2')
     set u=BlzCreateUnitWithSkin(p, 'nvil', 1718.6, - 2028.8, 266.697, 'nvil')
+    set u=BlzCreateUnitWithSkin(p, 'ewsp', 1841.4, - 2509.3, 312.021, 'ewsp')
     set u=BlzCreateUnitWithSkin(p, 'nzom', 108.1, - 587.1, 265.750, 'nzom')
     set u=BlzCreateUnitWithSkin(p, 'nzof', 62.6, - 632.8, 282.471, 'nzof')
     set u=BlzCreateUnitWithSkin(p, 'uaco', 89.3, - 362.0, 257.869, 'uaco')
@@ -145,21 +144,20 @@ function CreateUnitsForPlayer0 takes nothing returns nothing
     set u=BlzCreateUnitWithSkin(p, 'nhem', 199.7, 1467.3, 270.292, 'nhem')
     set u=BlzCreateUnitWithSkin(p, 'nhem', 199.6, 1340.8, 270.292, 'nhem')
     set u=BlzCreateUnitWithSkin(p, 'nbel', 580.4, 1354.1, 260.904, 'nbel')
-    call SetUnitState(u, UNIT_STATE_MANA, 0)
     set u=BlzCreateUnitWithSkin(p, 'nvk2', 99.0, 906.5, 270.224, 'nvk2')
     set u=BlzCreateUnitWithSkin(p, 'nvlk', 42.4, 852.5, 279.817, 'nvlk')
     set u=BlzCreateUnitWithSkin(p, 'nvil', 230.6, 915.1, 266.697, 'nvil')
     set u=BlzCreateUnitWithSkin(p, 'nvl2', 174.1, 860.8, 269.385, 'nvl2')
     set u=BlzCreateUnitWithSkin(p, 'u002', 96.3, - 1974.2, 266.257, 'u002')
-    set u=BlzCreateUnitWithSkin(p, 'u001', 237.4, - 1804.5, - 88.401, 'u001')
-    set u=BlzCreateUnitWithSkin(p, 'n004', 77.8, - 1469.2, - 88.891, 'n004')
-    set u=BlzCreateUnitWithSkin(p, 'n005', 232.9, - 1465.8, - 88.137, 'n005')
+    set u=BlzCreateUnitWithSkin(p, 'u001', 237.4, - 1804.5, 271.599, 'u001')
+    set u=BlzCreateUnitWithSkin(p, 'n004', 77.8, - 1469.2, 271.109, 'n004')
+    set u=BlzCreateUnitWithSkin(p, 'n005', 232.9, - 1465.8, 271.863, 'n005')
     set u=BlzCreateUnitWithSkin(p, 'n006', 398.6, - 1454.8, 269.510, 'n006')
     set u=BlzCreateUnitWithSkin(p, 'n000', 91.0, - 1665.8, 266.586, 'n000')
     set u=BlzCreateUnitWithSkin(p, 'n001', 228.5, - 1643.2, 268.943, 'n001')
     set u=BlzCreateUnitWithSkin(p, 'n002', 385.5, - 1642.9, 267.076, 'n002')
     set u=BlzCreateUnitWithSkin(p, 'n007', 96.4, - 2159.7, 264.707, 'n007')
-    set u=BlzCreateUnitWithSkin(p, 'n003', 399.6, - 1798.6, - 80.129, 'n003')
+    set u=BlzCreateUnitWithSkin(p, 'n003', 399.6, - 1798.6, 279.871, 'n003')
 endfunction
 
 //===========================================================================
@@ -219,40 +217,8 @@ function InitTrig_Melee_Initialization takes nothing returns nothing
 endfunction
 
 //===========================================================================
-// Trigger: Untitled Trigger 001
-//===========================================================================
-function Trig_Untitled_Trigger_001_Actions takes nothing returns nothing
-    call IssueImmediateOrderBJ(GetLastCreatedUnit(), "locustswarm")
-    call IssueImmediateOrderBJ(GetLastCreatedUnit(), "instant")
-    call IssueImmediateOrderBJ(GetLastCreatedUnit(), "raisedeadon")
-    call IssueImmediateOrderBJ(GetLastCreatedUnit(), "raisedeadoff")
-endfunction
-
-//===========================================================================
-function InitTrig_Untitled_Trigger_001 takes nothing returns nothing
-    set gg_trg_Untitled_Trigger_001=CreateTrigger()
-    call TriggerAddAction(gg_trg_Untitled_Trigger_001, function Trig_Untitled_Trigger_001_Actions)
-endfunction
-
-//===========================================================================
-// Trigger: Untitled Trigger 002
-//===========================================================================
-function Trig_Untitled_Trigger_002_Actions takes nothing returns nothing
-    call DisplayTextToForce(GetPlayersAll(), ( GetUnitName(GetSummoningUnit()) + ( " summoned a " + GetUnitName(GetSummonedUnit()) ) ))
-endfunction
-
-//===========================================================================
-function InitTrig_Untitled_Trigger_002 takes nothing returns nothing
-    set gg_trg_Untitled_Trigger_002=CreateTrigger()
-    call TriggerRegisterAnyUnitEventBJ(gg_trg_Untitled_Trigger_002, EVENT_PLAYER_UNIT_SUMMON)
-    call TriggerAddAction(gg_trg_Untitled_Trigger_002, function Trig_Untitled_Trigger_002_Actions)
-endfunction
-
-//===========================================================================
 function InitCustomTriggers takes nothing returns nothing
     call InitTrig_Melee_Initialization()
-    call InitTrig_Untitled_Trigger_001()
-    call InitTrig_Untitled_Trigger_002()
 endfunction
 
 //===========================================================================
@@ -293,6 +259,7 @@ endfunction
 function main takes nothing returns nothing
     call SetCameraBounds(- 3328.0 + GetCameraMargin(CAMERA_MARGIN_LEFT), - 3584.0 + GetCameraMargin(CAMERA_MARGIN_BOTTOM), 3328.0 - GetCameraMargin(CAMERA_MARGIN_RIGHT), 3072.0 - GetCameraMargin(CAMERA_MARGIN_TOP), - 3328.0 + GetCameraMargin(CAMERA_MARGIN_LEFT), 3072.0 - GetCameraMargin(CAMERA_MARGIN_TOP), 3328.0 - GetCameraMargin(CAMERA_MARGIN_RIGHT), - 3584.0 + GetCameraMargin(CAMERA_MARGIN_BOTTOM))
     call SetDayNightModels("Environment\\DNC\\DNCLordaeron\\DNCLordaeronTerrain\\DNCLordaeronTerrain.mdl", "Environment\\DNC\\DNCLordaeron\\DNCLordaeronUnit\\DNCLordaeronUnit.mdl")
+    call SetTerrainFogEx(0, 1700.0, 2300.0, 0.000, 0.000, 0.471, 0.471)
     call NewSoundEnvironment("Default")
     call SetAmbientDaySound("LordaeronSummerDay")
     call SetAmbientNightSound("LordaeronSummerNight")
@@ -302,7 +269,7 @@ function main takes nothing returns nothing
 
 
     call InitGlobals()
-    call InitCustomTriggers()
+    call InitTrig_Melee_Initialization() // INLINED!!
     call ConditionalTriggerExecute(gg_trg_Melee_Initialization) // INLINED!!
 
 endfunction
@@ -314,8 +281,8 @@ endfunction
 //***************************************************************************
 
 function config takes nothing returns nothing
-    call SetMapName("Just another Warcraft III map")
-    call SetMapDescription("Nondescript")
+    call SetMapName("TRIGSTR_859")
+    call SetMapDescription("TRIGSTR_861")
     call SetPlayers(1)
     call SetTeams(1)
     call SetGamePlacement(MAP_PLACEMENT_USE_MAP_SETTINGS)

@@ -14,7 +14,7 @@ import Math
 // ============================================================================
 public class SpawnWave extends Runnable
   private SpawnWaveDefinition m_definition
-  private Action m_onActivatedHandler
+  private EventCallback m_onActivatedHandler
   private player m_targetPlayer
   private LinkedList<unit> m_aliveSpawnedUnits
   private int m_numSpawned
@@ -53,22 +53,34 @@ public class SpawnWave extends Runnable
     m_numSpawned = 0
 
   // --------------------------------------------------------------------------
-  override function onStopped()
-    super.onStopped()
-    m_definition.getActivator().stop()
-    unlistenToActivatedEvent()
-    m_aliveSpawnedUnits.clear()
-    m_numSpawned = 0
-
-  // --------------------------------------------------------------------------
   override function onPaused()
     super.onPaused()
     m_definition.getActivator().pause()
+    unlistenToActivatedEvent()
 
   // --------------------------------------------------------------------------
   override function onResumed()
     super.onResumed()
+    listenToActivatedEvent()
     m_definition.getActivator().resume()
+
+  // --------------------------------------------------------------------------
+  override function onCompleted()
+    super.onCompleted()
+    unlistenToActivatedEvent()
+    m_definition.getActivator().complete()
+
+  // --------------------------------------------------------------------------
+  override function reset()
+    super.reset()
+    unlistenToActivatedEvent()
+    m_definition.getActivator().reset()
+    m_aliveSpawnedUnits.clear()
+    m_numSpawned = 0
+
+  // --------------------------------------------------------------------------
+  function activateOnce()
+    onActivated()
 
   // --------------------------------------------------------------------------
   protected function onActivated()
@@ -134,6 +146,10 @@ public class SpawnWave extends Runnable
     // Clean up the spawnPoints list
     destroy spawnPoints
 
+    // Wave has completed
+    if (waveProgress == 1.0)
+      complete()
+
   // --------------------------------------------------------------------------
   private function getNumSpawnsAvailable(int aliveCountMax, int spawnCountMax) returns int
     let numSpawnsAvailable = min(aliveCountMax - m_aliveSpawnedUnits.size(), spawnCountMax - m_numSpawned)
@@ -196,10 +212,19 @@ public class SpawnWave extends Runnable
   // --------------------------------------------------------------------------
   private function listenToActivatedEvent()
     unlistenToActivatedEvent()
-    if (m_onActivatedHandler == null)
-      let activator = m_definition.getActivator()
-      m_onActivatedHandler = activator.getActivatedEvent().register() () ->
-        onActivated()
+
+    if (m_onActivatedHandler != null)
+      return
+
+    let activator = m_definition.getActivator()
+    if (activator == null)
+      return
+    
+    let e = activator.getActivatedEvent()
+    if (e == null)
+      return
+
+    m_onActivatedHandler = e.register(() -> onActivated())
 
   // --------------------------------------------------------------------------
   private function unlistenToActivatedEvent()

@@ -3,13 +3,22 @@ import SurvivorJobComponent
 import UnitMetadata
 import RangedTargetXpReceieverComponent
 import GainXpPerKillComponent
+import TlsUnitIds
+import TlsAbilityIds
+import RegisterEvents
+import Abilities
 
 // ============================================================================
 public class SpearmanJobComponent extends SurvivorJobComponent
-  
+  private effect m_upgradeAvailableEffect
+
   // --------------------------------------------------------------------------
   construct(IUnitMetadata owner)
     super(owner)
+
+  // --------------------------------------------------------------------------
+  override function getTypeId() returns int
+    return SpearmanJobComponent.typeId
 
   // --------------------------------------------------------------------------
   protected override function onEnabled()
@@ -22,6 +31,21 @@ public class SpearmanJobComponent extends SurvivorJobComponent
     super.onDisabled()
     getOwner().getOrAddRangedTargetXpRecieverComponent().setEnabled(false)
     getOwner().getOrAddGainXpPerKillComponent().setEnabled(false)
+    hideUpgradeAvailableEffect()
+
+  // --------------------------------------------------------------------------
+  function showUpgradeAvailableEffect()
+    if (m_upgradeAvailableEffect != null)
+      return
+    let ownerUnit = getOwnerUnit()
+    m_upgradeAvailableEffect = AddSpecialEffectTarget(Abilities.spiritLinkTarget, ownerUnit, "origin")
+
+  // --------------------------------------------------------------------------
+  function hideUpgradeAvailableEffect()
+    if (m_upgradeAvailableEffect == null)
+      return
+    m_upgradeAvailableEffect.destr()
+    m_upgradeAvailableEffect = null
 
 // ============================================================================
 public function IUnitMetadata.getSpearmanJobComponent() returns SpearmanJobComponent
@@ -33,3 +57,40 @@ public function IUnitMetadata.getOrAddSpearmanJobComponent() returns SpearmanJob
   if (component == null)
     component = this.addComponent(new SpearmanJobComponent(this)) castTo SpearmanJobComponent
   return component
+
+// ============================================================================
+function onHeroLeveled()
+
+  let hero = GetLevelingUnit()
+
+  let comp = hero.getMetadata().getSpearmanJobComponent()
+  if (comp == null)
+    return
+
+  if (hero.getTypeId() == TlsUnitIds.Survivors.survivorSpearman and hero.getLevel() == 3)
+    hero.addAbility(TlsAbilityIds.spearmanUpgrade1)
+    comp.showUpgradeAvailableEffect()
+
+// ============================================================================
+function onSkillLearned()
+
+  let learnedSkill = GetLearnedSkill()
+  let hero = GetLearningUnit()
+
+  let comp = hero.getMetadata().getSpearmanJobComponent()
+  if (comp == null)
+    return
+
+  if (learnedSkill == TlsAbilityIds.frostAttack or
+      learnedSkill == TlsAbilityIds.fireAttack or
+      learnedSkill == TlsAbilityIds.lightningAttack)  
+    hero.removeAbility(TlsAbilityIds.spearmanUpgrade1)
+    comp.hideUpgradeAvailableEffect()
+
+// ============================================================================
+init
+  registerPlayerUnitEvent(EVENT_PLAYER_HERO_SKILL, function onSkillLearned)
+  registerPlayerUnitEvent(EVENT_PLAYER_HERO_LEVEL, function onHeroLeveled)
+
+  // Make the spearman upgrade spellbook glow
+  CreateCommandButtonEffect(TlsAbilityIds.spearmanUpgrade1, "spellbook")

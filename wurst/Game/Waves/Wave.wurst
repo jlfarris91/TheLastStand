@@ -3,45 +3,108 @@ import Runnable
 import LinkedList
 import SpawnWave
 import IProgress
+import HashMap
+import Events
 
 // ============================================================================
 public class Wave extends Runnable implements IProgress
   protected LinkedList<SpawnWave> m_spawnWaves
+  protected HashMap<SpawnWave, Event1Callback<Runnable>> m_spawnWaveStateChangeHandlers
+  private int m_xpReward
+  private int m_matsReward
+  private int m_goldReward
+  private int m_completedSpawnWaves
 
   // --------------------------------------------------------------------------
   construct()
     m_spawnWaves = new LinkedList<SpawnWave>()
+    m_spawnWaveStateChangeHandlers = new HashMap<SpawnWave, Event1Callback<Runnable>>()
 
   // --------------------------------------------------------------------------
   ondestroy
     for sw in m_spawnWaves
+      destroy m_spawnWaveStateChangeHandlers.get(sw)
       destroy sw
+
     destroy m_spawnWaves
     m_spawnWaves = null
+
+    destroy m_spawnWaveStateChangeHandlers
+    m_spawnWaveStateChangeHandlers = null
 
   // --------------------------------------------------------------------------
   function addSpawnWave(SpawnWave wave)
     m_spawnWaves.add(wave)
 
+    let e = wave.getStateChangedEvent()
+    if (e == null)
+      return
+
+    let handler = e.register((runnable) -> onSpawnWaveStateChanged(runnable castTo SpawnWave))
+    m_spawnWaveStateChangeHandlers.put(wave, handler)
+
   // --------------------------------------------------------------------------
   function removeSpawnWave(SpawnWave wave) returns bool
-    return m_spawnWaves.remove(wave)
+    if (not m_spawnWaves.remove(wave))
+      return false
+      
+    let handler = m_spawnWaveStateChangeHandlers.get(wave)
+    if (handler != null)
+      m_spawnWaveStateChangeHandlers.remove(wave)
+      destroy handler
+
+    return true
 
   // --------------------------------------------------------------------------
   function getSpawnWaves() returns LinkedList<SpawnWave>
     return m_spawnWaves
 
   // --------------------------------------------------------------------------
+  function getXpReward() returns int
+    return m_xpReward
+
+  // --------------------------------------------------------------------------
+  function setXpReward(int xpReward)
+    m_xpReward = xpReward
+
+  // --------------------------------------------------------------------------
+  function getMatsReward() returns int
+    return m_matsReward
+
+  // --------------------------------------------------------------------------
+  function setMatsReward(int matsReward)
+    m_matsReward = matsReward
+
+  // --------------------------------------------------------------------------
+  function getGoldReward() returns int
+    return m_goldReward
+
+  // --------------------------------------------------------------------------
+  function setGoldReward(int goldReward)
+    m_goldReward = goldReward
+
+  // --------------------------------------------------------------------------
   override function onStarted()
     super.onStarted()
+    m_completedSpawnWaves = 0
     for wave in m_spawnWaves
       wave.start()
 
   // --------------------------------------------------------------------------
-  override function onStopped()
-    super.onStopped()
+  override function onCompleted()
+    super.onCompleted()
+    let errorMsg = getError()
+
+    if (errorMsg != null)
+      Log.info("Wave failed: " + errorMsg)
+    else
+      Log.info("Wave completed successfully")
+
     for wave in m_spawnWaves
-      wave.stop()
+      if (errorMsg != null)
+        wave.fail(errorMsg)
+      else
+        wave.complete()
 
   // --------------------------------------------------------------------------
   override function onPaused()
@@ -56,6 +119,11 @@ public class Wave extends Runnable implements IProgress
       wave.resume()
 
   // --------------------------------------------------------------------------
+  override function reset()
+    super.reset()
+    m_completedSpawnWaves = 0
+
+  // --------------------------------------------------------------------------
   override function getProgress() returns real
     var numProgress = 0.0
     var totalProgress = 0.0
@@ -65,3 +133,13 @@ public class Wave extends Runnable implements IProgress
         numProgress += 1.0
         totalProgress += progressReporter.getProgress()
     return totalProgress / numProgress
+
+  // --------------------------------------------------------------------------
+  private function onSpawnWaveStateChanged(SpawnWave spawnWave)
+    if (spawnWave.isCompleted())
+      m_completedSpawnWaves++
+      Log.info("Spawn wave completed {0}/{1}".format(m_completedSpawnWaves.toString(), m_spawnWaves.size().toString()))
+      if (m_completedSpawnWaves == m_spawnWaves.size())
+        complete()
+    else if (spawnWave.failed())
+      fail(spawnWave.getError())

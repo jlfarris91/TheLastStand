@@ -5,22 +5,32 @@ import DayWaveCollection
 import NightWaveCollection
 import DayWave
 import NightWave
+import HumanPlayerMetadata
+import WaveRewardScalarComponent
+import PlayerUtils
+import DisplayTextToPlayer
+import StringExtensions
+import Events
+import FX
 
 // ============================================================================
-public class DayNightWaveRunner extends Runnable
+public class DayNightWaveRunner
+  private player m_targetPlayer
   private NightWaveCollection m_nightWaves
   private DayWaveCollection m_dayWaves
   private Wave m_currentWave
   private bool m_day
+  private Event1Callback<Runnable> m_onCurrentWaveStateChangedHandler
 
   // --------------------------------------------------------------------------
-  construct(NightWaveCollection nightWaves, DayWaveCollection dayWaves)
+  construct(player targetPlayer, NightWaveCollection nightWaves, DayWaveCollection dayWaves)
+    m_targetPlayer = targetPlayer
     m_nightWaves = nightWaves
     m_dayWaves = dayWaves
 
   // --------------------------------------------------------------------------
   ondestroy
-    stopCurrentlyRunningWave()
+    unlistenToCurrentWaveStateChangedEvent()
 
   // --------------------------------------------------------------------------
   function getCurrentWave() returns Wave
@@ -28,36 +38,76 @@ public class DayNightWaveRunner extends Runnable
   
   // --------------------------------------------------------------------------
   function startNightWave(int night)
+    this.cancel()
     Log.debug("Start night wave " + I2S(night))
-    stopCurrentlyRunningWave()
     m_currentWave = m_nightWaves.getLatestWave(night)
     if (m_currentWave != null)
       m_currentWave.start()
       m_day = false
+      listenToCurrentWaveStateChangedEvent()
     else
       Log.debug("No night wave found for night " + I2S(night))
 
   // --------------------------------------------------------------------------
   function startDayWave(int day)
+    this.cancel()
     Log.debug("Start day wave " + I2S(day))
-    stopCurrentlyRunningWave()
     m_currentWave = m_dayWaves.getLatestWave(day)
     if (m_currentWave != null)
-      m_currentWave.start()
       m_day = true
+      m_currentWave.start()
+      listenToCurrentWaveStateChangedEvent()
     else
       Log.debug("No day wave found for day " + I2S(day))
 
   // --------------------------------------------------------------------------
-  function stopCurrentlyRunningWave()
+  function cancel()
+    if (m_currentWave != null and not m_currentWave.isCompleted())
+      m_currentWave.cancel()
+
+  // --------------------------------------------------------------------------
+  private function onCurrentWaveStateChanged()
+    unlistenToCurrentWaveStateChangedEvent()
+
+    if (m_currentWave.succeeded())
+      grantRewards()
+
+  // --------------------------------------------------------------------------
+  private function grantRewards()
+
+    let comp = m_targetPlayer.getHumanMetadata().getOrAddWaveRewardScalarComponent()
+
+    int xp = m_currentWave.getXpReward()
+    xp = comp.scaleXpReward(xp)
+    if (xp != 0)
+      addXpToAllHeroesBelongingToPlayer(m_targetPlayer, xp)
+      displayMessageToPlayer(m_targetPlayer, "Reward: " + "+{0} xp".format(xp.toString()).colorize(TAG_COLOR_EXP))
+
+    int mats = m_currentWave.getMatsReward()
+    mats = comp.scaleMatsReward(mats)
+    if (mats != 0)
+      m_targetPlayer.addLumber(mats)
+      displayMessageToPlayer(m_targetPlayer, "Reward: " + "+{0} materials".format(mats.toString()).colorize(TAG_COLOR_MATERIALS))
+
+    int gold = m_currentWave.getGoldReward()
+    gold = comp.scaleMatsReward(gold)
+    if (gold != 0)
+      m_targetPlayer.addGold(gold)
+      displayMessageToPlayer(m_targetPlayer, "Reward: " + "+{0} gold".format(gold.toString()).colorize(TAG_COLOR_GOLD))
+
+  // --------------------------------------------------------------------------
+  private function listenToCurrentWaveStateChangedEvent()
     if (m_currentWave == null)
       return
 
-    if (m_day)
-      let dayWave = m_currentWave castTo DayWave
-      Log.debug("Stopping day wave " + I2S(dayWave.getDay()))
-    else
-      let nightWave = m_currentWave castTo NightWave
-      Log.debug("Stopping night wave " + I2S(nightWave.getNight()))
+    let e = m_currentWave.getStateChangedEvent()
+    if (e == null)
+      return
+    
+    m_onCurrentWaveStateChangedHandler = e.register((runnable) -> onCurrentWaveStateChanged())
 
-    m_currentWave.stop()
+  // --------------------------------------------------------------------------
+  private function unlistenToCurrentWaveStateChangedEvent()
+    if (m_onCurrentWaveStateChangedHandler != null)
+      destroy m_onCurrentWaveStateChangedHandler
+      m_onCurrentWaveStateChangedHandler = null

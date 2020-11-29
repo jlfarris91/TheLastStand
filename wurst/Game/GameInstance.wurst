@@ -17,6 +17,7 @@ import NormalDayWaveGenerator
 import WaveMultiboard
 import BaseUnitsRectProvider
 import TimeOfDay
+import RandomWeatherPlayer
 
 public GameInstance g_GameInstance
 
@@ -31,10 +32,13 @@ public class GameInstance extends Runnable
   private IWaveGenerator<DayWave> m_dayWaveGenerator
   private IWaveGenerator<NightWave> m_nightWaveGenerator
   private WaveMultiboard m_waveMultiboard
+  private RandomWeatherPlayer m_weatherPlayer
 
   // --------------------------------------------------------------------------
   ondestroy
-    stop()
+    if (not this.isCompleted())
+      this.cancel()
+    destroy m_weatherPlayer
 
   // --------------------------------------------------------------------------
   function getIsDay() returns bool
@@ -91,15 +95,13 @@ public class GameInstance extends Runnable
     startNextNight()
 
   // --------------------------------------------------------------------------
-  function reset()
-    stop()
+  override function reset()
+    super.reset()
     
     m_day = 0
     m_night = 0
     SetTimeOfDay(TIME_OF_DAY_INITIAL)
     SetTimeOfDayScalePercentBJ(GAME_SPEED_INITIAL)
-
-    start()
 
   // --------------------------------------------------------------------------
   override function onStarted()
@@ -108,19 +110,24 @@ public class GameInstance extends Runnable
     // These should move to a place that sets up the GameInstance
     m_dayWaveGenerator = new NormalDayWaveGenerator()
     m_nightWaveGenerator = new NormalNightWaveGenerator()
-
     m_waveMultiboard = new WaveMultiboard()
+    m_weatherPlayer = new RandomWeatherPlayer()
+
+    m_weatherPlayer.start()
 
     initializeGeneral()
     initializeAlliances()
     initializeWaves()
 
+
     doAfter(1.0) ->
       postStart()
 
   // --------------------------------------------------------------------------
-  override function onStopped()
-    super.onStopped()
+  override function onCompleted()
+    super.onCompleted()
+
+    m_weatherPlayer.stop()
 
     destroy m_playerWaves
     m_playerWaves = null

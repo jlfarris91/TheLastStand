@@ -1,0 +1,133 @@
+package WeatherManager
+import MapBounds
+import ClosureTimers
+import Math
+
+weathereffect g_lordaeronRainLight
+weathereffect g_lordaeronRainHeavy
+weathereffect g_windHeavy
+CallbackSingle g_currentWeatherTimer
+
+real g_fogFadeDT = 0.1
+real g_fogFadeT = 0.0
+real g_fogFadeDir = -1.0
+real g_fogFadeDuration = 5.0
+bool g_updateFog = true
+
+public tuple fogParams(real zstart, real zend, real density, real r, real g, real b)
+
+// ============================================================================
+public enum WeatherEffectType
+  NONE
+  RAIN_LIGHT
+  RAIN_HEAVY
+  FOG
+
+// ============================================================================
+public class Weather
+  private static WeatherEffectType m_weatherEffectType
+
+  // --------------------------------------------------------------------------
+  static function getWeatherEffect() returns WeatherEffectType
+    return m_weatherEffectType
+
+  // --------------------------------------------------------------------------
+  static function setWeatherEffect(WeatherEffectType weatherEffectType)
+    cancelWeatherEffectTimer()
+    
+    if (weatherEffectType == WeatherEffectType.RAIN_LIGHT)
+      startLightRain()
+    else
+      stopLightRain()
+    
+    if (weatherEffectType == WeatherEffectType.RAIN_HEAVY)
+      startHeavyRain()
+    else
+      stopHeavyRain()
+
+    if (weatherEffectType == WeatherEffectType.FOG)
+      startFog()
+    else
+      stopFog()
+
+    m_weatherEffectType = weatherEffectType
+
+  // --------------------------------------------------------------------------
+  static function startWeatherEffect(WeatherEffectType weatherEffectType, real duration)
+    setWeatherEffect(weatherEffectType)
+    g_currentWeatherTimer = doAfter(duration, () -> clearWeatherEffects())
+
+  // --------------------------------------------------------------------------
+  static function clearWeatherEffects()
+    setWeatherEffect(WeatherEffectType.NONE)
+
+  // --------------------------------------------------------------------------
+  private static function cancelWeatherEffectTimer()
+    if (g_currentWeatherTimer != null)
+      destroy g_currentWeatherTimer
+      g_currentWeatherTimer = null
+
+  // --------------------------------------------------------------------------
+  private static function startLightRain()
+    if (g_lordaeronRainLight == null)
+      g_lordaeronRainLight = AddWeatherEffect(boundRect, WeatherEffects.lordaeronRainLight)
+    g_lordaeronRainLight.enable()
+
+  // --------------------------------------------------------------------------
+  private static function stopLightRain()
+    if (g_lordaeronRainLight != null)
+      g_lordaeronRainLight.disable()
+
+  // --------------------------------------------------------------------------
+  private static function startHeavyRain()
+    if (g_lordaeronRainHeavy == null)
+      g_lordaeronRainHeavy = AddWeatherEffect(boundRect, WeatherEffects.lordaeronRainHeavy)
+    g_lordaeronRainHeavy.enable()
+
+  // --------------------------------------------------------------------------
+  private static function stopHeavyRain()
+    if (g_lordaeronRainHeavy != null)
+      g_lordaeronRainHeavy.disable()
+
+  // --------------------------------------------------------------------------
+  private static function startFog()
+    g_fogFadeDir = 1.0
+
+  // --------------------------------------------------------------------------
+  private static function stopFog()
+    g_fogFadeDir = -1.0
+
+  // --------------------------------------------------------------------------
+  static function toggleWeatherUpdate()
+    g_updateFog = not g_updateFog
+
+  // --------------------------------------------------------------------------
+  static function isUpdatingFog() returns bool
+    return g_updateFog
+
+  static fogParams m_fogOffParams = fogParams(1700.0, 2300.0, 0.0, 0.3, 0.3, 0.3)
+  static fogParams m_fogOnParams = fogParams(1000.0, 2000.0, 0.0, 0.0, 0.3, 0.3)
+  static real m_lastFogT = -1
+
+  // --------------------------------------------------------------------------
+  static function updateFog(real t)
+    if (t == m_lastFogT)
+      return
+    
+    m_lastFogT = t
+
+    let zstart = lerp(m_fogOffParams.zstart, m_fogOnParams.zstart, t)
+    let zend = lerp(m_fogOffParams.zend, m_fogOnParams.zend, t)
+    let density = lerp(m_fogOffParams.density, m_fogOnParams.density, t)
+    let r = lerp(m_fogOffParams.r, m_fogOnParams.r, t)
+    let g = lerp(m_fogOffParams.g, m_fogOnParams.g, t)
+    let b = lerp(m_fogOffParams.b, m_fogOnParams.b, t)
+    SetTerrainFogEx(0, zstart, zend, density, r, g, b)
+
+// ============================================================================
+init
+
+  doPeriodically(g_fogFadeDT) (CallbackPeriodic cb) ->
+    g_fogFadeT = clamp01(g_fogFadeT + (g_fogFadeDT / g_fogFadeDuration) * g_fogFadeDir)
+    if (g_updateFog)
+      Weather.updateFog(g_fogFadeT)
