@@ -10,11 +10,14 @@ import GameConstants
 import ErrorHandling
 import ClosureEvents
 import Math
+import IProgress
 
 // ============================================================================
-public class SpawnWave extends Runnable
+public class SpawnWave extends Runnable implements IProgress
   private SpawnWaveDefinition m_definition
   private EventCallback m_onActivatedHandler
+  private Event1<IProgress> m_progressChangedEvent
+  private Event1Callback<IProgress> m_onDefProgressChangedEventHandler
   private player m_targetPlayer
   private LinkedList<unit> m_aliveSpawnedUnits
   private int m_numSpawned
@@ -30,9 +33,14 @@ public class SpawnWave extends Runnable
   // --------------------------------------------------------------------------
   ondestroy
     unlistenToActivatedEvent()
+    unlistenToDefProgressChangedEvent()
     destroy m_aliveSpawnedUnits
     m_definition = null
     m_targetPlayer = null
+
+    if (m_progressChangedEvent != null)
+      destroy m_progressChangedEvent
+      m_progressChangedEvent = null
 
   // --------------------------------------------------------------------------
   function getTargetPlayer() returns player
@@ -54,35 +62,81 @@ public class SpawnWave extends Runnable
   override function onStarted()
     super.onStarted()
     listenToActivatedEvent()
+    listenToDefProgressChangedEvent()
+    
     m_definition.getActivator().start()
+
+    let runnableProgress = (m_definition.getProgress() castTo int) castTo IRunnable
+    if (runnableProgress != null)
+      runnableProgress.start()    
+
     m_aliveSpawnedUnits.clear()
     m_numSpawned = 0
 
   // --------------------------------------------------------------------------
   override function onPaused()
     super.onPaused()
-    m_definition.getActivator().pause()
     unlistenToActivatedEvent()
+    unlistenToDefProgressChangedEvent()
+
+    m_definition.getActivator().pause()
+
+    let runnableProgress = (m_definition.getProgress() castTo int) castTo IRunnable
+    if (runnableProgress != null)
+      runnableProgress.pause()
 
   // --------------------------------------------------------------------------
   override function onResumed()
     super.onResumed()
     listenToActivatedEvent()
+    listenToDefProgressChangedEvent()
+
     m_definition.getActivator().resume()
+    
+    let runnableProgress = (m_definition.getProgress() castTo int) castTo IRunnable
+    if (runnableProgress != null)
+      runnableProgress.resume()
 
   // --------------------------------------------------------------------------
   override function onCompleted()
     super.onCompleted()
     unlistenToActivatedEvent()
+    unlistenToDefProgressChangedEvent()
     m_definition.getActivator().complete()
+
+    let runnableProgress = (m_definition.getProgress() castTo int) castTo IRunnable
+    if (runnableProgress != null)
+      runnableProgress.complete()
 
   // --------------------------------------------------------------------------
   override function reset()
     super.reset()
     unlistenToActivatedEvent()
+    unlistenToDefProgressChangedEvent()
+
     m_definition.getActivator().reset()
+
+    let runnableProgress = (m_definition.getProgress() castTo int) castTo IRunnable
+    if (runnableProgress != null)
+      runnableProgress.reset()
+
     m_aliveSpawnedUnits.clear()
     m_numSpawned = 0
+
+  // --------------------------------------------------------------------------
+  override function getProgress() returns real
+    return clamp01(m_definition.getProgress().getProgress())
+
+  // --------------------------------------------------------------------------
+  override function getProgressChangedEvent() returns Event1<IProgress>
+    if (m_progressChangedEvent == null)
+      m_progressChangedEvent = new Event1<IProgress>()
+    return m_progressChangedEvent
+
+  // --------------------------------------------------------------------------
+  function raiseProgressChangedEvent()
+    if (m_progressChangedEvent != null)
+      m_progressChangedEvent.call(this)
 
   // --------------------------------------------------------------------------
   function activateOnce()
@@ -103,7 +157,7 @@ public class SpawnWave extends Runnable
     let camp = playerMetadata.getCamp()
     let center = camp.getCenter()
 
-    let waveProgress = getWaveProgress()
+    let waveProgress = getProgress()
     let aliveCountMax = m_definition.getMaxAliveCount(waveProgress)
     let spawnCountMax = m_definition.getMaxSpawnCount(waveProgress)    
     let spawnsPerActivation = m_definition.getSpawnsPerActivation(waveProgress)    
@@ -152,10 +206,6 @@ public class SpawnWave extends Runnable
     // Clean up the spawnPoints list
     destroy spawnPoints
 
-    // Wave has completed
-    if (waveProgress == 1.0)
-      complete()
-
   // --------------------------------------------------------------------------
   private function getNumSpawnsAvailable(int aliveCountMax, int spawnCountMax) returns int
     let numSpawnsAvailable = min(aliveCountMax - m_aliveSpawnedUnits.size(), spawnCountMax - m_numSpawned)
@@ -178,10 +228,7 @@ public class SpawnWave extends Runnable
       pos.x, pos.y,
       GetRandomDirectionDeg())
 
-    var progress = 0.0
-    let waveProgresser = m_definition.getProgress()
-    if (waveProgresser != null)
-      progress = waveProgresser.getProgress()
+    let progress = getProgress()
 
     let commonUnitModifier = m_definition.getCommonUnitModifier()
     if (commonUnitModifier != null)
@@ -208,14 +255,6 @@ public class SpawnWave extends Runnable
     return m_aliveSpawnedUnits.size()
 
   // --------------------------------------------------------------------------
-  function getWaveProgress() returns real
-    var waveProgress = -1.0
-    let getProgress = m_definition.getProgress()
-    if (getProgress != null)
-      waveProgress = getProgress.getProgress()
-    return clamp01(waveProgress)
-
-  // --------------------------------------------------------------------------
   private function listenToActivatedEvent()
     unlistenToActivatedEvent()
 
@@ -237,3 +276,28 @@ public class SpawnWave extends Runnable
     if (m_onActivatedHandler != null)
       destroy m_onActivatedHandler
       m_onActivatedHandler = null
+
+  // --------------------------------------------------------------------------
+  private function onDefProgressChanged()
+    raiseProgressChangedEvent()
+    if (getProgress() == 1.0)
+      complete()
+
+  // --------------------------------------------------------------------------
+  private function listenToDefProgressChangedEvent()
+    unlistenToDefProgressChangedEvent()
+
+    if (m_onDefProgressChangedEventHandler != null)
+      return
+
+    let progressChangedEvent = m_definition.getProgress().getProgressChangedEvent()
+    if (progressChangedEvent == null)
+      return
+
+    m_onDefProgressChangedEventHandler = progressChangedEvent.register((progress) -> onDefProgressChanged())
+
+  // --------------------------------------------------------------------------
+  private function unlistenToDefProgressChangedEvent()
+    if (m_onDefProgressChangedEventHandler != null)
+      destroy m_onDefProgressChangedEventHandler
+      m_onDefProgressChangedEventHandler = null

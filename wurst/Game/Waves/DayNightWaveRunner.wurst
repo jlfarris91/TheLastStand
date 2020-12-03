@@ -5,13 +5,6 @@ import DayWaveCollection
 import NightWaveCollection
 import DayWave
 import NightWave
-import HumanPlayerMetadata
-import WaveRewardScalarComponent
-import PlayerUtils
-import DisplayTextToPlayer
-import StringExtensions
-import Events
-import FX
 
 // ============================================================================
 public class DayNightWaveRunner
@@ -20,7 +13,6 @@ public class DayNightWaveRunner
   private DayWaveCollection m_dayWaves
   private Wave m_currentWave
   private bool m_day
-  private Event1Callback<Runnable> m_onCurrentWaveStateChangedHandler
 
   // --------------------------------------------------------------------------
   construct(player targetPlayer, NightWaveCollection nightWaves, DayWaveCollection dayWaves)
@@ -44,7 +36,6 @@ public class DayNightWaveRunner
     if (m_currentWave != null)
       m_currentWave.start()
       m_day = false
-      listenToCurrentWaveStateChangedEvent()
       Log.debug("Night wave {0} started.".format(m_currentWave.getId()))
     else
       Log.debug("No night wave found for night " + I2S(night))
@@ -57,7 +48,6 @@ public class DayNightWaveRunner
     if (m_currentWave != null)
       m_day = true
       m_currentWave.start()
-      listenToCurrentWaveStateChangedEvent()
       Log.debug("Day wave {0} started.".format(m_currentWave.getId()))
     else
       Log.debug("No day wave found for day " + I2S(day))
@@ -71,52 +61,3 @@ public class DayNightWaveRunner
     Log.debug("Wave {0} canceled by runner. State: {1}".format(m_currentWave.getId(), m_currentWave.getStatusString()))
 
     m_currentWave.cancel()
-    unlistenToCurrentWaveStateChangedEvent()
-
-  // --------------------------------------------------------------------------
-  private function onCurrentWaveStateChanged()
-    if (m_currentWave.isCompleted())
-      unlistenToCurrentWaveStateChangedEvent()
-
-    if (m_currentWave.succeeded())
-      grantRewards()
-
-  // --------------------------------------------------------------------------
-  private function grantRewards()
-
-    let comp = m_targetPlayer.getHumanMetadata().getOrAddWaveRewardScalarComponent()
-
-    int xp = m_currentWave.getXpReward()
-    xp = comp.scaleXpReward(xp)
-    if (xp != 0)
-      addXpToAllHeroesBelongingToPlayer(m_targetPlayer, xp)
-      displayMessageToPlayer(m_targetPlayer, "Reward: " + "+{0} xp".format(xp.toString()).colorize(TAG_COLOR_EXP))
-
-    int mats = m_currentWave.getMatsReward()
-    mats = comp.scaleMatsReward(mats)
-    if (mats != 0)
-      m_targetPlayer.addLumber(mats)
-      displayMessageToPlayer(m_targetPlayer, "Reward: " + "+{0} materials".format(mats.toString()).colorize(TAG_COLOR_MATERIALS))
-
-    int gold = m_currentWave.getGoldReward()
-    gold = comp.scaleMatsReward(gold)
-    if (gold != 0)
-      m_targetPlayer.addGold(gold)
-      displayMessageToPlayer(m_targetPlayer, "Reward: " + "+{0} gold".format(gold.toString()).colorize(TAG_COLOR_GOLD))
-
-  // --------------------------------------------------------------------------
-  private function listenToCurrentWaveStateChangedEvent()
-    if (m_currentWave == null)
-      return
-
-    let e = m_currentWave.getStateChangedEvent()
-    if (e == null)
-      return
-    
-    m_onCurrentWaveStateChangedHandler = e.register((runnable) -> onCurrentWaveStateChanged())
-
-  // --------------------------------------------------------------------------
-  private function unlistenToCurrentWaveStateChangedEvent()
-    if (m_onCurrentWaveStateChangedHandler != null)
-      destroy m_onCurrentWaveStateChangedHandler
-      m_onCurrentWaveStateChangedHandler = null

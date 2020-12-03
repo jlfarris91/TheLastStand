@@ -5,26 +5,41 @@ import SpawnWave
 import IProgress
 import HashMap
 import Events
+import HumanPlayerMetadata
+import WaveRewardScalarComponent
+import StringExtensions
+import FX
+import PlayerUtils
+import DisplayTextToPlayer
+import Math
 
 // ============================================================================
 public class Wave extends Runnable implements IProgress
   protected LinkedList<SpawnWave> m_spawnWaves
   protected HashMap<SpawnWave, Event1Callback<Runnable>> m_spawnWaveStateChangeHandlers
+  protected HashMap<SpawnWave, Event1Callback<IProgress>> m_spawnWaveProgressChangeHandlers
+  private player m_player
   private string m_id
   private int m_xpReward
   private int m_matsReward
   private int m_goldReward
   private int m_completedSpawnWaves
+  private Event1<IProgress> m_progressChangedEvent
 
   // --------------------------------------------------------------------------
-  construct()
+  construct(player p)
+    m_player = p
     m_spawnWaves = new LinkedList<SpawnWave>()
     m_spawnWaveStateChangeHandlers = new HashMap<SpawnWave, Event1Callback<Runnable>>()
+    m_spawnWaveProgressChangeHandlers = new HashMap<SpawnWave, Event1Callback<IProgress>>()
 
   // --------------------------------------------------------------------------
   ondestroy
+    unlistenToAllSpawnWaveEvents()
+
     for sw in m_spawnWaves
       destroy m_spawnWaveStateChangeHandlers.get(sw)
+      destroy m_spawnWaveProgressChangeHandlers.get(sw)
       destroy sw
 
     destroy m_spawnWaves
@@ -32,6 +47,13 @@ public class Wave extends Runnable implements IProgress
 
     destroy m_spawnWaveStateChangeHandlers
     m_spawnWaveStateChangeHandlers = null
+
+    destroy m_spawnWaveProgressChangeHandlers
+    m_spawnWaveProgressChangeHandlers = null
+
+    if (m_progressChangedEvent != null)
+      destroy m_progressChangedEvent
+      m_progressChangedEvent = null
 
   // --------------------------------------------------------------------------
   function getId() returns string
@@ -42,26 +64,13 @@ public class Wave extends Runnable implements IProgress
     m_id = id
 
   // --------------------------------------------------------------------------
-  function addSpawnWave(SpawnWave wave)
-    m_spawnWaves.add(wave)
-
-    let e = wave.getStateChangedEvent()
-    if (e == null)
-      return
-
-    let handler = e.register((runnable) -> onSpawnWaveStateChanged(runnable castTo SpawnWave))
-    m_spawnWaveStateChangeHandlers.put(wave, handler)
+  function addSpawnWave(SpawnWave spawnWave)
+    m_spawnWaves.add(spawnWave)
 
   // --------------------------------------------------------------------------
-  function removeSpawnWave(SpawnWave wave) returns bool
-    if (not m_spawnWaves.remove(wave))
+  function removeSpawnWave(SpawnWave spawnWave) returns bool
+    if (not m_spawnWaves.remove(spawnWave))
       return false
-      
-    let handler = m_spawnWaveStateChangeHandlers.get(wave)
-    if (handler != null)
-      m_spawnWaveStateChangeHandlers.remove(wave)
-      destroy handler
-
     return true
 
   // --------------------------------------------------------------------------
@@ -96,40 +105,41 @@ public class Wave extends Runnable implements IProgress
   override function onStarted()
     super.onStarted()
     m_completedSpawnWaves = 0
+    listenToAllSpawnWaveEvents()
     for wave in m_spawnWaves
       wave.start()
 
   // --------------------------------------------------------------------------
   override function onCompleted()
     super.onCompleted()
-    let errorMsg = getError()
+    unlistenToAllSpawnWaveEvents()
 
-    for wave in m_spawnWaves
-      if (errorMsg != null)
-        wave.fail(errorMsg)
-      else
-        wave.complete()
-
-    if (errorMsg != null)
-      Log.debug("Wave {0}: Failed: {1}".format(m_id, errorMsg))
+    if (this.failed())
+      Log.debug("Wave {0}: Failed: {1}".format(m_id, getError()))
     else
       Log.debug("Wave {0}: Completed successfully!".format(m_id))
+
+    if (this.succeeded())
+      grantRewards()
 
   // --------------------------------------------------------------------------
   override function onPaused()
     super.onPaused()
+    unlistenToAllSpawnWaveEvents()
     for wave in m_spawnWaves
       wave.pause()
 
   // --------------------------------------------------------------------------
   override function onResumed()
     super.onResumed()
+    listenToAllSpawnWaveEvents()
     for wave in m_spawnWaves
       wave.resume()
 
   // --------------------------------------------------------------------------
   override function reset()
     super.reset()
+    unlistenToAllSpawnWaveEvents()
     m_completedSpawnWaves = 0
     for wave in m_spawnWaves
       wave.reset()
@@ -143,16 +153,84 @@ public class Wave extends Runnable implements IProgress
       if (progressReporter != null)
         numProgress += 1.0
         totalProgress += progressReporter.getProgress()
-    return totalProgress / numProgress
+    return clamp01(totalProgress / numProgress)
 
   // --------------------------------------------------------------------------
   private function onSpawnWaveStateChanged(SpawnWave spawnWave)
-    if (spawnWave.isCompleted())
-      m_completedSpawnWaves++
-      Log.debug("Wave {0}: Spawn wave {1} completed ({2}/{3})".format(m_id, spawnWave.getId(), m_completedSpawnWaves.toString(), m_spawnWaves.size().toString()))
-      if (m_completedSpawnWaves == m_spawnWaves.size())
-        Log.debug("Wave {0}: All spawn waves completed!")
-        complete()
-    else if (spawnWave.failed())
+    if (spawnWave.failed())
       Log.debug("Wave {0}: Spawn wave {1} failed ({2}/{3}): {4}".format(m_id, spawnWave.getId(), m_completedSpawnWaves.toString(), m_spawnWaves.size().toString(), spawnWave.getError()))
       fail(spawnWave.getError())
+
+  // --------------------------------------------------------------------------
+  private function onSpawnWaveProgressChanged(IProgress _progress)
+    raiseProgressChangedEvent()
+
+    if (getProgress() == 1.0)
+      complete()
+
+  // --------------------------------------------------------------------------
+  override function getProgressChangedEvent() returns Event1<IProgress>
+    if (m_progressChangedEvent == null)
+      m_progressChangedEvent = new Event1<IProgress>()
+    return m_progressChangedEvent
+
+  // --------------------------------------------------------------------------
+  function raiseProgressChangedEvent()
+    if (m_progressChangedEvent != null)
+      m_progressChangedEvent.call(this)
+
+  // --------------------------------------------------------------------------
+  private function grantRewards()
+
+    let comp = m_player.getHumanMetadata().getOrAddWaveRewardScalarComponent()
+
+    int xp = getXpReward()
+    xp = comp.scaleXpReward(xp)
+    if (xp != 0)
+      addXpToAllHeroesBelongingToPlayer(m_player, xp)
+      displayMessageToPlayer(m_player, "Reward: " + "+{0} xp".format(xp.toString()).colorize(TAG_COLOR_EXP))
+
+    int mats = getMatsReward()
+    mats = comp.scaleMatsReward(mats)
+    if (mats != 0)
+      m_player.addLumber(mats)
+      displayMessageToPlayer(m_player, "Reward: " + "+{0} materials".format(mats.toString()).colorize(TAG_COLOR_MATERIALS))
+
+    int gold = getGoldReward()
+    gold = comp.scaleMatsReward(gold)
+    if (gold != 0)
+      m_player.addGold(gold)
+      displayMessageToPlayer(m_player, "Reward: " + "+{0} gold".format(gold.toString()).colorize(TAG_COLOR_GOLD))
+
+  // --------------------------------------------------------------------------
+  private function listenToAllSpawnWaveEvents()
+    for spawnWave in m_spawnWaves
+      listenToSpawnWaveEvents(spawnWave)
+
+  // --------------------------------------------------------------------------
+  private function listenToSpawnWaveEvents(SpawnWave spawnWave)
+    unlistenToSpawnWaveEvents(spawnWave)
+    
+    let e = spawnWave.getStateChangedEvent()
+    if (e != null)
+      let handler = e.register((runnable) -> onSpawnWaveStateChanged(runnable castTo SpawnWave))
+      m_spawnWaveStateChangeHandlers.put(spawnWave, handler)
+
+    let progress = spawnWave.getDefinition().getProgress()
+    if (progress != null)
+      let progressChangedEvent = progress.getProgressChangedEvent()
+      if (progressChangedEvent != null)
+        let handler = progressChangedEvent.register((progress) -> onSpawnWaveProgressChanged(progress))
+        m_spawnWaveProgressChangeHandlers.put(spawnWave, handler)
+    
+  // --------------------------------------------------------------------------
+  private function unlistenToAllSpawnWaveEvents()
+    for spawnWave in m_spawnWaves
+      unlistenToSpawnWaveEvents(spawnWave)
+
+  // --------------------------------------------------------------------------
+  private function unlistenToSpawnWaveEvents(SpawnWave spawnWave)
+    let handler = m_spawnWaveStateChangeHandlers.get(spawnWave)
+    if (handler != null)
+      m_spawnWaveStateChangeHandlers.remove(spawnWave)
+      destroy handler
