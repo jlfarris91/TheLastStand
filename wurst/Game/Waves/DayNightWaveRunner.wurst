@@ -30,7 +30,7 @@ public class DayNightWaveRunner
 
   // --------------------------------------------------------------------------
   ondestroy
-    unlistenToCurrentWaveStateChangedEvent()
+    cancelCurrentWave()
 
   // --------------------------------------------------------------------------
   function getCurrentWave() returns Wave
@@ -38,36 +38,45 @@ public class DayNightWaveRunner
   
   // --------------------------------------------------------------------------
   function startNightWave(int night)
-    this.cancel()
     Log.debug("Start night wave " + I2S(night))
+    cancelCurrentWave()
     m_currentWave = m_nightWaves.getLatestWave(night)
     if (m_currentWave != null)
       m_currentWave.start()
       m_day = false
       listenToCurrentWaveStateChangedEvent()
+      Log.debug("Night wave {0} started.".format(m_currentWave.getId()))
     else
       Log.debug("No night wave found for night " + I2S(night))
 
   // --------------------------------------------------------------------------
   function startDayWave(int day)
-    this.cancel()
-    Log.debug("Start day wave " + I2S(day))
+    Log.debug("Starting day wave {0}...".format(day.toString()))
+    cancelCurrentWave()
     m_currentWave = m_dayWaves.getLatestWave(day)
     if (m_currentWave != null)
       m_day = true
       m_currentWave.start()
       listenToCurrentWaveStateChangedEvent()
+      Log.debug("Day wave {0} started.".format(m_currentWave.getId()))
     else
       Log.debug("No day wave found for day " + I2S(day))
+    
 
   // --------------------------------------------------------------------------
-  function cancel()
-    if (m_currentWave != null and not m_currentWave.isCompleted())
-      m_currentWave.cancel()
+  function cancelCurrentWave()
+    if (m_currentWave == null or m_currentWave.isCompleted())
+      return
+
+    Log.debug("Wave {0} canceled by runner. State: {1}".format(m_currentWave.getId(), m_currentWave.getStatusString()))
+
+    m_currentWave.cancel()
+    unlistenToCurrentWaveStateChangedEvent()
 
   // --------------------------------------------------------------------------
   private function onCurrentWaveStateChanged()
-    unlistenToCurrentWaveStateChangedEvent()
+    if (m_currentWave.isCompleted())
+      unlistenToCurrentWaveStateChangedEvent()
 
     if (m_currentWave.succeeded())
       grantRewards()

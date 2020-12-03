@@ -10,6 +10,7 @@ import Events
 public class Wave extends Runnable implements IProgress
   protected LinkedList<SpawnWave> m_spawnWaves
   protected HashMap<SpawnWave, Event1Callback<Runnable>> m_spawnWaveStateChangeHandlers
+  private string m_id
   private int m_xpReward
   private int m_matsReward
   private int m_goldReward
@@ -31,6 +32,14 @@ public class Wave extends Runnable implements IProgress
 
     destroy m_spawnWaveStateChangeHandlers
     m_spawnWaveStateChangeHandlers = null
+
+  // --------------------------------------------------------------------------
+  function getId() returns string
+    return m_id
+
+  // --------------------------------------------------------------------------
+  function setId(string id)
+    m_id = id
 
   // --------------------------------------------------------------------------
   function addSpawnWave(SpawnWave wave)
@@ -95,16 +104,16 @@ public class Wave extends Runnable implements IProgress
     super.onCompleted()
     let errorMsg = getError()
 
-    if (errorMsg != null)
-      Log.info("Wave failed: " + errorMsg)
-    else
-      Log.info("Wave completed successfully")
-
     for wave in m_spawnWaves
       if (errorMsg != null)
         wave.fail(errorMsg)
       else
         wave.complete()
+
+    if (errorMsg != null)
+      Log.debug("Wave {0}: Failed: {1}".format(m_id, errorMsg))
+    else
+      Log.debug("Wave {0}: Completed successfully!".format(m_id))
 
   // --------------------------------------------------------------------------
   override function onPaused()
@@ -122,6 +131,8 @@ public class Wave extends Runnable implements IProgress
   override function reset()
     super.reset()
     m_completedSpawnWaves = 0
+    for wave in m_spawnWaves
+      wave.reset()
 
   // --------------------------------------------------------------------------
   override function getProgress() returns real
@@ -138,8 +149,10 @@ public class Wave extends Runnable implements IProgress
   private function onSpawnWaveStateChanged(SpawnWave spawnWave)
     if (spawnWave.isCompleted())
       m_completedSpawnWaves++
-      Log.info("Spawn wave completed {0}/{1}".format(m_completedSpawnWaves.toString(), m_spawnWaves.size().toString()))
+      Log.debug("Wave {0}: Spawn wave {1} completed ({2}/{3})".format(m_id, spawnWave.getId(), m_completedSpawnWaves.toString(), m_spawnWaves.size().toString()))
       if (m_completedSpawnWaves == m_spawnWaves.size())
+        Log.debug("Wave {0}: All spawn waves completed!")
         complete()
     else if (spawnWave.failed())
+      Log.debug("Wave {0}: Spawn wave {1} failed ({2}/{3}): {4}".format(m_id, spawnWave.getId(), m_completedSpawnWaves.toString(), m_spawnWaves.size().toString(), spawnWave.getError()))
       fail(spawnWave.getError())
