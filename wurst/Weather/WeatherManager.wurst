@@ -1,0 +1,179 @@
+package WeatherManager
+import MapBounds
+import ClosureTimers
+import Math
+import Gradient
+import ColorUtility
+import Range
+
+weathereffect g_lordaeronRainLight
+weathereffect g_lordaeronRainHeavy
+weathereffect g_windHeavy
+CallbackSingle g_currentWeatherTimer
+
+real g_fogFadeDT = 0.1
+real g_fogFadeT = 0.0
+real g_fogFadeDir = -1.0
+real g_fogFadeDuration = 5.0
+
+colorA g_fogColor = colorA(0, 77, 77, 255)
+rangeReal g_fogOnParams = rangeReal(1300.0, 2100.0)
+
+GradientColorList g_weatherFogColorGradient
+
+bool g_updateFog = true
+GradientColorList g_dncFogColorGradient
+GradientList<real> g_dncFogZStartGradient
+GradientList<real> g_dncFogZEndGradient
+
+public tuple fogParams(real zstart, real zend, real density)
+
+// ============================================================================
+public enum WeatherEffectType
+  NONE
+  RAIN_LIGHT
+  RAIN_HEAVY
+  FOG
+
+// ============================================================================
+public class Weather
+  private static WeatherEffectType m_weatherEffectType
+
+  // --------------------------------------------------------------------------
+  static function getWeatherEffect() returns WeatherEffectType
+    return m_weatherEffectType
+
+  // --------------------------------------------------------------------------
+  static function setWeatherEffect(WeatherEffectType weatherEffectType)
+    cancelWeatherEffectTimer()
+    
+    if (weatherEffectType == WeatherEffectType.RAIN_LIGHT)
+      startLightRain()
+    else
+      stopLightRain()
+    
+    if (weatherEffectType == WeatherEffectType.RAIN_HEAVY)
+      startHeavyRain()
+    else
+      stopHeavyRain()
+
+    if (weatherEffectType == WeatherEffectType.FOG)
+      startFog()
+    else
+      stopFog()
+
+    m_weatherEffectType = weatherEffectType
+
+  // --------------------------------------------------------------------------
+  static function startWeatherEffect(WeatherEffectType weatherEffectType, real duration)
+    setWeatherEffect(weatherEffectType)
+    g_currentWeatherTimer = doAfter(duration, () -> clearWeatherEffects())
+
+  // --------------------------------------------------------------------------
+  static function clearWeatherEffects()
+    setWeatherEffect(WeatherEffectType.NONE)
+
+  // --------------------------------------------------------------------------
+  private static function cancelWeatherEffectTimer()
+    if (g_currentWeatherTimer != null)
+      destroy g_currentWeatherTimer
+      g_currentWeatherTimer = null
+
+  // --------------------------------------------------------------------------
+  private static function startLightRain()
+    if (g_lordaeronRainLight == null)
+      g_lordaeronRainLight = AddWeatherEffect(boundRect, WeatherEffects.lordaeronRainLight)
+    g_lordaeronRainLight.enable()
+
+  // --------------------------------------------------------------------------
+  private static function stopLightRain()
+    if (g_lordaeronRainLight != null)
+      g_lordaeronRainLight.disable()
+
+  // --------------------------------------------------------------------------
+  private static function startHeavyRain()
+    if (g_lordaeronRainHeavy == null)
+      g_lordaeronRainHeavy = AddWeatherEffect(boundRect, WeatherEffects.lordaeronRainHeavy)
+    g_lordaeronRainHeavy.enable()
+
+  // --------------------------------------------------------------------------
+  private static function stopHeavyRain()
+    if (g_lordaeronRainHeavy != null)
+      g_lordaeronRainHeavy.disable()
+
+  // --------------------------------------------------------------------------
+  private static function startFog()
+    g_fogFadeDir = 1.0
+
+  // --------------------------------------------------------------------------
+  private static function stopFog()
+    g_fogFadeDir = -1.0
+
+  // --------------------------------------------------------------------------
+  static function toggleWeatherUpdate()
+    g_updateFog = not g_updateFog
+
+  // --------------------------------------------------------------------------
+  static function isUpdatingFog() returns bool
+    return g_updateFog
+
+  // --------------------------------------------------------------------------
+  static function updateFog(real t)
+
+    let timeOfDay = GetTimeOfDay()
+    let dayNightT = timeOfDay / 24.0
+    
+    let zstart_dayNight = g_dncFogZStartGradient.sample(dayNightT)
+    let zend_dayNight = g_dncFogZEndGradient.sample(dayNightT)
+    let color_dayNight = g_dncFogColorGradient.sample(dayNightT)
+    let color_weatherFog = g_weatherFogColorGradient.sample(dayNightT)
+
+    let zstart = lerp(zstart_dayNight, g_fogOnParams.min, t)
+    let zend = lerp(zend_dayNight, g_fogOnParams.max, t)
+    let color = color_dayNight.mix(color_weatherFog, t)
+    SetTerrainFogEx(0, zstart, zend, 0.0, color.getRed01(), color.getGreen01(), color.getBlue01())
+
+// ============================================================================
+init
+
+  // Represents the fog color for the full day
+  g_dncFogColorGradient = new GradientColorList((colorA a, colorA b, real t) -> a.mix(b, t), COLOR_BLACK)
+  ..addEntry(0.0, colorA(26, 38, 64, 255))
+  ..addEntry(4.0 / 24.0, colorA(26, 46, 56, 255))
+  ..addEntry(8.0 / 24.0, colorA(77, 77, 77, 255))
+  ..addEntry(0.5, colorA(100, 100, 77, 255))
+  ..addEntry(16.0 / 24.0, colorA(77, 77, 77, 255))
+  ..addEntry(20.0 / 24.0, colorA(26, 46, 56, 255))
+  ..addEntry(1.0, colorA(26, 38, 64, 255))
+
+  g_dncFogZStartGradient = new GradientList<real>((real a, real b, real t) -> lerp(a, b, t), 0.0)
+  ..addEntry(0.0, 1600.0)
+  ..addEntry(6.0 / 24.0, 1600.0)
+  ..addEntry(8.0 / 24.0, 2800.0)
+  ..addEntry(16.0 / 24.0, 2800.0)
+  ..addEntry(18.0 / 24.0, 1600.0)
+  ..addEntry(1.0, 1600.0)
+
+  g_dncFogZEndGradient = new GradientList<real>((real a, real b, real t) -> lerp(a, b, t), 0.0)
+  ..addEntry(0.0, 2300.0)
+  ..addEntry(4.0 / 24.0, 2300.0)
+  ..addEntry(8.0 / 24.0, 2800.0)
+  ..addEntry(16.0 / 24.0, 2800.0)
+  ..addEntry(18.0 / 24.0, 2300.0)
+  ..addEntry(1.0, 2300.0)
+
+  g_weatherFogColorGradient = new GradientColorList((colorA a, colorA b, real t) -> a.mix(b, t), COLOR_BLACK)
+  ..addEntry(0.0, colorA(50, 30, 90, 255))
+  ..addEntry(4.0 / 24.0, colorA(10, 60, 60, 255))
+  ..addEntry(8.0 / 24.0, colorA(77, 77, 77, 255))
+  ..addEntry(12.0 / 24.0, colorA(95, 73, 40, 255))
+  ..addEntry(16.0 / 24.0, colorA(77, 77, 77, 255))
+  ..addEntry(20.0 / 24.0, colorA(10, 60, 60, 255))
+  ..addEntry(1.0, colorA(50, 30, 90, 255))
+
+  // g_fogTimeFunc = (real t) -> 1 - (t - 1) * (t - 1)
+
+  doPeriodically(g_fogFadeDT) (CallbackPeriodic cb) ->
+    g_fogFadeT = clamp01(g_fogFadeT + (g_fogFadeDT / g_fogFadeDuration) * g_fogFadeDir)
+    if (g_updateFog)
+      Weather.updateFog(g_fogFadeT)

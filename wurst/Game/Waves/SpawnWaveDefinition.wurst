@@ -3,20 +3,31 @@ import IProgress
 import WaveActivator
 import ISpawnPointProvider
 import IUnitTypeProvider
-import Func
-import FunctionalField
+import UnitModifier
+import Functional
+import Math
+import HashMap
+import LinkedList
 
 // ============================================================================
 public class SpawnWaveDefinition
+  private string m_name
   private IProgress m_progress
   private IWaveActivator m_activator
   private ISpawnPointProvider m_spawnPointProvider
   private IUnitTypeProvider m_unitTypeProvider
-  private Func1<real, int> m_maxAliveCount
-  private Func1<real, int> m_maxSpawnCount
-  private Func1<real, int> m_spawnsPerActivation
-  private Func1<real, real> m_spawnGroupingFactor
-  private IFunctionalUnitModifier m_unitModifier
+  private FunctionalT<int> m_maxAliveCount
+  private FunctionalT<int> m_maxSpawnCount
+  private FunctionalT<int> m_spawnsPerActivation
+  private FunctionalT<real> m_spawnGroupingFactor
+  private IterableMap<int, AggregateUnitModifier> m_unitModifiers
+  private LinkedList<string> m_tags
+
+  // --------------------------------------------------------------------------
+  construct(string name)
+    m_name = name
+    m_unitModifiers = new IterableMap<int, AggregateUnitModifier>()
+    m_tags = new LinkedList<string>()
 
   // --------------------------------------------------------------------------
   ondestroy
@@ -52,9 +63,17 @@ public class SpawnWaveDefinition
       destroy m_spawnGroupingFactor
       m_spawnGroupingFactor = null
 
-    if (m_unitModifier != null)
-      destroy m_unitModifier
-      m_unitModifier = null
+    for unitTypeId in m_unitModifiers
+      destroy m_unitModifiers.get(unitTypeId)
+
+    destroy m_unitModifiers
+    m_unitModifiers = null
+
+    destroy m_tags
+
+  // --------------------------------------------------------------------------
+  function getName() returns string
+    return m_name
 
   // --------------------------------------------------------------------------
   function setProgress(IProgress progress)
@@ -89,41 +108,63 @@ public class SpawnWaveDefinition
     return m_unitTypeProvider
 
   // --------------------------------------------------------------------------
-  function setMaxAliveCount(Func1<real, int> value)
+  function setMaxAliveCount(FunctionalT<int> value)
     m_maxAliveCount = value
 
   // --------------------------------------------------------------------------
-  function getMaxAliveCount() returns Func1<real, int>
-    return m_maxAliveCount
+  function getMaxAliveCount(real t) returns int
+    if (m_maxAliveCount == null)
+      return UNLIMITED
+    return clamp(m_maxAliveCount.getValue(t), 0, UNLIMITED)
 
   // --------------------------------------------------------------------------
-  function setMaxSpawnCount(Func1<real, int> value)
+  function setMaxSpawnCount(FunctionalT<int> value)
     m_maxSpawnCount = value
 
   // --------------------------------------------------------------------------
-  function getMaxSpawnCount() returns Func1<real, int>
-    return m_maxSpawnCount
+  function getMaxSpawnCount(real t) returns int
+    if (m_maxSpawnCount == null)
+      return UNLIMITED
+    return clamp(m_maxSpawnCount.getValue(t), 0, UNLIMITED)
 
   // --------------------------------------------------------------------------
-  function getSpawnsPerActivation() returns Func1<real, int>
-    return m_spawnsPerActivation
+  function getSpawnsPerActivation(real t) returns int
+    if (m_spawnsPerActivation == null)
+      return 1
+    return clamp(m_spawnsPerActivation.getValue(t), 0, 1000)
 
   // --------------------------------------------------------------------------
-  function setSpawnsPerActivation(Func1<real, int> value)
+  function setSpawnsPerActivation(FunctionalT<int> value)
     m_spawnsPerActivation = value
 
   // --------------------------------------------------------------------------
-  function getSpawnGroupingFactor() returns Func1<real, real>
-    return m_spawnGroupingFactor
+  function getSpawnGroupingFactor(real t) returns real
+    if (m_spawnGroupingFactor == null)
+      return 0.0
+    return clamp01(m_spawnGroupingFactor.getValue(t))
 
   // --------------------------------------------------------------------------
-  function setSpawnGroupingFactor(Func1<real, real> value)
+  function setSpawnGroupingFactor(FunctionalT<real> value)
     m_spawnGroupingFactor = value
 
   // --------------------------------------------------------------------------
-  function getUnitModifier() returns IFunctionalUnitModifier
-    return m_unitModifier
+  function getCommonUnitModifier() returns AggregateUnitModifier
+    return getUnitModifier(-999)
 
   // --------------------------------------------------------------------------
-  function setUnitModifier(IFunctionalUnitModifier value)
-    m_unitModifier = value
+  function getUnitModifier(int unitTypeId) returns AggregateUnitModifier
+    var unitModifier = m_unitModifiers.get(unitTypeId)
+    if (unitModifier == null)
+      unitModifier = new AggregateUnitModifier()
+      m_unitModifiers.put(unitTypeId, unitModifier)
+    return unitModifier
+
+  // --------------------------------------------------------------------------
+  function setTags(vararg string tags)
+    m_tags.clear()
+    for tag in tags
+      m_tags.add(tag)
+
+  // --------------------------------------------------------------------------
+  function getTags() returns LinkedList<string>
+    return m_tags

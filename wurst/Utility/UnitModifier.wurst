@@ -1,6 +1,7 @@
-package FunctionalField
+package UnitModifier
 import Func
 import LinkedList
+import Range
 
 // ============================================================================
 public interface IFunctionalUnitModifier
@@ -315,6 +316,10 @@ public class MaxHpUnitField extends FunctionalFieldBase<int>
     skip
 
   // --------------------------------------------------------------------------
+  construct(int value)
+    setValue(value)
+
+  // --------------------------------------------------------------------------
   construct(Func1<real, int> func)
     setFunc(func)
 
@@ -369,6 +374,56 @@ public class ArmorUnitField extends FunctionalFieldBase<real>
   // --------------------------------------------------------------------------
   override function apply(unit u, real t)
     u.setArmor(getValue(t))
+
+// ============================================================================
+public class AttackDamageRangeField implements IFunctionalUnitModifier
+  private int weaponIndex
+  private RangeIntFunc1<real> damageRangeFunc
+
+  construct(int weaponIndex, rangeInt damageRange)
+    this.weaponIndex = weaponIndex
+    damageRangeFunc = (real t) -> damageRange
+
+  // --------------------------------------------------------------------------
+  construct(int weaponIndex, RangeIntFunc1<real> damageRangeFunc)
+    this.weaponIndex = weaponIndex
+    this.damageRangeFunc = damageRangeFunc
+
+  // --------------------------------------------------------------------------
+  override function apply(unit u, real t)
+    let range = damageRangeFunc.call(t)
+    let damageBase = range.min == range.max ? range.min : range.min - 1
+    let damageNumberOfDice = range.min == range.max ? 0 : 1
+    let damageSidesPerDie = range.min == range.max ? range.max - range.min : (range.max - range.min) + 1
+    u.setBaseDamage(damageBase, weaponIndex)
+    u.setDiceNumber(damageNumberOfDice, weaponIndex)
+    u.setDiceSides(damageSidesPerDie, weaponIndex)
+
+// ============================================================================
+public class AttackCooldownField extends FunctionalFieldBase<real>
+  private int weaponIndex
+
+  // --------------------------------------------------------------------------
+  construct(int weaponIndex)
+    this.weaponIndex = weaponIndex
+
+  // --------------------------------------------------------------------------
+  construct(int weaponIndex, real value)
+    this.weaponIndex = weaponIndex
+    setValue(value)
+
+  // --------------------------------------------------------------------------
+  construct(int weaponIndex, Func1<real, real> func)
+    this.weaponIndex = weaponIndex
+    setFunc(func)
+
+  // --------------------------------------------------------------------------
+  static function fromValue(int weaponIndex, real value) returns AttackCooldownField
+    return new AttackCooldownField(weaponIndex, value)
+
+  // --------------------------------------------------------------------------
+  override function apply(unit u, real t)
+    u.setAttackCooldown(getValue(t), weaponIndex)
 
 // // ============================================================================
 // public abstract class LerpBase<T> implements Func1<real, T>

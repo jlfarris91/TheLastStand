@@ -2,55 +2,489 @@ package DebugCommands
 import ChatCommands
 import DisplayTextToPlayer
 import Host
-import ChatCommandHandler
 import MemoryTrackingMultiboard
 import ClosureTimers
 import Godlike
+import ErrorHandling
+import GameInstance
+import Wave
+import GroupUtils
+import MainItemLibrary
+import UnitMetadata
+import HumanPlayerMetadata
+import LinkedList
+import WeatherManager
+import GameConstants
+import TimeOfDay
 
-constant string DEBUG_COMMAND_MEMORYTRACKER = "mem"
-constant string DEBUG_COMMAND_GODLIKE = "godlike"
+constant string COMMAND_MEMORYTRACKER = "mem"
+constant string COMMAND_GODLIKE = "godlike"
+constant string COMMAND_SPAWNONE = "spawnone"
+constant string COMMAND_DAY = "day"
+constant string COMMAND_NIGHT = "night"
+constant string COMMAND_SKIP_TO_DAY = "skipToDay"
+constant string COMMAND_SKIP_TO_NIGHT = "skipToNight"
+constant string COMMAND_SEE = "see"
+constant string COMMAND_KILL_SELECTED_UNITS = "kill"
+constant string COMMAND_REMOVE_SELECTED_UNITS = "remove"
+constant string COMMAND_MOVE_SELECTED_UNITS = "move"
+constant string COMMAND_CREATE_ITEM = "item"
+constant string COMMAND_CREATE_UNIT = "unit"
+constant string COMMAND_ADD_MATS = "mats"
+constant string COMMAND_SHOW_WAVES = "waves"
+constant string COMMAND_LOG_LEVEL = "loglvl"
+constant string COMMAND_WEATHER = "weather"
+constant string COMMAND_CLEARWEATHER = "clearweather"
+constant string COMMAND_TOGGLEWEATHERUPDATE = "toggleweatherupdate"
+constant string COMMAND_SETFOG = "setfog"
+constant string COMMAND_RESETFOG = "resetfog"
+constant string COMMAND_SETLEVEL = "setlevel"
+constant string COMMAND_TODSCALE = "timescale"
+constant string COMMAND_TOD = "time"
 
-DebugChatCommandHandler g_debugChatCommandHandler
+DebugChatCommandHandler g_commandHandler
 MemoryTrackingMultiboard g_memoryTrackingMultiboard
 
 // ============================================================================
 public class DebugChatCommandHandler extends ChatCommandHandler
 
   // --------------------------------------------------------------------------
-  override function handleChatCommand(player p, string command) returns bool
+  construct(string name)
+    super(name)
 
-    if (p.isHost())
-      return super.handleChatCommand(p, command)
-
-    return false
+  // --------------------------------------------------------------------------
+  override function handleChatCommand(player p, string command, LinkedList<string> commandArgs) returns bool
+    if (not p.isHost())
+      return false
+    return super.handleChatCommand(p, command, commandArgs)    
 
 // ============================================================================
 function showMemoryTrackerMultiboard()
+  let commandPlayer = getChatCommandPlayer()
 
   if (g_memoryTrackingMultiboard.isShowing())
-    displayMessageToPlayer(g_HostPlayer, "Hiding memory tracking multiboard")
+    displayMessageToPlayer(commandPlayer, "Hiding memory tracking multiboard")
     g_memoryTrackingMultiboard.hide()
   else
-    displayMessageToPlayer(g_HostPlayer, "Showing memory tracking multiboard")
+    displayMessageToPlayer(commandPlayer, "Showing memory tracking multiboard")
     g_memoryTrackingMultiboard.updateMultiboardRows()
     g_memoryTrackingMultiboard.show()
 
 // ============================================================================
 function godlike()
+  let commandPlayer = getChatCommandPlayer()
   if (isGodModeEnabled())
     disableGodMode()
-    displayMessageToPlayer(g_HostPlayer, "Disabled God Mode")
+    displayMessageToPlayer(commandPlayer, "Disabled God Mode")
   else
-    displayMessageToPlayer(g_HostPlayer, "Enabled God Mode")
+    displayMessageToPlayer(commandPlayer, "Enabled God Mode")
     enableGodMode()
 
 // ============================================================================
-init
-  g_debugChatCommandHandler = new DebugChatCommandHandler()
-  registerChatCommandHandler(g_debugChatCommandHandler, -1)
+function spawnone()
+  let command = getChatCommand()
 
-  g_debugChatCommandHandler.registerHandlerAction(DEBUG_COMMAND_MEMORYTRACKER, function showMemoryTrackerMultiboard)
-  g_debugChatCommandHandler.registerHandlerAction(DEBUG_COMMAND_GODLIKE, function godlike)
+  let playerId = command.getArgument(0).getInt()
+  let dayNightWave = command.getArgument(1).getString().toLowerCase()
+  let waveId = command.getArgument(2).getInt()
+
+  var spawnWaveId = -1
+  let spawnWaveIdArg = command.getArgument(3)
+  if (spawnWaveIdArg != null)
+    spawnWaveId = spawnWaveIdArg.getInt()
+
+  let p = Player(playerId)
+  if (p == null)
+    error("Found no player with id " + playerId.toString())
+
+  let playerWaves = g_GameInstance.getPlayerWaves(p)
+  if (playerWaves == null)
+    error("Player waves is null for player " + p.getName())
+    return
+
+  Wave wave = null
+
+  if (dayNightWave == "day")
+    wave = playerWaves.getDayWaves().getLatestWave(waveId)    
+  if dayNightWave == "night"
+    wave = playerWaves.getNightWaves().getLatestWave(waveId)
+
+  if (wave == null)
+    error("Found no wave at index " + waveId.toString())
+    return
+
+  let spawnWaves = wave.getSpawnWaves()
+  
+  if (spawnWaveId != -1)
+  // {
+    let spawnWave = spawnWaves.get(spawnWaveId)
+
+    if (spawnWave == null)
+      error("Found no spawn wave at index " + spawnWaveId.toString())
+      return
+
+    spawnWave.activateOnce()
+    displayMessageToPlayer(p, "Activated {0} {1} spawn wave {2} once".format(dayNightWave, waveId.toString(), spawnWave.getDefinition().getName()))
+    return
+  // }
+
+  if (spawnWaves.isEmpty())
+    error("Wave {0} has no registered spawn waves ".format(waveId.toString()))
+    return
+
+  for spawnWave in spawnWaves
+    spawnWave.activateOnce()
+    displayMessageToPlayer(p, "Activated {0} {1} spawn wave {2} once".format(dayNightWave, waveId.toString(), spawnWave.getDefinition().getName()))
+
+// ============================================================================
+function startNextDay()
+  g_GameInstance.startNextDay()
+
+// ============================================================================
+function startNextNight()
+  g_GameInstance.startNextNight()
+
+// ============================================================================
+function turnOnMapVisibility()
+  let commandPlayer = getChatCommandPlayer()
+  if (IsFogEnabled())
+    displayMessageToPlayer(commandPlayer, "Disabled fog of war")
+    FogEnableOff()
+    FogMaskEnableOff()
+  else
+    displayMessageToPlayer(commandPlayer, "Enabled fog of war")
+    FogEnableOn()
+    FogMaskEnableOn()
+
+// ============================================================================
+function killSelectedUnits()
+  let commandPlayer = getChatCommandPlayer()
+  let ug = getGroup()
+  ug.enumUnitsSelected(commandPlayer, null)
+  for u from ug
+    u.kill()
+  ug.release()
+
+// ============================================================================
+function removeSelectedUnits()
+  let commandPlayer = getChatCommandPlayer()
+  let ug = getGroup()
+  ug.enumUnitsSelected(commandPlayer, null)
+  for u from ug
+    u.remove()
+  ug.release()
+
+// ============================================================================
+function moveSelectedUnits()
+  let cameraLoc = GetCameraTargetPositionLoc()
+  let cameraPos = vec2(GetLocationX(cameraLoc), GetLocationY(cameraLoc))
+  let ug = getGroup()
+  ug.enumUnitsSelected(GetTriggerPlayer(), null)
+  for u in ug
+    u.setPos(cameraPos)
+  ug.release()
+  RemoveLocation(cameraLoc)
+
+// ============================================================================
+function createItemForSelectedUnit()
+
+  let command = getChatCommand()
+  let commandPlayer = getChatCommandPlayer()
+
+  let itemId = command.getArgument(0).getRawCode()
+
+  var count = 1
+  let countArg = command.getArgument(1)
+  if (countArg != null)
+    count = countArg.getInt()
+
+  let g = getGroup()
+  g.enumUnitsSelected(commandPlayer, null)
+  if (g.isEmpty())
+    displayMessageToPlayer(commandPlayer, "Must selected a unit to give the items to")
+    g.release()
+    return
+
+  let selectedUnit = g.getUnitAt(0)
+  g.release()
+
+  let pos = selectedUnit.getPos()
+
+  for i = 1 to count
+    let itm = g_MainItemLibrary.createItem(itemId, pos)
+    if (itm != null)
+      displayMessageToPlayer(commandPlayer, "Created " + count.toString() + " item(s) of type " + itm.getName())
+
+// ============================================================================
+function createUnitAtCameraPos()
+  let cameraLoc = GetCameraTargetPositionLoc()
+  let cameraPos = vec2(GetLocationX(cameraLoc), GetLocationY(cameraLoc))
+
+  let command = getChatCommand()
+  let commandPlayer = getChatCommandPlayer()
+  let playerId = command.getArgument(0).getInt()
+  let unitId = command.getArgument(1).getRawCode()
+  let count = command.getArgument(2).getInt()
+
+  let p = Player(playerId)
+  if (p == null)
+    error("Player id argument is invalid")
+
+  string unitName = null
+  for i = 1 to count
+    let u = createUnitTLS(p, unitId, cameraPos.x, cameraPos.y, GetRandomDirectionDeg())
+    if (u != null and unitName == null)
+      unitName = u.getName()
+  
+  if (unitName != null)
+    displayMessageToPlayer(commandPlayer, "Created " + I2S(count) + " " + unitName)
+
+  RemoveLocation(cameraLoc)
+
+// ============================================================================
+function addMats()
+  let command = getChatCommand()
+  let commandPlayer = getChatCommandPlayer()
+  let playerId = command.getArgument(0).getInt()
+  let matsCount = command.getArgument(1).getInt()
+
+  let p = Player(playerId)
+  if (p == null)
+    error("Player id argument is invalid")
+    return
+
+  let playerMetadata = p.getMetadata() castTo HumanPlayerMetadata
+  if (playerMetadata == null)
+    error("Can't give materials to player \"{0}\"".format(p.getName()))
+    return
+
+  playerMetadata.giveMaterials(matsCount)
+  displayMessageToPlayer(commandPlayer, "Gave {0} materials to {1}".format(I2S(matsCount), p.getNameColored()))
+
+// ============================================================================
+function skipToDay()
+  let command = getChatCommand()
+  let commandPlayer = getChatCommandPlayer()
+  let day = command.getArgument(0).getInt()
+  displayMessageToPlayer(commandPlayer, "Skipping to day {0}...".format(I2S(day)))
+  g_GameInstance.skipToDay(day)
+    
+// ============================================================================
+function skipToNight()
+  let command = getChatCommand()
+  let commandPlayer = getChatCommandPlayer()
+  let night = command.getArgument(0).getInt()
+  displayMessageToPlayer(commandPlayer, "Skipping to night {0}...".format(I2S(night)))
+  g_GameInstance.skipToNight(night)  
+
+// ============================================================================
+function showWavesMultiboard()
+  
+  let command = getChatCommand()
+  let commandPlayer = getChatCommandPlayer()
+
+  let waveMultiboard = g_GameInstance.getWaveMultiboard()
+
+  if (command.getArgumentCount() == 0)
+    waveMultiboard.setPlayer(null)
+    waveMultiboard.setDisplayTarget(null)
+    waveMultiboard.hide()
+    displayMessageToPlayer(commandPlayer, "Hiding wave multiboard")
+    return
+
+  let playerId = command.getArgument(0).getInt()
+  let p = Player(playerId)
+  if (p == null)
+    error("Player id argument is invalid")
+    return
+
+  waveMultiboard.setPlayer(p)
+  waveMultiboard.setDisplayTarget(commandPlayer)
+  waveMultiboard.show()
+  displayMessageToPlayer(commandPlayer, "Showing wave multiboard")
+
+// ============================================================================
+function setLogLevel()
+  let command = getChatCommand()
+  let commandPlayer = getChatCommandPlayer()
+  let levelArg = command.getArgument(0).getString().toLowerCase()
+
+  switch (levelArg)
+    case "trace"
+      DEBUG_LEVEL = Loglevel.TRACE
+    case "debug"
+      DEBUG_LEVEL = Loglevel.DEBUG
+    case "info"
+      DEBUG_LEVEL = Loglevel.INFO
+    case "warning"
+      DEBUG_LEVEL = Loglevel.WARNING
+    case "error"
+      DEBUG_LEVEL = Loglevel.ERROR
+    default
+      error("Couldn't parse log level string from argument 0 \"{0}\"".format(levelArg)) 
+
+  displayMessageToPlayer(commandPlayer, "Set log level to " + levelArg)
+
+// ============================================================================
+function setWeatherEffect()
+  let command = getChatCommand()
+  let effectName = command.getArgument(0).getString()
+
+  switch (effectName)
+    case "fog"
+      Weather.setWeatherEffect(WeatherEffectType.FOG)
+    case "lightrain"
+      Weather.setWeatherEffect(WeatherEffectType.RAIN_LIGHT)
+    case "heavyrain"
+      Weather.setWeatherEffect(WeatherEffectType.RAIN_HEAVY)
+    case "none"
+      Weather.setWeatherEffect(WeatherEffectType.NONE)
+
+// ============================================================================
+function clearWeatherEffects()
+  Weather.clearWeatherEffects()
+
+// ============================================================================
+function setTerrainFog()
+  let command = getChatCommand()
+  let style = command.getArgument(0).getInt()
+  let zstart = command.getArgument(1).getReal()
+  let zend = command.getArgument(2).getReal()
+  let density = command.getArgument(3).getReal()
+  let r = command.getArgument(4).getReal()
+  let g = command.getArgument(5).getReal()
+  let b = command.getArgument(6).getReal()
+
+  SetTerrainFogEx(style, zstart, zend, density, r, g, b)
+
+// ============================================================================
+function resetTerrainFog()
+  ResetTerrainFog()
+
+// ============================================================================
+function toggleWeatherUpdate()
+  let commandPlayer = getChatCommandPlayer()
+  Weather.toggleWeatherUpdate()
+  displayMessageToPlayer(commandPlayer, "Weather update: " + Weather.isUpdatingFog().toString())
+
+// ============================================================================
+function setLevel()
+  let command = getChatCommand()
+  let level = command.getArgument(0).getInt()
+
+  let commandPlayer = getChatCommandPlayer()
+  let ug = getGroup()
+  ug.enumUnitsSelected(commandPlayer, null)
+  for u from ug
+    u.setLevel(level, false)
+  ug.release()
+
+// ============================================================================
+function todScale()
+  let command = getChatCommand()
+  let commandPlayer = getChatCommandPlayer()
+  let speedArg = command.getArgument(0)
+
+  if (speedArg == null)
+    displayMessageToPlayer(commandPlayer, "Time of Day Scale is {0}%".format(GetTimeOfDayScalePercentBJ().toString()))
+    return
+
+  let speed = speedArg.getReal()
+  SetTimeOfDayScalePercentBJ(speed)
+  displayMessageToPlayer(commandPlayer, "Time of Day Scale set to {0}%".format(GetTimeOfDayScalePercentBJ().toString()))
+
+// ============================================================================
+function timeOfDay()
+  let command = getChatCommand()
+  let commandPlayer = getChatCommandPlayer()
+  let timeOfDayArg = command.getArgument(0)
+
+  if (timeOfDayArg == null)
+    displayMessageToPlayer(commandPlayer, "Time of Day is {0}".format(GetTimeOfDay().toString()))
+    return
+
+  let timeOfDay = timeOfDayArg.getReal()
+  SetTimeOfDay(timeOfDay)
+  displayMessageToPlayer(commandPlayer, "Time of Day set to {0}".format(GetTimeOfDay().toString()))
+
+// ============================================================================
+function registerDebugCommands()
+
+  g_commandHandler.registerCommandDefinition(COMMAND_MEMORYTRACKER, function showMemoryTrackerMultiboard)  
+  g_commandHandler.registerCommandDefinition(COMMAND_GODLIKE, function godlike)
+
+  g_commandHandler.registerCommandDefinition(COMMAND_SPAWNONE, function spawnone)
+    ..addArgument(new ChatCommandArgument("PLAYER_ID", ChatCommandArgumentType.INT, false))
+    ..addArgument(new ChatCommandArgument("WAVE_TYPE", ChatCommandArgumentType.STRING, false)..setStringOptions("day", "night"))
+    ..addArgument(new ChatCommandArgument("WAVE_ID", ChatCommandArgumentType.INT, false))
+    ..addArgument(new ChatCommandArgument("SPAWN_WAVE_ID", ChatCommandArgumentType.INT, true))
+
+  g_commandHandler.registerCommandDefinition(COMMAND_DAY, function startNextDay)
+  g_commandHandler.registerCommandDefinition(COMMAND_NIGHT, function startNextNight)
+  g_commandHandler.registerCommandDefinition(COMMAND_SEE, function turnOnMapVisibility)
+  g_commandHandler.registerCommandDefinition(COMMAND_KILL_SELECTED_UNITS, function killSelectedUnits)
+  g_commandHandler.registerCommandDefinition(COMMAND_REMOVE_SELECTED_UNITS, function removeSelectedUnits)
+  g_commandHandler.registerCommandDefinition(COMMAND_MOVE_SELECTED_UNITS, function moveSelectedUnits)
+
+  g_commandHandler.registerCommandDefinition(COMMAND_CREATE_ITEM, function createItemForSelectedUnit)
+    ..addFourCCArgument("ITEM_ID", false)
+    ..addIntegerArgument("ITEM_COUNT", true)
+
+  g_commandHandler.registerCommandDefinition(COMMAND_CREATE_UNIT, function createUnitAtCameraPos)
+    ..addIntegerArgument("PLAYER_ID", false)
+    ..addFourCCArgument("UNIT_ID", false)
+    ..addIntegerArgument("UNIT_COUNT", false)
+
+  g_commandHandler.registerCommandDefinition(COMMAND_ADD_MATS, function addMats)
+    ..addIntegerArgument("PLAYER_ID", false)
+    ..addIntegerArgument("MATERIALS_COUNT", false)
+
+  g_commandHandler.registerCommandDefinition(COMMAND_SKIP_TO_DAY, function skipToDay)
+    ..addIntegerArgument("DAY_ID", false)
+
+  g_commandHandler.registerCommandDefinition(COMMAND_SKIP_TO_NIGHT, function skipToNight)
+    ..addIntegerArgument("NIGHT_ID", false)
+
+  g_commandHandler.registerCommandDefinition(COMMAND_SHOW_WAVES, function showWavesMultiboard)
+    ..addIntegerArgument("PLAYER_ID", true)
+
+  g_commandHandler.registerCommandDefinition(COMMAND_LOG_LEVEL, function setLogLevel)
+    ..addArgument(new ChatCommandArgument("LOG_LEVEL", ChatCommandArgumentType.STRING, false)..setStringOptions("trace", "debug", "info", "warning", "error"))
+
+  g_commandHandler.registerCommandDefinition(COMMAND_WEATHER, function setWeatherEffect)
+    ..addArgument(new ChatCommandArgument("EFFECT", ChatCommandArgumentType.STRING, false)..setStringOptions("fog", "lightrain", "heavyrain", "none"))
+  
+  g_commandHandler.registerCommandDefinition(COMMAND_CLEARWEATHER, function clearWeatherEffects)
+
+  g_commandHandler.registerCommandDefinition(COMMAND_SETFOG, function setTerrainFog)
+    ..addArgument(new ChatCommandArgument("STYLE", ChatCommandArgumentType.INT, false)..setIntOptions(0, 1, 2))
+    ..addRealArgument("ZSTART", false)
+    ..addRealArgument("ZEND", false)
+    ..addRealArgument("DENSITY", false)
+    ..addRealArgument("R", false)
+    ..addRealArgument("G", false)
+    ..addRealArgument("B", false)
+
+  g_commandHandler.registerCommandDefinition(COMMAND_RESETFOG, function resetTerrainFog)
+  g_commandHandler.registerCommandDefinition(COMMAND_TOGGLEWEATHERUPDATE, function toggleWeatherUpdate)
+  
+  g_commandHandler.registerCommandDefinition(COMMAND_SETLEVEL, function setLevel)
+    ..addIntegerArgument("LEVEL", false)
+
+  g_commandHandler.registerCommandDefinition(COMMAND_TODSCALE, function todScale)
+    ..setDescription("Gets and sets the time of day scale percentage. Use the optional SCALE argument to set the time of day scale.")
+    ..addRealArgument("SCALE", true, "The time of day scalar percentage [0.0-100.0]")
+  
+  g_commandHandler.registerCommandDefinition(COMMAND_TOD, function timeOfDay)
+    ..setDescription("Gets and sets the time of day. Use the optional TIME argument to set the time of day.")
+    ..addRealArgument("TIME", true, "The time of day [0.0-24.0]. Day starts at {0} and night starts at {1}.".format(TIME_OF_DAY.toString(), TIME_OF_NIGHT.toString()))
+
+// ============================================================================
+init
+  g_commandHandler = new DebugChatCommandHandler("Debug")
+  registerChatCommandHandler(g_commandHandler, -1)
+
+  nullTimer(() -> registerDebugCommands())
 
   nullTimer() () -> 
     g_memoryTrackingMultiboard = new MemoryTrackingMultiboard()

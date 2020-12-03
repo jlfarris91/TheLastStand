@@ -17,6 +17,7 @@ import NormalDayWaveGenerator
 import WaveMultiboard
 import BaseUnitsRectProvider
 import TimeOfDay
+import RandomWeatherPlayer
 
 public GameInstance g_GameInstance
 
@@ -31,18 +32,13 @@ public class GameInstance extends Runnable
   private IWaveGenerator<DayWave> m_dayWaveGenerator
   private IWaveGenerator<NightWave> m_nightWaveGenerator
   private WaveMultiboard m_waveMultiboard
+  private RandomWeatherPlayer m_weatherPlayer
 
   // --------------------------------------------------------------------------
   ondestroy
-    stop()
-
-  // --------------------------------------------------------------------------
-  function getIsDay() returns bool
-    return GetTimeOfDay() >= TIME_OF_DAY and GetTimeOfDay() < TIME_OF_NIGHT
-
-  // --------------------------------------------------------------------------
-  function getIsNight() returns bool
-    return GetTimeOfDay() >= TIME_OF_NIGHT or GetTimeOfDay() < TIME_OF_DAY
+    if (not this.isCompleted())
+      this.cancel()
+    destroy m_weatherPlayer
 
   // --------------------------------------------------------------------------
   function getDay() returns int
@@ -65,6 +61,10 @@ public class GameInstance extends Runnable
     return m_playerWaves
 
   // --------------------------------------------------------------------------
+  function getPlayerWaves(player p) returns PlayerWaves
+    return m_playerWaves.getOrCreatePlayerWaves(p)
+
+  // --------------------------------------------------------------------------
   function startNextDay()
     SetTimeOfDay(TIME_OF_DAY)
 
@@ -78,34 +78,22 @@ public class GameInstance extends Runnable
 
   // --------------------------------------------------------------------------
   function skipToDay(int day)
-    if (day > getDay())
-      if (getIsDay())
-        startNextNight()
-      else
-        startNextDay()
-      doAfter(0.2) ->
-        skipToDay(day)
+    m_day = day - 1
+    startNextDay()
 
   // --------------------------------------------------------------------------
   function skipToNight(int night)
-    if (night > getNight())
-      if (getIsDay())
-        startNextNight()
-      else
-        startNextDay()
-      doAfter(0.2) ->  
-        skipToNight(night)
+    m_night = night - 1
+    startNextNight()
 
   // --------------------------------------------------------------------------
-  function reset()
-    stop()
+  override function reset()
+    super.reset()
     
     m_day = 0
     m_night = 0
     SetTimeOfDay(TIME_OF_DAY_INITIAL)
     SetTimeOfDayScalePercentBJ(GAME_SPEED_INITIAL)
-
-    start()
 
   // --------------------------------------------------------------------------
   override function onStarted()
@@ -114,19 +102,24 @@ public class GameInstance extends Runnable
     // These should move to a place that sets up the GameInstance
     m_dayWaveGenerator = new NormalDayWaveGenerator()
     m_nightWaveGenerator = new NormalNightWaveGenerator()
-
     m_waveMultiboard = new WaveMultiboard()
+    m_weatherPlayer = new RandomWeatherPlayer()
+
+    m_weatherPlayer.start()
 
     initializeGeneral()
     initializeAlliances()
     initializeWaves()
 
+
     doAfter(1.0) ->
       postStart()
 
   // --------------------------------------------------------------------------
-  override function onStopped()
-    super.onStopped()
+  override function onCompleted()
+    super.onCompleted()
+
+    m_weatherPlayer.stop()
 
     destroy m_playerWaves
     m_playerWaves = null
@@ -163,7 +156,7 @@ public class GameInstance extends Runnable
   function startDay()
     m_day++
 
-    Log.debug("Started day " + I2S(m_day))
+    Log.debug("Starting day {0}...".format(m_day.toString()))
 
     PlaySoundBJ(TlsSounds.questCompleted)
 
@@ -177,11 +170,13 @@ public class GameInstance extends Runnable
 
     spawnUnrescuedSurvivorsNearPlayers()
 
+    Log.debug("Day {0} started.".format(m_day.toString()))
+
   // --------------------------------------------------------------------------
   function startNight()
     m_night++
 
-    Log.debug("Started night " + I2S(m_night))
+    Log.debug("Starting night {0}...".format(m_night.toString()))
 
     removeUnrescuedSurvivors()
 
@@ -189,6 +184,8 @@ public class GameInstance extends Runnable
     for p in g_PlayingHumanPlayers
       let waves = m_playerWaves.getOrCreatePlayerWaves(p)
       waves.getRunner().startNightWave(m_night)
+
+    Log.debug("Night {0} started.".format(m_night.toString()))
 
   // --------------------------------------------------------------------------
   private function respawnDeadPlayers()
@@ -253,11 +250,13 @@ public class GameInstance extends Runnable
 
 // ============================================================================
 function onDayStart()
-  g_GameInstance.startDay()
+  // Wait to allow Waves and SpawnWaves to complete
+  doAfter(1.0, () -> g_GameInstance.startDay())
 
 // ============================================================================
 function onNightStart()
-  g_GameInstance.startNight()
+  // Wait to allow Waves and SpawnWaves to complete
+  doAfter(1.0, () -> g_GameInstance.startNight())
 
 // ============================================================================
 init
