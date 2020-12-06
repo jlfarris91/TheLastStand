@@ -1,0 +1,96 @@
+package DropItemOnDeathComponent
+import UnitComponent
+import ItemSetLibrary
+import RegisterEvents
+import ItemSet
+
+// ============================================================================
+public class DropItemOnDeathComponent extends UnitComponent
+  private int m_itemType = -1
+  private ItemSetLibrary m_itemSetLibrary
+  private ItemSet m_itemSet
+
+  // --------------------------------------------------------------------------
+  construct (IUnitMetadata owner)
+    super(owner)
+    setDisableOnDeath(false)
+    m_itemType = -1
+    m_itemSetLibrary = null
+    m_itemSet = null
+
+  // --------------------------------------------------------------------------
+  override function getTypeId() returns int
+    return DropItemOnDeathComponent.typeId
+
+  // --------------------------------------------------------------------------
+  function setItemType(int itemType)
+    m_itemType = itemType
+
+  // --------------------------------------------------------------------------
+  function getItemType() returns int
+    return m_itemType
+
+  // --------------------------------------------------------------------------
+  function setItemSetLibrary(ItemSetLibrary itemSetLibrary)
+    m_itemSetLibrary = itemSetLibrary
+
+  // --------------------------------------------------------------------------
+  function getItemSetLibrary() returns ItemSetLibrary
+    return m_itemSetLibrary
+
+  // --------------------------------------------------------------------------
+  function setItemSet(ItemSet itemSet)
+    m_itemSet = itemSet
+
+  // --------------------------------------------------------------------------
+  function getItemSet() returns ItemSet
+    return m_itemSet
+
+// ============================================================================
+public function IUnitMetadata.getDropItemOnDeathComponent() returns DropItemOnDeathComponent
+  return this.getComponent(DropItemOnDeathComponent.typeId) castTo DropItemOnDeathComponent
+
+// ============================================================================
+public function IUnitMetadata.getOrAddDropItemOnDeathComponent() returns DropItemOnDeathComponent
+  var component = this.getDropItemOnDeathComponent()
+  if (component == null)
+    component = this.addComponent(new DropItemOnDeathComponent(this)) castTo DropItemOnDeathComponent
+  return component
+
+// ============================================================================
+function onUnitKilled()
+
+  let dyingUnit = GetDyingUnit()
+  let metadata = dyingUnit.getMetadata()
+  if (metadata == null)
+    return
+
+  let comp = metadata.getDropItemOnDeathComponent()
+  if (comp == null or not comp.getEnabled())
+    return
+
+  let itemSetLibrary = comp.getItemSetLibrary()
+  let itemSet = comp.getItemSet()
+  if (itemSetLibrary == null and itemSet == null)
+    Log.warn("DropItemOnDeathComponent has no item set or item set library assigned!")
+    return
+
+  var itemTypeId = comp.getItemType()
+  if (itemTypeId == -1)
+    if (itemSetLibrary != null)
+      let itemType = itemSetLibrary.getRandomItemType()
+      if (itemType == null)
+        Log.warn("ItemSetLibrary contains no items!")
+        return
+      itemTypeId = itemType.id
+    else
+      itemTypeId = itemSet.getRandomItemTypeId()
+
+  if (itemSetLibrary != null)
+    itemSetLibrary.createItem(itemTypeId, dyingUnit.getPos())      
+  else
+    itemSet.createItem(itemTypeId, dyingUnit.getPos())
+
+// ============================================================================
+init
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_DEATH, function onUnitKilled)

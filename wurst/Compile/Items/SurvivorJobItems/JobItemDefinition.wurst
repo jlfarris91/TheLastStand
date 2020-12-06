@@ -4,7 +4,6 @@ import StringExtensions
 import StringBuilder
 import ErrorHandling
 import TlsUnitDefinition
-import DataStringUtility
 import LinkedList
 import ColorUtility
 
@@ -82,7 +81,6 @@ public class JobDescriptionItem implements IJobDescriptionItem
 
   [Survivor Job Change]
   Use this item on a Survivor to give them new abilities.
-  Job assignment is permanent!
 
   Survivor Male -> Spearman
 
@@ -94,8 +92,8 @@ public class JobDescriptionItem implements IJobDescriptionItem
                 Ability 3
 */
 public class JobItemTooltipBuilder
-  private string m_fromUnitName
-  private string m_toUnitName
+  private ITlsUnitDefinition m_fromUnit
+  private ITlsUnitDefinition m_toUnit
   private string m_desc
   private LinkedList<IJobDescriptionItem> m_items
 
@@ -111,9 +109,9 @@ public class JobItemTooltipBuilder
     m_items = null
 
   // --------------------------------------------------------------------------
-  function setUnits(string fromUnit, string toUnit) returns JobItemTooltipBuilder
-    m_fromUnitName = fromUnit
-    m_toUnitName = toUnit
+  function setUnits(ITlsUnitDefinition fromUnit, ITlsUnitDefinition toUnit) returns JobItemTooltipBuilder
+    m_fromUnit = fromUnit
+    m_toUnit = toUnit
     return this
 
   // --------------------------------------------------------------------------
@@ -138,8 +136,8 @@ public class JobItemTooltipBuilder
 
   // --------------------------------------------------------------------------
   function clear()
-    m_fromUnitName = null
-    m_toUnitName = null
+    m_fromUnit = null
+    m_toUnit = null
     m_desc = null
     for itm in m_items
       destroy itm
@@ -154,14 +152,18 @@ public class JobItemTooltipBuilder
       sb.appendLine()
 
     sb.appendLine("[Survivor Job Change]".colorize(COLOR_GOLD))
-    sb.appendLine("Use this item on a {0} to give them new abilities.".format(m_fromUnitName))
-    sb.appendLine("Job assignment is permanent!".colorize(Colors.red))
+    sb.appendLine("Use this item on a {0} to give them new abilities.".format(m_fromUnit.getName()))
     sb.appendLine()
     
     sb.append("Changes a ")
-    sb.append(m_fromUnitName.colorize(COLOR_GOLD))
+    sb.append(m_fromUnit.getName().colorize(COLOR_GOLD))
     sb.append(" to a ")
-    sb.appendLine(m_toUnitName.colorize(COLOR_GOLD))
+    sb.appendLine(m_toUnit.getName().colorize(COLOR_GOLD))
+    sb.appendLine()
+
+    let targetsAllowed = m_toUnit.getAttack1Targets()
+    if (not targetsAllowed.isEmpty() and not targetsAllowed.has("Air"))
+      sb.appendLine("Attacks ground only!".colorize(Colors.red))
 
     return sb.toStringAndDestroy()
 
@@ -174,14 +176,13 @@ public class JobItemTooltipBuilder
       sb.appendLine()
 
     sb.appendLine("[Survivor Job Change]".colorize(COLOR_GOLD))
-    sb.appendLine("Give this item to a {0} to give them new abilities.".format(m_fromUnitName))
-    sb.appendLine("Job assignment is permanent!".colorize(Colors.red))
+    sb.appendLine("Give this item to a {0} to give them new abilities.".format(m_fromUnit.getName()))
     sb.appendLine()
 
     sb.append("Changes a ")
-    sb.append(m_fromUnitName.colorize(COLOR_GOLD))
+    sb.append(m_fromUnit.getName().colorize(COLOR_GOLD))
     sb.append(" to a ")
-    sb.appendLine(m_toUnitName.colorize(COLOR_GOLD))
+    sb.appendLine(m_toUnit.getName().colorize(COLOR_GOLD))
     sb.appendLine()
 
     let padStr = " "
@@ -203,20 +204,20 @@ public class JobItemTooltipBuilder
   static function createDefault(ITlsUnitDefinition fromUnit, ITlsUnitDefinition toUnit, string tip) returns JobItemTooltipBuilder
     let builder = new JobItemTooltipBuilder()
 
-    builder.setUnits(fromUnit.getName(), toUnit.getName())
+    builder.setUnits(fromUnit, toUnit)
     builder.setItemDescription(tip)
-
-    let toUnitId = toUnit.getNewId()
-    let toUnitBaseId = toUnit.getBaseId()
 
     builder.addItem("Health: ", toUnit.getHitPointsMaximumBase().toString())
 
     if (toUnit.getAttacksEnabled() > 0)
       builder.addItem("Range: ", toUnit.getAttack1Range().toString())
-      let minDmgStr = getDataString(toUnitId, toUnitBaseId, "mindmg1")
-      let maxDmgStr = getDataString(toUnitId, toUnitBaseId, "maxdmg1")
-      builder.addItem("Damage: ", "{0}-{1}".format(minDmgStr, maxDmgStr))
+      builder.addItem("Damage: ", "{0} ({1} dps)".format(toUnit.getAttack1DamageRangeString(), toUnit.getApproxAttack1DPSString()))
       builder.addItem("Attack: ", toUnit.getAttack1AttackType().toString())
+
+      let targetsAllowed = toUnit.getAttack1Targets()
+      if (not targetsAllowed.isEmpty())
+        builder.addItem("Targets: ", targetsAllowed.joinBy(", "))
+
     else
       builder.addItem("Attack: ", "Does not attack")
     
