@@ -18,6 +18,8 @@ import WaveMultiboard
 import BaseUnitsRectProvider
 import TimeOfDay
 import RandomWeatherPlayer
+import DisplayTextToPlayer
+import StringExtensions
 
 public GameInstance g_GameInstance
 
@@ -26,6 +28,7 @@ constant real GAME_SPEED_INITIAL = 100.0
 
 // ============================================================================
 public class GameInstance extends Runnable
+  private bool m_gracePeriod
   private int m_day
   private int m_night
   private PlayerWavesMap m_playerWaves
@@ -55,6 +58,10 @@ public class GameInstance extends Runnable
   // --------------------------------------------------------------------------
   function getNightsSurvived() returns int
     return max(m_day - 1, 0)
+
+  // --------------------------------------------------------------------------
+  function isGracePeriod() returns bool
+    return m_gracePeriod
 
   // --------------------------------------------------------------------------
   function getWaves() returns PlayerWavesMap
@@ -111,7 +118,6 @@ public class GameInstance extends Runnable
     initializeAlliances()
     initializeWaves()
 
-
     doAfter(1.0) ->
       postStart()
 
@@ -153,8 +159,17 @@ public class GameInstance extends Runnable
     p.setLumber(GameSettings.startingMaterials)
 
   // --------------------------------------------------------------------------
+  function updateGracePeriod()
+    let wasGracePeriod = m_gracePeriod
+    m_gracePeriod = m_day < GRACE_PERIOD_END_DAY
+    if (wasGracePeriod and not m_gracePeriod)
+      displayMessageToPlayers("Grace period has ended. Hero death is now permanent.".colorize(COLOR_GOLD))
+
+  // --------------------------------------------------------------------------
   function startDay()
     m_day++
+
+    updateGracePeriod()
 
     Log.debug("Starting day {0}...".format(m_day.toString()))
 
@@ -189,6 +204,9 @@ public class GameInstance extends Runnable
 
   // --------------------------------------------------------------------------
   private function respawnDeadPlayers()
+    if (not m_gracePeriod)
+      return
+
     g_PlayingHumanPlayers.forEach() (player p) ->
       if (p.getHumanMetadata().getIsDead())
         spawnInitialPlayerUnitsAtRandomPoint(p)  
@@ -205,7 +223,7 @@ public class GameInstance extends Runnable
 
     // We control experience gain manually
     for p in g_HumanPlayers
-      SetPlayerHandicapXPBJ(p, 0.00 )
+      SetPlayerHandicapXPBJ(p, 0.00)
 
   // --------------------------------------------------------------------------
   private function initializeWaves()
@@ -232,8 +250,6 @@ public class GameInstance extends Runnable
 
   // --------------------------------------------------------------------------
   private function initializeAlliances()  
-    SetPlayerAllianceStateBJ(PLAYER_RAIDERS, PLAYER_UNDEAD, bj_ALLIANCE_UNALLIED)
-    SetPlayerAllianceStateBJ(PLAYER_UNDEAD, PLAYER_RAIDERS, bj_ALLIANCE_UNALLIED)
     for p in g_HumanPlayers
       // Make player treat undead as an enemy
       SetPlayerAllianceStateBJ(p, PLAYER_UNDEAD, bj_ALLIANCE_UNALLIED)

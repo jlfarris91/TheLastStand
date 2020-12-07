@@ -1,9 +1,12 @@
 package UndeadTargetingComponent
 import UnitComponent
 import UndeadUtility
-import Orders
 import HumanPlayerMetadata
 import Events
+import LinkedList
+import ClosureTimers
+
+LinkedList<UndeadTargetingComponent> g_activeComponents
 
 // ============================================================================
 public class UndeadTargetingComponent extends UnitComponent
@@ -43,17 +46,27 @@ public class UndeadTargetingComponent extends UnitComponent
     return true
 
   // --------------------------------------------------------------------------
+  override function onEnabled()
+    super.onEnabled()
+    g_activeComponents.add(this)
+
+  // --------------------------------------------------------------------------
+  override function onDisabled()
+    super.onDisabled()
+    g_activeComponents.remove(this)
+
+  // --------------------------------------------------------------------------
   function issueOrderTargetingPlayer()
 
     if (tryTargetClosestUnit())
-      // Log.debug("[UndeadTargetingComponent] Found target to attack")
+      Log.debug("[UndeadTargetingComponent] Found target to attack")
       return
 
     if (tryTargetCampCenter())
-      // Log.debug("[UndeadTargetingComponent] Could not find target unit, attack-moving to camp center")
+      Log.debug("[UndeadTargetingComponent] Could not find target unit, attack-moving to camp center")
       return
 
-    // Log.debug("[UndeadTargetingComponent] Found no player unit to attack")
+    Log.debug("[UndeadTargetingComponent] Found no player unit to attack")
     increaseAcquisitionRange()
 
   // --------------------------------------------------------------------------
@@ -64,9 +77,9 @@ public class UndeadTargetingComponent extends UnitComponent
 
     let undeadUnit = getOwnerUnit()
 
-    let target = getClosestUndeadTarget(targetPlayer, undeadUnit.getPos())
+    let target = getClosestUndeadTarget(targetPlayer, undeadUnit.getPos(), function isFilterUnitVulnerableStructure)
     if (target != null)
-      undeadUnit.issuePointOrderById(OrderIds.attack, target.getPos())
+      undeadUnit.issuePointOrder("attack", target.getPos())
       return true
 
     return false
@@ -83,7 +96,7 @@ public class UndeadTargetingComponent extends UnitComponent
 
     let campCenter = playerMetadata.getCamp().getCenter()
     let undeadUnit = getOwnerUnit()
-    undeadUnit.issuePointOrderById(OrderIds.attack, campCenter)
+    undeadUnit.issuePointOrder("attack", campCenter)
     return true
 
   // --------------------------------------------------------------------------
@@ -104,3 +117,15 @@ public function IUnitMetadata.getOrAddUndeadTargetingComponent() returns UndeadT
   if (component == null)
     component = this.addComponent(new UndeadTargetingComponent(this)) castTo UndeadTargetingComponent
   return component
+
+// ============================================================================
+function updateTargetingComponents()
+  for comp in g_activeComponents
+    comp.issueOrderTargetingPlayer()
+
+// ============================================================================
+init
+  g_activeComponents = new LinkedList<UndeadTargetingComponent>()
+
+  doPeriodically(10.0) (CallbackPeriodic cb) ->
+    updateTargetingComponents()

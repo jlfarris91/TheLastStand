@@ -1,7 +1,6 @@
 package SurvivorJobChangeComponent
 import UnitComponent
 import UnitExtensions
-import ClosureTimers
 import FX
 import SurvivorJobIds
 import RegisterEvents
@@ -9,8 +8,23 @@ import DisplayTextToPlayer
 import StringExtensions
 import TlsItemIds
 import MainItemLibrary
+import ErrorHandling
+import TlsUnitIds
 
-constant string JOB_CHANGE_FX_PATH = "Objects\\Spawnmodels\\Other\\ToonBoom\\ToonBoom.mdl"
+group g_temp
+
+// ============================================================================
+function filterUnitIsSurvivorMale() returns bool
+  return GetFilterUnit().getTypeId() == TlsUnitIds.Survivors.survivorMale
+
+// ============================================================================
+function countNumberOfJoblessSurvivors(player p) returns int
+  let filter = Condition(function filterUnitIsSurvivorMale)
+  g_temp.clear()
+  g_temp.enumUnitsOfPlayer(p, filter)
+  let count = g_temp.size()
+  filter.destr()
+  return count
 
 // ============================================================================
 public class SurvivorJobChangeComponent extends UnitComponent
@@ -24,45 +38,55 @@ public class SurvivorJobChangeComponent extends UnitComponent
     return SurvivorJobChangeComponent.typeId
 
   // --------------------------------------------------------------------------
-  function playJobChangeFX()
-    let fx = FX.createEffect(JOB_CHANGE_FX_PATH, getOwnerUnit().getPos())
-    fx.setAlpha(255)
-    fx.setColor(255, 255, 255)
-    fx.setScale(1.0)
-    doAfter(5) ->
-      DestroyEffect(fx)
-
-  // --------------------------------------------------------------------------
   function changeJobs(string jobId) returns bool
-    let matchingUnitType = getUnitTypeForJobId(jobId)
-    if (matchingUnitType == -1)
-      Log.error("Invalid job id: " + jobId)
+    let matchingUnitTypes = getUnitTypeForJobId(jobId)
+
+    if (matchingUnitTypes.isEmpty())
+      error("Invalid job id: " + jobId)
+      destroy matchingUnitTypes
       return false
 
     let ownerUnit = getOwnerUnit()
-
     let unitType = ownerUnit.getTypeId()
-    if (unitType == matchingUnitType)
+
+    if (matchingUnitTypes.has(unitType))
       displayMessageToPlayer(ownerUnit.getOwner(), "{0} is already a {1}!".format(ownerUnit.getProperName().colorize(COLOR_GOLD), getJobTitleForJobId(jobId).colorize(COLOR_GOLD)))
+      destroy matchingUnitTypes
       return false
 
-    playJobChangeFX()
-
-    FX.createJobChangeTag(getJobTitleForJobId(jobId), ownerUnit.getPos(), ownerUnit.getOwner())
-
-    let oldJobId = getJobIdForUnitType(unitType)
-
-    let wasSelected = ownerUnit.isSelectedByOwner()
-    let replacedUnit = replaceUnitTLS(ownerUnit, matchingUnitType, bj_UNIT_STATE_METHOD_RELATIVE)
-    if (wasSelected)
-      SelectUnitAddForPlayer(replacedUnit, replacedUnit.getOwner())
+    let replacementUnitId = matchingUnitTypes.getFirst()
+    let replacedUnit = replaceUnit(replacementUnitId)
   
+    let oldJobId = getJobIdForUnitType(unitType)
     if (oldJobId != SurvivorJobIds.none)
       let jobItemType = getItemTypeForJobId(oldJobId)
       let jobItem = g_MainItemLibrary.createItem(jobItemType, replacedUnit.getPos())
       UnitAddItemSwapped(jobItem, replacedUnit)
-
+    
+    destroy matchingUnitTypes
     return true
+
+  // --------------------------------------------------------------------------
+  function upgradeJob() returns bool
+    let upgradedUnitId = getNextJobUpgradeUnitType(getOwnerUnit().getTypeId())
+    if (upgradedUnitId == -1)
+      return false
+    replaceUnit(upgradedUnitId)
+    return true
+
+  // --------------------------------------------------------------------------
+  private function replaceUnit(int replacementUnitId) returns unit
+    let ownerUnit = getOwnerUnit()
+
+    let wasSelected = ownerUnit.isSelectedByOwner()
+    let replacedUnit = replaceUnitTLS(ownerUnit, replacementUnitId, bj_UNIT_STATE_METHOD_RELATIVE)
+    if (wasSelected)
+      SelectUnitAddForPlayer(replacedUnit, replacedUnit.getOwner())
+
+    FX.createJobChangeEffect(replacedUnit.getPos())
+    FX.createJobChangeTag(replacedUnit.getName(), replacedUnit.getPos(), replacedUnit.getOwner())
+
+    return replacedUnit
 
 // ============================================================================
 public function IUnitMetadata.getSurvivorJobChangeComponent() returns SurvivorJobChangeComponent
@@ -102,5 +126,43 @@ function onUnitUsedItem()
     manipulatedItem.remove()
 
 // ============================================================================
+function onOrderIssued()
+
+  let orderedUnit = GetOrderedUnit()
+
+  let metadata = orderedUnit.getMetadata()
+  if (metadata == null)
+    return
+  
+  let comp = metadata.getSurvivorJobChangeComponent()
+  if (comp == null)
+    return
+
+  let orderedUnitId = orderedUnit.getTypeId()
+  let issuedOrderId = GetIssuedOrderId()
+  let upgradeToUnitId = getNextJobUpgradeUnitType(orderedUnitId)
+
+  if (upgradeToUnitId == issuedOrderId)
+    comp.upgradeJob()
+
+// ============================================================================
+function onUnitKilled()
+  let dyingUnit = GetDyingUnit()
+
+  if (not dyingUnit.isSurvivor())
+    return
+
+  let jobId = getJobIdForUnitType(dyingUnit.getTypeId())
+  if (jobId == SurvivorJobIds.none)
+    return
+
+  let jobItemType = getItemTypeForJobId(jobId)
+  g_MainItemLibrary.createItem(jobItemType, dyingUnit.getPos())
+
+// ============================================================================
 init
+  g_temp = CreateGroup()
+
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_USE_ITEM, function onUnitUsedItem)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ISSUED_ORDER, function onOrderIssued)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_DEATH, function onUnitKilled)

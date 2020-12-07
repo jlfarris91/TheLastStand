@@ -1,6 +1,10 @@
 globals
+    // User-defined
+ability udg_Untitled_Variable_001= null
+
     // Generated
 trigger gg_trg_Melee_Initialization= null
+trigger gg_trg_Untitled_Trigger_001= null
 
 
 //JASSHelper struct globals:
@@ -36,6 +40,21 @@ endfunction
 
 //***************************************************************************
 //*
+//*  Items
+//*
+//***************************************************************************
+
+function CreateAllItems takes nothing returns nothing
+    local integer itemID
+
+    call BlzCreateItemWithSkin('I000', 473.0, - 497.1, 'I000')
+    call BlzCreateItemWithSkin('I001', 545.5, - 498.9, 'I001')
+    call BlzCreateItemWithSkin('I002', 616.6, - 495.3, 'I002')
+    call BlzCreateItemWithSkin('I003', 688.1, - 499.7, 'I003')
+endfunction
+
+//***************************************************************************
+//*
 //*  Unit Creation
 //*
 //***************************************************************************
@@ -60,6 +79,8 @@ function CreateBuildingsForPlayer0 takes nothing returns nothing
     set u=BlzCreateUnitWithSkin(p, 'h006', 1248.0, 1056.0, 270.000, 'h006')
     set u=BlzCreateUnitWithSkin(p, 'h002', 1440.0, 608.0, 270.000, 'h002')
     set u=BlzCreateUnitWithSkin(p, 'h004', 1696.0, 864.0, 270.000, 'h004')
+    set u=BlzCreateUnitWithSkin(p, 'h00L', 704.0, - 1088.0, 270.000, 'h00L')
+    set u=BlzCreateUnitWithSkin(p, 'h00M', 832.0, - 1088.0, 270.000, 'h00M')
 endfunction
 
 //===========================================================================
@@ -95,18 +116,19 @@ function CreateUnitsForPlayer0 takes nothing returns nothing
     set u=BlzCreateUnitWithSkin(p, 'nchp', 330.6, 1610.7, 269.243, 'nchp')
     set u=BlzCreateUnitWithSkin(p, 'nhef', 193.1, 1717.9, 277.368, 'nhef')
     set u=BlzCreateUnitWithSkin(p, 'nhem', 196.5, 1598.0, 272.112, 'nhem')
-    set u=BlzCreateUnitWithSkin(p, 'nhew', 329.1, 1478.5, 270.456, 'nhew')
-    set u=BlzCreateUnitWithSkin(p, 'nbee', 457.5, 1487.1, 270.595, 'nbee')
-    set u=BlzCreateUnitWithSkin(p, 'nmed', 462.1, 628.7, 270.000, 'nmed')
+    set u=BlzCreateUnitWithSkin(p, 'nhew', 322.0, 1485.2, 270.456, 'nhew')
+    set u=BlzCreateUnitWithSkin(p, 'nbee', 454.9, 1477.9, 270.595, 'nbee')
+    set u=BlzCreateUnitWithSkin(p, 'nmed', 460.5, 630.0, 270.000, 'nmed')
     set u=BlzCreateUnitWithSkin(p, 'nhea', 457.9, 1736.2, 253.660, 'nhea')
     set u=BlzCreateUnitWithSkin(p, 'nina', - 1328.4, - 1094.2, 275.570, 'nina')
     set u=BlzCreateUnitWithSkin(p, 'ugho', - 1732.7, 1194.2, 275.244, 'ugho')
+    set u=BlzCreateUnitWithSkin(p, 'h00G', 468.8, - 326.5, 270.000, 'h00G')
     set u=BlzCreateUnitWithSkin(p, 'ugar', - 1585.8, 970.0, 268.559, 'ugar')
     set u=BlzCreateUnitWithSkin(p, 'nsko', - 1746.0, 796.2, 273.221, 'nsko')
     set u=BlzCreateUnitWithSkin(p, 'hrrh', 327.1, 1346.5, 271.138, 'hrrh')
     set u=BlzCreateUnitWithSkin(p, 'h00D', 578.9, 484.0, 270.000, 'h00D')
-    set u=BlzCreateUnitWithSkin(p, 'n00B', 465.8, 749.5, 270.000, 'n00B')
-    set u=BlzCreateUnitWithSkin(p, 'n00C', 585.2, 763.2, 270.000, 'n00C')
+    set u=BlzCreateUnitWithSkin(p, 'n00B', 463.5, 766.5, 270.000, 'n00B')
+    set u=BlzCreateUnitWithSkin(p, 'n00C', 594.5, 782.4, 270.000, 'n00C')
     set u=BlzCreateUnitWithSkin(p, 'earc', 332.1, 1735.3, 260.592, 'earc')
     set u=BlzCreateUnitWithSkin(p, 'nhfp', 332.7, 331.6, 267.836, 'nhfp')
     set u=BlzCreateUnitWithSkin(p, 'nvil', 225.9, 1063.5, 270.000, 'nvil')
@@ -121,14 +143,22 @@ function CreateUnitsForPlayer0 takes nothing returns nothing
     set u=BlzCreateUnitWithSkin(p, 'nvil', 237.9, 337.1, 270.000, 'nvil')
     set u=BlzCreateUnitWithSkin(p, 'nbrg', 339.0, 758.4, 270.000, 'nbrg')
     set u=BlzCreateUnitWithSkin(p, 'nrvd', - 1695.5, - 1365.4, 277.392, 'nrvd')
+    set u=BlzCreateUnitWithSkin(p, 'n004', 152.3, - 271.5, 65.568, 'n004')
+    set u=BlzCreateUnitWithSkin(p, 'n004', 72.3, - 265.9, 84.630, 'n004')
     set u=BlzCreateUnitWithSkin(p, 'nvil', 1718.6, - 2028.8, 266.697, 'nvil')
     set u=BlzCreateUnitWithSkin(p, 'ewsp', 1841.4, - 2509.3, 312.021, 'ewsp')
-    set u=BlzCreateUnitWithSkin(p, 'hcth', 581.7, 903.8, 270.000, 'hcth')
-    set u=BlzCreateUnitWithSkin(p, 'hfoo', 457.6, 901.1, 270.000, 'hfoo')
-    set u=BlzCreateUnitWithSkin(p, 'hmil', 343.1, 914.9, 270.000, 'hmil')
+    set u=BlzCreateUnitWithSkin(p, 'hcth', 590.9, 952.1, 270.000, 'hcth')
+    set u=BlzCreateUnitWithSkin(p, 'hfoo', 454.9, 957.3, 270.000, 'hfoo')
+    set u=BlzCreateUnitWithSkin(p, 'hmil', 337.9, 956.0, 270.000, 'hmil')
+    set u=BlzCreateUnitWithSkin(p, 'n004', 82.2, - 370.4, 254.484, 'n004')
+    set u=BlzCreateUnitWithSkin(p, 'n004', 154.8, - 367.1, 90.036, 'n004')
+    set u=BlzCreateUnitWithSkin(p, 'n004', 84.2, - 481.0, 21.589, 'n004')
     set u=BlzCreateUnitWithSkin(p, 'nzom', - 1717.4, 1468.7, 265.750, 'nzom')
     set u=BlzCreateUnitWithSkin(p, 'nzof', - 1762.9, 1423.1, 282.471, 'nzof')
     set u=BlzCreateUnitWithSkin(p, 'uaco', - 1736.1, 1693.8, 257.869, 'uaco')
+    set u=BlzCreateUnitWithSkin(p, 'n004', 167.5, - 479.6, 113.108, 'n004')
+    set u=BlzCreateUnitWithSkin(p, 'n004', 242.5, - 478.1, 70.985, 'n004')
+    set u=BlzCreateUnitWithSkin(p, 'n004', 228.8, - 363.7, 258.549, 'n004')
     set u=BlzCreateUnitWithSkin(p, 'ugho', - 1598.8, 1198.6, 275.244, 'ugho')
     set u=BlzCreateUnitWithSkin(p, 'ugho', - 1471.9, 1207.2, 275.244, 'ugho')
     set u=BlzCreateUnitWithSkin(p, 'nzom', - 1582.7, 1488.5, 265.750, 'nzom')
@@ -137,11 +167,22 @@ function CreateUnitsForPlayer0 takes nothing returns nothing
     set u=BlzCreateUnitWithSkin(p, 'nzof', - 1495.3, 1447.4, 282.471, 'nzof')
     set u=BlzCreateUnitWithSkin(p, 'uaco', - 1602.2, 1701.0, 257.869, 'uaco')
     set u=BlzCreateUnitWithSkin(p, 'uaco', - 1476.8, 1706.3, 257.869, 'uaco')
+    set u=BlzCreateUnitWithSkin(p, 'n004', 237.4, - 254.6, 185.422, 'n004')
+    set u=BlzCreateUnitWithSkin(p, 'h00H', 561.8, - 325.5, 270.000, 'h00H')
     set u=BlzCreateUnitWithSkin(p, 'hhes', 454.1, 1346.7, 270.046, 'hhes')
+    set u=BlzCreateUnitWithSkin(p, 'h00J', 670.0, - 323.6, 270.000, 'h00J')
     set u=BlzCreateUnitWithSkin(p, 'nhem', 199.7, 1467.3, 270.292, 'nhem')
     set u=BlzCreateUnitWithSkin(p, 'nhem', 199.6, 1340.8, 270.292, 'nhem')
     set u=BlzCreateUnitWithSkin(p, 'nbel', 580.4, 1354.1, 260.904, 'nbel')
-    set u=BlzCreateUnitWithSkin(p, 'nvil', 233.8, 887.3, 270.000, 'nvil')
+    set u=BlzCreateUnitWithSkin(p, 'nban', 334.5, 1898.1, 278.835, 'nban')
+    set u=BlzCreateUnitWithSkin(p, 'nrog', 460.0, 1883.4, 275.909, 'nrog')
+    set u=BlzCreateUnitWithSkin(p, 'nvil', 228.7, 948.4, 270.000, 'nvil')
+    set u=BlzCreateUnitWithSkin(p, 'nenf', 596.7, 1889.7, 276.039, 'nenf')
+    set u=BlzCreateUnitWithSkin(p, 'Hhkl', 722.0, 967.6, 264.932, 'Hhkl')
+    set u=BlzCreateUnitWithSkin(p, 'nwlt', 336.6, 2109.5, 267.821, 'nwlt')
+    set u=BlzCreateUnitWithSkin(p, 'Hkal', 593.3, 631.5, 277.579, 'Hkal')
+    set u=BlzCreateUnitWithSkin(p, 'nwlg', 456.3, 2130.1, 266.687, 'nwlg')
+    set u=BlzCreateUnitWithSkin(p, 'nwld', 597.6, 2133.1, 268.269, 'nwld')
     set u=BlzCreateUnitWithSkin(p, 'u002', - 1729.2, 81.7, 266.257, 'u002')
     set u=BlzCreateUnitWithSkin(p, 'u001', - 1588.0, 251.4, 271.599, 'u001')
     set u=BlzCreateUnitWithSkin(p, 'n004', - 1747.7, 586.7, 271.109, 'n004')
@@ -152,6 +193,17 @@ function CreateUnitsForPlayer0 takes nothing returns nothing
     set u=BlzCreateUnitWithSkin(p, 'n002', - 1440.0, 412.9, 267.076, 'n002')
     set u=BlzCreateUnitWithSkin(p, 'n007', - 1729.1, - 103.9, 264.707, 'n007')
     set u=BlzCreateUnitWithSkin(p, 'n003', - 1425.9, 257.2, 279.871, 'n003')
+endfunction
+
+//===========================================================================
+function CreateBuildingsForPlayer1 takes nothing returns nothing
+    local player p= Player(1)
+    local unit u
+    local integer unitID
+    local trigger t
+    local real life
+
+    set u=BlzCreateUnitWithSkin(p, 'h00K', 1088.0, - 704.0, 270.000, 'h00K')
 endfunction
 
 //===========================================================================
@@ -168,6 +220,7 @@ endfunction
 //===========================================================================
 function CreatePlayerBuildings takes nothing returns nothing
     call CreateBuildingsForPlayer0()
+    call CreateBuildingsForPlayer1()
 endfunction
 
 //===========================================================================
@@ -177,7 +230,7 @@ endfunction
 
 //===========================================================================
 function CreateAllUnits takes nothing returns nothing
-    call CreateBuildingsForPlayer0() // INLINED!!
+    call CreatePlayerBuildings()
     call CreateNeutralPassive()
     call CreateUnitsForPlayer0() // INLINED!!
 endfunction
@@ -211,8 +264,24 @@ function InitTrig_Melee_Initialization takes nothing returns nothing
 endfunction
 
 //===========================================================================
+// Trigger: Untitled Trigger 001
+//===========================================================================
+function Trig_Untitled_Trigger_001_Actions takes nothing returns nothing
+    set udg_Untitled_Variable_001=BlzGetUnitAbility(null, 'AUan')
+    call IssuePointOrderLocBJ(null, "attack", GetRectCenter(GetPlayableMapRect()))
+endfunction
+
+//===========================================================================
+function InitTrig_Untitled_Trigger_001 takes nothing returns nothing
+    set gg_trg_Untitled_Trigger_001=CreateTrigger()
+    call TriggerAddAction(gg_trg_Untitled_Trigger_001, function Trig_Untitled_Trigger_001_Actions)
+endfunction
+
+
+//===========================================================================
 function InitCustomTriggers takes nothing returns nothing
     call InitTrig_Melee_Initialization()
+    call InitTrig_Untitled_Trigger_001()
 endfunction
 
 //===========================================================================
@@ -258,12 +327,13 @@ function main takes nothing returns nothing
     call SetAmbientDaySound("LordaeronSummerDay")
     call SetAmbientNightSound("LordaeronSummerNight")
     call SetMapMusic("Music", true, 0)
+    call CreateAllItems()
     call CreateAllUnits()
     call InitBlizzard()
 
 
     call InitGlobals()
-    call InitTrig_Melee_Initialization() // INLINED!!
+    call InitCustomTriggers()
     call ConditionalTriggerExecute(gg_trg_Melee_Initialization) // INLINED!!
 
 endfunction
