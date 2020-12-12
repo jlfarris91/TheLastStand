@@ -1,0 +1,379 @@
+package CircularCachedSpawnManager
+import Range
+import GameConstants
+import SpawnRegion
+import RegionExtensions
+import UnitExtensions
+import Circle
+import LinkedList
+import LinkedListExtensions
+import ClosureTimers
+import HashMap
+import SpawnManager
+import SpawnPointCollection
+import HumanPlayers
+import UnitIndexer
+import Arc
+
+constant real HOSTILE_INVALIDATION_RANGE = 800.0
+constant real FRIENDLY_INVALIDATION_RANGE = 512.0
+constant int MAX_REQUEST_ATTEMPTS = 10
+
+constant real ANGLE_DELTA = PI2 / 8.0
+constant real ANGLE_DELTA_HALF = ANGLE_DELTA / 2.0
+constant real ANGLE_PAD_PERCENT = 0.1
+constant real DISTANCE_PAD_PERCENT = 0.1
+
+HashMap<int, CircularCachedSpawnManager> g_playerHostileSpawnManagers
+LinkedList<SpawnAreaUpdateRequest> g_updateRequests
+LinkedList<int> g_tempValidSpawnPointIndexList
+group g_testGroup = CreateGroup()
+
+// ============================================================================
+tuple spawnArea(int index)
+
+// ============================================================================
+function makeSpawnArea(SpawnRange range, int direction) returns spawnArea
+  return spawnArea((range castTo int) * 8 + direction)
+
+// ============================================================================
+function spawnArea.getSpawnRange() returns SpawnRange
+  return R2I(I2R(this.index) / 8) castTo SpawnRange
+
+// ============================================================================
+function spawnArea.getDirection() returns int
+  return this.index - (this.getSpawnRange() castTo int) * 8
+
+// ============================================================================
+function spawnArea.getDistanceRange() returns rangeReal
+  rangeReal range
+
+  switch (this.getSpawnRange())
+    case CLOSE
+      range = SPAWN_RANGE_CLOSE
+    case NEAR
+      range = SPAWN_RANGE_NEAR
+    case MID
+      range = SPAWN_RANGE_MID
+    case FAR
+      range = SPAWN_RANGE_FAR
+  
+  let padVal = range.getLength() * DISTANCE_PAD_PERCENT
+  range.min += padVal
+  range.max -= padVal
+
+  return range
+
+// ============================================================================
+function spawnArea.overlaps(vec2 spawnAreaCenter, circle circle) returns bool
+  return arc(spawnAreaCenter, this.getAngleRange(), this.getDistanceRange()).overlaps(circle)
+
+// ============================================================================
+function spawnArea.getAngleRange() returns rangeReal
+  return rangeReal(
+    I2R(this.getDirection()) * ANGLE_DELTA - ANGLE_DELTA_HALF + ANGLE_DELTA * ANGLE_PAD_PERCENT,
+    I2R(this.getDirection() + 1) * ANGLE_DELTA - ANGLE_DELTA_HALF - ANGLE_DELTA * ANGLE_PAD_PERCENT)
+
+// ============================================================================
+function spawnArea.getRandomPointInSpawnRange() returns vec2
+  let angleRange = this.getAngleRange()
+  let distRange = this.getDistanceRange()
+  let angle = angleRange.getRandom()
+  let dist = distRange.getRandom()
+  return vec2(Cos(angle) * dist, Sin(angle) * dist)
+
+// ============================================================================
+function spawnArea.getDirectionVector() returns vec2
+  let angle = this.getAngleRange().getMid()
+  return vec2(Cos(angle), Sin(angle))
+
+// ============================================================================
+function spawnArea.toString() returns string
+  return "{0}:{1}".format(this.getSpawnRange().toString(), this.getDirection().toString())
+
+// ============================================================================
+class SpawnAreaUpdateRequest
+  private CircularCachedSpawnManager m_spawnData
+  private spawnArea m_area
+  private int m_attempts
+
+  // --------------------------------------------------------------------------
+  construct(CircularCachedSpawnManager spawnManager, spawnArea area)
+    m_spawnData = spawnManager
+    m_area = area
+    m_attempts = 0
+
+  // --------------------------------------------------------------------------
+  function getSpawnManager() returns CircularCachedSpawnManager
+    return m_spawnData
+
+  // --------------------------------------------------------------------------
+  function getSpawnArea() returns spawnArea
+    return m_area
+
+  // --------------------------------------------------------------------------
+  function getAttempts() returns int
+    return m_attempts
+
+  // --------------------------------------------------------------------------
+  function incrementAttempts()
+    m_attempts++
+
+// ============================================================================
+public class CircularCachedSpawnManager implements ISpawnManager
+  private circle m_circle
+  private vec2 array[32] m_pos
+  private bool array[32] m_valid
+  private bool array[32] m_processingRequest
+  private bool m_isEnabled
+  private string m_id
+  private player m_player
+
+  // Debug helpers
+  //private effect array[8] m_spawnRangeEffects
+  //private texttag array[8] m_spawnRangeTexts
+  //private effect array[32] m_spawnPointEffects
+
+  // --------------------------------------------------------------------------
+  construct(player p, string id)
+    m_player = p
+    m_id = id
+
+  // --------------------------------------------------------------------------
+  function getId() returns string
+    return m_id
+
+  // --------------------------------------------------------------------------
+  function setCenter(vec2 pos)
+    m_circle = circle(pos, SPAWN_RANGE_FAR.max)
+    invalidateSpawnPoints()
+    // updateEffects()
+
+  // --------------------------------------------------------------------------
+  function getCenter() returns vec2
+    return m_circle.center
+
+  // --------------------------------------------------------------------------
+  function setIsEnabled(bool enabled)
+    m_isEnabled = enabled
+    invalidateSpawnPoints()
+
+  // --------------------------------------------------------------------------
+  function getIsEnabled() returns bool
+    return m_isEnabled
+  
+  // --------------------------------------------------------------------------
+  override function getRandomSpawnPointInRange(SpawnRange range) returns spawnPointResult
+    if (not m_isEnabled)
+      return spawnPointResult(false, ZERO2)
+
+    let startIndex = (range castTo int) * 8
+
+    var validCount = 0
+    for i = 0 to 7
+      if (m_valid[startIndex + i])
+        validCount++
+
+    if (validCount > 0)
+      let validIndex = GetRandomInt(0, validCount)
+      for i = 0 to 7
+        if (m_valid[startIndex + i] and i == validIndex)
+          return spawnPointResult(true, m_pos[startIndex + i])
+
+    return spawnPointResult(false, ZERO2)
+    
+  // --------------------------------------------------------------------------
+  override function getRandomSpawnPointsInRange(SpawnRange range, int count) returns spawnPointsResult
+    if (not m_isEnabled)
+      return spawnPointsResult(false, null)
+
+    let startIndex = (range castTo int) * 8
+
+    g_tempValidSpawnPointIndexList.clear()
+
+    for i = 0 to 7
+      let validSpawnPointIndex = startIndex + i
+      if (m_valid[validSpawnPointIndex])
+        g_tempValidSpawnPointIndexList.add(validSpawnPointIndex)
+
+    if (g_tempValidSpawnPointIndexList.isEmpty())
+      return spawnPointsResult(false, null)
+
+    let collection = new SpawnPointCollection()
+    
+    let spawnPointIndices = g_tempValidSpawnPointIndexList.getRandomUnique(count)
+    for validIndex in spawnPointIndices
+      collection.pushPoint(m_pos[validIndex])
+
+    return spawnPointsResult(true, collection)
+
+  // --------------------------------------------------------------------------
+  function isAreaValid(spawnArea area) returns bool
+    return m_valid[area.index]
+
+  // --------------------------------------------------------------------------
+  function updateSpawnArea(spawnArea area) returns bool
+    if (not m_isEnabled)
+      return false
+    
+    let index = area.index
+    if (m_valid[index] or not m_processingRequest[index])
+      return true
+    
+    let pos = getCenter() + area.getRandomPointInSpawnRange()
+    let isValid = isSpawnPointValid(pos)
+    
+    m_pos[index] = pos
+    m_valid[index] = isValid
+    m_processingRequest[index] = false
+    
+    // updateEffects()
+
+    return isValid
+
+  // --------------------------------------------------------------------------
+  function invalidateSpawnPoints()
+    for i = 0 to 31
+      invalidateSpawnArea(spawnArea(i))
+
+    // updateEffects()
+
+  // --------------------------------------------------------------------------
+  function invalidateSpawnPoints(circle circle)
+
+    if (not m_circle.overlaps(circle))
+      return
+
+    let center = getCenter()
+
+    for i = 0 to 31
+      let spawnArea = spawnArea(i)
+      if ((m_valid[i] or not m_processingRequest[i]) and spawnArea.overlaps(center, circle))
+        invalidateSpawnArea(spawnArea)
+
+    // updateEffects()
+        
+  // --------------------------------------------------------------------------
+  private function invalidateSpawnArea(spawnArea spawnArea)
+    m_valid[spawnArea.index] = false
+
+    if (m_isEnabled and not m_processingRequest[spawnArea.index])
+      m_processingRequest[spawnArea.index] = true
+      g_updateRequests.add(new SpawnAreaUpdateRequest(this, spawnArea))
+
+  // --------------------------------------------------------------------------
+  function isSpawnPointValid(vec2 pos) returns bool
+    if (not g_spawnRegion.containsPoint(pos))
+      return false
+    g_testGroup.enumUnitsInRange(pos, UNDEAD_SPAWN_TEST_RADIUS)    
+    var isValid = true
+    for u from g_testGroup
+      if (doesUnitInvalidateHostileSpawnPoint(u))
+        isValid = false
+        break
+    return isValid
+
+  // --------------------------------------------------------------------------
+  // private function updateEffects()
+
+  //   for i = 0 to 7
+  //     let spawnRange = (i castTo SpawnRange)
+  //     let spawnRangeReal = spawnRange.toRangeReal()
+      
+  //     if (m_spawnRangeEffects[i] == null)
+  //       m_spawnRangeEffects[i] = FX.createRangeEffect(m_circle.center, spawnRangeReal.max, Colors.green)
+  //     m_spawnRangeEffects[i].setPos(m_circle.center)
+      
+  //     let spawnRangeTextPos = (m_circle.center + vec2(0, spawnRangeReal.max)).withZ(32.0)
+  //     if (m_spawnRangeTexts[i] == null)
+  //       m_spawnRangeTexts[i] = createTTEx(
+  //         spawnRangeTextPos,
+  //         "{0} ({1})".format(spawnRange.toString(), spawnRangeReal.max.toString()),
+  //         10.0)
+  //     m_spawnRangeTexts[i].setPos(spawnRangeTextPos)
+
+  //   for i = 0 to 31
+  //     if (m_valid[i])
+  //       if (m_spawnPointEffects[i] == null)
+  //         m_spawnPointEffects[i] = AddSpecialEffect("UI\\Feedback\\WaypointFlags\\WaypointFlag.mdl", m_pos[i].x, m_pos[i].y)
+  //         m_spawnPointEffects[i].setColor(m_player.getColor().toColor())
+  //         FX.createJobChangeEffect(m_pos[i])
+  //       m_spawnPointEffects[i].setPos(m_pos[i])
+  //     if (not m_valid[i] and m_spawnPointEffects[i] != null)
+  //       m_spawnPointEffects[i].destr()
+
+// ============================================================================
+public function getPlayerCachedHostileSpawnManager(player p) returns CircularCachedSpawnManager
+  CircularCachedSpawnManager spawnManager = g_playerHostileSpawnManagers.get(p.getId())
+  if (spawnManager == null)
+    spawnManager = new CircularCachedSpawnManager(p, "Hostile:"+p.getName())
+    g_playerHostileSpawnManagers.put(p.getId(), spawnManager)
+  return spawnManager
+
+// ============================================================================
+public function doesUnitInvalidateHostileSpawnPoint(unit u) returns bool
+  return u.isStructure()
+         and u.isAlive()
+         and u.isEnemyOf(PLAYER_UNDEAD)
+         and not u.isInvulnerable()
+
+// ============================================================================
+function processRequests()
+  if (g_updateRequests.isEmpty())
+    return
+
+  var attemptsCounter = 0
+
+  while (not g_updateRequests.isEmpty() and attemptsCounter < 50)
+    let request = g_updateRequests.dequeue()
+    let spawnManager = request.getSpawnManager()
+    let spawnArea = request.getSpawnArea()
+
+    if (not spawnManager.isAreaValid(spawnArea) and spawnManager.getIsEnabled())
+      var foundValidSpawnPoint = false
+      
+      for i = 0 to MAX_REQUEST_ATTEMPTS-1
+        attemptsCounter++
+        request.incrementAttempts()
+        if (spawnManager.updateSpawnArea(spawnArea))
+          foundValidSpawnPoint = true
+          Log.debug("Found valid spawn point for request {0}:{1} after {2} attempt(s)".format(
+            spawnManager.getId(),
+            spawnArea.toString(),
+            i.toString()))
+          break
+
+      if (foundValidSpawnPoint)
+        destroy request
+      else if (request.getAttempts() < MAX_REQUEST_ATTEMPTS*3)
+        Log.debug("Requeuing request {0}:{1} after {2} attempts".format(
+          spawnManager.getId(),
+          spawnArea.toString(),
+          request.getAttempts().toString()))
+        g_updateRequests.add(request)
+      else
+        Log.debug("Giving up on request {0}:{1} after {2} attempts".format(
+          spawnManager.getId(),
+          spawnArea.toString(),
+          request.getAttempts().toString()))
+      
+
+// ============================================================================
+function onUnitIndexing()
+
+  let indexingUnit = getIndexingUnit()
+  let unitPos = indexingUnit.getPos()
+
+  if (doesUnitInvalidateHostileSpawnPoint(indexingUnit))
+    for p in g_PlayingHumanPlayers
+      getPlayerCachedHostileSpawnManager(p).invalidateSpawnPoints(circle(unitPos, HOSTILE_INVALIDATION_RANGE))
+
+// ============================================================================
+init
+  g_playerHostileSpawnManagers = new HashMap<int, CircularCachedSpawnManager>()
+  g_tempValidSpawnPointIndexList = new LinkedList<int>()
+  g_updateRequests = new LinkedList<SpawnAreaUpdateRequest>()
+  doPeriodically(1.0, (CallbackPeriodic cb) -> processRequests())
+
+  onUnitIndex(() -> onUnitIndexing())
+  onUnitDeindex(() -> onUnitIndexing())

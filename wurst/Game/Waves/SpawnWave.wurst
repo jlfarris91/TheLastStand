@@ -11,6 +11,10 @@ import ErrorHandling
 import ClosureEvents
 import Math
 import IProgress
+import HashMap
+import SpawnManager
+
+HashMap<unit, SpawnWave> g_unitToSpawnWaveMap
 
 // ============================================================================
 public class SpawnWave extends Runnable implements IProgress
@@ -34,7 +38,11 @@ public class SpawnWave extends Runnable implements IProgress
   ondestroy
     unlistenToActivatedEvent()
     unlistenToDefProgressChangedEvent()
+    
+    for u in m_aliveSpawnedUnits
+      unregisterSpawnedUnit(u)
     destroy m_aliveSpawnedUnits
+    
     m_definition = null
     m_targetPlayer = null
 
@@ -63,8 +71,6 @@ public class SpawnWave extends Runnable implements IProgress
     super.onStarted()
     listenToActivatedEvent()
     listenToDefProgressChangedEvent()
-    
-    m_definition.getActivator().start()
 
     let runnableProgress = (m_definition.getProgress() castTo int) castTo IRunnable
     if (runnableProgress != null)
@@ -72,6 +78,8 @@ public class SpawnWave extends Runnable implements IProgress
 
     m_aliveSpawnedUnits.clear()
     m_numSpawned = 0
+
+    m_definition.getActivator().start()
 
   // --------------------------------------------------------------------------
   override function onPaused()
@@ -154,29 +162,32 @@ public class SpawnWave extends Runnable implements IProgress
     if (playerMetadata == null or playerMetadata.getIsDead())
       return
 
-    let camp = playerMetadata.getCamp()
-    let center = camp.getCenter()
-
     let waveProgress = getProgress()
     let aliveCountMax = m_definition.getMaxAliveCount(waveProgress)
-    let spawnCountMax = m_definition.getMaxSpawnCount(waveProgress)    
+    let spawnCountMax = m_definition.getMaxSpawnCount(waveProgress)
     let spawnsPerActivation = m_definition.getSpawnsPerActivation(waveProgress)    
     let spawnGroupingFactor = m_definition.getSpawnGroupingFactor(waveProgress)
+    let waitForFullSpawnGroup = m_definition.getWaitForFullSpawnGroup()
 
     let numSpawnGroups = max(R2I(I2R(spawnsPerActivation) * (1.0 - spawnGroupingFactor)), 1)
     let spawnGroupSize = max(R2I(I2R(spawnsPerActivation) * spawnGroupingFactor), 1)
 
-    let spawnPoints = m_definition.getSpawnPointProvider().getSpawnPoints(center, numSpawnGroups)
-    if (spawnPoints.getCount() == 0)
+    let spawnPointsResult = m_definition.getSpawnPointProvider().getSpawnPoints(numSpawnGroups)
+    if (not spawnPointsResult.succeeded)
       error("[SpawnWave.onActivated] Found no spawn points!")
+      return
 
     var numSpawnsAvailable = getNumSpawnsAvailable(aliveCountMax, spawnCountMax)
 
     // For each spawn point
-    for sp in spawnPoints
+    for sp in spawnPointsResult.spawnPoints
       
       // Until we reach max alive or max spawned
       if (numSpawnsAvailable == 0)
+        break
+
+      // Sometimes we want to spawn the entire group at once
+      if (waitForFullSpawnGroup and numSpawnsAvailable < spawnGroupSize)
         break
 
       // Spawn N units to form a group
@@ -204,18 +215,20 @@ public class SpawnWave extends Runnable implements IProgress
         destroy unitTypes
 
     // Clean up the spawnPoints list
-    destroy spawnPoints
+    destroy spawnPointsResult.spawnPoints
 
   // --------------------------------------------------------------------------
   private function getNumSpawnsAvailable(int aliveCountMax, int spawnCountMax) returns int
-    let numSpawnsAvailable = min(aliveCountMax - m_aliveSpawnedUnits.size(), spawnCountMax - m_numSpawned)
+    let remainingAlive = aliveCountMax - getAliveCount()
+    let remainingSpawn = spawnCountMax - getSpawnedCount()
+    let numSpawnsAvailable = max(min(remainingAlive, remainingSpawn), 0)
 
-    if (m_numSpawned >= spawnCountMax)
-      Log.debug("[SpawnWave.onActivated] Reached max number of spawns for wave")
+    if (getSpawnedCount() >= spawnCountMax)
+      //Log.debug("[SpawnWave.onActivated] Reached max number of spawns for wave")
       return 0
 
-    if (m_aliveSpawnedUnits.size() >= aliveCountMax)
-      Log.debug("[SpawnWave.onActivated] Reached max number of concurrent alive")
+    if (getAliveCount() >= aliveCountMax)
+      //Log.debug("[SpawnWave.onActivated] Reached max number of concurrent alive")
       return 0
 
     return numSpawnsAvailable
@@ -238,13 +251,22 @@ public class SpawnWave extends Runnable implements IProgress
     if (unitModifier != null)
       unitModifier.apply(spawnedUnit, progress)
 
-    m_aliveSpawnedUnits.add(spawnedUnit)
-    EventListener.add(spawnedUnit, EVENT_PLAYER_UNIT_DEATH) () ->
-      m_aliveSpawnedUnits.remove(spawnedUnit)
-
-    m_numSpawned++
+    registerSpawnedUnit(spawnedUnit)
 
     return spawnedUnit
+
+  // --------------------------------------------------------------------------
+  function registerSpawnedUnit(unit spawnedUnit)
+    if (g_unitToSpawnWaveMap.has(spawnedUnit))
+      return
+    m_aliveSpawnedUnits.add(spawnedUnit)
+    g_unitToSpawnWaveMap.put(spawnedUnit, this)    
+    m_numSpawned++
+  
+  // --------------------------------------------------------------------------
+  function unregisterSpawnedUnit(unit spawnedUnit)
+    m_aliveSpawnedUnits.remove(spawnedUnit)
+    g_unitToSpawnWaveMap.remove(spawnedUnit)
 
   // --------------------------------------------------------------------------
   function getSpawnedCount() returns int
@@ -301,3 +323,18 @@ public class SpawnWave extends Runnable implements IProgress
     if (m_onDefProgressChangedEventHandler != null)
       destroy m_onDefProgressChangedEventHandler
       m_onDefProgressChangedEventHandler = null
+
+// ============================================================================
+function onUnitDeath()
+  let dyingUnit = GetDyingUnit()
+
+  if (not g_unitToSpawnWaveMap.has(dyingUnit))
+    return
+
+  let spawnWave = g_unitToSpawnWaveMap.get(dyingUnit)
+  spawnWave.unregisterSpawnedUnit(dyingUnit)
+
+// ============================================================================
+init
+  g_unitToSpawnWaveMap = new HashMap<unit, SpawnWave>()
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_DEATH, function onUnitDeath)

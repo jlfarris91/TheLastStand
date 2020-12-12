@@ -1,17 +1,8 @@
 package Survivors
-import GroupUtils
-import GameConstants
-import Math
-import GameSettings
-import MainItemLibrary
-import HumanPlayers
 import Camp
 import TlsUnitIds
 import HumanPlayerMetadata
 import UnitMetadata
-import SurvivorSpawnManager
-import RandomSpawnPointProvider
-import SpawnPointCollection
 import WeightedSet
 import DisplayTextToPlayer
 import StringExtensions
@@ -19,60 +10,8 @@ import SurvivorComponent
 import Orders
 import ColorUtility
 import ErrorHandling
-import Range
 import FX
-
-// ============================================================================
-public function removeUnrescuedSurvivors()
-  let ug = getGroup()
-  ug.enumUnitsOfPlayer(PLAYER_VILLAGERS, null)
-  for u in ug
-    if (u.getTypeId() == TlsUnitIds.Survivors.survivorMale)
-      u.remove()
-  ug.release()
-
-// ============================================================================
-public function spawnUnrescuedSurvivorsNearPlayers()
-  g_PlayingHumanPlayers.forEach() (player p) ->
-    spawnUnrescuedSurvivorsNearPlayer(p)
-
-// ============================================================================
-function spawnUnrescuedSurvivorsNearPlayer(player p)
-  let playerMetadata = p.getHumanMetadataRequired()
-
-  if (playerMetadata.getIsDead())
-    return
-  
-  let camp = playerMetadata.getCamp()
-  var center = camp.getCenter()
-
-  // Clamp the spawn area to the world bounds
-  center = clampToWorldBounds(center, SURVIVORS_SPAWN_RANGE.max)
-
-  let spawnPoints = getNearbySpawnPoints(center, GameSettings.survivors_SpawnCountPerPlayer)
-
-  for sp in spawnPoints
-    let survivor = createUnitTLS(
-      PLAYER_VILLAGERS,
-      TlsUnitIds.Survivors.survivorMale,
-      sp.x, sp.y,
-      GetRandomDirectionDeg())
-    if (survivor != null)
-      MakeUnitRescuableToForceBJ(survivor, true, g_HumanPlayersForce)
-      SetUnitRescueRange(survivor, SURVIVORS_RESCUE_RANGE)
-      SetRescueUnitColorChangeBJ(true)
-
-    // There's a chance to give an unrescued survivor an item
-    if (passesChanceCheck(SURVIVORS_ITEM_CHANCE))
-      g_MainItemLibrary.giveRandomItemToUnit(survivor, SURVIVORS_ITEM_CHANCES)
-
-// ============================================================================
-function getNearbySpawnPoints(vec2 pos, int count) returns SpawnPointCollection
-
-  let spawnPointProvider = new RandomSpawnPointProvider(g_survivorSpawnManager, SURVIVORS_SPAWN_RANGE)
-  let spawnPoints = spawnPointProvider.getSpawnPoints(pos, count)
-  destroy spawnPointProvider
-  return spawnPoints
+import SurvivorSpawnManager
   
 // ============================================================================
 public function spawnSurvivorUnitForPlayer(player p) returns unit
@@ -96,14 +35,13 @@ public function spawnSurvivorUnitForPlayer(player p) returns unit
 
   let unitId = weightedSet.getRandom()
 
-  let spawnPoint = getSpawnPoint(camp.getCenter())
+  let spawnPointResult = getSpawnPoint(p)
+  if (not spawnPointResult.succeeded)
+    Log.error("Failed to find spawn point for survivor")
+    return null
 
-  let survivor = createUnitTLS(p, unitId, spawnPoint, GetRandomDirectionDeg())
+  let survivor = createUnitTLS(p, unitId, spawnPointResult.spawnPoint, GetRandomDirectionDeg())
   let survivorMetadata = survivor.getMetadataRequired()
-
-  // TODO: give them a non-job item
-  //if (passesChanceCheck(SURVIVORS_ITEM_CHANCE))
-  //  g_MainItemLibrary.giveRandomItemToUnit(survivor, SURVIVORS_ITEM_CHANCES)
 
   let survivorUnit = survivorMetadata.getUnit()
   survivorUnit.issuePointOrderById(OrderIds.move, camp.getCenter())
@@ -118,12 +56,7 @@ public function spawnSurvivorUnitForPlayer(player p) returns unit
 
   return survivorUnit
 
-// --------------------------------------------------------------------------
-function getSpawnPoint(vec2 pos) returns vec2
-
-  // Use RandomSpawnPointProvider since it automatically grows the range
-  // if no spawn point could be found
-  let spawnPointProvider = new RandomSpawnPointProvider(g_survivorSpawnManager, SPAWN_SURVIVOR_RANGE)
-  let spawnPoint = spawnPointProvider.getSpawnPoint(pos)
-  destroy spawnPointProvider
-  return spawnPoint
+// ============================================================================
+function getSpawnPoint(player p) returns spawnPointResult
+  let spawnManager = getPlayerSurvivorSpawnManager(p)
+  return spawnManager.getRandomSpawnPointInRange(SpawnRange.NEAR)
