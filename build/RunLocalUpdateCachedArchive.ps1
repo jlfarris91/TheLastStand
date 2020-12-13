@@ -9,10 +9,10 @@ if ($env:IsLocalBuild -eq 0)
 
 # 1. Run the pipeline with IsLocalBuild=true so that we use the real war3 archive data
 #    This will generate a list file of all the archive files referenced by the pipeline
-.\RunPipeline.ps1
+if (-Not (Test-Path "listfile")) { .\RunPipeline.ps1 }
 
 # 2. Use the list file generated from RunPipeline to build our cached archive
-.\LocalBuildCachedArchive.ps1
+if (Test-Path "listfile") { .\LocalBuildCachedArchive.ps1 }
 
 # 3. Clean up the list file
 if (Test-Path "listfile") { Remove-Item "listfile" }
