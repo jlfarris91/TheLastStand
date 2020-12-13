@@ -502,9 +502,17 @@
 
             string pt = affectsPathing.PathingTexture;
 
-            m_assetManager.FindAsset(pt)
-                .Map(assetRef => m_imageProvider.GetImage(assetRef))
-                .Do(UpdatePathMap);
+            try
+            {
+                m_assetManager.FindAsset(pt)
+                    .Map(assetRef => m_imageProvider.GetImage(assetRef))
+                    .Do(UpdatePathMap);
+            }
+            catch (Exception)
+            {
+                m_logger.Log($"Failed to update pathing map for placement {placement.Id} with pathing texture {pt}");
+                throw;
+            }
 
             //Color GetPixel(IImage image, int x, int y, int div90)
             //{
