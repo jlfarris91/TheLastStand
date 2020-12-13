@@ -156,10 +156,7 @@ function CreateUnitsForPlayer9 takes nothing returns nothing
     set u=BlzCreateUnitWithSkin(p, 'h01S', - 4739.0, 10419.9, 220.390, 'h01S')
     set u=BlzCreateUnitWithSkin(p, 'h01A', 9638.1, 51.5, 312.032, 'h01A')
     set u=BlzCreateUnitWithSkin(p, 'h01A', 9687.3, 56.6, 302.331, 'h01A')
-    set u=BlzCreateUnitWithSkin(p, 'h01K', 9699.1, - 42.8, 105.364, 'h01K')
-    set u=BlzCreateUnitWithSkin(p, 'h007', 10882.6, - 3951.0, 62.064, 'h007')
-    set u=BlzCreateUnitWithSkin(p, 'h01K', 10825.8, - 3861.3, 309.297, 'h01K')
-    set u=BlzCreateUnitWithSkin(p, 'h01A', 10900.5, - 3879.1, 318.339, 'h01A')
+    set u=BlzCreateUnitWithSkin(p, 'h01K', 9672.6, - 24.3, 105.364, 'h01K')
     set u=BlzCreateUnitWithSkin(p, 'h01A', - 7239.7, - 4588.4, 1.384, 'h01A')
     set u=BlzCreateUnitWithSkin(p, 'h007', - 7184.4, - 4668.4, 279.369, 'h007')
     set u=BlzCreateUnitWithSkin(p, 'h01T', - 7938.6, - 4768.3, 248.002, 'h01T')
@@ -182,9 +179,9 @@ function CreateUnitsForPlayer9 takes nothing returns nothing
     set u=BlzCreateUnitWithSkin(p, 'h01K', - 3575.7, - 6648.0, 357.495, 'h01K')
     set u=BlzCreateUnitWithSkin(p, 'h01T', - 3710.7, - 6427.4, 140.380, 'h01T')
     set u=BlzCreateUnitWithSkin(p, 'h01T', 2595.5, 9068.3, 273.610, 'h01T')
-    set u=BlzCreateUnitWithSkin(p, 'h01A', 5408.3, - 10731.1, 325.744, 'h01A')
-    set u=BlzCreateUnitWithSkin(p, 'h01K', 5448.0, - 10666.1, 222.941, 'h01K')
-    set u=BlzCreateUnitWithSkin(p, 'h01U', 5549.1, - 10669.2, 222.172, 'h01U')
+    set u=BlzCreateUnitWithSkin(p, 'h01A', 5531.9, - 11418.9, 325.744, 'h01A')
+    set u=BlzCreateUnitWithSkin(p, 'h01K', 5582.3, - 11356.7, 134.221, 'h01K')
+    set u=BlzCreateUnitWithSkin(p, 'h01U', 5470.8, - 11461.8, 96.222, 'h01U')
 endfunction
 
 //===========================================================================
@@ -243,7 +240,7 @@ endfunction
 function CreateRegions takes nothing returns nothing
     local weathereffect we
 
-    set gg_rct_BaseUnits=Rect(10912.0, - 11616.0, 11296.0, - 10848.0)
+    set gg_rct_BaseUnits=Rect(10944.0, - 11584.0, 11328.0, - 10816.0)
     set gg_rct_debugSurvivorSpawn=Rect(- 320.0, - 7648.0, - 128.0, - 7456.0)
 endfunction
 

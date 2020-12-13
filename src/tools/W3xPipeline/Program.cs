@@ -206,6 +206,7 @@
             catch (Exception ex)
             {
                 sLogger.Log($"Failed: {ex.Message}");
+                sLogger.Log(ex.StackTrace);
                 Environment.Exit(-1);
             }
             finally
