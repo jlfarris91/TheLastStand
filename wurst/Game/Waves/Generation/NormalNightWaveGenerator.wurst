@@ -10,7 +10,6 @@ import Functional
 import Math
 import PeriodicWaveActivator
 import GameConstants
-import UndeadSpawnManager
 import SingleUnitTypeProvider
 import TlsUnitIds
 import Range
@@ -29,6 +28,10 @@ import ItemSet
 import TlsItemIds
 import Func
 import ObjEditingCommons
+import SpawnDefinitionTags
+import CircularCachedSpawnManager
+import ISpawnPointProvider
+import UndeadSpawnManager
 
 Func1<real, real> g_coinSmallWeightTFunc
 Func1<real, real> g_coinMediumWeightTFunc
@@ -39,12 +42,20 @@ Func1<real, real> g_coinEpicWeightTFunc
 public class NormalNightWaveGenerator implements IWaveGenerator<NightWave>
 
   private constant int TOTAL_NUM_NIGHTS = 30
+  private ISpawnPointProvider array[4] m_randomSpawnPointProviders
 
   // --------------------------------------------------------------------------
   override function generateWavesForPlayer(player p, WaveCollection<NightWave> waves)
     
     let gameProgress = new GameWaveProgress()
     ..setTotalWaves(TOTAL_NUM_NIGHTS)
+
+    let currentSpawnManager = getPlayerCachedHostileSpawnManager(p)
+    let fallbackSpawnManager = getPlayerUndeadSpawnManager(p)
+    m_randomSpawnPointProviders[SpawnRange.CLOSE castTo int] = new RandomSpawnPointProvider(currentSpawnManager, fallbackSpawnManager, SpawnRange.CLOSE)
+    m_randomSpawnPointProviders[SpawnRange.NEAR castTo int] = new RandomSpawnPointProvider(currentSpawnManager, fallbackSpawnManager, SpawnRange.NEAR)
+    m_randomSpawnPointProviders[SpawnRange.MID castTo int] = new RandomSpawnPointProvider(currentSpawnManager, fallbackSpawnManager, SpawnRange.MID)
+    m_randomSpawnPointProviders[SpawnRange.FAR castTo int] = new RandomSpawnPointProvider(currentSpawnManager, fallbackSpawnManager, SpawnRange.FAR)
 
     // Zombies spawn every night
     for i = 1 to TOTAL_NUM_NIGHTS
@@ -151,17 +162,21 @@ public class NormalNightWaveGenerator implements IWaveGenerator<NightWave>
     // Monolith               (Invade, Summoner)
     waves.getOrCreateWave(gameProgress.nextWave())
     ..addSpawnWave(createSpawnWave_Monolith(p, gameProgress))
+  
+  // --------------------------------------------------------------------------
+  function getRandomSpawnPointProvider(SpawnRange range) returns ISpawnPointProvider
+    return m_randomSpawnPointProviders[range castTo int]
 
   // --------------------------------------------------------------------------
   private function createSpawnWave_Zombies(player p, IGameWaveProgress gameProgress) returns SpawnWave
     let def = new SpawnWaveDefinition("Zombies")
-    ..setTags("melee", "normal")
+    ..setTags(SpawnDefinitionTags.ground, SpawnDefinitionTags.melee, SpawnDefinitionTags.normal)
     ..setProgress(g_nightProgress)
     ..setMaxAliveCount(FunctionalT.fromValue(20))
     ..setSpawnsPerActivation(FunctionalT.fromValue(12))
-    ..setSpawnGroupingFactor(FunctionalT.fromValue(1.0))
+    ..setSpawnGroupingFactor(FunctionalT.fromValue(0.25))
     ..setActivator(new PeriodicWaveActivator(3.0))
-    ..setSpawnPointProvider(new RandomSpawnPointProvider(g_undeadSpawnManager, SPAWN_RANGE_CLOSE))
+    ..setSpawnPointProvider(getRandomSpawnPointProvider(SpawnRange.NEAR))
     ..setUnitTypeProvider(new RandomUnitTypeProvider()
       ..addUnitType(TlsUnitIds.Undead.zombieMale, 1)
       ..addUnitType(TlsUnitIds.Undead.zombieFemale, 1))
@@ -181,13 +196,13 @@ public class NormalNightWaveGenerator implements IWaveGenerator<NightWave>
   // --------------------------------------------------------------------------
   private function createSpawnWave_InfectiousZombies(player p, IGameWaveProgress gameProgress) returns SpawnWave
     let def = new SpawnWaveDefinition("Infectious Zombies")
-    ..setTags("melee", "poison", "normal")
+    ..setTags(SpawnDefinitionTags.ground, SpawnDefinitionTags.melee, SpawnDefinitionTags.normal, SpawnDefinitionTags.poison)
     ..setProgress(g_nightProgress)
     ..setMaxAliveCount(FunctionalT.fromValue(10))
     ..setSpawnsPerActivation(FunctionalT.fromValue(10))
     ..setSpawnGroupingFactor(FunctionalT.fromValue(1.0))
     ..setActivator(new PeriodicWaveActivator(3.0))
-    ..setSpawnPointProvider(new RandomSpawnPointProvider(g_undeadSpawnManager, SPAWN_RANGE_CLOSE))
+    ..setSpawnPointProvider(getRandomSpawnPointProvider(SpawnRange.NEAR))
     ..setUnitTypeProvider(new SingleUnitTypeProvider(TlsUnitIds.Undead.zombieMale))
     
     def.getUnitModifier(TlsUnitIds.Undead.zombieMale)
@@ -206,13 +221,13 @@ public class NormalNightWaveGenerator implements IWaveGenerator<NightWave>
   // --------------------------------------------------------------------------
   private function createSpawnWave_Crows(player p, IGameWaveProgress gameProgress) returns SpawnWave
     let def = new SpawnWaveDefinition("Crows")
-    ..setTags("flying", "ranged", "magic")
+    ..setTags(SpawnDefinitionTags.flying, SpawnDefinitionTags.ranged, SpawnDefinitionTags.magic)
     ..setProgress(g_nightProgress)
     ..setMaxAliveCount(FunctionalT.fromFunc((real _waveProgress) -> lerpInt(1, 4, gameProgress.getCurrentGameProgress())))
     ..setSpawnsPerActivation(FunctionalT.fromFunc((real waveProgress) -> lerpInt(2, 4, waveProgress)))
     ..setSpawnGroupingFactor(FunctionalT.fromValue(0.0))
     ..setActivator(new PeriodicWaveActivator(10.0))
-    ..setSpawnPointProvider(new RandomSpawnPointProvider(g_undeadSpawnManager, SPAWN_RANGE_MID))
+    ..setSpawnPointProvider(getRandomSpawnPointProvider(SpawnRange.MID))
     ..setUnitTypeProvider(new SingleUnitTypeProvider(TlsUnitIds.Undead.crow))
 
     def.getUnitModifier(TlsUnitIds.Undead.crow)
@@ -226,13 +241,13 @@ public class NormalNightWaveGenerator implements IWaveGenerator<NightWave>
   // --------------------------------------------------------------------------
   private function createSpawnWave_Necromancers(player p, IGameWaveProgress gameProgress) returns SpawnWave
     let def = new SpawnWaveDefinition("Necromancers")
-    ..setTags("summoner", "ranged", "magic")
+    ..setTags(SpawnDefinitionTags.summoner, SpawnDefinitionTags.ranged, SpawnDefinitionTags.magic)
     ..setProgress(g_nightProgress)
     ..setMaxAliveCount(FunctionalT.fromFunc((real _waveProgress) -> lerpInt(2, 8, gameProgress.getCurrentGameProgress())))
     ..setSpawnsPerActivation(FunctionalT.fromValue(1))
     ..setSpawnGroupingFactor(FunctionalT.fromValue(0.0))
     ..setActivator(new PeriodicWaveActivator(10.0)..setActivateOnStart(false))
-    ..setSpawnPointProvider(new RandomSpawnPointProvider(g_undeadSpawnManager, SPAWN_RANGE_MID))
+    ..setSpawnPointProvider(getRandomSpawnPointProvider(SpawnRange.MID))
     ..setUnitTypeProvider(new SingleUnitTypeProvider(TlsUnitIds.Undead.necromancer))
 
     def.getUnitModifier(TlsUnitIds.Undead.necromancer)
@@ -246,13 +261,13 @@ public class NormalNightWaveGenerator implements IWaveGenerator<NightWave>
   // --------------------------------------------------------------------------
   private function createSpawnWave_GreaterNecromancers(player p, IGameWaveProgress gameProgress) returns SpawnWave
     let def = new SpawnWaveDefinition("Greater Necromancers")
-    ..setTags("summoner", "ranged", "magic")
+    ..setTags(SpawnDefinitionTags.summoner, SpawnDefinitionTags.ranged, SpawnDefinitionTags.magic)
     ..setProgress(g_nightProgress)
     ..setMaxAliveCount(FunctionalT.fromFunc((real waveProgress) -> lerpInt(2, 8, waveProgress)))
     ..setSpawnsPerActivation(FunctionalT.fromValue(2))
     ..setSpawnGroupingFactor(FunctionalT.fromValue(1.0))
     ..setActivator(new PeriodicWaveActivator(5.0))
-    ..setSpawnPointProvider(new RandomSpawnPointProvider(g_undeadSpawnManager, SPAWN_RANGE_MID))
+    ..setSpawnPointProvider(getRandomSpawnPointProvider(SpawnRange.MID))
     ..setUnitTypeProvider(new SingleUnitTypeProvider(TlsUnitIds.Undead.greaterNecromancer))
 
     def.getUnitModifier(TlsUnitIds.Undead.greaterNecromancer)
@@ -266,13 +281,13 @@ public class NormalNightWaveGenerator implements IWaveGenerator<NightWave>
   // --------------------------------------------------------------------------
   private function createSpawnWave_EtherealNecromancers(player p, IGameWaveProgress gameProgress) returns SpawnWave
     let def = new SpawnWaveDefinition("Ethereal Necromancers")
-    ..setTags("summoner", "ranged", "magic")
+    ..setTags(SpawnDefinitionTags.summoner, SpawnDefinitionTags.ranged, SpawnDefinitionTags.magic)
     ..setProgress(g_nightProgress)
     ..setMaxAliveCount(FunctionalT.fromFunc((real waveProgress) -> lerpInt(2, 8, waveProgress)))
     ..setSpawnsPerActivation(FunctionalT.fromValue(2))
     ..setSpawnGroupingFactor(FunctionalT.fromValue(1.0))
     ..setActivator(new PeriodicWaveActivator(5.0))
-    ..setSpawnPointProvider(new RandomSpawnPointProvider(g_undeadSpawnManager, SPAWN_RANGE_MID))
+    ..setSpawnPointProvider(getRandomSpawnPointProvider(SpawnRange.MID))
     ..setUnitTypeProvider(new SingleUnitTypeProvider(TlsUnitIds.Undead.etherealNecromancer))
 
     def.getUnitModifier(TlsUnitIds.Undead.etherealNecromancer)
@@ -286,11 +301,11 @@ public class NormalNightWaveGenerator implements IWaveGenerator<NightWave>
   // --------------------------------------------------------------------------
   private function createSpawnWave_Abominations(player p, IGameWaveProgress gameProgress) returns SpawnWave
     let def = new SpawnWaveDefinition("Abominations")
-    ..setTags("boss", "heavy", "siege")
+    ..setTags(SpawnDefinitionTags.leader, SpawnDefinitionTags.heavy, SpawnDefinitionTags.siege)
     ..setProgress(g_nightProgress)
     ..setMaxSpawnCount(FunctionalT.fromValue(lerp(1, 5, gameProgress.getCurrentGameProgress()).floor()))
     ..setActivator(new PeriodicWaveActivator(10.0))
-    ..setSpawnPointProvider(new RandomSpawnPointProvider(g_undeadSpawnManager, SPAWN_RANGE_FAR))
+    ..setSpawnPointProvider(getRandomSpawnPointProvider(SpawnRange.MID))
     ..setUnitTypeProvider(new SingleUnitTypeProvider(TlsUnitIds.Undead.abomination))
     
     def.getUnitModifier(TlsUnitIds.Undead.abomination)
@@ -310,13 +325,13 @@ public class NormalNightWaveGenerator implements IWaveGenerator<NightWave>
   // --------------------------------------------------------------------------
   private function createSpawnWave_SkeletonArchers(player p, IGameWaveProgress gameProgress) returns SpawnWave
     let def = new SpawnWaveDefinition("Skeleton Archers")
-    ..setTags("ranged", "normal")
+    ..setTags(SpawnDefinitionTags.ranged, SpawnDefinitionTags.normal)
     ..setProgress(g_nightProgress)
     ..setMaxAliveCount(FunctionalT.fromFunc((real waveProgress) -> lerpInt(2, 8, waveProgress)))
     ..setSpawnsPerActivation(FunctionalT.fromValue(2))
     ..setSpawnGroupingFactor(FunctionalT.fromValue(1.0))
     ..setActivator(new PeriodicWaveActivator(5.0))
-    ..setSpawnPointProvider(new RandomSpawnPointProvider(g_undeadSpawnManager, SPAWN_RANGE_MID))
+    ..setSpawnPointProvider(getRandomSpawnPointProvider(SpawnRange.MID))
     ..setUnitTypeProvider(new SingleUnitTypeProvider(TlsUnitIds.Undead.skeletonArcher))
 
     def.getUnitModifier(TlsUnitIds.Undead.skeletonArcher)
@@ -328,13 +343,13 @@ public class NormalNightWaveGenerator implements IWaveGenerator<NightWave>
   // --------------------------------------------------------------------------
   private function createSpawnWave_BurningArchers(player p, IGameWaveProgress gameProgress) returns SpawnWave
     let def = new SpawnWaveDefinition("Burning Archers")
-    ..setTags("ranged", "normal")
+    ..setTags(SpawnDefinitionTags.ranged, SpawnDefinitionTags.normal)
     ..setProgress(g_nightProgress)
     ..setMaxAliveCount(FunctionalT.fromFunc((real waveProgress) -> lerpInt(2, 8, waveProgress)))
     ..setSpawnsPerActivation(FunctionalT.fromValue(2))
     ..setSpawnGroupingFactor(FunctionalT.fromValue(1.0))
     ..setActivator(new PeriodicWaveActivator(5.0))
-    ..setSpawnPointProvider(new RandomSpawnPointProvider(g_undeadSpawnManager, SPAWN_RANGE_MID))
+    ..setSpawnPointProvider(getRandomSpawnPointProvider(SpawnRange.MID))
     ..setUnitTypeProvider(new SingleUnitTypeProvider(TlsUnitIds.Undead.burningArcher))
 
     def.getUnitModifier(TlsUnitIds.Undead.burningArcher)
@@ -346,13 +361,13 @@ public class NormalNightWaveGenerator implements IWaveGenerator<NightWave>
   // --------------------------------------------------------------------------
   private function createSpawnWave_SkeletonMarksmen(player p, IGameWaveProgress gameProgress) returns SpawnWave
     let def = new SpawnWaveDefinition("Skeleton Marksmen")
-    ..setTags("ranged", "normal")
+    ..setTags(SpawnDefinitionTags.ranged, SpawnDefinitionTags.normal)
     ..setProgress(g_nightProgress)
     ..setMaxAliveCount(FunctionalT.fromFunc((real waveProgress) -> lerpInt(2, 8, waveProgress)))
     ..setSpawnsPerActivation(FunctionalT.fromValue(2))
     ..setSpawnGroupingFactor(FunctionalT.fromValue(1.0))
     ..setActivator(new PeriodicWaveActivator(5.0))
-    ..setSpawnPointProvider(new RandomSpawnPointProvider(g_undeadSpawnManager, SPAWN_RANGE_MID))
+    ..setSpawnPointProvider(getRandomSpawnPointProvider(SpawnRange.MID))
     ..setUnitTypeProvider(new SingleUnitTypeProvider(TlsUnitIds.Undead.skeletonMarksman))
 
     def.getUnitModifier(TlsUnitIds.Undead.skeletonMarksman)
@@ -364,17 +379,18 @@ public class NormalNightWaveGenerator implements IWaveGenerator<NightWave>
   // --------------------------------------------------------------------------
   private function createSpawnWave_DarkMinions(player p, IGameWaveProgress gameProgress) returns SpawnWave
     let def = new SpawnWaveDefinition("Dark Minions")
-    ..setTags("group", "melee", "normal")
+    ..setTags(SpawnDefinitionTags.grouped, SpawnDefinitionTags.melee, SpawnDefinitionTags.normal)
     ..setProgress(g_nightProgress)
     ..setMaxAliveCount(FunctionalT.fromFunc((real waveProgress) -> lerpInt(6, 12, waveProgress)))
     ..setSpawnsPerActivation(FunctionalT.fromValue(3))
     ..setSpawnGroupingFactor(FunctionalT.fromValue(1.0))
     ..setActivator(new PeriodicWaveActivator(12.0))
-    ..setSpawnPointProvider(new RandomSpawnPointProvider(g_undeadSpawnManager, SPAWN_RANGE_MID))
+    ..setSpawnPointProvider(getRandomSpawnPointProvider(SpawnRange.MID))
     ..setUnitTypeProvider(new FixedGroupUnitTypeProvider()
       ..addUnitType(TlsUnitIds.Undead.lesserDarkMinion)
       ..addUnitType(TlsUnitIds.Undead.darkMinion)
       ..addUnitType(TlsUnitIds.Undead.greaterDarkMinion))
+    ..setWaitForFullSpawnGroup(true)
 
     def.getUnitModifier(TlsUnitIds.Undead.lesserDarkMinion)
       ..setTargetPlayer(p)
@@ -411,13 +427,13 @@ public class NormalNightWaveGenerator implements IWaveGenerator<NightWave>
   // --------------------------------------------------------------------------
   private function createSpawnWave_Ghosts(player p, IGameWaveProgress gameProgress) returns SpawnWave
     let def = new SpawnWaveDefinition("Ghosts")
-    ..setTags("invade", "ethereal", "melee", "magic")
+    ..setTags(SpawnDefinitionTags.invade, SpawnDefinitionTags.ethereal, SpawnDefinitionTags.melee, SpawnDefinitionTags.magic)
     ..setProgress(g_nightProgress)
     ..setMaxAliveCount(FunctionalT.fromFunc((real waveProgress) -> lerpInt(2, 8, waveProgress)))
     ..setSpawnsPerActivation(FunctionalT.fromValue(2))
     ..setSpawnGroupingFactor(FunctionalT.fromValue(1.0))
     ..setActivator(new PeriodicWaveActivator(5.0))
-    ..setSpawnPointProvider(new RandomSpawnPointProvider(g_undeadSpawnManager, SPAWN_RANGE_MID))
+    ..setSpawnPointProvider(getRandomSpawnPointProvider(SpawnRange.MID))
     ..setUnitTypeProvider(new SingleUnitTypeProvider(TlsUnitIds.Undead.ghost))
 
     def.getUnitModifier(TlsUnitIds.Undead.ghost)
@@ -429,13 +445,13 @@ public class NormalNightWaveGenerator implements IWaveGenerator<NightWave>
   // --------------------------------------------------------------------------
   private function createSpawnWave_Wraiths(player p, IGameWaveProgress gameProgress) returns SpawnWave
     let def = new SpawnWaveDefinition("Wraiths")
-    ..setTags("invade", "ethereal", "melee", "magic")
+    ..setTags(SpawnDefinitionTags.invade, SpawnDefinitionTags.ethereal, SpawnDefinitionTags.melee, SpawnDefinitionTags.magic)
     ..setProgress(g_nightProgress)
     ..setMaxAliveCount(FunctionalT.fromFunc((real waveProgress) -> lerpInt(2, 8, waveProgress)))
     ..setSpawnsPerActivation(FunctionalT.fromValue(2))
     ..setSpawnGroupingFactor(FunctionalT.fromValue(1.0))
     ..setActivator(new PeriodicWaveActivator(5.0))
-    ..setSpawnPointProvider(new RandomSpawnPointProvider(g_undeadSpawnManager, SPAWN_RANGE_MID))
+    ..setSpawnPointProvider(getRandomSpawnPointProvider(SpawnRange.MID))
     ..setUnitTypeProvider(new SingleUnitTypeProvider(TlsUnitIds.Undead.wraith))
 
     def.getUnitModifier(TlsUnitIds.Undead.wraith)
@@ -447,13 +463,13 @@ public class NormalNightWaveGenerator implements IWaveGenerator<NightWave>
   // --------------------------------------------------------------------------
   private function createSpawnWave_Banshees(player p, IGameWaveProgress gameProgress) returns SpawnWave
     let def = new SpawnWaveDefinition("Banshees")
-    ..setTags("invade", "ethereal", "ranged", "magic")
+    ..setTags(SpawnDefinitionTags.invade, SpawnDefinitionTags.ethereal, SpawnDefinitionTags.ranged, SpawnDefinitionTags.magic)
     ..setProgress(g_nightProgress)
     ..setMaxAliveCount(FunctionalT.fromFunc((real waveProgress) -> lerpInt(2, 8, waveProgress)))
     ..setSpawnsPerActivation(FunctionalT.fromValue(2))
     ..setSpawnGroupingFactor(FunctionalT.fromValue(1.0))
     ..setActivator(new PeriodicWaveActivator(5.0))
-    ..setSpawnPointProvider(new RandomSpawnPointProvider(g_undeadSpawnManager, SPAWN_RANGE_MID))
+    ..setSpawnPointProvider(getRandomSpawnPointProvider(SpawnRange.MID))
     ..setUnitTypeProvider(new SingleUnitTypeProvider(TlsUnitIds.Undead.banshee))
 
     def.getUnitModifier(TlsUnitIds.Undead.banshee)
@@ -465,13 +481,13 @@ public class NormalNightWaveGenerator implements IWaveGenerator<NightWave>
   // --------------------------------------------------------------------------
   private function createSpawnWave_Ghouls(player p, IGameWaveProgress gameProgress) returns SpawnWave
     let def = new SpawnWaveDefinition("Ghouls")
-    ..setTags("melee", "healing", "poison", "normal")
+    ..setTags(SpawnDefinitionTags.melee, SpawnDefinitionTags.healing, SpawnDefinitionTags.poison, SpawnDefinitionTags.normal)
     ..setProgress(g_nightProgress)
     ..setMaxAliveCount(FunctionalT.fromFunc((real waveProgress) -> lerpInt(2, 8, waveProgress)))
     ..setSpawnsPerActivation(FunctionalT.fromValue(2))
     ..setSpawnGroupingFactor(FunctionalT.fromValue(1.0))
     ..setActivator(new PeriodicWaveActivator(5.0))
-    ..setSpawnPointProvider(new RandomSpawnPointProvider(g_undeadSpawnManager, SPAWN_RANGE_MID))
+    ..setSpawnPointProvider(getRandomSpawnPointProvider(SpawnRange.MID))
     ..setUnitTypeProvider(new SingleUnitTypeProvider(TlsUnitIds.Undead.ghoul))
 
     def.getUnitModifier(TlsUnitIds.Undead.ghoul)
@@ -483,14 +499,14 @@ public class NormalNightWaveGenerator implements IWaveGenerator<NightWave>
   // --------------------------------------------------------------------------
   private function createSpawnWave_ForgottenOne(player p, IGameWaveProgress gameProgress) returns SpawnWave
     let def = new SpawnWaveDefinition("Forgotten One")
-    ..setTags("invade", "melee", "normal")
+    ..setTags(SpawnDefinitionTags.invade, SpawnDefinitionTags.melee, SpawnDefinitionTags.normal)
     ..setProgress(g_nightProgress)
     ..setMaxAliveCount(FunctionalT.fromValue(1))
     ..setMaxSpawnCount(FunctionalT.fromValue(1))
     ..setSpawnsPerActivation(FunctionalT.fromValue(1))
     ..setSpawnGroupingFactor(FunctionalT.fromValue(0.0))
     ..setActivator(new PeriodicWaveActivator(5.0))
-    ..setSpawnPointProvider(new RandomSpawnPointProvider(g_undeadSpawnManager, SPAWN_RANGE_MID))
+    ..setSpawnPointProvider(getRandomSpawnPointProvider(SpawnRange.MID))
     ..setUnitTypeProvider(new SingleUnitTypeProvider(TlsUnitIds.Undead.forgottenOne))
 
     def.getUnitModifier(TlsUnitIds.Undead.forgottenOne)
@@ -508,13 +524,13 @@ public class NormalNightWaveGenerator implements IWaveGenerator<NightWave>
   // --------------------------------------------------------------------------
   private function createSpawnWave_SkeletonChampions(player p, IGameWaveProgress gameProgress) returns SpawnWave
     let def = new SpawnWaveDefinition("Skeleton Champions")
-    ..setTags("leader", "melee", "normal")
+    ..setTags(SpawnDefinitionTags.leader, SpawnDefinitionTags.melee, SpawnDefinitionTags.normal)
     ..setProgress(g_nightProgress)
     ..setMaxAliveCount(FunctionalT.fromFunc((real waveProgress) -> lerpInt(2, 8, waveProgress)))
     ..setSpawnsPerActivation(FunctionalT.fromValue(2))
     ..setSpawnGroupingFactor(FunctionalT.fromValue(1.0))
     ..setActivator(new PeriodicWaveActivator(5.0))
-    ..setSpawnPointProvider(new RandomSpawnPointProvider(g_undeadSpawnManager, SPAWN_RANGE_MID))
+    ..setSpawnPointProvider(getRandomSpawnPointProvider(SpawnRange.MID))
     ..setUnitTypeProvider(new SingleUnitTypeProvider(TlsUnitIds.Undead.skeletonChampion))
 
     def.getUnitModifier(TlsUnitIds.Undead.skeletonChampion)
@@ -526,13 +542,13 @@ public class NormalNightWaveGenerator implements IWaveGenerator<NightWave>
   // --------------------------------------------------------------------------
   private function createSpawnWave_Gargoyles(player p, IGameWaveProgress gameProgress) returns SpawnWave
     let def = new SpawnWaveDefinition("Gargoyles")
-    ..setTags("flying", "ranged", "fortified", "magic")
+    ..setTags(SpawnDefinitionTags.flying, SpawnDefinitionTags.ranged, SpawnDefinitionTags.fortified, SpawnDefinitionTags.magic)
     ..setProgress(g_nightProgress)
     ..setMaxAliveCount(FunctionalT.fromFunc((real waveProgress) -> lerpInt(2, 8, waveProgress)))
     ..setSpawnsPerActivation(FunctionalT.fromValue(2))
     ..setSpawnGroupingFactor(FunctionalT.fromValue(1.0))
     ..setActivator(new PeriodicWaveActivator(5.0))
-    ..setSpawnPointProvider(new RandomSpawnPointProvider(g_undeadSpawnManager, SPAWN_RANGE_MID))
+    ..setSpawnPointProvider(getRandomSpawnPointProvider(SpawnRange.MID))
     ..setUnitTypeProvider(new SingleUnitTypeProvider(TlsUnitIds.Undead.gargoyle))
 
     def.getUnitModifier(TlsUnitIds.Undead.gargoyle)
@@ -544,13 +560,13 @@ public class NormalNightWaveGenerator implements IWaveGenerator<NightWave>
   // --------------------------------------------------------------------------
   private function createSpawnWave_OrcSkeletons(player p, IGameWaveProgress gameProgress) returns SpawnWave
     let def = new SpawnWaveDefinition("Orc Skeletons")
-    ..setTags("group", "melee", "heavy", "normal")
+    ..setTags(SpawnDefinitionTags.grouped, SpawnDefinitionTags.melee, SpawnDefinitionTags.heavy, SpawnDefinitionTags.normal)
     ..setProgress(g_nightProgress)
     ..setMaxAliveCount(FunctionalT.fromFunc((real waveProgress) -> lerpInt(2, 8, waveProgress)))
     ..setSpawnsPerActivation(FunctionalT.fromValue(2))
     ..setSpawnGroupingFactor(FunctionalT.fromValue(1.0))
     ..setActivator(new PeriodicWaveActivator(5.0))
-    ..setSpawnPointProvider(new RandomSpawnPointProvider(g_undeadSpawnManager, SPAWN_RANGE_MID))
+    ..setSpawnPointProvider(getRandomSpawnPointProvider(SpawnRange.MID))
     ..setUnitTypeProvider(new SingleUnitTypeProvider(TlsUnitIds.Undead.skeletonOrc))
 
     def.getUnitModifier(TlsUnitIds.Undead.skeletonOrc)
@@ -562,13 +578,13 @@ public class NormalNightWaveGenerator implements IWaveGenerator<NightWave>
   // --------------------------------------------------------------------------
   private function createSpawnWave_Monolith(player p, IGameWaveProgress gameProgress) returns SpawnWave
     let def = new SpawnWaveDefinition("Monolith")
-    ..setTags("invade", "ranged", "fortified", "magic")
+    ..setTags(SpawnDefinitionTags.invade, SpawnDefinitionTags.ranged, SpawnDefinitionTags.fortified, SpawnDefinitionTags.magic)
     ..setProgress(g_nightProgress)
     ..setMaxAliveCount(FunctionalT.fromFunc((real waveProgress) -> lerpInt(2, 8, waveProgress)))
     ..setSpawnsPerActivation(FunctionalT.fromValue(2))
     ..setSpawnGroupingFactor(FunctionalT.fromValue(1.0))
     ..setActivator(new PeriodicWaveActivator(5.0))
-    ..setSpawnPointProvider(new RandomSpawnPointProvider(g_undeadSpawnManager, SPAWN_RANGE_CLOSE))
+    ..setSpawnPointProvider(getRandomSpawnPointProvider(SpawnRange.CLOSE))
     ..setUnitTypeProvider(new SingleUnitTypeProvider(TlsUnitIds.Undead.monolith))
 
     def.getUnitModifier(TlsUnitIds.Undead.monolith)
@@ -586,13 +602,13 @@ public class NormalNightWaveGenerator implements IWaveGenerator<NightWave>
   // --------------------------------------------------------------------------
   private function createSpawnWave_MeatWagons(player p, IGameWaveProgress gameProgress) returns SpawnWave
     let def = new SpawnWaveDefinition("Meat Wagons")
-    ..setTags("ranged", "siege")
+    ..setTags(SpawnDefinitionTags.ranged, SpawnDefinitionTags.siege)
     ..setProgress(g_nightProgress)
     ..setMaxAliveCount(FunctionalT.fromFunc((real waveProgress) -> lerpInt(2, 8, waveProgress)))
     ..setSpawnsPerActivation(FunctionalT.fromValue(2))
     ..setSpawnGroupingFactor(FunctionalT.fromValue(1.0))
     ..setActivator(new PeriodicWaveActivator(5.0))
-    ..setSpawnPointProvider(new RandomSpawnPointProvider(g_undeadSpawnManager, SPAWN_RANGE_MID))
+    ..setSpawnPointProvider(getRandomSpawnPointProvider(SpawnRange.MID))
     ..setUnitTypeProvider(new SingleUnitTypeProvider(TlsUnitIds.Undead.meatWagon))
 
     def.getUnitModifier(TlsUnitIds.Undead.meatWagon)
@@ -604,13 +620,13 @@ public class NormalNightWaveGenerator implements IWaveGenerator<NightWave>
   // --------------------------------------------------------------------------
   private function createSpawnWave_Mutants(player p, IGameWaveProgress gameProgress) returns SpawnWave
     let def = new SpawnWaveDefinition("Mutants")
-    ..setTags("ranged", "puller", "chaos")
+    ..setTags(SpawnDefinitionTags.ranged, SpawnDefinitionTags.puller, SpawnDefinitionTags.chaos)
     ..setProgress(g_nightProgress)
     ..setMaxAliveCount(FunctionalT.fromFunc((real waveProgress) -> lerpInt(2, 8, waveProgress)))
     ..setSpawnsPerActivation(FunctionalT.fromValue(2))
     ..setSpawnGroupingFactor(FunctionalT.fromValue(1.0))
     ..setActivator(new PeriodicWaveActivator(5.0))
-    ..setSpawnPointProvider(new RandomSpawnPointProvider(g_undeadSpawnManager, SPAWN_RANGE_MID))
+    ..setSpawnPointProvider(getRandomSpawnPointProvider(SpawnRange.MID))
     ..setUnitTypeProvider(new SingleUnitTypeProvider(TlsUnitIds.Undead.mutant))
 
     def.getUnitModifier(TlsUnitIds.Undead.mutant)
@@ -622,13 +638,13 @@ public class NormalNightWaveGenerator implements IWaveGenerator<NightWave>
   // --------------------------------------------------------------------------
   private function createSpawnWave_CryptFiends(player p, IGameWaveProgress gameProgress) returns SpawnWave
     let def = new SpawnWaveDefinition("Crypt Fiends")
-    ..setTags("invade", "ranged", "magic")
+    ..setTags(SpawnDefinitionTags.invade, SpawnDefinitionTags.ranged, SpawnDefinitionTags.magic)
     ..setProgress(g_nightProgress)
     ..setMaxAliveCount(FunctionalT.fromFunc((real waveProgress) -> lerpInt(2, 8, waveProgress)))
     ..setSpawnsPerActivation(FunctionalT.fromValue(2))
     ..setSpawnGroupingFactor(FunctionalT.fromValue(1.0))
     ..setActivator(new PeriodicWaveActivator(5.0))
-    ..setSpawnPointProvider(new RandomSpawnPointProvider(g_undeadSpawnManager, SPAWN_RANGE_CLOSE))
+    ..setSpawnPointProvider(getRandomSpawnPointProvider(SpawnRange.MID))
     ..setUnitTypeProvider(new SingleUnitTypeProvider(TlsUnitIds.Undead.cryptFiend))
 
     def.getUnitModifier(TlsUnitIds.Undead.cryptFiend)
@@ -640,14 +656,15 @@ public class NormalNightWaveGenerator implements IWaveGenerator<NightWave>
   // --------------------------------------------------------------------------
   private function createSpawnWave_Raiders(player p, IGameWaveProgress gameProgress) returns SpawnWave
     let def = new SpawnWaveDefinition("Raiders")
-    ..setTags("group", "melee", "ranged", "normal")
+    ..setTags(SpawnDefinitionTags.grouped, SpawnDefinitionTags.melee, SpawnDefinitionTags.ranged, SpawnDefinitionTags.normal)
     ..setProgress(g_nightProgress)
     ..setMaxAliveCount(FunctionalT.fromFunc((real waveProgress) -> lerpInt(2, 8, waveProgress)))
     ..setSpawnsPerActivation(FunctionalT.fromValue(2))
     ..setSpawnGroupingFactor(FunctionalT.fromValue(1.0))
     ..setActivator(new PeriodicWaveActivator(5.0))
-    ..setSpawnPointProvider(new RandomSpawnPointProvider(g_undeadSpawnManager, SPAWN_RANGE_MID))
+    ..setSpawnPointProvider(getRandomSpawnPointProvider(SpawnRange.MID))
     ..setUnitTypeProvider(new SingleUnitTypeProvider(TlsUnitIds.Undead.greaterDarkMinion))
+    ..setWaitForFullSpawnGroup(true)
 
     def.getUnitModifier(TlsUnitIds.Undead.greaterDarkMinion)
       ..standardElite(p, gameProgress)
@@ -658,13 +675,13 @@ public class NormalNightWaveGenerator implements IWaveGenerator<NightWave>
   // --------------------------------------------------------------------------
   private function createSpawnWave_Shades(player p, IGameWaveProgress gameProgress) returns SpawnWave
     let def = new SpawnWaveDefinition("Shades")
-    ..setTags("flying", "ranged", "chaos")
+    ..setTags(SpawnDefinitionTags.flying, SpawnDefinitionTags.ranged, SpawnDefinitionTags.chaos)
     ..setProgress(g_nightProgress)
     ..setMaxAliveCount(FunctionalT.fromFunc((real waveProgress) -> lerpInt(2, 8, waveProgress)))
     ..setSpawnsPerActivation(FunctionalT.fromValue(2))
     ..setSpawnGroupingFactor(FunctionalT.fromValue(1.0))
     ..setActivator(new PeriodicWaveActivator(5.0))
-    ..setSpawnPointProvider(new RandomSpawnPointProvider(g_undeadSpawnManager, SPAWN_RANGE_MID))
+    ..setSpawnPointProvider(getRandomSpawnPointProvider(SpawnRange.MID))
     ..setUnitTypeProvider(new SingleUnitTypeProvider(TlsUnitIds.Undead.shade))
 
     def.getUnitModifier(TlsUnitIds.Undead.shade)
@@ -744,6 +761,8 @@ function AggregateUnitModifier.standardElite(player p, IGameWaveProgress gamePro
   this.standardEliteAttack1Cooldown(gameProgress)
   this.standardEliteGrantLumberOnDeath(gameProgress)
   this.standardGrantCoinsOnDeath(gameProgress)
+  this.setAcquisitionRange(ELITE_SIGHT_RANGE)
+  this.setSightRadius(ELITE_SIGHT_RANGE)
 
 // ============================================================================
 function AggregateUnitModifier.standardRangedElite(player p, IGameWaveProgress gameProgress)
@@ -756,7 +775,9 @@ function AggregateUnitModifier.standardRangedElite(player p, IGameWaveProgress g
   this.standardGrantCoinsOnDeath(gameProgress)
 
   this.setDamageRange(0, lerp(rangeInt(16, 32), rangeInt(64, 80), gameProgress.getCurrentGameProgress()))
-  this.setAttackRange(0, 400)
+  this.setAttackRange(0, ELITE_RANGED_ATTACK_RANGE)
+  this.setAcquisitionRange(ELITE_SIGHT_RANGE)
+  this.setSightRadius(ELITE_SIGHT_RANGE)
 
 // ============================================================================
 function AggregateUnitModifier.standardGrantCoinsOnDeath(IGameWaveProgress gameProgress)

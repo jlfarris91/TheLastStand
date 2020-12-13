@@ -2,31 +2,94 @@ package SurvivorSpawnManager
 import public SpawnManager
 import GameConstants
 import PlayerExtensions
+import Bounds
+import BoundsExtensions
+import RegionExtensions
+import HumanPlayerMetadata
+import Spawning
+import Range
+import HashMap
 
+constant int NUM_RETRIES = 10
 constant real TEST_RADIUS = 512.0
+group g_testGroup = CreateGroup()
 
-public SurvivorSpawnManager g_survivorSpawnManager
+HashMap<int, SurvivorSpawnManager> g_playerSurvivorSpawnManagers
 
-public class SurvivorSpawnManager extends SpawnManager
-  private static group s_testGroup = CreateGroup()
+// ============================================================================
+public class SurvivorSpawnManager implements ISpawnManager
+  private player m_player
+  
+  // --------------------------------------------------------------------------
+  construct(player p)
+    m_player = p
 
   // --------------------------------------------------------------------------
-  override function isSpawnPointValid(vec2 pos) returns bool
-    if (not super.isSpawnPointValid(pos))
+  function getCenter() returns vec2
+    return m_player.getHumanMetadata().getCamp().getCenter()
+
+  // --------------------------------------------------------------------------
+  override function getRandomSpawnPointInRange(SpawnRange range) returns spawnPointResult
+    var angleDeg = GetRandomReal(0, 360.0)
+    let center = getCenter()
+    let rangeReal = range.toRangeReal()
+    for i = 0 to NUM_RETRIES
+      angleDeg = angleDeg + GetRandomReal(180.0 * 0.75, 180.0 * 1.25)
+      let dist = rangeReal.getRandom()
+      let angle = angle(angleDeg*DEGTORAD)
+      let testPos = center.polarOffset(angle, dist)
+      if (isSpawnPointValid(testPos))
+        return spawnPointResult(true, testPos)
+
+    return spawnPointResult(false, ZERO2)
+
+  // --------------------------------------------------------------------------
+  override function getRandomSpawnPointsInRange(SpawnRange range, int count) returns spawnPointsResult
+    let validSpawnPoints = new SpawnPointCollection()
+    for i = 0 to count - 1
+      let spawnPosResult = getRandomSpawnPointInRange(range)
+      if (spawnPosResult.succeeded)
+        validSpawnPoints.pushPoint(spawnPosResult.spawnPoint)
+    return spawnPointsResult(true, validSpawnPoints)
+
+  // --------------------------------------------------------------------------
+  function getRandomSpawnPointInPlayableMap() returns spawnPointResult
+    return getRandomPointInRect(bounds(playableMin, playableMax))
+
+  // --------------------------------------------------------------------------
+  private function getRandomPointInRect(bounds bounds) returns spawnPointResult
+    for i = 0 to NUM_RETRIES
+      let testPos = bounds.getRandomPoint()
+      if (isSpawnPointValid(testPos))
+        return spawnPointResult(true, testPos)
+    return spawnPointResult(false, ZERO2)
+
+  // --------------------------------------------------------------------------
+  private function isSpawnPointValid(vec2 pos) returns bool
+    if (not g_spawnRegion.containsPoint(pos))
       return false
-    s_testGroup.enumUnitsInRange(pos, TEST_RADIUS)    
+    g_testGroup.enumUnitsInRange(pos, TEST_RADIUS)    
     var isValid = true
-    for u from s_testGroup
+    for u from g_testGroup
       if (doesUnitInvalidateSpawnPoint(u))
         isValid = false
         break
     return isValid
 
-  // ============================================================================
+  // --------------------------------------------------------------------------
   private function doesUnitInvalidateSpawnPoint(unit u) returns bool
     return u.isAlive() and
           (u.isEnemyOf(PLAYER_VILLAGERS) or u.getOwner().isHumanPlayer())
           and not u.isInvulnerable()
 
+// ============================================================================
+public function getPlayerSurvivorSpawnManager(player p) returns SurvivorSpawnManager
+  SurvivorSpawnManager spawnManager = g_playerSurvivorSpawnManagers.get(p.getId())
+  if (spawnManager == null)
+    spawnManager = new SurvivorSpawnManager(p)
+    g_playerSurvivorSpawnManagers.put(p.getId(), spawnManager)
+  return spawnManager
+
+// ============================================================================
 init
-  g_survivorSpawnManager = new SurvivorSpawnManager()
+  g_playerSurvivorSpawnManagers = new HashMap<int, SurvivorSpawnManager>()

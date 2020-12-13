@@ -1,77 +1,68 @@
 package RandomSpawnPointProvider
 import Spawning
 import ISpawnPointProvider
-import ErrorHandling
-import Range
 
 constant int RETRY_COUNT = 10
 
 // ============================================================================
 public class RandomSpawnPointProvider implements ISpawnPointProvider
   private ISpawnManager m_spawnPointManager
-  private rangeReal m_range
-  private rangeReal m_resizeFactor
+  private ISpawnManager m_fallback
+  private SpawnRange m_range
 
   // --------------------------------------------------------------------------
-  construct(ISpawnManager spawnPointManager, rangeReal range)
+  construct(ISpawnManager spawnPointManager, ISpawnManager fallback, SpawnRange range)
     m_spawnPointManager = spawnPointManager
     m_range = range
-    m_resizeFactor = rangeReal(1.1, 1.2)
+    m_fallback = fallback
 
   // --------------------------------------------------------------------------
-  function getRange() returns rangeReal
+  function getRange() returns SpawnRange
     return m_range
 
   // --------------------------------------------------------------------------
-  function setRange(rangeReal range)
+  function setRange(SpawnRange range)
     m_range = range
 
   // --------------------------------------------------------------------------
   private function growRange()
-    m_range = rangeReal(m_range.min * m_resizeFactor.min, m_range.max * m_resizeFactor.max)
+    switch (m_range)
+      case SpawnRange.CLOSE
+        m_range = SpawnRange.NEAR
+      case SpawnRange.NEAR
+        m_range = SpawnRange.MID
+      case SpawnRange.MID
+        m_range = SpawnRange.FAR
+      case SpawnRange.FAR
+        return
     Log.debug("Grew spawn point provider range!")
 
   // --------------------------------------------------------------------------
-  override function getSpawnPoint(vec2 center) returns vec2
-    vec2 spawnPoint = ZERO2
-
-    for i = 0 to RETRY_COUNT - 1
-      spawnPoint = m_spawnPointManager.getRandomSpawnPointInRange(center, m_range)
-      
-      // Found a point no need to resize range
-      if (spawnPoint != INVALID_SPAWN_POINT)
-        break
-      
-      // Could not find a spawn point within the range, grow the range and try again
-      growRange()
-
-    if (spawnPoint == INVALID_SPAWN_POINT)
-      error("Resized range " + RETRY_COUNT.toString() + " times and still could not find a spawn point")
-
-    return spawnPoint
-
-  // --------------------------------------------------------------------------
-  override function getSpawnPoints(vec2 center, int count) returns SpawnPointCollection
+  override function getSpawnPoints(int count) returns spawnPointsResult
     
-    let result = new SpawnPointCollection()
+    let spawnPoints = new SpawnPointCollection()
 
     for i = 0 to RETRY_COUNT - 1
-      let remainingCount = max(count - result.getCount(), 0)
+      let remainingCount = max(count - spawnPoints.getCount(), 0)
       if (remainingCount == 0)
         break
 
-      let spawnPoints = m_spawnPointManager.getRandomSpawnPointsInRange(center, m_range, remainingCount)
-      for sp in spawnPoints
-        result.pushPoint(sp)
-      destroy spawnPoints
+      let result = m_spawnPointManager.getRandomSpawnPointsInRange(m_range, remainingCount)
+      if (result.succeeded)
+        for sp in result.spawnPoints
+          spawnPoints.pushPoint(sp)
+        destroy result.spawnPoints
 
-      if (result.getCount() == count)
+      if (spawnPoints.getCount() == count)
         break
-      
-      // Could not find enough spawn points within the range, grow the range and try again
+
+      // Could not find a spawn point within the range, grow the range and try again
       growRange()
 
-    if (result.getCount() != count)
-      error("Resized range " + RETRY_COUNT.toString() + " times and still could not find enough spawn points")
+    if (spawnPoints.getCount() != count)
+      if (m_fallback != null)
+        Log.warn("Using fallback spawn manager after " + RETRY_COUNT.toString() + " attempts")
+        return m_fallback.getRandomSpawnPointsInRange(m_range, count)
+      return spawnPointsResult(false, null)
 
-    return result
+    return spawnPointsResult(true, spawnPoints)
