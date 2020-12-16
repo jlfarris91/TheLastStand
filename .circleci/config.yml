@@ -16,13 +16,6 @@ jobs:
             choco install GitVersion.Portable
 
       - run:
-          name: Install Wurst
-          command: |
-            $pathWithWurst = "{0};{1}\.wurst\" -f [System.Environment]::GetEnvironmentVariable("Path", [EnvironmentVariableTarget]::Machine), $env:USERPROFILE
-            [System.Environment]::SetEnvironmentVariable("Path", $pathWithWurst, [EnvironmentVariableTarget]::Machine)
-            java -jar .\build\WurstSetup.jar install wurstscript
-
-      - run:
           name: Generate Wurst Build Configuration
           command: |
             Push-Location build
@@ -32,7 +25,15 @@ jobs:
 
       - run:
           name: Install Dependencies
-          command: grill install
+          command: |
+            $pathWithWurst = "{0};{1}\.wurst\" -f [System.Environment]::GetEnvironmentVariable("Path", [EnvironmentVariableTarget]::Machine), $env:USERPROFILE
+            [System.Environment]::SetEnvironmentVariable("Path", $pathWithWurst, [EnvironmentVariableTarget]::Machine)
+            java -jar .\build\WurstSetup.jar install wurstscript
+
+            # Reload the path variable after grill is installed
+            $env:Path=[System.Environment]::GetEnvironmentVariable("Path", [EnvironmentVariableTarget]::Machine)
+
+            grill install
 
       - run:
           name: Run Map Pipeline
@@ -59,20 +60,31 @@ jobs:
             .\PrepareArtifacts.ps1
             Pop-Location
 
+      # This isn't strictly required when things are working correctly since the map will be persisted to the workspace
+      # so that it can be published as a github release
       - store_artifacts:
           path: ./_artifacts/
+      
+      - persist_to_workspace:
+          root: ~/project
+          paths:
+            - _artifacts/*
 
-  publish-github-release:
+  publish-dev-release:
     docker:
       - image: cibuilds/github:0.10
     steps:
       - attach_workspace:
-          at: ./artifacts
+          at: ./project/
       - run:
-          name: "Publish Release on GitHub"
+          name: "Publish Dev Release on GitHub"
           command: |
-            VERSION=$(MapVersion)
-            ghr -t ${GITHUB_TOKEN} -u ${CIRCLE_PROJECT_USERNAME} -r ${CIRCLE_PROJECT_REPONAME} -c ${CIRCLE_SHA1} -delete ${VERSION} ./artifacts/
+            ghr -t ${GITHUB_TOKEN} \
+                -u ${CIRCLE_PROJECT_USERNAME} \
+                -r ${CIRCLE_PROJECT_REPONAME} \
+                -c ${CIRCLE_SHA1} \
+                -delete \
+                TheLastStand-dev ./project/_artifacts/
 
 workflows:
   version: 2
@@ -86,11 +98,12 @@ workflows:
                 - develop
             tags:
               only: /^\d+\.\d+\.\d+$/
-      - publish-github-release:
+      - publish-dev-release:
           requires:
             - build
           filters:
             branches:
-              ignore: /.*/
+              only:
+                - develop
             tags:
               only: /^\d+\.\d+\.\d+$/
