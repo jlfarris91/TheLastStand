@@ -10,9 +10,10 @@ import SurvivorComponent
 import Orders
 import ColorUtility
 import ErrorHandling
-import FX
 import SurvivorSpawnManager
-  
+import ClosureTimers
+import GameConstants
+
 // ============================================================================
 public function spawnSurvivorUnitForPlayer(player p) returns unit
 
@@ -27,17 +28,17 @@ public function spawnSurvivorUnitForPlayer(player p) returns unit
   let camp = playerMetadata.getCamp()
 
   let weightedSet = new WeightedSet<int>()
-  ..add(TlsUnitIds.Survivors.survivorMale, 40)
-  ..add(TlsUnitIds.Survivors.survivorMilitia1, 4)
-  ..add(TlsUnitIds.Survivors.survivorSpearman, 2)
-  ..add(TlsUnitIds.Survivors.survivorMedic, 2)
+  ..add(TlsUnitIds.Survivors.survivorMale, 50)
+  ..add(TlsUnitIds.Survivors.survivorMilitia1, 1)
+  ..add(TlsUnitIds.Survivors.survivorSpearman, 1)
+  ..add(TlsUnitIds.Survivors.survivorMedic, 1)
   ..add(TlsUnitIds.Survivors.survivorMarksman, 1)
 
   let unitId = weightedSet.getRandom()
 
   let spawnPointResult = getSpawnPoint(p)
   if (not spawnPointResult.succeeded)
-    Log.error("Failed to find spawn point for survivor")
+    Log.debug("Failed to find spawn point for survivor")
     return null
 
   let survivor = createUnitTLS(p, unitId, spawnPointResult.spawnPoint, GetRandomDirectionDeg())
@@ -49,14 +50,21 @@ public function spawnSurvivorUnitForPlayer(player p) returns unit
   let survivorDataComponent = survivorMetadata.getSurvivorComponent()
   let survivorData = survivorDataComponent.getSurvivorData()
   
-  let message = survivorMetadata.getName().colorize(Colors.gold) + " " + survivorData.getName() + " has joined your camp!"
+  let message = "{0} {1} has joined your camp!".format(
+    survivorMetadata.getName().colorize(Colors.gold),
+    survivorData.getName())
   displayMessageToPlayer(p, message)
 
-  FX.createSpawnEffect(survivor.getPos())
+  let playerColor = p.getColor().toColor()
+  AddIndicator(survivorUnit, playerColor.red, playerColor.green, playerColor.blue, 255)
+
+  doPeriodicallyTimed(SURVIVOR_FADE_INTERVAL, SURVIVOR_FADE_DURATION) (CallbackCounted cb) ->
+    if (survivorUnit != null)
+      survivorUnit.setVertexColor(colorA(150, 150, 150, 0).mix(colorA(150, 150, 150, 255), cb.getPercentage()))
 
   return survivorUnit
 
 // ============================================================================
 function getSpawnPoint(player p) returns spawnPointResult
   let spawnManager = getPlayerSurvivorSpawnManager(p)
-  return spawnManager.getRandomSpawnPointInRange(SpawnRange.NEAR)
+  return spawnManager.getRandomSpawnPointInRange(SpawnRange.CLOSE)
