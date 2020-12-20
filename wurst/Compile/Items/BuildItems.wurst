@@ -1,0 +1,72 @@
+package BuildItems
+import TlsUnitIds
+import HashMap
+import HashList
+import TlsItemIds
+import UnitIndexer
+import MainItemLibrary
+import Optional
+import RegisterEvents
+import ItemExtensions
+
+HashList<int> g_itemTypeList = new HashList<int>()
+HashList<int> g_unitTypeList = new HashList<int>()
+HashMap<int, int> g_itemTypeToUnitTypeMap = new HashMap<int, int>()
+HashMap<int, int> g_unitTypeToItemTypeMap = new HashMap<int, int>()
+
+// ============================================================================
+public function item.isBuildItem() returns bool
+  return g_itemTypeList.has(this.getTypeId())
+
+// ============================================================================
+public function unit.isBuildItemUnit() returns bool
+  return g_unitTypeList.has(this.getTypeId())
+
+// ============================================================================
+public class BuildItems
+
+  // --------------------------------------------------------------------------
+  static function getItemType(int unitType) returns optionalInt
+    if (not g_unitTypeToItemTypeMap.has(unitType))
+      return none_int("[BuildItems] There is no item type registered for unit type {0}".format(unitType.toString()))
+    return g_unitTypeToItemTypeMap.get(unitType).some()
+
+  // --------------------------------------------------------------------------
+  static function getUnitType(int itemType) returns optionalInt
+    if (not g_itemTypeToUnitTypeMap.has(itemType))
+      return none_int("[BuildItems] There is no unit type registered for item type {0}".format(itemType.toString()))
+    return g_itemTypeToUnitTypeMap.get(itemType).some()
+
+  // --------------------------------------------------------------------------
+  static function register(int itemType, int unitType)
+    g_itemTypeList.add(itemType)
+    g_unitTypeList.add(unitType)
+    g_itemTypeToUnitTypeMap.put(itemType, unitType)
+    g_unitTypeToItemTypeMap.put(unitType, itemType)
+
+// ============================================================================
+function onUnitIndexed()
+
+// ============================================================================
+function onUnitTrained()
+  let trainedUnit = GetTrainedUnit()
+  let trainingUnit = GetTriggerUnit()
+
+  if (not trainedUnit.isBuildItemUnit())
+    return
+
+  // Build units are dummy units and only exist to spawn an item in their place
+  trainedUnit.remove()
+
+  let optionalItemType = BuildItems.getItemType(trainedUnit.getTypeId())
+  if (not optionalItemType.hasValue)
+    Log.debug(optionalItemType.errorMessage)
+    return
+  
+  // The training units have an inventory so put the item there
+  g_MainItemLibrary.createItemForUnit(trainingUnit, optionalItemType.value)
+
+// ============================================================================
+init
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_TRAIN_FINISH, function onUnitTrained)
+  onUnitIndex(function onUnitIndexed)
