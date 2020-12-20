@@ -13,16 +13,27 @@ import ErrorHandling
 import SurvivorSpawnManager
 import ClosureTimers
 import GameConstants
+import FX
+import Bounds
+import BoundsExtensions
+import Range
+import HumanPlayers
+import TentComponent
+import FriendlyCircularCachedSpawnManager
+import RandomSpawnPointProvider
+
+group g_tempGroup = CreateGroup()
 
 // ============================================================================
 public function spawnSurvivorUnitForPlayer(player p) returns unit
 
   if (p == null)
-    error("Argument 'p' cannot be null")
+    error("[spawnSurvivorUnitForPlayer] Argument 'p' cannot be null")
     return null
 
   let playerMetadata = p.getHumanMetadataRequired()
   if (playerMetadata.getIsDead())
+    Log.debug("[spawnSurvivorUnitForPlayer] Player {0} is dead".format(p.getName()))
     return null
 
   let camp = playerMetadata.getCamp()
@@ -38,7 +49,7 @@ public function spawnSurvivorUnitForPlayer(player p) returns unit
 
   let spawnPointResult = getSpawnPoint(p)
   if (not spawnPointResult.succeeded)
-    Log.debug("Failed to find spawn point for survivor")
+    Log.debug("[spawnSurvivorUnitForPlayer] Failed to find spawn point for survivor")
     return null
 
   let survivor = createUnitTLS(p, unitId, spawnPointResult.spawnPoint, GetRandomDirectionDeg())
@@ -51,7 +62,7 @@ public function spawnSurvivorUnitForPlayer(player p) returns unit
   let survivorData = survivorDataComponent.getSurvivorData()
   
   let message = "{0} {1} has joined your camp!".format(
-    survivorMetadata.getName().colorize(Colors.gold),
+    survivorUnit.getName().colorize(Colors.gold),
     survivorData.getName())
   displayMessageToPlayer(p, message)
 
@@ -65,6 +76,76 @@ public function spawnSurvivorUnitForPlayer(player p) returns unit
   return survivorUnit
 
 // ============================================================================
+public function trySpawnSurvivorForPlayer(player p)
+  if (not p.isPlayingHumanPlayer())
+    return
+  let numberOfTents = countNumberOfConstructedTentsOwnedByPlayer(p)
+  let numberOfSurvivors = countNumberOfSurvivorsOwnedByPlayer(p)
+  Log.debug("[trySpawnSurvivorForPlayer] Player {0} has {1} tent(s) and {2} survivor(s)".format(p.getName(), numberOfTents.toString(), numberOfSurvivors.toString()))
+  if (numberOfTents > numberOfSurvivors)
+    spawnSurvivorUnitForPlayer(p)
+
+// ============================================================================
+public function countNumberOfConstructedTentsOwnedByPlayer(player p) returns int
+  g_tempGroup.clear()
+  g_tempGroup.enumUnitsOfPlayer(p, null)
+  var count = 0
+  for u from g_tempGroup
+    let metadata = u.getMetadata()
+    if (metadata != null and metadata.hasComponent(TentComponent.typeId))
+      let tentComponent = metadata.getTentComponent()
+      if (tentComponent != null and tentComponent.getIsConstructed())
+        count++
+  return count
+
+// ============================================================================
+public function countNumberOfSurvivorsOwnedByPlayer(player p) returns int
+  g_tempGroup.clear()
+  g_tempGroup.enumUnitsOfPlayer(p, null)
+  var count = 0
+  for u from g_tempGroup
+    if (u.isAlive() and u.isSurvivor())
+      count++
+  return count
+
+// ============================================================================
+public function owningPlayerBanishSurvivor(unit targetUnit)
+  let owningPlayer = targetUnit.getOwner()
+
+  FX.createJobChangeTag("Banished!", targetUnit.getPos(), owningPlayer)
+
+  displayMessageToPlayer(owningPlayer, "You have banished {0} from your camp.".format(targetUnit.getProperName()))
+
+  let playerColor = owningPlayer.getColor().toColor()
+  AddIndicator(targetUnit, playerColor.red, playerColor.green, playerColor.blue, 255)
+
+  // Try to spawn another survivor for the player later
+  doAfter(SURVIVORS_RESPAWN_BANISHED_INTERVAL_RANGE.getRandom(), () -> trySpawnSurvivorForPlayer(owningPlayer))
+
+  banishSurvivor(targetUnit)
+
+// ============================================================================
+public function banishSurvivor(unit targetUnit)
+
+  // Give to the villagers player so the human player can't control it anymore
+  targetUnit.setOwner(PLAYER_VILLAGERS, false)
+
+  // Make the target move to a random point in the map while it is being banished
+  targetUnit.issuePointOrder("move", playableBounds.getRandomPoint())
+
+  // Fade out the survivor over time
+  doPeriodicallyTimed(SURVIVOR_FADE_INTERVAL, SURVIVOR_FADE_DURATION) (CallbackCounted cb) ->
+    if (targetUnit != null)
+      targetUnit.setVertexColor(colorA(150, 150, 150, 255).mix(colorA(150, 150, 150, 0), cb.getPercentage()))
+  
+  // Remove the survivor once it is invisible
+  doAfter(SURVIVOR_FADE_DURATION, () -> targetUnit.remove())
+
+// ============================================================================
 function getSpawnPoint(player p) returns spawnPointResult
-  let spawnManager = getPlayerSurvivorSpawnManager(p)
-  return spawnManager.getRandomSpawnPointInRange(SpawnRange.CLOSE)
+  let currentSpawnManager = getPlayerCachedFriendlySpawnManager(p)
+  let fallbackSpawnManager = getPlayerSurvivorSpawnManager(p)
+  let spawnPointProvider = new RandomSpawnPointProvider(currentSpawnManager, fallbackSpawnManager, SpawnRange.CLOSE)
+  let result = spawnPointProvider.getSpawnPoint()
+  destroy spawnPointProvider
+  return result

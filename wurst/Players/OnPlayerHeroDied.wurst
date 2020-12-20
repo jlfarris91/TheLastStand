@@ -1,17 +1,15 @@
 package OnPlayerHeroDied
-import RegisterEvents
 import GameSettings
 import DisplayTextToPlayer
 import GameConstants
 import Camp
 import HumanPlayerMetadata
 import UnitMetadata
-
-// ============================================================================
-function givePlayerUnitsToVillagers(player p)
-  let playerMetadata = p.getHumanMetadataRequired()
-  let camp = playerMetadata.getCamp()
-  camp.giveAllUnitsToPlayer(PLAYER_VILLAGERS)
+import GroupUtils
+import UnitExtensions
+import Survivors
+import HumanPlayers
+import ClosureEvents
 
 // ============================================================================
 function disableFogOfWarForPlayer(player p)
@@ -28,7 +26,7 @@ function onPlayerHeroDied(HumanPlayerMetadata playerMetadata)
   else
     disableFogOfWarForPlayer(p)
 
-  givePlayerUnitsToVillagers(p)
+  giveAllUnitsToVillagersPlayer(p)
 
   playerMetadata.reset()
   playerMetadata.getCamp().reset()
@@ -54,5 +52,43 @@ function onPlayerUnitDied()
     onPlayerHeroDied(playerMetadata)
 
 // ============================================================================
+function onPlayerLeftGame()
+  let leavingPlayer = GetTriggerPlayer()
+  let metadata = leavingPlayer.getHumanMetadata()
+  if (metadata == null)
+    return
+
+  g_PlayingHumanPlayers.remove(leavingPlayer)
+
+  let hero = metadata.getHero()
+  if (hero != null)
+    let heroUnit = hero.getUnit()
+    if (heroUnit != null)
+      heroUnit.remove()
+
+  let camp = metadata.getCamp()
+  if (camp != null)
+    let campTent = camp.getCampTent()
+    if (campTent != null)
+      campTent.kill()
+  
+  giveAllUnitsToVillagersPlayer(PLAYER_VILLAGERS)
+
+// ============================================================================
+function giveAllUnitsToVillagersPlayer(player p)
+  let playerMetadata = p.getHumanMetadataRequired()
+  let playerHero = playerMetadata.getHero()
+  let playerHeroUnit = playerHero.getUnit()
+  let tempGroup = getGroup()
+  tempGroup.enumUnitsOfPlayer(p, null)
+  for u from tempGroup
+    if (u.isStructure())
+      u.setOwner(PLAYER_VILLAGERS, true)
+    else if (u != playerHeroUnit)
+      banishSurvivor(u)
+  tempGroup.release()
+
+// ============================================================================
 init
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_DEATH, function onPlayerUnitDied)
+  EventListener.add(EVENT_PLAYER_LEAVE, () -> onPlayerLeftGame())

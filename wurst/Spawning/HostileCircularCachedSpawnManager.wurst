@@ -1,0 +1,43 @@
+package HostileCircularCachedSpawnManager
+import CircularCachedSpawnManager
+import HashMap
+import UnitExtensions
+import GameConstants
+import UnitIndexer
+import HumanPlayers
+import Circle
+
+constant real HOSTILE_INVALIDATION_RANGE = 800.0
+HashMap<int, CircularCachedSpawnManager> g_playerHostileSpawnManagers
+
+// ============================================================================
+public function getPlayerCachedHostileSpawnManager(player p) returns CircularCachedSpawnManager
+  CircularCachedSpawnManager spawnManager = g_playerHostileSpawnManagers.get(p.getId())
+  if (spawnManager == null)
+    spawnManager = new CircularCachedSpawnManager(p, "Hostile:"+p.getName(), (unit u) -> doesUnitInvalidateHostileSpawnPoint(u))
+    g_playerHostileSpawnManagers.put(p.getId(), spawnManager)
+  return spawnManager
+
+// ============================================================================
+function doesUnitInvalidateHostileSpawnPoint(unit u) returns bool
+  return u.isStructure()
+         and u.isAlive()
+         and u.isEnemyOf(PLAYER_UNDEAD)
+         and not u.isInvulnerable()
+
+// ============================================================================
+function onUnitIndexing()
+
+  let indexingUnit = getIndexingUnit()
+  let unitPos = indexingUnit.getPos()
+
+  if (doesUnitInvalidateHostileSpawnPoint(indexingUnit))
+    for p in g_PlayingHumanPlayers
+      getPlayerCachedHostileSpawnManager(p).invalidateSpawnPoints(circle(unitPos, HOSTILE_INVALIDATION_RANGE))
+
+// ============================================================================
+init
+  g_playerHostileSpawnManagers = new HashMap<int, CircularCachedSpawnManager>()
+
+  onUnitIndex(() -> onUnitIndexing())
+  onUnitDeindex(() -> onUnitIndexing())

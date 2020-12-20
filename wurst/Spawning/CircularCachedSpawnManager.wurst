@@ -3,28 +3,21 @@ import Range
 import GameConstants
 import SpawnRegion
 import RegionExtensions
-import UnitExtensions
 import Circle
 import LinkedList
 import LinkedListExtensions
 import ClosureTimers
-import HashMap
 import SpawnManager
 import SpawnPointCollection
-import HumanPlayers
-import UnitIndexer
 import Arc
+import Func
 
-constant real HOSTILE_INVALIDATION_RANGE = 800.0
-constant real FRIENDLY_INVALIDATION_RANGE = 512.0
 constant int MAX_REQUEST_ATTEMPTS = 10
-
 constant real ANGLE_DELTA = PI2 / 8.0
 constant real ANGLE_DELTA_HALF = ANGLE_DELTA / 2.0
 constant real ANGLE_PAD_PERCENT = 0.1
 constant real DISTANCE_PAD_PERCENT = 0.1
 
-HashMap<int, CircularCachedSpawnManager> g_playerHostileSpawnManagers
 LinkedList<SpawnAreaUpdateRequest> g_updateRequests
 LinkedList<int> g_tempValidSpawnPointIndexList
 group g_testGroup = CreateGroup()
@@ -128,6 +121,7 @@ public class CircularCachedSpawnManager implements ISpawnManager
   private bool m_isEnabled
   private string m_id
   private player m_player
+  private Func1<unit, bool> m_spawnPointInvalidationFilter
 
   // Debug helpers
   //private effect array[8] m_spawnRangeEffects
@@ -135,9 +129,14 @@ public class CircularCachedSpawnManager implements ISpawnManager
   //private effect array[32] m_spawnPointEffects
 
   // --------------------------------------------------------------------------
-  construct(player p, string id)
+  construct(player p, string id, Func1<unit, bool> spawnPointInvalidationFilter)
     m_player = p
     m_id = id
+    m_spawnPointInvalidationFilter = spawnPointInvalidationFilter
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    destroy m_spawnPointInvalidationFilter
 
   // --------------------------------------------------------------------------
   function getId() returns string
@@ -268,7 +267,7 @@ public class CircularCachedSpawnManager implements ISpawnManager
     g_testGroup.enumUnitsInRange(pos, UNDEAD_SPAWN_TEST_RADIUS)    
     var isValid = true
     for u from g_testGroup
-      if (doesUnitInvalidateHostileSpawnPoint(u))
+      if (m_spawnPointInvalidationFilter.call(u))
         isValid = false
         break
     return isValid
@@ -301,21 +300,6 @@ public class CircularCachedSpawnManager implements ISpawnManager
   //       m_spawnPointEffects[i].setPos(m_pos[i])
   //     if (not m_valid[i] and m_spawnPointEffects[i] != null)
   //       m_spawnPointEffects[i].destr()
-
-// ============================================================================
-public function getPlayerCachedHostileSpawnManager(player p) returns CircularCachedSpawnManager
-  CircularCachedSpawnManager spawnManager = g_playerHostileSpawnManagers.get(p.getId())
-  if (spawnManager == null)
-    spawnManager = new CircularCachedSpawnManager(p, "Hostile:"+p.getName())
-    g_playerHostileSpawnManagers.put(p.getId(), spawnManager)
-  return spawnManager
-
-// ============================================================================
-public function doesUnitInvalidateHostileSpawnPoint(unit u) returns bool
-  return u.isStructure()
-         and u.isAlive()
-         and u.isEnemyOf(PLAYER_UNDEAD)
-         and not u.isInvulnerable()
 
 // ============================================================================
 function processRequests()
@@ -356,24 +340,9 @@ function processRequests()
           spawnManager.getId(),
           spawnArea.toString(),
           request.getAttempts().toString()))
-      
-
-// ============================================================================
-function onUnitIndexing()
-
-  let indexingUnit = getIndexingUnit()
-  let unitPos = indexingUnit.getPos()
-
-  if (doesUnitInvalidateHostileSpawnPoint(indexingUnit))
-    for p in g_PlayingHumanPlayers
-      getPlayerCachedHostileSpawnManager(p).invalidateSpawnPoints(circle(unitPos, HOSTILE_INVALIDATION_RANGE))
 
 // ============================================================================
 init
-  g_playerHostileSpawnManagers = new HashMap<int, CircularCachedSpawnManager>()
   g_tempValidSpawnPointIndexList = new LinkedList<int>()
   g_updateRequests = new LinkedList<SpawnAreaUpdateRequest>()
   doPeriodically(1.0, (CallbackPeriodic cb) -> processRequests())
-
-  onUnitIndex(() -> onUnitIndexing())
-  onUnitDeindex(() -> onUnitIndexing())
