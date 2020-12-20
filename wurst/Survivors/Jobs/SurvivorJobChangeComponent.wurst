@@ -2,16 +2,16 @@ package SurvivorJobChangeComponent
 import UnitComponent
 import UnitExtensions
 import FX
-import SurvivorJobIds
+import SurvivorJobs
 import RegisterEvents
 import DisplayTextToPlayer
 import StringExtensions
-import TlsItemIds
 import MainItemLibrary
-import ErrorHandling
-import TlsUnitIds
+import SurvivorComponent
+import TlsUnitDefinition
+import TlsJobItemIds
 
-group g_temp
+group g_temp = CreateGroup()
 
 // ============================================================================
 function filterUnitIsSurvivorMale() returns bool
@@ -38,40 +38,58 @@ public class SurvivorJobChangeComponent extends UnitComponent
     return SurvivorJobChangeComponent.typeId
 
   // --------------------------------------------------------------------------
-  function changeJobs(string jobId) returns bool
-    let matchingUnitTypes = getUnitTypeForJobId(jobId)
-
-    if (matchingUnitTypes.isEmpty())
-      error("Invalid job id: " + jobId)
-      destroy matchingUnitTypes
-      return false
-
+  function changeJobs(SurvivorJobDefinition job) returns bool
     let ownerUnit = getOwnerUnit()
     let unitType = ownerUnit.getTypeId()
 
-    if (matchingUnitTypes.has(unitType))
-      displayMessageToPlayer(ownerUnit.getOwner(), "{0} is already a {1}!".format(ownerUnit.getProperName().colorize(COLOR_GOLD), getJobTitleForJobId(jobId).colorize(COLOR_GOLD)))
-      destroy matchingUnitTypes
+    if (job.hasUnitType(unitType))
+      displayMessageToPlayer(ownerUnit.getOwner(), "{0} is already a {1}!".format(ownerUnit.getProperName().colorize(COLOR_GOLD), job.getTitle().colorize(COLOR_GOLD)))
       return false
 
-    let replacementUnitId = matchingUnitTypes.getFirst()
+    let survivorComp = getOwner().getSurvivorComponent()
+    if (survivorComp == null)
+      return false
+
+    let survivorData = survivorComp.getSurvivorData()
+    if (survivorData == null)
+      return false
+
+    let jobData = survivorData.getJobData(job)
+    if (jobData == null)
+      return false
+
+    let replacementUnitId = jobData.getUnitId()
     let replacedUnit = replaceUnit(replacementUnitId)
   
-    let oldJobId = getJobIdForUnitType(unitType)
-    if (oldJobId != SurvivorJobIds.none)
-      let jobItemType = getItemTypeForJobId(oldJobId)
+    let oldJob = getJobDefinitionForUnitType(unitType)
+    if (oldJob != SurvivorJobs.none)
+      let jobItemType = oldJob.getItemType()
       let jobItem = g_MainItemLibrary.createItem(jobItemType, replacedUnit.getPos())
       UnitAddItemSwapped(jobItem, replacedUnit)
-    
-    destroy matchingUnitTypes
+
     return true
 
   // --------------------------------------------------------------------------
   function upgradeJob() returns bool
-    let upgradedUnitId = getNextJobUpgradeUnitType(getOwnerUnit().getTypeId())
-    if (upgradedUnitId == -1)
+    let currentUnitId = getOwnerUnit().getTypeId()
+    let job = getJobDefinitionForUnitType(currentUnitId)
+    
+    let nextUnitId = job.getNextUpgrade(currentUnitId)
+    if (nextUnitId == -1)
       return false
-    replaceUnit(upgradedUnitId)
+
+    replaceUnit(nextUnitId)
+
+    // There is a bug with upgrading non-building units where the player is not
+    // charged for the upgrade - so do that now.
+    let nextUnitDef = getUnitDefinition(nextUnitId)
+    if (nextUnitDef != null)
+      let p = getOwnerUnit().getOwner()
+      p.subGold(nextUnitDef.getGoldCost())
+      p.subLumber(nextUnitDef.getLumberCost())
+    else
+      Log.debug("No definition registered for unit type {0}".format(nextUnitId.toString()))
+
     return true
 
   // --------------------------------------------------------------------------
@@ -116,18 +134,17 @@ function onUnitUsedItem()
     displayMessageToPlayer(manipulatingUnit.getOwner(), "This item can only be used by a survivor")
     return
 
-  let jobId = getJobIdForItemType(manipulatedItem.getTypeId())
-  if (jobId == SurvivorJobIds.none)
+  let jobId = getJobDefinitionForItemType(manipulatedItem.getTypeId())
+  if (jobId == SurvivorJobs.none)
     return
 
-  let successfullyChangedJobs = comp.changeJobs(jobId)
-
-  if (successfullyChangedJobs)
+  if (comp.changeJobs(jobId))
     manipulatedItem.remove()
 
 // ============================================================================
 function onOrderIssued()
 
+  let issuedOrderId = GetIssuedOrderId()
   let orderedUnit = GetOrderedUnit()
 
   let metadata = orderedUnit.getMetadata()
@@ -138,11 +155,13 @@ function onOrderIssued()
   if (comp == null)
     return
 
-  let orderedUnitId = orderedUnit.getTypeId()
-  let issuedOrderId = GetIssuedOrderId()
-  let upgradeToUnitId = getNextJobUpgradeUnitType(orderedUnitId)
+  let currentUnitId = orderedUnit.getTypeId()
+  let job = getJobDefinitionForUnitType(currentUnitId)
+  if (job == null)
+    return
 
-  if (upgradeToUnitId == issuedOrderId)
+  let nextUnitId = job.getNextUpgrade(currentUnitId)
+  if (nextUnitId == issuedOrderId)
     comp.upgradeJob()
 
 // ============================================================================
@@ -152,17 +171,15 @@ function onUnitKilled()
   if (not dyingUnit.isSurvivor())
     return
 
-  let jobId = getJobIdForUnitType(dyingUnit.getTypeId())
-  if (jobId == SurvivorJobIds.none)
+  let job = getJobDefinitionForUnitType(dyingUnit.getTypeId())
+  if (job == SurvivorJobs.none)
     return
 
-  let jobItemType = getItemTypeForJobId(jobId)
+  let jobItemType = job.getItemType()
   g_MainItemLibrary.createItem(jobItemType, dyingUnit.getPos())
 
 // ============================================================================
 init
-  g_temp = CreateGroup()
-
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_USE_ITEM, function onUnitUsedItem)
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ISSUED_ORDER, function onOrderIssued)
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_DEATH, function onUnitKilled)

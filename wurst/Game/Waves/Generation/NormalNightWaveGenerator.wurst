@@ -29,9 +29,9 @@ import TlsItemIds
 import Func
 import ObjEditingCommons
 import SpawnDefinitionTags
-import CircularCachedSpawnManager
 import ISpawnPointProvider
 import UndeadSpawnManager
+import HostileCircularCachedSpawnManager
 
 Func1<real, real> g_coinSmallWeightTFunc
 Func1<real, real> g_coinMediumWeightTFunc
@@ -186,7 +186,6 @@ public class NormalNightWaveGenerator implements IWaveGenerator<NightWave>
       ..setMaxHp(lerpInt(120, 2000, gameProgress.getCurrentGameProgress()))
       ..setArmor(lerp(0.0, 5.0, gameProgress.getCurrentGameProgress()))
       ..setDamageRange(0, lerp(rangeInt(8, 12), rangeInt(240, 260), gameProgress.getCurrentGameProgress()))
-      ..grantLumberOnDeath(1.0, R2I(gameProgress.getCurrentWaveNumber() * NORMAL_LUMBER_REWARD_SCALE).toRange())
       ..setMovementSpeed(lerp(100, 250, gameProgress.getCurrentGameProgress()))
       ..setDefenseType(ArmorType.Unarmored)
       ..add(new ZombieUnitModifier())
@@ -211,7 +210,6 @@ public class NormalNightWaveGenerator implements IWaveGenerator<NightWave>
       ..standardEliteArmor(gameProgress)
       ..standardEliteAttack1DamageRange(gameProgress)
       ..standardEliteAttack1Cooldown(gameProgress)
-      ..standardEliteGrantLumberOnDeath(gameProgress)
       ..standardGrantCoinsOnDeath(gameProgress, 0.5)
       ..setDefenseType(ArmorType.Unarmored)
       ..add(new PoisonZombieUnitModifier())
@@ -303,18 +301,17 @@ public class NormalNightWaveGenerator implements IWaveGenerator<NightWave>
     let def = new SpawnWaveDefinition("Abominations")
     ..setTags(SpawnDefinitionTags.leader, SpawnDefinitionTags.heavy, SpawnDefinitionTags.siege)
     ..setProgress(g_nightProgress)
-    ..setMaxSpawnCount(FunctionalT.fromValue(lerp(1, 5, gameProgress.getCurrentGameProgress()).floor()))
+    ..setMaxAliveCount(FunctionalT.fromValue(1))
     ..setActivator(new PeriodicWaveActivator(10.0))
     ..setSpawnPointProvider(getRandomSpawnPointProvider(SpawnRange.MID))
     ..setUnitTypeProvider(new SingleUnitTypeProvider(TlsUnitIds.Undead.abomination))
     
     def.getUnitModifier(TlsUnitIds.Undead.abomination)
       ..setTargetPlayer(p)
-      ..standardEliteMaxHp(gameProgress, 4.0)
+      ..standardEliteMaxHp(gameProgress, 10.0)
       ..standardEliteArmor(gameProgress, 4.0)
       ..standardEliteAttack1DamageRange(gameProgress, 4.0)
       ..standardEliteAttack1Cooldown(gameProgress)
-      ..standardEliteGrantLumberOnDeath(gameProgress)
       ..guaranteeGrantCoinsOnDeath(gameProgress)
       ..setDefenseType(ArmorType.Large)
       ..add(new AbominationUnitModifier())
@@ -398,7 +395,6 @@ public class NormalNightWaveGenerator implements IWaveGenerator<NightWave>
       ..setArmor(lerp(1.0, 5.0, gameProgress.getCurrentGameProgress()))
       ..setDamageRange(0, lerp(rangeInt(8, 13), rangeInt(300, 330), gameProgress.getCurrentGameProgress()))
       ..setAttackCooldown(0, lerp(1.5, 1.0, gameProgress.getCurrentGameProgress()))
-      ..grantLumberOnDeath(1.0, R2I(gameProgress.getCurrentWaveNumber() * ELITE_LUMBER_REWARD_SCALE).toRange())
       ..setDefenseType(ArmorType.Medium)
       ..standardGrantCoinsOnDeath(gameProgress, 0.5)
 
@@ -408,7 +404,6 @@ public class NormalNightWaveGenerator implements IWaveGenerator<NightWave>
       ..setArmor(lerp(5.0, 15.0, gameProgress.getCurrentGameProgress()))
       ..setDamageRange(0, lerp(rangeInt(8, 13), rangeInt(300, 330), gameProgress.getCurrentGameProgress()))
       ..setAttackCooldown(0, lerp(1.5, 1.0, gameProgress.getCurrentGameProgress()))
-      ..grantLumberOnDeath(1.0, R2I(gameProgress.getCurrentWaveNumber() * ELITE_LUMBER_REWARD_SCALE).toRange())
       ..setDefenseType(ArmorType.Medium)
       ..standardGrantCoinsOnDeath(gameProgress, 0.75)
 
@@ -418,7 +413,6 @@ public class NormalNightWaveGenerator implements IWaveGenerator<NightWave>
       ..setArmor(lerp(5.0, 15.0, gameProgress.getCurrentGameProgress()))
       ..setDamageRange(0, lerp(rangeInt(8, 13), rangeInt(300, 330), gameProgress.getCurrentGameProgress()))
       ..setAttackCooldown(0, lerp(1.5, 1.0, gameProgress.getCurrentGameProgress()))
-      ..grantLumberOnDeath(1.0, R2I(gameProgress.getCurrentWaveNumber() * ELITE_LUMBER_REWARD_SCALE).toRange())
       ..setDefenseType(ArmorType.Large)
       ..standardGrantCoinsOnDeath(gameProgress, 1.0)
 
@@ -515,7 +509,6 @@ public class NormalNightWaveGenerator implements IWaveGenerator<NightWave>
       ..standardEliteArmor(gameProgress)
       ..standardEliteAttack1DamageRange(gameProgress)
       ..standardEliteAttack1Cooldown(gameProgress)
-      ..standardEliteGrantLumberOnDeath(gameProgress)
       ..guaranteeGrantCoinsOnDeath(gameProgress)
       ..setDefenseType(ArmorType.Hero)
 
@@ -593,7 +586,6 @@ public class NormalNightWaveGenerator implements IWaveGenerator<NightWave>
       ..standardEliteArmor(gameProgress)
       ..standardEliteAttack1DamageRange(gameProgress)
       ..standardEliteAttack1Cooldown(gameProgress)
-      ..standardEliteGrantLumberOnDeath(gameProgress)
       ..guaranteeGrantCoinsOnDeath(gameProgress)
       ..setDefenseType(ArmorType.Fortified)
 
@@ -714,7 +706,7 @@ function AggregateUnitModifier.standardEliteMaxHp(IGameWaveProgress gameProgress
 
 // ============================================================================
 function AggregateUnitModifier.standardEliteMaxHp(IGameWaveProgress gameProgress, real scale)
-  let maxHp = R2I(I2R(lerpInt(240, 2000, gameProgress.getCurrentGameProgress())) * scale)
+  let maxHp = R2I(I2R(lerpInt(240, 3000, gameProgress.getCurrentGameProgress())) * scale)
   this.setMaxHp(maxHp)
 
 // ============================================================================
@@ -745,21 +737,12 @@ function AggregateUnitModifier.standardEliteAttack1Cooldown(IGameWaveProgress ga
   this.setAttackCooldown(0, lerp(2.0, 1.0, gameProgress.getCurrentGameProgress() * scale))
 
 // ============================================================================
-function AggregateUnitModifier.standardEliteGrantLumberOnDeath(IGameWaveProgress gameProgress)
-  this.standardEliteGrantLumberOnDeath(gameProgress, 1.0)
-
-// ============================================================================
-function AggregateUnitModifier.standardEliteGrantLumberOnDeath(IGameWaveProgress gameProgress, real scale)
-  this.grantLumberOnDeath(1.0, R2I(gameProgress.getCurrentWaveNumber() * ELITE_LUMBER_REWARD_SCALE * scale).toRange())
-
-// ============================================================================
 function AggregateUnitModifier.standardElite(player p, IGameWaveProgress gameProgress)
   this.setTargetPlayer(p)
   this.standardEliteMaxHp(gameProgress)
   this.standardEliteArmor(gameProgress)
   this.standardEliteAttack1DamageRange(gameProgress)
   this.standardEliteAttack1Cooldown(gameProgress)
-  this.standardEliteGrantLumberOnDeath(gameProgress)
   this.standardGrantCoinsOnDeath(gameProgress)
   this.setAcquisitionRange(ELITE_SIGHT_RANGE)
   this.setSightRadius(ELITE_SIGHT_RANGE)
@@ -771,7 +754,6 @@ function AggregateUnitModifier.standardRangedElite(player p, IGameWaveProgress g
   this.standardEliteArmor(gameProgress)
   this.standardEliteAttack1DamageRange(gameProgress)
   this.standardEliteAttack1Cooldown(gameProgress)
-  this.standardEliteGrantLumberOnDeath(gameProgress)
   this.standardGrantCoinsOnDeath(gameProgress)
 
   this.setDamageRange(0, lerp(rangeInt(16, 32), rangeInt(64, 80), gameProgress.getCurrentGameProgress()))

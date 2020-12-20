@@ -4,14 +4,13 @@ import Abomination
 import TlsAbilityIds
 import Zombie
 import ErrorHandling
-import UnitMetadata
 import Math
 import GroupUtils
 import FX
 import Orders
 import UnitExtensions
-import PlayerExtensions
 import UndeadTargetingComponent
+import HumanPlayers
 
 constant real ABOM_MIN_THROW_RANGE = 400.0
 constant real ABOM_MAX_THROW_RANGE = 700.0
@@ -50,20 +49,22 @@ public class AbomHoldingState extends BaseStateMachineState
     if (zombie == null)
       error("Expected Abomination to be holding a zombie when entering this state")
 
+    let abomUnit = _abom.getUnit()
     if (zombie.isFemaleZombie())
-      _abom.addAbility(TlsAbilityIds.holdingZombieFemale)
+      abomUnit.addAbility(TlsAbilityIds.holdingZombieFemale)
     else
-      _abom.addAbility(TlsAbilityIds.holdingZombieMale)
+      abomUnit.addAbility(TlsAbilityIds.holdingZombieMale)
 
-    _abom.addAbility(TlsAbilityIds.abomThrowZombie)
+    abomUnit.addAbility(TlsAbilityIds.abomThrowZombie)
 
   // --------------------------------------------------------------------------
   override function exit()
     _timer = 0.0
     _threwZombie = false
-    _abom.removeAbility(TlsAbilityIds.holdingZombieFemale)
-    _abom.removeAbility(TlsAbilityIds.holdingZombieMale)
-    _abom.removeAbility(TlsAbilityIds.abomThrowZombie)
+    let abomUnit = _abom.getUnit()
+    abomUnit.removeAbility(TlsAbilityIds.holdingZombieFemale)
+    abomUnit.removeAbility(TlsAbilityIds.holdingZombieMale)
+    abomUnit.removeAbility(TlsAbilityIds.abomThrowZombie)
     hideTargetIndicator()
 
   // --------------------------------------------------------------------------
@@ -86,7 +87,8 @@ public class AbomHoldingState extends BaseStateMachineState
 
     Log.debug("[AbomHoldingState] Found target to throw zombie at: " + target.getName())
 
-    let currentPos = _abom.getPos()
+    let abomUnit = _abom.getUnit()
+    let currentPos = abomUnit.getPos()
     let targetPos = target.getPos()
     let throwRange = _abom.getThrowRange()
     let angle = currentPos.angleTo(targetPos)
@@ -94,7 +96,7 @@ public class AbomHoldingState extends BaseStateMachineState
     dist = clamp(dist, ABOM_MIN_THROW_RANGE, throwRange)
 
     let finalPos = currentPos.polarOffset(angle, dist)
-    _abom.issuePointOrderById(ABOM_THROW_ORDER_ID, finalPos)
+    abomUnit.issuePointOrderById(ABOM_THROW_ORDER_ID, finalPos)
 
     showTargetIndicator(finalPos)
 
@@ -102,13 +104,15 @@ public class AbomHoldingState extends BaseStateMachineState
 
   // --------------------------------------------------------------------------
   private function findThrowTarget() returns unit
+    let abomUnit = _abom.getUnit()
+
     // === These must be cleaned up
     let ug = getGroup()
     let cond = Condition(function isFilterUnitAValidThrowTarget)
-    g_minThrowArea = _abom.getPos().withRadiusRect(ABOM_MIN_THROW_RANGE)
+    g_minThrowArea = abomUnit.getPos().withRadiusRect(ABOM_MIN_THROW_RANGE)
     // ===
 
-    ug.enumUnitsInRange(_abom.getPos(), ABOM_MAX_THROW_RANGE, cond)
+    ug.enumUnitsInRange(abomUnit.getPos(), ABOM_MAX_THROW_RANGE, cond)
     let target = ug.getRandomUnit()
 
     // === Cleanup

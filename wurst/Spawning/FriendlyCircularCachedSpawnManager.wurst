@@ -1,0 +1,43 @@
+package FriendlyCircularCachedSpawnManager
+import CircularCachedSpawnManager
+import HashMap
+import UnitExtensions
+import GameConstants
+import UnitIndexer
+import HumanPlayers
+import Circle
+
+constant real FRIENDLY_INVALIDATION_RANGE = 512.0
+HashMap<int, CircularCachedSpawnManager> g_playerFriendlySpawnManagers
+
+// ============================================================================
+public function getPlayerCachedFriendlySpawnManager(player p) returns CircularCachedSpawnManager
+  CircularCachedSpawnManager spawnManager = g_playerFriendlySpawnManagers.get(p.getId())
+  if (spawnManager == null)
+    spawnManager = new CircularCachedSpawnManager(p, "Friendly:"+p.getName(), (unit u) -> doesUnitInvalidateFriendlySpawnPoint(u))
+    g_playerFriendlySpawnManagers.put(p.getId(), spawnManager)
+  return spawnManager
+
+// ============================================================================
+function doesUnitInvalidateFriendlySpawnPoint(unit u) returns bool
+  return u.isStructure()
+         and u.isAlive()
+         and u.isEnemyOf(PLAYER_VILLAGERS)
+         and not u.isInvulnerable()
+
+// ============================================================================
+function onUnitIndexing()
+
+  let indexingUnit = getIndexingUnit()
+  let unitPos = indexingUnit.getPos()
+
+  if (doesUnitInvalidateFriendlySpawnPoint(indexingUnit))
+    for p in g_PlayingHumanPlayers
+      getPlayerCachedFriendlySpawnManager(p).invalidateSpawnPoints(circle(unitPos, FRIENDLY_INVALIDATION_RANGE))
+
+// ============================================================================
+init
+  g_playerFriendlySpawnManagers = new HashMap<int, CircularCachedSpawnManager>()
+
+  onUnitIndex(() -> onUnitIndexing())
+  onUnitDeindex(() -> onUnitIndexing())
