@@ -1,0 +1,113 @@
+package GameStatsMultiboard
+import BaseMultiboard
+import TimeOfDay
+import GameInstance
+import RealTime
+import HumanPlayers
+import HumanPlayerMetadata
+import TimerUtils
+import ClosureTimers
+import StringExtensions
+import ColorUtility
+
+constant real INTERVAL_PERIOD = 0.1
+constant int COLUMN_PLAYER_NAME = 0
+constant int COLUMN_KILLS = 1
+constant int COLUMN_SCORE = 2
+constant int COLUMN_COUNT = 3
+
+constant int ROW_HEADER = 0
+
+// ============================================================================
+public class GameStatsMultiboard extends BaseMultiboard
+  private timer m_timer
+  private player m_player
+
+  // --------------------------------------------------------------------------
+  construct(player p)
+    m_player = p
+    setDisplayTarget(p)
+
+  // --------------------------------------------------------------------------
+  override function show()
+
+    updateLayout()
+    update()
+
+    super.show()
+    
+    if (m_timer == null)
+      m_timer = getTimer()
+      m_timer.doPeriodically(INTERVAL_PERIOD) (CallbackPeriodic cb) ->
+        update()
+    
+  // --------------------------------------------------------------------------
+  override function hide()
+    super.hide()    
+
+    if (m_timer != null)
+      m_timer.release()
+      m_timer = null
+
+  // --------------------------------------------------------------------------
+  function getPlayer() returns player
+    return m_player
+
+  // --------------------------------------------------------------------------
+  function updateLayout()
+
+    hide()
+    destroyMultiboard()
+    
+    // Header + 1 row per player
+    let rowCount = 1 + g_HumanPlayers.size()
+
+    m_multiboard = CreateMultiboardBJ(COLUMN_COUNT, rowCount, "UNTITLED")
+
+    MultiboardSetItemsWidth(m_multiboard, 0.05)
+    m_multiboard.setColumnWidth(COLUMN_PLAYER_NAME, 0.11)
+    m_multiboard.setColumnWidth(COLUMN_KILLS, 0.04)
+    m_multiboard.setColumnWidth(COLUMN_SCORE, 0.04)
+    MultiboardSetItemStyleBJ(m_multiboard, COLUMN_PLAYER_NAME + 1, 0, true, false)
+    MultiboardSetItemStyleBJ(m_multiboard, COLUMN_KILLS + 1, 0, true, false)
+    MultiboardSetItemStyleBJ(m_multiboard, COLUMN_SCORE + 1, 0, true, false)
+
+    m_multiboard.setItemValue(ROW_HEADER, COLUMN_PLAYER_NAME, "Player")
+    m_multiboard.setItemValue(ROW_HEADER, COLUMN_KILLS, "Kills")
+    m_multiboard.setItemValue(ROW_HEADER, COLUMN_SCORE, "Score")
+
+  // --------------------------------------------------------------------------
+  function update()
+
+    if (m_player == null)
+      return
+
+    let multiboardTitle = "{0} {1}".format(
+        isDay() ? "Day" : "Night",
+        (isDay() ? g_GameInstance.getDay() : g_GameInstance.getNight()).toString())
+
+    m_multiboard.setTitle(multiboardTitle)
+
+    updateRows()
+
+  // --------------------------------------------------------------------------
+  private function updateRows()
+    var row = 1
+    for p in g_HumanPlayers
+      updateRow(p, row)
+      row++
+
+  // --------------------------------------------------------------------------
+  private function updateRow(player p, int row)
+
+    let playerMetadata = p.getHumanMetadata()
+    if (playerMetadata == null)
+      return
+
+    let playerName = playerMetadata.getDisplayName().colorize(p.getColor().toColor())
+    let kills = playerMetadata.getKills()
+    let score = playerMetadata.getScore()
+
+    m_multiboard.setItemValue(row, COLUMN_PLAYER_NAME, playerName)
+    m_multiboard.setItemValue(row, COLUMN_KILLS, kills.toString())
+    m_multiboard.setItemValue(row, COLUMN_SCORE, score.toString())
