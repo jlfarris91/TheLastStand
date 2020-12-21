@@ -1,21 +1,58 @@
 package UndeadTargetingComponent
 import UnitComponent
-import UnitMetadata
-import UndeadUtility
-import Orders
 import HumanPlayerMetadata
 import Events
+import LinkedList
+import RegisterEvents
+import HashMap
+import HumanPlayers
+import TlsUnitIds
+import HashList
+import Unit_WoodFence
+import Unit_StoneWall
+import Unit_Gate
+import GroupUtils
+
+HashMap<player, LinkedList<unit>> g_validHumanStructureTargets
+HashList<int> g_validTargetStructureIds
+
+/*
+
+  This component is used to direct spawned enemies to attack a target player.
+  
+  It works by first attempting to target one of the player's "exterior structures"
+  such as barricades, walls, gates, etc. We can reasonably assume that players
+  will build at least one of these structures at some point. This works whether
+  the player's base is completely closed off or has a pathable opening.
+  
+  We keep track of all of these exterior structures to make the operation as
+  efficient as possible; issueOrderTargetingPlayer() is called at least once
+  per enemy. We need to remember to update g_validTargetStructureIds with any
+  new exterior structures added to the game.
+
+  If the player has built no exterior structure then the unit will target the
+  player's camp tent. If the player has no camp tent the unit will target the
+  player's hero.
+
+  Finally, if there is nothing to target so far the unit will increase it's
+  acquisition range to the maximum. It should find SOMETHING to attack.
+
+  We use the attack-move order in hopes of having the unit wander into range
+  of a player's unit to attack. However, this can also mean that it can wander
+  by another player's camp and attack it instead. This is fine.
+
+*/
 
 // ============================================================================
 public class UndeadTargetingComponent extends UnitComponent
   private player m_targetPlayer
-  private GenericEvent<UndeadTargetingComponent> m_targetPlayerChangedEvent
+  private Event m_targetPlayerChangedEvent
 
   // --------------------------------------------------------------------------
   construct(IUnitMetadata owner)
     super(owner)
     m_targetPlayer = null
-    m_targetPlayerChangedEvent = new GenericEvent<UndeadTargetingComponent>()
+    m_targetPlayerChangedEvent = new Event()
 
   // --------------------------------------------------------------------------
   ondestroy
@@ -23,7 +60,11 @@ public class UndeadTargetingComponent extends UnitComponent
     m_targetPlayerChangedEvent = null
 
   // --------------------------------------------------------------------------
-  function getTargetPlayerChangedEvent() returns GenericEvent<UndeadTargetingComponent>
+  override function getTypeId() returns int
+    return UndeadTargetingComponent.typeId
+
+  // --------------------------------------------------------------------------
+  function getTargetPlayerChangedEvent() returns Event
     return m_targetPlayerChangedEvent
 
   // --------------------------------------------------------------------------
@@ -43,15 +84,15 @@ public class UndeadTargetingComponent extends UnitComponent
   function issueOrderTargetingPlayer()
 
     if (tryTargetClosestUnit())
-      Log.debug("[UndeadTargetingComponent] Found target to attack")
+      //Log.debug("[UndeadTargetingComponent] Found target to attack")
       return
 
     if (tryTargetCampCenter())
-      Log.debug("[UndeadTargetingComponent] Could not find target unit, attack-moving to camp center")
+      //Log.debug("[UndeadTargetingComponent] Could not find target unit, attack-moving to camp center")
       return
 
-    Log.debug("[UndeadTargetingComponent] Found no player unit to attack")
-    increaseAcquisitionRange()
+    //Log.debug("[UndeadTargetingComponent] Found no player unit to attack")
+    //increaseAcquisitionRange()
 
   // --------------------------------------------------------------------------
   protected function tryTargetClosestUnit() returns bool
@@ -61,9 +102,9 @@ public class UndeadTargetingComponent extends UnitComponent
 
     let undeadUnit = getOwnerUnit()
 
-    let target = getClosestUndeadTarget(targetPlayer, undeadUnit.getPos())
+    let target = getClosestValidHumanStructureTarget(targetPlayer, undeadUnit.getPos())
     if (target != null)
-      undeadUnit.issuePointOrderById(OrderIds.attack, target.getPos())
+      undeadUnit.issuePointOrder("attack", target.getPos())
       return true
 
     return false
@@ -80,7 +121,7 @@ public class UndeadTargetingComponent extends UnitComponent
 
     let campCenter = playerMetadata.getCamp().getCenter()
     let undeadUnit = getOwnerUnit()
-    undeadUnit.issuePointOrderById(OrderIds.attack, campCenter)
+    undeadUnit.issuePointOrder("attack", campCenter)
     return true
 
   // --------------------------------------------------------------------------
@@ -89,11 +130,11 @@ public class UndeadTargetingComponent extends UnitComponent
 
   // --------------------------------------------------------------------------
   private function raiseTargetPlayerChangedEvent()
-    m_targetPlayerChangedEvent.call(this)
+    m_targetPlayerChangedEvent.call()
 
 // ============================================================================
 public function IUnitMetadata.getUndeadTargetingComponent() returns UndeadTargetingComponent
-  return this.getComponent(Type(UndeadTargetingComponent.typeId)) castTo UndeadTargetingComponent
+  return this.getComponent(typeInfo(UndeadTargetingComponent.typeId)) castTo UndeadTargetingComponent
 
 // ============================================================================
 public function IUnitMetadata.getOrAddUndeadTargetingComponent() returns UndeadTargetingComponent
@@ -101,3 +142,91 @@ public function IUnitMetadata.getOrAddUndeadTargetingComponent() returns UndeadT
   if (component == null)
     component = this.addComponent(new UndeadTargetingComponent(this)) castTo UndeadTargetingComponent
   return component
+
+// ============================================================================
+function getClosestValidHumanStructureTarget(player p, vec2 pos) returns unit
+  let targetList = g_validHumanStructureTargets.get(p)
+  if (targetList.isEmpty())
+    return null
+  
+  var distance = REAL_MAX
+  unit target = null
+
+  for u in targetList
+    let d = u.getPos().distanceToSq(pos)
+    if (d < distance)
+      target = u
+      distance = d
+
+  return target
+
+// ============================================================================
+function unitIsValidTargetStructure(unit u) returns bool
+  return g_validTargetStructureIds.has(u.getTypeId())
+
+// ============================================================================
+function filterUnitIsValidTargetStructure() returns bool
+  return unitIsValidTargetStructure(GetFilterUnit())
+
+// ============================================================================
+function onConstructionFinished()
+  let constructedUnit = GetConstructedStructure()
+  let owningPlayer = constructedUnit.getOwner()
+
+  if (not owningPlayer.isHumanPlayer())
+    return
+
+  if (not unitIsValidTargetStructure(constructedUnit))
+    return
+
+  let targetList = g_validHumanStructureTargets.get(owningPlayer)
+  targetList.add(constructedUnit)
+
+// ============================================================================
+function onUnitDeath()
+  let constructedUnit = GetDyingUnit()
+  let owningPlayer = constructedUnit.getOwner()
+
+  if (not owningPlayer.isHumanPlayer())
+    return
+
+  if (not unitIsValidTargetStructure(constructedUnit))
+    return
+
+  let targetList = g_validHumanStructureTargets.get(owningPlayer)
+  targetList.remove(constructedUnit)
+
+// ============================================================================
+function populateInitialValidHumanStructureTargets()
+  let cond = Condition(function filterUnitIsValidTargetStructure)
+  let tempGroup = getGroup()
+  for p in g_PlayingHumanPlayers
+    let list = g_validHumanStructureTargets.get(p)
+    tempGroup.clear()
+    tempGroup.enumUnitsOfPlayer(p, cond)
+    for u in tempGroup
+      list.add(u)
+  cond.destr()
+  tempGroup.release()
+
+// ============================================================================
+init
+  g_validHumanStructureTargets = new HashMap<player, LinkedList<unit>>()
+
+  for p in g_PlayingHumanPlayers
+    g_validHumanStructureTargets.put(p, new LinkedList<unit>())
+
+  g_validTargetStructureIds = new HashList<int>()
+  ..add(TlsUnitIds.barricade)
+  ..add(TlsUnitIds.stoneBarricade)
+  ..add(TlsUnitIds.tallStoneBarricade)
+  ..add(TlsUnitIds.scoutTower)
+  ..addAll(g_woodFenceIds)
+  ..addAll(g_stoneWallIds)
+  ..addAll(g_gateIds)
+
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_CONSTRUCT_FINISH, function onConstructionFinished)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_DEATH, function onUnitDeath)
+
+  // Populate with initial structures (for debug purposes)
+  populateInitialValidHumanStructureTargets()

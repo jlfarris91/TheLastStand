@@ -1,11 +1,17 @@
 package PeriodicWaveActivator
 import WaveActivator
 import ClosureTimers
+import Runnable
 
 // ============================================================================
 public class PeriodicWaveActivator extends WaveActivatorBase
   private real m_interval
   private CallbackPeriodic m_timerCallback
+
+  // --------------------------------------------------------------------------
+  construct(real interval)
+    setInterval(interval)
+    m_timerCallback = null
 
   // --------------------------------------------------------------------------
   ondestroy
@@ -18,24 +24,51 @@ public class PeriodicWaveActivator extends WaveActivatorBase
   // --------------------------------------------------------------------------
   function setInterval(real interval)
     m_interval = interval
-    if (getHasStarted())
+    if (this.hasStarted())
       restart()
 
   // --------------------------------------------------------------------------
-  override function getHasStarted() returns bool
-    return super.getHasStarted()
+  override function onStarted()
+    super.onStarted()
+    startSpawning()
 
   // --------------------------------------------------------------------------
-  override function getIsRunning() returns bool
-    return super.getIsRunning()
+  override function onCompleted()
+    super.onCompleted()
+    stopSpawning()
+
+  // --------------------------------------------------------------------------
+  private function restart()
+    stopSpawning()
+    startSpawning()
+
+  // --------------------------------------------------------------------------
+  private function startSpawning()
+    if (m_timerCallback != null)
+      return
+
+    // Immediately raise the event
+    raiseActivatedEvent()
+
+    // Then every N seconds
+    m_timerCallback = doPeriodically(getInterval()) (CallbackPeriodic cb) ->
+      raiseActivatedEvent()
+
+  // --------------------------------------------------------------------------
+  private function stopSpawning()
+    destroyTimerCallback()
+
+  // --------------------------------------------------------------------------
+  override function getState() returns RunnableState
+    return super.getState()
+
+  // --------------------------------------------------------------------------
+  override function getError() returns string
+    return super.getError()
 
   // --------------------------------------------------------------------------
   override function start()
     super.start()
-
-  // --------------------------------------------------------------------------
-  override function stop()
-    super.stop()
 
   // --------------------------------------------------------------------------
   override function pause()
@@ -46,26 +79,15 @@ public class PeriodicWaveActivator extends WaveActivatorBase
     super.resume()
 
   // --------------------------------------------------------------------------
-  override function onStarted()
-    super.onStarted()
-    startSpawning()
+  override function complete()
+    super.complete()
 
   // --------------------------------------------------------------------------
-  override function onStopped()
-    super.onStopped()
-    stopSpawning()
+  override function fail(string errorMsg)
+    super.fail(errorMsg)
 
   // --------------------------------------------------------------------------
-  private function restart()
-    stopSpawning()
-    startSpawning()
-
-  // --------------------------------------------------------------------------
-  private function startSpawning()
-    m_timerCallback = doPeriodically(getInterval()) (CallbackPeriodic cb) ->
-      raiseActivatedEvent()
-
-  // --------------------------------------------------------------------------
-  private function stopSpawning()
+  private function destroyTimerCallback()
     if (m_timerCallback != null)
       destroy m_timerCallback
+      m_timerCallback = null

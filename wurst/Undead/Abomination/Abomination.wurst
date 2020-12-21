@@ -30,7 +30,7 @@ constant string ABOM_THROW_DUST_EFFECT = "Objects\\Spawnmodels\\Undead\\ImpaleTa
 public class Abomination extends UndeadUnit
   private unit _holdingZombie
   private StateMachineComponent m_stateMachine
-  private Action1<UndeadTargetingComponent> m_targetPlayerChangedEvent
+  private EventCallback m_targetPlayerChangedHandler
 
   // --------------------------------------------------------------------------
   construct()
@@ -55,7 +55,7 @@ public class Abomination extends UndeadUnit
 
   // --------------------------------------------------------------------------
   function getThrowRange() returns real
-    return this.getAbility(TlsAbilityIds.abomThrowZombie).getField(ABILITY_RLF_CAST_RANGE, 0)
+    return this.getUnit().getAbility(TlsAbilityIds.abomThrowZombie).getField(ABILITY_RLF_CAST_RANGE, 0)
   
   // --------------------------------------------------------------------------
   override function onUnitChanged(unit oldUnit, unit newUnit)
@@ -100,19 +100,22 @@ public class Abomination extends UndeadUnit
   // --------------------------------------------------------------------------
   private function listenToTargetPlayerChangedEvent()
     unlistenToTargetPlayerChangedEvent()
-    let undeadTargetComponent = this.getOrAddUndeadTargetingComponent()
-    if (undeadTargetComponent != null)
-      m_targetPlayerChangedEvent = undeadTargetComponent.getTargetPlayerChangedEvent().add() (UndeadTargetingComponent comp) ->
+
+    let evt = getTargetPlayerChangedEvent()
+    if (evt != null)
+      m_targetPlayerChangedHandler = evt.register() () ->
         startStateMachine()
 
   // --------------------------------------------------------------------------
   private function unlistenToTargetPlayerChangedEvent()
-    if (m_targetPlayerChangedEvent != null)
-      let undeadTargetComponent = this.getUndeadTargetingComponent()
-      if (undeadTargetComponent != null)
-        undeadTargetComponent.getTargetPlayerChangedEvent().remove(m_targetPlayerChangedEvent)
-      destroy m_targetPlayerChangedEvent
-      m_targetPlayerChangedEvent = null      
+    if (m_targetPlayerChangedHandler != null)
+      destroy m_targetPlayerChangedHandler
+      m_targetPlayerChangedHandler = null
+
+  // --------------------------------------------------------------------------
+  private function getTargetPlayerChangedEvent() returns Event
+    let undeadTargetingComponent = this.getUndeadTargetingComponent()
+    return undeadTargetingComponent != null ? undeadTargetingComponent.getTargetPlayerChangedEvent() : null
 
 // ============================================================================
 function onAbomGrabbedZombie(unit caster, unit target)
@@ -128,7 +131,7 @@ function onAbomGrabbedZombie(unit caster, unit target)
     return
 
   target.setInvulnerable(true)
-  abom.setAnimation(ABOM_ANIM_GRAB_INDEX)
+  abom.getUnit().setAnimation(ABOM_ANIM_GRAB_INDEX)
 
   doAfter(ABOM_ANIM_GRAB_DURATION) () ->
     if (abom != null)
@@ -187,7 +190,7 @@ function onAbomThrowZombie(unit caster)
   dummyCaster.setFieldWeapon(UNIT_WEAPON_SF_ATTACK_PROJECTILE_ART, 1, projectileArtPath)
 
   // Start the animation for throwing the held zombie
-  abom.setAnimation(ABOM_THROW_ANIM_INDEX)
+  abom.getUnit().setAnimation(ABOM_THROW_ANIM_INDEX)
   doAfter(ABOM_THROW_ANIM_DURATION) () ->
     // Get the statemachine again here in case the abom dies before this is called
     let stateMachine2 = getAliveAbomStateMachine(caster)

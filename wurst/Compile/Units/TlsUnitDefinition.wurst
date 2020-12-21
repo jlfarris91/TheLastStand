@@ -6,6 +6,12 @@ import public TlsAbilityIds
 import public TlsObjEditingCommons
 import public UnitIds
 import HashMap
+import UnitDefinitionInitModule
+import ObjEditingNatives
+import Dice
+import Range
+import LinkedList
+import TargetsAllowedUtils
 
 HashMap<int, ITlsUnitDefinition> g_unitIdToDefinitionMap
 
@@ -45,6 +51,8 @@ public interface ITlsUnitDefinition
   function getAttack1Range() returns int
   function getAttack1CooldownTime() returns real
   function getAttack1AttackType() returns AttackType
+  function getAttack1TargetsAllowed() returns string
+  function getAttack1Targets() returns LinkedList<string>
   function getHitPointsMaximumBase() returns int
   function getMaximumMana() returns int
   function getAttacksEnabled() returns int
@@ -55,6 +63,61 @@ public interface ITlsUnitDefinition
   function getMaterialCost() returns int
   function getRecycleGoldRewarded() returns int
   function getRecycleLumberRewarded() returns int
+
+// ============================================================================
+public function ITlsUnitDefinition.getApproxAttack1DPS() returns rangeReal
+  let damageRange = this.getAttack1DamageRange()
+  let min = I2R(damageRange.min) / this.getAttack1CooldownTime()
+  let max = I2R(damageRange.max) / this.getAttack1CooldownTime()
+  return rangeReal(min, max)
+
+// ============================================================================
+public function ITlsUnitDefinition.getApproxAttack1DPSString() returns string
+  let range = this.getApproxAttack1DPS()
+  return "{0} - {1} dps".format(I2S(R2I(range.min)), I2S(R2I(range.max)))
+
+// ============================================================================
+public function ITlsUnitDefinition.getAttack1DamageRangeString() returns string
+  let range = this.getAttack1DamageRange()
+  return "{0} - {1}".format(I2S(range.min), I2S(range.max))
+
+// ============================================================================
+public function UnitDefinition.setAttack1DamageRange(rangeInt range)
+  this.setAttack1DamageDice(range.toDice())
+
+// ============================================================================
+public function BuildingDefinition.setAttack1DamageRange(rangeInt range)
+  this.setAttack1DamageDice(range.toDice())
+
+// ============================================================================
+public function HeroDefinition.setAttack1DamageRange(rangeInt range)
+  this.setAttack1DamageDice(range.toDice())
+
+// ============================================================================
+public function ITlsUnitDefinition.getAttack1DamageRange() returns rangeInt
+  return this.getAttack1DamageDice().toRange()
+
+// ============================================================================
+public function UnitDefinition.setAttack1DamageDice(dice dice)
+  this.setAttack1DamageBase(dice.base)
+  this.setAttack1DamageNumberofDice(dice.numberOfDice)
+  this.setAttack1DamageSidesperDie(dice.sidesPerDie)
+
+// ============================================================================
+public function BuildingDefinition.setAttack1DamageDice(dice dice)
+  this.setAttack1DamageBase(dice.base)
+  this.setAttack1DamageNumberofDice(dice.numberOfDice)
+  this.setAttack1DamageSidesperDie(dice.sidesPerDie)
+
+// ============================================================================
+public function HeroDefinition.setAttack1DamageDice(dice dice)
+  this.setAttack1DamageBase(dice.base)
+  this.setAttack1DamageNumberofDice(dice.numberOfDice)
+  this.setAttack1DamageSidesperDie(dice.sidesPerDie)
+
+// ============================================================================
+public function ITlsUnitDefinition.getAttack1DamageDice() returns dice
+  return dice(this.getAttack1DamageBase(), this.getAttack1DamageNumberofDice(), this.getAttack1DamageSidesperDie())
 
 // ============================================================================
 public class TlsUnitDefinition extends UnitDefinition implements ITlsUnitDefinition
@@ -69,6 +132,8 @@ public class TlsUnitDefinition extends UnitDefinition implements ITlsUnitDefinit
   private int m_manaMaximum
   private AttackType m_attack1AttackType
   private real m_attack1CooldownTime
+  private string m_attack1TargetsAllowed
+  private LinkedList<string> m_attack1Targets
   private int m_attacksEnabled
   private string m_tooltipBasic
   private string m_tooltipExtended
@@ -76,10 +141,15 @@ public class TlsUnitDefinition extends UnitDefinition implements ITlsUnitDefinit
   private int m_lumberCost
   private int m_recycleGoldRewarded
   private int m_recycleLumberRewarded
+  private string m_upgradesTo
+
+  public use UnitDefinitionInitModule
 
   // --------------------------------------------------------------------------
   construct(int newId, int baseId)
     super(newId, baseId)
+    m_attack1Targets = new LinkedList<string>()
+    init_all()
     if (not compiletime)
       registerUnitDefinition(newId, this)
 
@@ -191,6 +261,21 @@ public class TlsUnitDefinition extends UnitDefinition implements ITlsUnitDefinit
     return m_attack1CooldownTime
 
   // --------------------------------------------------------------------------
+  override function setAttack1TargetsAllowed(string data)
+    super.setAttack1TargetsAllowed(data)
+    m_attack1TargetsAllowed = data
+    m_attack1Targets.clear()
+    getTargetsAllowedPretty(data, m_attack1Targets)
+
+  // --------------------------------------------------------------------------
+  override function getAttack1TargetsAllowed() returns string
+    return m_attack1TargetsAllowed
+
+  // --------------------------------------------------------------------------
+  override function getAttack1Targets() returns LinkedList<string>
+    return m_attack1Targets
+
+  // --------------------------------------------------------------------------
   override function setAttacksEnabled(int value)
     super.setAttacksEnabled(value)
     m_attacksEnabled = value
@@ -258,6 +343,15 @@ public class TlsUnitDefinition extends UnitDefinition implements ITlsUnitDefinit
   // --------------------------------------------------------------------------
   override function getRecycleLumberRewarded() returns int
     return m_recycleLumberRewarded
+
+  // --------------------------------------------------------------------------
+  function setUpgradesTo(string data)
+    def.setString("uupt", data)
+    m_upgradesTo = data
+  
+  // --------------------------------------------------------------------------
+  function getUpgradesTo() returns string
+    return m_upgradesTo
 
 // ============================================================================
 init

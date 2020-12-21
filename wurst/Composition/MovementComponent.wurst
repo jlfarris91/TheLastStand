@@ -3,17 +3,18 @@ import UnitMetadata
 import GameConstants
 import Events
 import RealtimeUnitComponent
+import RealtimeUpdate
 
 // ============================================================================
 public class MovementComponent extends RealtimeUnitComponent
 
   private vec2 m_lastPos
-  private GenericArgsEvent<MovementComponent, real> m_unitMovedEvent
+  private Event1<real> m_unitMovedEvent
 
   // --------------------------------------------------------------------------
   construct(IUnitMetadata owner)
     super(owner)
-    m_unitMovedEvent = new GenericArgsEvent<MovementComponent, real>()
+    m_unitMovedEvent = new Event1<real>()
 
   // --------------------------------------------------------------------------
   ondestroy
@@ -21,22 +22,28 @@ public class MovementComponent extends RealtimeUnitComponent
     m_unitMovedEvent = null
 
   // --------------------------------------------------------------------------
-  function getUnitMovedEvent() returns GenericArgsEvent<MovementComponent, real>
+  override function getTypeId() returns int
+    return MovementComponent.typeId
+
+  // --------------------------------------------------------------------------
+  function getUnitMovedEvent() returns Event1<real>
     return m_unitMovedEvent
 
   // --------------------------------------------------------------------------
   override function onEnabled()
     super.onEnabled()
-    registerForUpdate()
+    this.registerForRealtimeUpdate(RealtimeUpdatePriority.Fast)
     m_lastPos = getOwnerUnit().getPos()
 
   // --------------------------------------------------------------------------
   override function onDisabled()
     super.onDisabled()
-    unregisterForUpdate()
+    this.unregisterForRealtimeUpdate()
 
   // --------------------------------------------------------------------------
-  override function onUpdate(real dt)
+  override function realtimeUpdate(real dt)
+    super.realtimeUpdate(dt)
+    
     let pos = getOwnerUnit().getPos()
     let distanceInMeters = m_lastPos.distanceTo(pos) * WORLD_TO_METERS
     if (distanceInMeters > 0.0)
@@ -47,11 +54,15 @@ public class MovementComponent extends RealtimeUnitComponent
   private function onMoved(real distanceInMeters)
 
     if (m_unitMovedEvent != null)
-      m_unitMovedEvent.call(this, distanceInMeters)
+      m_unitMovedEvent.call(distanceInMeters)
+
+// ============================================================================
+public function IUnitMetadata.getMovementComponent() returns MovementComponent
+  return this.getComponent(typeInfo(MovementComponent.typeId)) castTo MovementComponent
 
 // ============================================================================
 public function IUnitMetadata.getOrAddMovementComponent() returns MovementComponent
-  var component = this.getComponent(Type(MovementComponent.typeId)) castTo MovementComponent
+  var component = this.getMovementComponent()
   if (component == null)
     component = this.addComponent(new MovementComponent(this)) castTo MovementComponent
   return component

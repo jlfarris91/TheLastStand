@@ -1,37 +1,28 @@
 package InfectedComponent
-import UnitMetadata
 import UnitComponent
-import LinkedList
-import Doodads
 import Abilities
 import AttachmentPoints
-import LinkedListExtensions
 import TlsAbilityIds
-
-constant real EGG_SACK_EFFECT_SCALE = 0.3
-constant string EGG_SACK_EFFECT_MODEL_PATH = Doodads.eggSack0
 
 constant real POISON_EFFECT_SCALE = 0.8
 constant string POISON_EFFECT_MODEL_PATH = Abilities.poisonStingTarget
-
-LinkedList<string> g_randomEffectModelPaths
-LinkedList<string> g_attachmentPoints
+constant colorA INFECTED_TINT_COLOR = colorA(180, 255, 140, 255)
 
 // ============================================================================
 public class InfectedComponent extends UnitComponent
-
-  private LinkedList<effect> m_effects
-  private bool m_isVisible
+  private effect m_effect
 
   // --------------------------------------------------------------------------
   construct(IUnitMetadata owner)
     super(owner)
-    m_effects = new LinkedList<effect>()
 
   // --------------------------------------------------------------------------
   ondestroy
     hide()
-    destroy m_effects
+
+  // --------------------------------------------------------------------------
+  override function getTypeId() returns int
+    return InfectedComponent.typeId
 
   // --------------------------------------------------------------------------
   override function onEnabled()
@@ -54,28 +45,17 @@ public class InfectedComponent extends UnitComponent
     if (targetUnit == null)
       return
   
-    m_effects.add(createPoisonEffect(targetUnit))
-      
-    // Add some extra egg sacks for effect
-    for attachmentPoint in g_attachmentPoints
-      m_effects.add(createEggSackEffect(targetUnit, attachmentPoint))
-
-    m_isVisible = true
+    m_effect = createPoisonEffect(targetUnit)
+    targetUnit.setVertexColor(INFECTED_TINT_COLOR)
 
   // --------------------------------------------------------------------------
   function hide()
-    if (not getIsVisible())
-      return
-
-    for fx in m_effects
-      fx.destr()
-    m_effects.clear()
-
-    m_isVisible = false
+    if (m_effect != null)
+      m_effect.destr()
 
   // --------------------------------------------------------------------------
   function getIsVisible() returns bool
-    return m_isVisible
+    return m_effect != null
 
   // --------------------------------------------------------------------------
   private function enableInfectedWoundAbility()
@@ -88,13 +68,6 @@ public class InfectedComponent extends UnitComponent
     let ownerUnit = getOwnerUnit()
     if (ownerUnit != null)
       ownerUnit.removeAbility(TlsAbilityIds.infectedWound)
-
-  // --------------------------------------------------------------------------
-  private function createEggSackEffect(unit targetUnit, string attachmentPoint) returns effect
-    let modelPath = g_randomEffectModelPaths.getRandom()
-    let fx = AddSpecialEffectTargetUnitBJ(attachmentPoint, targetUnit, modelPath)
-    ..setScale(EGG_SACK_EFFECT_SCALE)
-    return fx
   
   // --------------------------------------------------------------------------
   private function createPoisonEffect(unit targetUnit) returns effect
@@ -104,17 +77,7 @@ public class InfectedComponent extends UnitComponent
 
 // ============================================================================
 public function IUnitMetadata.getOrAddInfectedComponent() returns InfectedComponent
-  var component = this.getComponent(Type(InfectedComponent.typeId)) castTo InfectedComponent
+  var component = this.getComponent(typeInfo(InfectedComponent.typeId)) castTo InfectedComponent
   if (component == null)
     component = this.addComponent(new InfectedComponent(this)) castTo InfectedComponent
   return component
-
-// ============================================================================
-init
-  g_randomEffectModelPaths = new LinkedList<string>()
-  g_randomEffectModelPaths.add(Doodads.eggSack0)
-  g_randomEffectModelPaths.add(Doodads.eggSack1)
-
-  g_attachmentPoints = new LinkedList<string>()
-  g_attachmentPoints.add(AttachmentPoints.head)
-  g_attachmentPoints.add(AttachmentPoints.chest)

@@ -24,18 +24,19 @@ $env:TempRoot = [System.IO.Path]::Combine($env:ProjectRoot, $env:TempDirName)
 $env:ArtifactDirName = "_artifacts"
 $env:ArtifactRoot = [System.IO.Path]::Combine($env:ProjectRoot, $env:ArtifactDirName)
 
-.\buildtarget.ps1
+$env:IsLocalBuild = 1
+if ($env:CI -eq "true") { $env:IsLocalBuild = 0 }
 
-$env:IsLocalBuild = 0
-if ($env:Version_Patch -eq "DEV") { $env:IsLocalBuild = 1 }
-
-Write-Host ("Is Local Build: {0}" -f $env:IsLocalBuild)
-Write-Host ("Version Major: {0}" -f $env:Version_Major)
-Write-Host ("Version Minor: {0}" -f $env:Version_Minor)
-Write-Host ("Version Patch: {0}" -f $env:Version_Patch)
+# Write-Host ("Is Local Build: {0}" -f $env:IsLocalBuild)
 
 $env:MapAuthor = "Ozymandias"
-$env:MapVersion = "v{0}.{1}.{2}" -f $env:Version_Major, $env:Version_Minor, $env:Version_Patch
+
+$VersionInfo = [PSCustomObject](GitVersion | ConvertFrom-Json)
+$env:MapVersion = "v{0}" -f $VersionInfo.MajorMinorPatch
+
+if ($VersionInfo.BranchName -eq "develop") {
+  $env:MapVersion = "{0}.{1}" -f $env:MapVersion, $VersionInfo.PreReleaseTag
+}
 
 $env:SourceMapFileName = "TheLastStand.w3x"
 
@@ -45,15 +46,7 @@ $env:MapNameVersioned = "{0} {1}" -f $env:MapName, $env:MapVersion
 $env:MapNameNoSpaces = "TheLastStand"
 $env:MapNameNoSpacesVersioned = "{0}{1}" -f $env:MapNameNoSpaces, $env:MapVersion
 
-if ($env:IsLocalBuild -eq 1)
-{
-  $env:WurstMapName = $env:MapNameNoSpaces
-}
-else
-{
-  $env:WurstMapName = $env:MapNameNoSpacesVersioned
-}
-
+$env:WurstMapName = $env:MapNameNoSpacesVersioned
 $env:WurstMapFileName = "{0}.w3x" -f $env:WurstMapName
 $env:WurstSourceMapFilePath = [System.IO.Path]::Combine($env:ProjectRoot, $env:WurstMapFileName)
 $env:WurstOutputMapFilePath = [System.IO.Path]::Combine($env:TempRoot, $env:WurstMapFileName)

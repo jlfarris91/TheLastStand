@@ -1,0 +1,134 @@
+package SpikesComponent
+import UnitComponent
+import TlsUnitIds
+import TlsAbilityIds
+import RegisterEvents
+import TimerUtils
+import ClosureTimers
+
+constant real SPIKE4_TIMESCALE_DEFAULT = 1.0
+constant real SPIKE4_TIMESCALE_ATTACK = 5.0
+constant real SPIKE4_ATTACKTIMER_DURATION = 1.0
+
+// ============================================================================
+public class SpikesComponent extends UnitComponent
+  private CallbackManual m_spike4AttackTimerCallback
+
+  // --------------------------------------------------------------------------
+  construct (IUnitMetadata owner)
+    super(owner)
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    releaseSpike4AttackTimer()
+
+  // --------------------------------------------------------------------------
+  override function getTypeId() returns int
+    return SpikesComponent.typeId
+
+  // --------------------------------------------------------------------------
+  override function onEnabled()
+    super.onEnabled()
+    update()
+
+  // --------------------------------------------------------------------------
+  override function onDisabled()
+    super.onDisabled()
+
+    let ownerUnit = getOwnerUnit()
+    ownerUnit.removeAbility(TlsAbilityIds.spikeAttackSlowBonus)
+
+    releaseSpike4AttackTimer()
+
+  // --------------------------------------------------------------------------
+  function update()
+    let ownerUnit = getOwnerUnit()
+    let ownerUnitId = ownerUnit.getTypeId()
+
+    if (ownerUnitId == TlsUnitIds.spikes[4])
+      resetSpike4Animation()
+
+    if (not ownerUnit.hasAbility(TlsAbilityIds.spikeAttackSlowBonus))
+      ownerUnit.addAbility(TlsAbilityIds.spikeAttackSlowBonus)
+
+    if (not ownerUnit.hasAbility(TlsAbilityIds.spikeBarrage))
+      ownerUnit.addAbility(TlsAbilityIds.spikeBarrage)
+
+    let ownerUnitLvl = getOwnerUnitLevel() + 1
+    ownerUnit.setAbilityLevel(TlsAbilityIds.spikeAttackSlowBonus, ownerUnitLvl)
+    ownerUnit.setAbilityLevel(TlsAbilityIds.spikeBarrage, ownerUnitLvl)
+
+  // --------------------------------------------------------------------------
+  function onUnitAttackedBySpikes4()
+    playSpike4AttackAnimation()
+    initializeSpike4AttackTimer()
+    m_spike4AttackTimerCallback.restart()
+
+  // --------------------------------------------------------------------------
+  private function playSpike4AttackAnimation()
+    getOwnerUnit().setTimeScale(SPIKE4_TIMESCALE_ATTACK)
+
+  // --------------------------------------------------------------------------
+  private function resetSpike4Animation()
+    let ownerUnit = getOwnerUnit()
+    ownerUnit.setTimeScale(SPIKE4_TIMESCALE_DEFAULT)
+
+  // --------------------------------------------------------------------------
+  private function initializeSpike4AttackTimer()
+    if (m_spike4AttackTimerCallback == null)
+      m_spike4AttackTimerCallback = getTimer().doManual(SPIKE4_ATTACKTIMER_DURATION, false) -> 
+        resetSpike4Animation()
+
+  // --------------------------------------------------------------------------
+  private function releaseSpike4AttackTimer()    
+    if (m_spike4AttackTimerCallback != null)
+      destroy m_spike4AttackTimerCallback
+      m_spike4AttackTimerCallback = null
+
+  // --------------------------------------------------------------------------
+  function getOwnerUnitLevel() returns int
+    let ownerUnitId = getOwnerUnit().getTypeId()
+    for i = 0 to 4
+      if (ownerUnitId == TlsUnitIds.spikes[i])
+        return i
+    return 0
+
+// ============================================================================
+public function IUnitMetadata.getSpikesComponent() returns SpikesComponent
+  return this.getComponent(typeInfo(SpikesComponent.typeId)) castTo SpikesComponent
+
+// ============================================================================
+public function IUnitMetadata.getOrAddSpikesComponent() returns SpikesComponent
+  var component = this.getSpikesComponent()
+  if (component == null)
+    component = this.addComponent(new SpikesComponent(this)) castTo SpikesComponent
+  return component
+
+// ============================================================================
+function onUpgradeFinished()
+  let upgradedUnit = GetTriggerUnit()
+  
+  let metadata = upgradedUnit.getMetadata()
+  if (metadata == null)
+    return
+
+  let spikesComponent = metadata.getSpikesComponent()
+  if (spikesComponent == null or not spikesComponent.getEnabled())
+    return
+
+  spikesComponent.update()
+
+// ============================================================================
+function onUnitAttackedBySpikes4()
+  let attackingUnit = GetAttacker()
+  if (attackingUnit.getTypeId() != TlsUnitIds.spikes[4])
+    return
+  let spikesComponent = attackingUnit.getMetadata().getSpikesComponent()
+  if (spikesComponent == null or not spikesComponent.getEnabled())
+    return
+  spikesComponent.onUnitAttackedBySpikes4()
+
+// ============================================================================
+init
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_UPGRADE_FINISH, function onUpgradeFinished)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ATTACKED, function onUnitAttackedBySpikes4)

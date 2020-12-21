@@ -5,10 +5,12 @@ import HumanPlayerMetadata
 import UnitMetadata
 import GameSettings
 import Orders
+import MainItemLibrary
+import TlsItemIds
 import SurvivorSpawnManager
 
 // ============================================================================
-public function spawnHeroForPlayer(player p, vec2 pos) returns unit
+public function spawnHeroForPlayer(player p, vec2 pos, bool firstTime) returns unit
   let playerMetadata = p.getHumanMetadataRequired()
 
   unit hero = null
@@ -16,16 +18,19 @@ public function spawnHeroForPlayer(player p, vec2 pos) returns unit
 
   // The hero has been respawned and the metadata already exists
   if (heroMetadata != null)
-    let oldHeroUnit = heroMetadata.getUnit()
-    // We want to persist the hero's metadata
-    if (GameSettings.persistHeroMetadata)
-      hero = createUnitTLS(heroMetadata, p, TlsUnitIds.hero, pos.x, pos.y, GetRandomDirectionDeg())
-    oldHeroUnit.remove()
+    if (firstTime)
+      hero = heroMetadata.getUnit()
+    else
+      let oldHeroUnit = heroMetadata.getUnit()
+      if (oldHeroUnit != null)
+        oldHeroUnit.remove()
+      // We want to persist the hero's metadata
+      hero = createUnitTLS(heroMetadata, p, TlsUnitIds.hero, pos.x, pos.y, 270)
 
   // This is the first time the hero has been spawned for the player
   // new hero metadata will be automatically generated
   if (hero == null)
-    hero = createUnitTLS(p, TlsUnitIds.hero, pos.x, pos.y, GetRandomDirectionDeg())
+    hero = createUnitTLS(p, TlsUnitIds.hero, pos.x, pos.y, 270)
 
   // Reset player's camera to look at new hero
   if (p == GetLocalPlayer())
@@ -33,21 +38,22 @@ public function spawnHeroForPlayer(player p, vec2 pos) returns unit
   
   SelectUnitForPlayerSingle(hero, p)
 
-  // FIXME: prevent hero xp gain
-  SuspendHeroXP(hero, true)
-
   // Set player name back to normal if they were deceased
   playerMetadata.resetDisplayName()
+
+  // Give starting items
+  g_MainItemLibrary.createItemForUnit(hero, TlsItemIds.tent)
 
   return hero
 
 // ============================================================================
-public function spawnInitialPlayerUnitsAtRandomPoint(player p)
-  let sp = g_survivorSpawnManager.getRandomSpawnPointInPlayableMap()
-  if (sp == INVALID_SPAWN_POINT)
+public function spawnInitialPlayerUnitsAtRandomPoint(player p, bool firstTime)
+  let sp = getPlayerSurvivorSpawnManager(p).getRandomSpawnPointInPlayableMap()
+  if (not sp.succeeded)
     error("Could not find a safe spawn point to spawn hero for player " + p.getName())
+    return
 
-  let hero = spawnHeroForPlayer(p, sp)
+  let hero = spawnHeroForPlayer(p, sp.spawnPoint, firstTime)
   
   // Create survivors for the player to start with
   spawnInitialSurvivorsForPlayer(p, hero)

@@ -25,3 +25,6 @@ if ($LASTEXITCODE -ne 0)
 
 # 3. Now have Wurst build the map
 .\RunWurstBuild.ps1
+
+# 4. Update the cached archive
+.\RunLocalUpdateCachedArchive.ps1

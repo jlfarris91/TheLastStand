@@ -1,0 +1,53 @@
+package RandomWeatherPlayer
+import WeatherManager
+import WeightedSet
+import Range
+import ClosureTimers
+
+// ============================================================================
+public class RandomWeatherPlayer
+  private WeightedSet<WeatherEffectType> m_weatherSet
+  private rangeReal m_durationRange
+  private CallbackSingle m_timerCallback
+
+  // --------------------------------------------------------------------------
+  construct()
+    m_weatherSet = new WeightedSet<WeatherEffectType>()
+    m_weatherSet.add(WeatherEffectType.RAIN_LIGHT, 1.0)
+    m_weatherSet.add(WeatherEffectType.RAIN_HEAVY, 1.0)
+    m_weatherSet.add(WeatherEffectType.FOG, 1.0)
+    m_durationRange = rangeReal(30.0, 180.0)
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    stop()
+    destroy m_weatherSet
+
+  // --------------------------------------------------------------------------
+  function setWeatherEffectWeight(WeatherEffectType weatherEffectType, real chance)
+    m_weatherSet.setWeight(weatherEffectType, chance)
+
+  // --------------------------------------------------------------------------
+  function getWeatherEffectWeight(WeatherEffectType weatherEffectType) returns real
+    return m_weatherSet.getWeight(weatherEffectType)
+
+  // --------------------------------------------------------------------------
+  function setWeatherEffectDurationRange(rangeReal durationRange)
+    m_durationRange = durationRange
+
+  // --------------------------------------------------------------------------
+  function getWeatherEffectDurationRange() returns rangeReal
+    return m_durationRange
+
+  // --------------------------------------------------------------------------
+  function start()
+    Weather.clearWeatherEffects()
+    m_timerCallback = doAfter(m_durationRange.getRandom()) () ->
+      Weather.setWeatherEffect(m_weatherSet.getRandom())
+      m_timerCallback = doAfter(m_durationRange.getRandom(), () -> start())
+
+  // --------------------------------------------------------------------------
+  function stop()
+    if (m_timerCallback != null)
+      destroy m_timerCallback
+      m_timerCallback = null

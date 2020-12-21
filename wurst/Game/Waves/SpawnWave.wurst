@@ -10,41 +10,45 @@ import GameConstants
 import ErrorHandling
 import ClosureEvents
 import Math
+import IProgress
+import HashMap
+import SpawnManager
 
-public constant int UNLIMITED = 99999
+HashMap<unit, SpawnWave> g_unitToSpawnWaveMap
 
 // ============================================================================
-public class SpawnWave extends Runnable
+public class SpawnWave extends Runnable implements IProgress
   private SpawnWaveDefinition m_definition
-  private Action1<IWaveActivator> m_onActivatedHandler
+  private EventCallback m_onActivatedHandler
+  private Event1<IProgress> m_progressChangedEvent
+  private Event1Callback<IProgress> m_onDefProgressChangedEventHandler
   private player m_targetPlayer
   private LinkedList<unit> m_aliveSpawnedUnits
-  private GenericArgsEvent<SpawnWave, LinkedList<unit>> m_unitsSpawnedEvent
   private int m_numSpawned
-  private string m_name
+  private string m_id
 
   // --------------------------------------------------------------------------
   construct(SpawnWaveDefinition def, player targetPlayer)
     m_definition = def
     m_aliveSpawnedUnits = new LinkedList<unit>()
-    m_unitsSpawnedEvent = new GenericArgsEvent<SpawnWave, LinkedList<unit>>()
+    m_id = "[P{0}:{1}]".format(targetPlayer.getId().toString(), def.getName())
     setTargetPlayer(targetPlayer)
 
   // --------------------------------------------------------------------------
   ondestroy
     unlistenToActivatedEvent()
+    unlistenToDefProgressChangedEvent()
+    
+    for u in m_aliveSpawnedUnits
+      unregisterSpawnedUnit(u)
     destroy m_aliveSpawnedUnits
-    destroy m_unitsSpawnedEvent
+    
     m_definition = null
     m_targetPlayer = null
 
-  // --------------------------------------------------------------------------
-  function setName(string name)
-    m_name = name
-
-  // --------------------------------------------------------------------------
-  function getName() returns string
-    return m_name
+    if (m_progressChangedEvent != null)
+      destroy m_progressChangedEvent
+      m_progressChangedEvent = null
 
   // --------------------------------------------------------------------------
   function getTargetPlayer() returns player
@@ -59,34 +63,92 @@ public class SpawnWave extends Runnable
     return m_definition
 
   // --------------------------------------------------------------------------
-  function getUnitsSpawnedEvent() returns GenericArgsEvent<SpawnWave, LinkedList<unit>>
-    return m_unitsSpawnedEvent
+  function getId() returns string
+    return m_id
 
   // --------------------------------------------------------------------------
   override function onStarted()
     super.onStarted()
     listenToActivatedEvent()
-    m_definition.getActivator().start()
+    listenToDefProgressChangedEvent()
+
+    let runnableProgress = (m_definition.getProgress() castTo int) castTo IRunnable
+    if (runnableProgress != null)
+      runnableProgress.start()    
+
     m_aliveSpawnedUnits.clear()
     m_numSpawned = 0
 
-  // --------------------------------------------------------------------------
-  override function onStopped()
-    super.onStopped()
-    m_definition.getActivator().stop()
-    unlistenToActivatedEvent()
-    m_aliveSpawnedUnits.clear()
-    m_numSpawned = 0
+    m_definition.getActivator().start()
 
   // --------------------------------------------------------------------------
   override function onPaused()
     super.onPaused()
+    unlistenToActivatedEvent()
+    unlistenToDefProgressChangedEvent()
+
     m_definition.getActivator().pause()
+
+    let runnableProgress = (m_definition.getProgress() castTo int) castTo IRunnable
+    if (runnableProgress != null)
+      runnableProgress.pause()
 
   // --------------------------------------------------------------------------
   override function onResumed()
     super.onResumed()
+    listenToActivatedEvent()
+    listenToDefProgressChangedEvent()
+
     m_definition.getActivator().resume()
+    
+    let runnableProgress = (m_definition.getProgress() castTo int) castTo IRunnable
+    if (runnableProgress != null)
+      runnableProgress.resume()
+
+  // --------------------------------------------------------------------------
+  override function onCompleted()
+    super.onCompleted()
+    unlistenToActivatedEvent()
+    unlistenToDefProgressChangedEvent()
+    m_definition.getActivator().complete()
+
+    let runnableProgress = (m_definition.getProgress() castTo int) castTo IRunnable
+    if (runnableProgress != null)
+      runnableProgress.complete()
+
+  // --------------------------------------------------------------------------
+  override function reset()
+    super.reset()
+    unlistenToActivatedEvent()
+    unlistenToDefProgressChangedEvent()
+
+    m_definition.getActivator().reset()
+
+    let runnableProgress = (m_definition.getProgress() castTo int) castTo IRunnable
+    if (runnableProgress != null)
+      runnableProgress.reset()
+
+    m_aliveSpawnedUnits.clear()
+    m_numSpawned = 0
+
+  // --------------------------------------------------------------------------
+  override function getProgress() returns real
+    return clamp01(m_definition.getProgress().getProgress())
+
+  // --------------------------------------------------------------------------
+  override function getProgressChangedEvent() returns Event1<IProgress>
+    if (m_progressChangedEvent == null)
+      m_progressChangedEvent = new Event1<IProgress>()
+    return m_progressChangedEvent
+
+  // --------------------------------------------------------------------------
+  function raiseProgressChangedEvent()
+    if (m_progressChangedEvent != null)
+      m_progressChangedEvent.call(this)
+
+  // --------------------------------------------------------------------------
+  function activateOnce()
+    onActivated()
 
   // --------------------------------------------------------------------------
   protected function onActivated()
@@ -96,35 +158,36 @@ public class SpawnWave extends Runnable
       error("[SpawnWave.onActivated] Target player has not been set")
       return
 
-    let playerMetadata = p.getHumanMetadataRequired()
-    if (playerMetadata.getIsDead())
+    let playerMetadata = p.getHumanMetadata()
+    if (playerMetadata == null or playerMetadata.getIsDead())
       return
 
-    let camp = playerMetadata.getCamp()
-    let center = camp.getCenter()
-
-    let waveProgress = getWaveProgress()
-    let aliveCountMax = getAliveCountMax(waveProgress)
-    let spawnCountMax = getSpawnCountMax(waveProgress)    
-    let spawnsPerActivation = getSpawnsPerActivation(waveProgress)    
-    let spawnGroupingFactor = getSpawnGroupFactor(waveProgress)
+    let waveProgress = getProgress()
+    let aliveCountMax = m_definition.getMaxAliveCount(waveProgress)
+    let spawnCountMax = m_definition.getMaxSpawnCount(waveProgress)
+    let spawnsPerActivation = m_definition.getSpawnsPerActivation(waveProgress)    
+    let spawnGroupingFactor = m_definition.getSpawnGroupingFactor(waveProgress)
+    let waitForFullSpawnGroup = m_definition.getWaitForFullSpawnGroup()
 
     let numSpawnGroups = max(R2I(I2R(spawnsPerActivation) * (1.0 - spawnGroupingFactor)), 1)
     let spawnGroupSize = max(R2I(I2R(spawnsPerActivation) * spawnGroupingFactor), 1)
 
-    let spawnPoints = m_definition.getSpawnPointProvider().getSpawnPoints(center, numSpawnGroups)
-    if (spawnPoints.getCount() == 0)
+    let spawnPointsResult = m_definition.getSpawnPointProvider().getSpawnPoints(numSpawnGroups)
+    if (not spawnPointsResult.succeeded)
       error("[SpawnWave.onActivated] Found no spawn points!")
-
-    let spawnedUnits = new LinkedList<unit>()
+      return
 
     var numSpawnsAvailable = getNumSpawnsAvailable(aliveCountMax, spawnCountMax)
 
     // For each spawn point
-    for sp in spawnPoints
+    for sp in spawnPointsResult.spawnPoints
       
       // Until we reach max alive or max spawned
       if (numSpawnsAvailable == 0)
+        break
+
+      // Sometimes we want to spawn the entire group at once
+      if (waitForFullSpawnGroup and numSpawnsAvailable < spawnGroupSize)
         break
 
       // Spawn N units to form a group
@@ -144,8 +207,7 @@ public class SpawnWave extends Runnable
           if (numSpawnsAvailable == 0)
             break
 
-          let spawnedUnit = spawnSingleUnit(unitType, sp)
-          spawnedUnits.add(spawnedUnit)
+          spawnSingleUnit(unitType, sp)
 
           numSpawnsAvailable = getNumSpawnsAvailable(aliveCountMax, spawnCountMax)
 
@@ -153,20 +215,21 @@ public class SpawnWave extends Runnable
         destroy unitTypes
 
     // Clean up the spawnPoints list
-    destroy spawnPoints
-    
-    m_unitsSpawnedEvent.call(this, spawnedUnits)
-    destroy spawnedUnits
+    destroy spawnPointsResult.spawnPoints
 
   // --------------------------------------------------------------------------
   private function getNumSpawnsAvailable(int aliveCountMax, int spawnCountMax) returns int
-    let numSpawnsAvailable = min(aliveCountMax - m_aliveSpawnedUnits.size(), spawnCountMax - m_numSpawned)
+    let remainingAlive = aliveCountMax - getAliveCount()
+    let remainingSpawn = spawnCountMax - getSpawnedCount()
+    let numSpawnsAvailable = max(min(remainingAlive, remainingSpawn), 0)
 
-    if (m_numSpawned >= spawnCountMax)
-      Log.debug("[SpawnWave.onActivated] Reached max number of spawns for wave")
+    if (getSpawnedCount() >= spawnCountMax)
+      //Log.debug("[SpawnWave.onActivated] Reached max number of spawns for wave")
+      return 0
 
-    if (m_aliveSpawnedUnits.size() >= aliveCountMax)
-      Log.debug("[SpawnWave.onActivated] Reached max number of concurrent alive")
+    if (getAliveCount() >= aliveCountMax)
+      //Log.debug("[SpawnWave.onActivated] Reached max number of concurrent alive")
+      return 0
 
     return numSpawnsAvailable
 
@@ -178,22 +241,32 @@ public class SpawnWave extends Runnable
       pos.x, pos.y,
       GetRandomDirectionDeg())
 
-    var progress = 0.0
-    let waveProgresser = m_definition.getProgress()
-    if (waveProgresser != null)
-      progress = waveProgresser.getProgress()
+    let progress = getProgress()
 
-    let unitModifier = m_definition.getUnitModifier()
+    let commonUnitModifier = m_definition.getCommonUnitModifier()
+    if (commonUnitModifier != null)
+      commonUnitModifier.apply(spawnedUnit, progress)
+
+    let unitModifier = m_definition.getUnitModifier(unitTypeId)
     if (unitModifier != null)
       unitModifier.apply(spawnedUnit, progress)
 
-    m_aliveSpawnedUnits.add(spawnedUnit)
-    EventListener.add(spawnedUnit, EVENT_PLAYER_UNIT_DEATH) () ->
-      m_aliveSpawnedUnits.remove(spawnedUnit)
-
-    m_numSpawned++
+    registerSpawnedUnit(spawnedUnit)
 
     return spawnedUnit
+
+  // --------------------------------------------------------------------------
+  function registerSpawnedUnit(unit spawnedUnit)
+    if (g_unitToSpawnWaveMap.has(spawnedUnit))
+      return
+    m_aliveSpawnedUnits.add(spawnedUnit)
+    g_unitToSpawnWaveMap.put(spawnedUnit, this)    
+    m_numSpawned++
+  
+  // --------------------------------------------------------------------------
+  function unregisterSpawnedUnit(unit spawnedUnit)
+    m_aliveSpawnedUnits.remove(spawnedUnit)
+    g_unitToSpawnWaveMap.remove(spawnedUnit)
 
   // --------------------------------------------------------------------------
   function getSpawnedCount() returns int
@@ -204,59 +277,64 @@ public class SpawnWave extends Runnable
     return m_aliveSpawnedUnits.size()
 
   // --------------------------------------------------------------------------
-  function getWaveProgress() returns real
-    var waveProgress = -1.0
-    let getProgress = m_definition.getProgress()
-    if (getProgress != null)
-      waveProgress = getProgress.getProgress()
-    return clamp01(waveProgress)
-
-  // --------------------------------------------------------------------------
-  function getAliveCountMax(real waveProgress) returns int
-    var aliveCountMax = UNLIMITED
-    let getAliveCountMax = m_definition.getMaxAliveCount()
-    if (getAliveCountMax != null)
-      aliveCountMax = getAliveCountMax.call(waveProgress)
-    return clamp(aliveCountMax, 0, UNLIMITED)
-
-  // --------------------------------------------------------------------------
-  function getSpawnCountMax(real waveProgress) returns int
-    var spawnCountMax = UNLIMITED
-    let getSpawnPointMax = m_definition.getMaxSpawnCount()
-    if (getSpawnPointMax != null)
-      spawnCountMax = getSpawnPointMax.call(waveProgress)
-    return clamp(spawnCountMax, 0, UNLIMITED)
-
-  // --------------------------------------------------------------------------
-  function getSpawnGroupFactor(real waveProgress) returns real
-    var spawnGroupingFactor = 0.0
-    let getSpawnGroupingFactor = m_definition.getSpawnGroupingFactor()
-    if (getSpawnGroupingFactor != null)
-      spawnGroupingFactor = getSpawnGroupingFactor.call(waveProgress)
-    return clamp01(spawnGroupingFactor)
-
-  // --------------------------------------------------------------------------
-  function getSpawnsPerActivation(real waveProgress) returns int
-    var spawnsPerActivation = 1
-    let getSpawnsPerActivation = m_definition.getSpawnsPerActivation()
-    if (getSpawnsPerActivation != null)
-      spawnsPerActivation = getSpawnsPerActivation.call(waveProgress)
-    return clamp(spawnsPerActivation, 0, 1000)
-
-  // --------------------------------------------------------------------------
   private function listenToActivatedEvent()
     unlistenToActivatedEvent()
-    if (m_onActivatedHandler == null)
-      let activator = m_definition.getActivator()
-      m_onActivatedHandler = activator.getActivatedEvent().add() (IWaveActivator sender) ->
-        onActivated()
+
+    if (m_onActivatedHandler != null)
+      return
+
+    let activator = m_definition.getActivator()
+    if (activator == null)
+      return
+    
+    let e = activator.getActivatedEvent()
+    if (e == null)
+      return
+
+    m_onActivatedHandler = e.register(() -> onActivated())
 
   // --------------------------------------------------------------------------
   private function unlistenToActivatedEvent()
     if (m_onActivatedHandler != null)
-      if (m_definition != null)
-        let activator = m_definition.getActivator()
-        if (activator != null)
-          activator.getActivatedEvent().remove(m_onActivatedHandler)
       destroy m_onActivatedHandler
       m_onActivatedHandler = null
+
+  // --------------------------------------------------------------------------
+  private function onDefProgressChanged()
+    raiseProgressChangedEvent()
+    if (getProgress() == 1.0)
+      complete()
+
+  // --------------------------------------------------------------------------
+  private function listenToDefProgressChangedEvent()
+    unlistenToDefProgressChangedEvent()
+
+    if (m_onDefProgressChangedEventHandler != null)
+      return
+
+    let progressChangedEvent = m_definition.getProgress().getProgressChangedEvent()
+    if (progressChangedEvent == null)
+      return
+
+    m_onDefProgressChangedEventHandler = progressChangedEvent.register((progress) -> onDefProgressChanged())
+
+  // --------------------------------------------------------------------------
+  private function unlistenToDefProgressChangedEvent()
+    if (m_onDefProgressChangedEventHandler != null)
+      destroy m_onDefProgressChangedEventHandler
+      m_onDefProgressChangedEventHandler = null
+
+// ============================================================================
+function onUnitDeath()
+  let dyingUnit = GetDyingUnit()
+
+  if (not g_unitToSpawnWaveMap.has(dyingUnit))
+    return
+
+  let spawnWave = g_unitToSpawnWaveMap.get(dyingUnit)
+  spawnWave.unregisterSpawnedUnit(dyingUnit)
+
+// ============================================================================
+init
+  g_unitToSpawnWaveMap = new HashMap<unit, SpawnWave>()
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_DEATH, function onUnitDeath)

@@ -1,6 +1,5 @@
 package GameInstance
 import GameSettings
-import Survivors
 import GameConstants
 import HumanPlayers
 import HumanPlayerMetadata
@@ -15,8 +14,11 @@ import Runnable
 import NormalNightWaveGenerator
 import NormalDayWaveGenerator
 import WaveMultiboard
-import Events
 import BaseUnitsRectProvider
+import TimeOfDay
+import RandomWeatherPlayer
+import DisplayTextToPlayer
+import StringExtensions
 
 public GameInstance g_GameInstance
 
@@ -25,26 +27,21 @@ constant real GAME_SPEED_INITIAL = 100.0
 
 // ============================================================================
 public class GameInstance extends Runnable
+  private bool m_gracePeriod
+  private bool m_updateGracePeriod
   private int m_day
   private int m_night
-  private Action m_dayEventHandler
-  private Action m_nightEventHandler
   private PlayerWavesMap m_playerWaves
   private IWaveGenerator<DayWave> m_dayWaveGenerator
   private IWaveGenerator<NightWave> m_nightWaveGenerator
   private WaveMultiboard m_waveMultiboard
+  private RandomWeatherPlayer m_weatherPlayer
 
   // --------------------------------------------------------------------------
   ondestroy
-    stop()
-
-  // --------------------------------------------------------------------------
-  function getIsDay() returns bool
-    return GetTimeOfDay() >= TIME_OF_DAY and GetTimeOfDay() < TIME_OF_NIGHT
-
-  // --------------------------------------------------------------------------
-  function getIsNight() returns bool
-    return GetTimeOfDay() >= TIME_OF_NIGHT or GetTimeOfDay() < TIME_OF_DAY
+    if (not this.isCompleted())
+      this.cancel()
+    destroy m_weatherPlayer
 
   // --------------------------------------------------------------------------
   function getDay() returns int
@@ -63,8 +60,24 @@ public class GameInstance extends Runnable
     return max(m_day - 1, 0)
 
   // --------------------------------------------------------------------------
+  function isGracePeriodActive() returns bool
+    return m_gracePeriod
+
+  // --------------------------------------------------------------------------
+  function setGracePeriodActive(bool value)
+    m_gracePeriod = value
+
+  // --------------------------------------------------------------------------
+  function setUpdateGracePeriod(bool value)
+    m_updateGracePeriod = value
+
+  // --------------------------------------------------------------------------
   function getWaves() returns PlayerWavesMap
     return m_playerWaves
+
+  // --------------------------------------------------------------------------
+  function getPlayerWaves(player p) returns PlayerWaves
+    return m_playerWaves.getOrCreatePlayerWaves(p)
 
   // --------------------------------------------------------------------------
   function startNextDay()
@@ -80,61 +93,49 @@ public class GameInstance extends Runnable
 
   // --------------------------------------------------------------------------
   function skipToDay(int day)
-    if (day > getDay())
-      if (getIsDay())
-        startNextNight()
-      else
-        startNextDay()
-      doAfter(0.2) ->
-        skipToDay(day)
+    m_day = day - 1
+    startNextDay()
 
   // --------------------------------------------------------------------------
   function skipToNight(int night)
-    if (night > getNight())
-      if (getIsDay())
-        startNextNight()
-      else
-        startNextDay()
-      doAfter(0.2) ->  
-        skipToNight(night)
+    m_night = night - 1
+    startNextNight()
 
   // --------------------------------------------------------------------------
-  function reset()
-    stop()
+  override function reset()
+    super.reset()
     
     m_day = 0
     m_night = 0
     SetTimeOfDay(TIME_OF_DAY_INITIAL)
     SetTimeOfDayScalePercentBJ(GAME_SPEED_INITIAL)
 
-    start()
-
   // --------------------------------------------------------------------------
   override function onStarted()
     super.onStarted()
 
+    m_updateGracePeriod = true
+
     // These should move to a place that sets up the GameInstance
     m_dayWaveGenerator = new NormalDayWaveGenerator()
     m_nightWaveGenerator = new NormalNightWaveGenerator()
-
     m_waveMultiboard = new WaveMultiboard()
+    m_weatherPlayer = new RandomWeatherPlayer()
+
+    m_weatherPlayer.start()
 
     initializeGeneral()
     initializeAlliances()
     initializeWaves()
 
-    listenForDayEvent()
-    listenForNightEvent()
-
     doAfter(1.0) ->
       postStart()
 
   // --------------------------------------------------------------------------
-  override function onStopped()
-    super.onStopped()    
+  override function onCompleted()
+    super.onCompleted()
 
-    unlistenForDayEvent()
-    unlistenForNightEvent()
+    m_weatherPlayer.stop()
 
     destroy m_playerWaves
     m_playerWaves = null
@@ -159,7 +160,7 @@ public class GameInstance extends Runnable
   // --------------------------------------------------------------------------
   private function initializePlayer(player p)
     
-    spawnInitialPlayerUnitsAtRandomPoint(p)
+    spawnInitialPlayerUnitsAtRandomPoint(p, true)
 
     // Create a visible region around the base units
     createVision(p, getBaseUnitsRect(), false)
@@ -168,10 +169,20 @@ public class GameInstance extends Runnable
     p.setLumber(GameSettings.startingMaterials)
 
   // --------------------------------------------------------------------------
-  private function onDayStart()
+  function updateGracePeriod()
+    let wasGracePeriod = m_gracePeriod
+    m_gracePeriod = m_day < GRACE_PERIOD_END_DAY
+    if (wasGracePeriod and not m_gracePeriod)
+      displayMessageToPlayers("Grace period has ended. Hero death is now permanent.".colorize(COLOR_GOLD))
+
+  // --------------------------------------------------------------------------
+  function startDay()
     m_day++
 
-    Log.debug("Started day " + I2S(m_day))
+    if (m_updateGracePeriod)
+      updateGracePeriod()
+
+    Log.debug("Starting day {0}...".format(m_day.toString()))
 
     PlaySoundBJ(TlsSounds.questCompleted)
 
@@ -181,34 +192,33 @@ public class GameInstance extends Runnable
     // Start day waves for players
     for p in g_PlayingHumanPlayers
       let waves = m_playerWaves.getOrCreatePlayerWaves(p)
+      Log.debug("Starting day wave {0} for player {1}".format(m_day.toString(), p.getName()))
       waves.getRunner().startDayWave(m_day)
 
-    spawnUnrescuedSurvivorsNearPlayers()
-
-    // For each player that has less food than their max spawn a survivor
-    for p in g_PlayingHumanPlayers
-      if (p.getCurrentSupply() < p.getMaxSupply())
-        let duration = GetRandomReal(SPAWN_SURVIVOR_AT_DAY_START_DELAY_MIN, SPAWN_SURVIVOR_AT_DAY_START_DELAY_MAX)
-        doAfter(duration, () -> spawnSurvivorUnitForPlayer(p))
+    Log.debug("Day {0} started.".format(m_day.toString()))
 
   // --------------------------------------------------------------------------
-  private function onNightStart()
+  function startNight()
     m_night++
 
-    Log.debug("Started night " + I2S(m_night))
-
-    removeUnrescuedSurvivors()
+    Log.debug("Starting night {0}...".format(m_night.toString()))
 
     // Start night waves for players
     for p in g_PlayingHumanPlayers
       let waves = m_playerWaves.getOrCreatePlayerWaves(p)
+      Log.debug("Starting night wave {0} for player {1}".format(m_night.toString(), p.getName()))
       waves.getRunner().startNightWave(m_night)
+
+    Log.debug("Night {0} started.".format(m_night.toString()))
 
   // --------------------------------------------------------------------------
   private function respawnDeadPlayers()
+    if (not m_gracePeriod)
+      return
+
     g_PlayingHumanPlayers.forEach() (player p) ->
       if (p.getHumanMetadata().getIsDead())
-        spawnInitialPlayerUnitsAtRandomPoint(p)  
+        spawnInitialPlayerUnitsAtRandomPoint(p, false)  
 
   // --------------------------------------------------------------------------
   private function initializeGeneral()
@@ -220,9 +230,9 @@ public class GameInstance extends Runnable
     SetTimeOfDay(TIME_OF_DAY_INITIAL)
     FogEnableOn()
 
+    // We control experience gain manually
     for p in g_HumanPlayers
-      // We control experience gain manually
-      SetPlayerHandicapXPBJ(p, 0.00 )
+      SetPlayerHandicapXPBJ(p, 0.00)
 
   // --------------------------------------------------------------------------
   private function initializeWaves()
@@ -249,8 +259,6 @@ public class GameInstance extends Runnable
 
   // --------------------------------------------------------------------------
   private function initializeAlliances()  
-    SetPlayerAllianceStateBJ(PLAYER_RAIDERS, PLAYER_UNDEAD, bj_ALLIANCE_UNALLIED)
-    SetPlayerAllianceStateBJ(PLAYER_UNDEAD, PLAYER_RAIDERS, bj_ALLIANCE_UNALLIED)
     for p in g_HumanPlayers
       // Make player treat undead as an enemy
       SetPlayerAllianceStateBJ(p, PLAYER_UNDEAD, bj_ALLIANCE_UNALLIED)
@@ -265,39 +273,22 @@ public class GameInstance extends Runnable
       // Make raiders treat player as an enemy
       SetPlayerAllianceStateBJ(PLAYER_UNDEAD, p, bj_ALLIANCE_UNALLIED)
 
-  // --------------------------------------------------------------------------
-  private function listenForDayEvent()
-    unlistenForDayEvent()
+// ============================================================================
+function onDayStart()
+  // Wait to allow Waves and SpawnWaves to complete
+  g_GameInstance.startDay()
 
-    if (m_dayEventHandler == null)
-      m_dayEventHandler = GameEvents.dayStartEvent.add() () ->
-        onDayStart()
-
-  // --------------------------------------------------------------------------
-  private function unlistenForDayEvent()
-    if (m_dayEventHandler != null)
-      GameEvents.dayStartEvent.remove(m_dayEventHandler)
-      destroy m_dayEventHandler
-      m_dayEventHandler = null
-
-  // --------------------------------------------------------------------------
-  private function listenForNightEvent()
-    unlistenForNightEvent()
-
-    if (m_nightEventHandler == null)
-      m_nightEventHandler = GameEvents.nightStartEvent.add() () ->
-        onNightStart()
-
-  // --------------------------------------------------------------------------
-  private function unlistenForNightEvent()
-    if (m_nightEventHandler != null)
-      GameEvents.nightStartEvent.remove(m_nightEventHandler)
-      destroy m_nightEventHandler
-      m_nightEventHandler = null
+// ============================================================================
+function onNightStart()
+  // Wait to allow Waves and SpawnWaves to complete
+  g_GameInstance.startNight()
 
 // ============================================================================
 init
   g_GameInstance = new GameInstance()
+
+  registerDayEvent(function onDayStart)
+  registerNightEvent(function onNightStart)
 
   doAfter(0.1) ->
     g_GameInstance.start()

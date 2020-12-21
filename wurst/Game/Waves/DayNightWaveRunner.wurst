@@ -5,55 +5,93 @@ import DayWaveCollection
 import NightWaveCollection
 import DayWave
 import NightWave
+import DisplayTextToPlayer
+import SpawnWave
+import LinkedList
+import StringExtensions
 
 // ============================================================================
-public class DayNightWaveRunner extends Runnable
+public class DayNightWaveRunner
+  private player m_targetPlayer
   private NightWaveCollection m_nightWaves
   private DayWaveCollection m_dayWaves
   private Wave m_currentWave
   private bool m_day
 
   // --------------------------------------------------------------------------
-  construct(NightWaveCollection nightWaves, DayWaveCollection dayWaves)
+  construct(player targetPlayer, NightWaveCollection nightWaves, DayWaveCollection dayWaves)
+    m_targetPlayer = targetPlayer
     m_nightWaves = nightWaves
     m_dayWaves = dayWaves
 
   // --------------------------------------------------------------------------
   ondestroy
-    stopCurrentlyRunningWave()
+    cancelCurrentWave()
+
+  // --------------------------------------------------------------------------
+  function getCurrentWave() returns Wave
+    return m_currentWave
   
   // --------------------------------------------------------------------------
   function startNightWave(int night)
     Log.debug("Start night wave " + I2S(night))
-    stopCurrentlyRunningWave()
+    cancelCurrentWave()
     m_currentWave = m_nightWaves.getLatestWave(night)
     if (m_currentWave != null)
       m_currentWave.start()
       m_day = false
+      Log.debug("Night wave {0} started.".format(m_currentWave.getId()))
+      announceWave(m_currentWave)
     else
       Log.debug("No night wave found for night " + I2S(night))
 
   // --------------------------------------------------------------------------
   function startDayWave(int day)
-    Log.debug("Start day wave " + I2S(day))
-    stopCurrentlyRunningWave()
+    Log.debug("Starting day wave {0}...".format(day.toString()))
+    cancelCurrentWave()
     m_currentWave = m_dayWaves.getLatestWave(day)
     if (m_currentWave != null)
-      m_currentWave.start()
       m_day = true
+      m_currentWave.start()
+      Log.debug("Day wave {0} started.".format(m_currentWave.getId()))
     else
       Log.debug("No day wave found for day " + I2S(day))
 
   // --------------------------------------------------------------------------
-  function stopCurrentlyRunningWave()
-    if (m_currentWave == null)
+  function cancelCurrentWave()
+    if (m_currentWave == null or m_currentWave.isCompleted())
       return
 
-    if (m_day)
-      let dayWave = m_currentWave castTo DayWave
-      Log.debug("Stopping day wave " + I2S(dayWave.getDay()))
-    else
-      let nightWave = m_currentWave castTo NightWave
-      Log.debug("Stopping night wave " + I2S(nightWave.getNight()))
+    Log.debug("Wave {0} canceled by runner. State: {1}".format(m_currentWave.getId(), m_currentWave.getStatusString()))
 
-    m_currentWave.stop()
+    m_currentWave.cancel()
+
+  // --------------------------------------------------------------------------
+  private function announceWave(Wave wave)
+    let nightWave = wave castTo NightWave
+    if (nightWave == null)
+      return
+
+    let spawnWaves = wave.getSpawnWaves()
+    if (spawnWaves.isEmpty())
+      return
+
+    let spawnWavesCloned = spawnWaves.copy()
+
+    // Remove "Zombies" spawn wave that exists for every night after the first
+    if (nightWave.getNight() > 1)
+      spawnWavesCloned.removeAt(0)
+
+    let firstSpawnWaveDef = spawnWavesCloned.getFirst().getDefinition()
+    let spawnWaveName = firstSpawnWaveDef.getName()
+    let spawnWaveTagsStr = firstSpawnWaveDef.getTags().joinBy(", ")
+
+    destroy spawnWavesCloned
+
+    let message = "Night {0} - {1} ({2})".format(
+      nightWave.getNight().toString(),
+      spawnWaveName.colorize(COLOR_GOLD),
+      spawnWaveTagsStr)
+    
+    // e.g. "Night 3 - Skeleton Archers"
+    displayMessageToPlayer(m_targetPlayer, message)

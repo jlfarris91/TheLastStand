@@ -2,18 +2,29 @@ package TimedProgress
 import Runnable
 import GameTimer
 import IProgress
+import Events
+import RealtimeUpdate
 
 // ============================================================================
-public class TimedProgress extends Runnable implements IProgress
+public class TimedProgress extends Runnable implements IProgress, IRealtimeListener
   private real m_duration
   private real m_startTime
-  private real m_elapsedTime
+  private real m_totalTime
+  private Event1<IProgress> m_progressChangedEvent
 
   // --------------------------------------------------------------------------
   construct()
     m_duration = 0
     m_startTime = 0
-    m_elapsedTime = 0
+    m_totalTime = 0
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    this.unregisterForRealtimeUpdate()
+
+    if (m_progressChangedEvent != null)
+      destroy m_progressChangedEvent
+      m_progressChangedEvent = null
 
   // --------------------------------------------------------------------------
   function getDuration() returns real
@@ -24,26 +35,55 @@ public class TimedProgress extends Runnable implements IProgress
     m_duration = value
 
   // --------------------------------------------------------------------------
+  function getElapsed() returns real
+    return (currentTime - m_startTime) + m_totalTime
+
+  // --------------------------------------------------------------------------
   override function getProgress() returns real
-    return ((currentTime - m_startTime) + m_elapsedTime) / m_duration
+    return getElapsed() / m_duration
 
   // --------------------------------------------------------------------------
   override function onStarted()
     super.onStarted()
     m_startTime = currentTime
-    m_elapsedTime = 0.0
-
-  override function onStopped()
-    super.onStopped()
-    m_startTime = -1.0
-    m_elapsedTime = 0.0
+    m_totalTime = 0.0
+    this.registerForRealtimeUpdate(RealtimeUpdatePriority.Fast)
 
   // --------------------------------------------------------------------------
   override function onPaused()
     super.onPaused()
-    m_elapsedTime += currentTime - m_startTime
+    m_totalTime += currentTime - m_startTime
+    this.unregisterForRealtimeUpdate()
 
   // --------------------------------------------------------------------------
   override function onResumed()
     super.onResumed()
     m_startTime = currentTime
+    this.registerForRealtimeUpdate(RealtimeUpdatePriority.Fast)
+
+  // --------------------------------------------------------------------------
+  override function onCompleted()
+    super.onCompleted()
+    m_totalTime += currentTime - m_startTime
+    this.unregisterForRealtimeUpdate()
+
+  // --------------------------------------------------------------------------
+  override function reset()
+    super.reset()
+    m_startTime = 0.0
+    m_totalTime = 0.0
+
+  // --------------------------------------------------------------------------
+  override function getProgressChangedEvent() returns Event1<IProgress>
+    if (m_progressChangedEvent == null)
+      m_progressChangedEvent = new Event1<IProgress>()
+    return m_progressChangedEvent
+
+  // --------------------------------------------------------------------------
+  override function realtimeUpdate(real dt)
+    raiseProgressChangedEvent()
+
+  // --------------------------------------------------------------------------
+  function raiseProgressChangedEvent()
+    if (m_progressChangedEvent != null)
+      m_progressChangedEvent.call(this)

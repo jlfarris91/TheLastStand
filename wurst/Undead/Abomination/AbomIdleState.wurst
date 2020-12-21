@@ -1,7 +1,6 @@
 package AbomIdleState
 import StateMachine
 import Abomination
-import UnitMetadata
 import TlsAbilityIds
 import Orders
 import GroupUtils
@@ -33,11 +32,12 @@ public class AbomIdleState extends BaseStateMachineState
   // --------------------------------------------------------------------------
   override function enter()
     _time = 0.0
-    _lastPos = _abom.getPos()
+    let abomUnit = _abom.getUnit()
+    _lastPos = abomUnit.getPos()
     _grabbingZombie = false
     _grabbingZombieTimer = ABOM_GRABBING_ZOMBIE_TIMEOUT
 
-    _abom.addAbility(TlsAbilityIds.abomGrabZombie)
+    abomUnit.addAbility(TlsAbilityIds.abomGrabZombie)
 
     attackPlayer()
 
@@ -48,13 +48,13 @@ public class AbomIdleState extends BaseStateMachineState
     _grabbingZombie = false
     _grabbingZombieTimer = ABOM_GRABBING_ZOMBIE_TIMEOUT
 
-    _abom.removeAbility(TlsAbilityIds.abomGrabZombie)
+    _abom.getUnit().removeAbility(TlsAbilityIds.abomGrabZombie)
 
   // --------------------------------------------------------------------------
   override function update(real dt)
     _time += dt
 
-    let currentPos = _abom.getPos()
+    let currentPos = _abom.getUnit().getPos()
     let distanceSq = currentPos.distanceToSq(_lastPos)
 
     if (distanceSq > ABOM_IDLE_RADIUS_SQ)
@@ -83,13 +83,14 @@ public class AbomIdleState extends BaseStateMachineState
 
   // --------------------------------------------------------------------------
   private function tryGrabZombie() returns bool
+    let abomUnit = _abom.getUnit()
 
     // === These need to be cleaned up
     let g = getGroup()
-    let filter = Condition(function isFilterUnitAZombie)
+    let filter = Condition(function isFilterUnitAnAliveZombie)
     // ===
 
-    g.enumUnitsInRange(_abom.getPos(), 512.0, filter)
+    g.enumUnitsInRange(abomUnit.getPos(), 512.0, filter)
     let target = g.getRandomUnit()
 
     // === Cleanup
@@ -102,5 +103,10 @@ public class AbomIdleState extends BaseStateMachineState
       return false
 
     Log.debug("[AbomIdleState] Grab zombie: " + target.getName())
-    _abom.issueTargetOrderById(OrderIds.charm, target)
+    abomUnit.issueTargetOrderById(OrderIds.charm, target)
     return true
+
+// ============================================================================
+function isFilterUnitAnAliveZombie() returns bool
+  let u = GetFilterUnit()
+  return u.isZombie() and u.isAlive()

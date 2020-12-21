@@ -1,0 +1,68 @@
+package KillsStat
+import Statistic
+import UnitComponent
+import SurvivorStats
+import SurvivorComponent
+import RegisterEvents
+
+// ============================================================================
+public class KillsStat extends UnitComponent
+  private SurvivorComponent m_survivorDataComponent
+
+  // --------------------------------------------------------------------------
+  construct(IUnitMetadata owner)
+    super(owner)
+
+  // --------------------------------------------------------------------------
+  override function getTypeId() returns int
+    return KillsStat.typeId
+
+  // --------------------------------------------------------------------------
+  override protected function onEnabled()
+    super.onEnabled()
+    m_survivorDataComponent = getOwner().getOrAddSurvivorComponent()
+
+  // --------------------------------------------------------------------------
+  override protected function onDisabled()
+    super.onDisabled()
+    m_survivorDataComponent = null
+
+  // --------------------------------------------------------------------------
+  function registerKill()
+    let stats = m_survivorDataComponent.getSurvivorData()
+    if (stats == null)
+      return
+
+    let stat = stats.getStatistic(SurvivorStats.kills) castTo IntStatistic
+    if (stat == null)
+      return
+
+    stat.increment(1)
+
+// ============================================================================
+public function IUnitMetadata.getKillsStat() returns KillsStat
+  return this.getComponent(typeInfo(KillsStat.typeId)) castTo KillsStat
+
+// ============================================================================
+public function IUnitMetadata.getOrAddKillsStat() returns KillsStat
+  var component = this.getKillsStat()
+  if (component == null)
+    component = this.addComponent(new KillsStat(this)) castTo KillsStat
+  return component
+
+// ============================================================================
+function onUnitKilled()
+  let killingUnit = GetKillingUnit()
+  let metadata = killingUnit.getMetadata()
+  if (metadata == null)
+    return
+
+  let stat = metadata.getKillsStat()
+  if (stat == null or not stat.getEnabled())
+    return
+
+  stat.registerKill()
+
+// ============================================================================
+init
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_DEATH, function onUnitKilled)

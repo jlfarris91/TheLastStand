@@ -5,14 +5,13 @@ import ErrorHandling
 import LinkedList
 import TlsUnitIds
 import UnitMetadata
-import HumanPlayerMetadata
-import TlsAbilityIds
-import DisplayTextToPlayer
 
 import public initlater CampUnit
 import public initlater CampUnitFactory
+import HumanPlayerMetadata
 
 HashMap<player, ICamp> g_PlayerCamps
+group g_tempGroup
 
 // ============================================================================
 public interface ICamp
@@ -22,9 +21,6 @@ public interface ICamp
   function setCampTent(unit u)
   
   function getCenter() returns vec2
-  
-  function getIsSecure() returns bool
-  function setIsSecure(bool isSecure)
 
   function getUnit(unit u) returns ICampUnitMetadata
   function addUnit(ICampUnitMetadata u) returns ICampUnitMetadata
@@ -33,8 +29,6 @@ public interface ICamp
   function getUnits() returns LinkedList<ICampUnitMetadata>
 
   function reset()
-
-  function giveAllUnitsToPlayer(player newOwner)
 
 // ============================================================================
 public interface ICampUnitMetadata extends IUnitMetadata
@@ -90,23 +84,12 @@ public class Camp implements ICamp
   override function getCenter() returns vec2
     if (_campFlag != null)
       return _campFlag.getPos()
-    else if (_owner.getHero() != null)
-      return _owner.getHero().getPos()
+    let hero = _owner.getHero()
+    if (hero != null)
+      let heroUnit = hero.getUnit()
+      if (heroUnit != null)
+      return heroUnit.getPos()
     return ZERO2
-
-  // --------------------------------------------------------------------------
-  override function getIsSecure() returns bool
-    return this._isSecure
-
-  // --------------------------------------------------------------------------
-  override function setIsSecure(bool isSecure)
-    if (this._isSecure == isSecure)
-      return
-    this._isSecure = isSecure
-    if (isSecure)
-      onCampSecure()
-    else
-      onCampNotSecure()
 
   // --------------------------------------------------------------------------
   override function getUnit(unit u) returns ICampUnitMetadata
@@ -116,14 +99,14 @@ public class Camp implements ICamp
   override function addUnit(ICampUnitMetadata campUnit) returns ICampUnitMetadata
     this._units.add(campUnit)
     this._unitToCampUnitMap.put(campUnit.getUnit(), campUnit)
-    Log.debug("Added unit {0} to {1} camp".format(campUnit.getUnit().getName(), _owner.getName()))
+    //Log.debug("Added unit {0} to {1} camp".format(campUnit.getUnit().getName(), _owner.getName()))
     return campUnit
 
   // --------------------------------------------------------------------------
   override function removeUnit(ICampUnitMetadata campUnit) returns bool
     this._units.remove(campUnit)
     this._unitToCampUnitMap.remove(campUnit.getUnit())
-    Log.debug("Removed unit {0} from {1} camp".format(campUnit.getUnit().getName(), _owner.getName()))
+    //Log.debug("Removed unit {0} from {1} camp".format(campUnit.getUnit().getName(), _owner.getName()))
     return true
 
   // --------------------------------------------------------------------------
@@ -132,22 +115,3 @@ public class Camp implements ICamp
     for campUnit in this._units
       campUnits.add(campUnit)
     return campUnits
-
-  // --------------------------------------------------------------------------
-  override function giveAllUnitsToPlayer(player newOwner)
-    let campUnits = getUnits()
-    for u in campUnits
-      if (u != _owner.getHero())
-        u.setOwner(newOwner, true)
-
-  // --------------------------------------------------------------------------
-  protected function onCampSecure()
-    _campFlag.removeAbility(TlsAbilityIds.campIsNotSecure)
-    _campFlag.addAbility(TlsAbilityIds.campIsSecure)
-    displayMessageToPlayer(_owner.getPlayer(), "Your camp is |cffffcc00Secure|r")
-
-  // --------------------------------------------------------------------------
-  protected function onCampNotSecure()
-    _campFlag.removeAbility(TlsAbilityIds.campIsSecure)
-    _campFlag.addAbility(TlsAbilityIds.campIsNotSecure)
-    displayMessageToPlayer(_owner.getPlayer(), "Your camp is |cffffcc00Not Secure|r")

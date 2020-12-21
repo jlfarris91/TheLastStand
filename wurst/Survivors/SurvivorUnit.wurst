@@ -9,13 +9,12 @@ import Icons
 import SurvivorComponent
 import HashMap
 
-import DistanceTraveledStatistic
-import KillsStatistic
-import DaysSurvivedStatisticComponent
-import NightsSurvivedStatisticComponent
+import KillsStat
+import DaysSurvivedStat
+import NightsSurvivedStat
 import SurvivorData
 import SurvivorNames
-import SurvivorJobIds
+import SurvivorJobs
 
 import BuilderJobComponent
 import MilitiaJobComponent
@@ -27,13 +26,14 @@ import RangedTargetXpReceieverComponent
 
 // ============================================================================
 public class Survivor extends CampUnit
-  private HashMap<string, SurvivorJobComponent> m_jobComponents
+  private HashMap<SurvivorJobDefinition, SurvivorJobComponent> m_jobComponents
   private SurvivorJobComponent m_activeJobComponent
+  private SurvivorData m_survivorData
 
   // --------------------------------------------------------------------------
   construct(ICamp camp)
     super(camp)
-    m_jobComponents = new HashMap<string, SurvivorJobComponent>()
+    m_jobComponents = new HashMap<SurvivorJobDefinition, SurvivorJobComponent>()
     initialize()
 
   // --------------------------------------------------------------------------
@@ -41,6 +41,9 @@ public class Survivor extends CampUnit
     destroy m_jobComponents
     m_jobComponents = null
     m_activeJobComponent = null
+
+    destroy m_survivorData
+    m_survivorData = null
 
   // --------------------------------------------------------------------------
   protected override function onUnitChanged(unit oldUnit, unit newUnit)
@@ -58,8 +61,8 @@ public class Survivor extends CampUnit
       return
 
     let newUnitId = newUnit.getTypeId()
-    let jobId = getJobIdForUnitType(newUnitId)
-    m_activeJobComponent = getJobComponent(jobId)
+    let job = getJobDefinitionForUnitType(newUnitId)
+    m_activeJobComponent = getJobComponent(job)
 
     if (m_activeJobComponent != null)
       m_activeJobComponent.setEnabled(true)
@@ -69,7 +72,7 @@ public class Survivor extends CampUnit
   // --------------------------------------------------------------------------
   private function saveOldJobStats(unit theUnit)
     let unitTypeId = theUnit.getTypeId()
-    let jobId = getJobIdForUnitType(unitTypeId)
+    let jobId = getJobDefinitionForUnitType(unitTypeId)
     let survivorDataComp = this.getSurvivorComponent()
     let survivorData = survivorDataComp.getSurvivorData()
 
@@ -77,11 +80,12 @@ public class Survivor extends CampUnit
     if (jobData != null)
       jobData.setLevel(theUnit.getLevel())
       jobData.setExperience(theUnit.getXp())
+      jobData.setUnitId(unitTypeId)
 
   // --------------------------------------------------------------------------
   private function loadNewJobStats(unit theUnit)
     let unitTypeId = theUnit.getTypeId()
-    let jobId = getJobIdForUnitType(unitTypeId)
+    let jobId = getJobDefinitionForUnitType(unitTypeId)
     let survivorDataComp = this.getSurvivorComponent()
     let survivorData = survivorDataComp.getSurvivorData()
 
@@ -92,12 +96,12 @@ public class Survivor extends CampUnit
       theUnit.setXp(jobData.getExperience(), false)
 
   // --------------------------------------------------------------------------
-  private function registerJobComponent(string jobId, SurvivorJobComponent comp)
-    m_jobComponents.put(jobId, comp)
+  private function registerJobComponent(SurvivorJobDefinition job, SurvivorJobComponent comp)
+    m_jobComponents.put(job, comp)
 
   // --------------------------------------------------------------------------
-  private function getJobComponent(string jobId) returns SurvivorJobComponent
-    return m_jobComponents.get(jobId)
+  function getJobComponent(SurvivorJobDefinition job) returns SurvivorJobComponent
+    return m_jobComponents.get(job)
 
   // --------------------------------------------------------------------------
   private function initialize()
@@ -105,10 +109,10 @@ public class Survivor extends CampUnit
     let owningUnit = getUnit()
     let owningPlayer = owningUnit.getOwner()
 
-    let survivorData = new SurvivorData()
-    survivorData.setName(getRandomSurvivorNameForPlayer(owningPlayer))
+    m_survivorData = new SurvivorData()
+    m_survivorData.setName(getRandomSurvivorNameForPlayer(owningPlayer))
 
-    initializeStats(survivorData)
+    initializeStats(m_survivorData)
 
     addComponent(new SurvivorJobChangeComponent(this))
 
@@ -117,13 +121,13 @@ public class Survivor extends CampUnit
     addComponent(rangedTargetXpReceiever)
 
     let survivorDataComponent = this.getOrAddSurvivorComponent()
-    survivorDataComponent.setSurvivorData(survivorData)
+    survivorDataComponent.setSurvivorData(m_survivorData)
 
-    registerJobComponent(SurvivorJobIds.builder,  this.getOrAddBuilderJobComponent()  ..setEnabled(false))
-    registerJobComponent(SurvivorJobIds.militia,  this.getOrAddMilitiaJobComponent()  ..setEnabled(false))
-    registerJobComponent(SurvivorJobIds.spearman, this.getOrAddSpearmanJobComponent() ..setEnabled(false))
-    registerJobComponent(SurvivorJobIds.medic,    this.getOrAddMedicJobComponent()    ..setEnabled(false))
-    registerJobComponent(SurvivorJobIds.marksman, this.getOrAddMarksmanJobComponent() ..setEnabled(false))
+    registerJobComponent(SurvivorJobs.builder,  this.getOrAddBuilderJobComponent()  ..setEnabled(false))
+    registerJobComponent(SurvivorJobs.militia,  this.getOrAddMilitiaJobComponent()  ..setEnabled(false))
+    registerJobComponent(SurvivorJobs.spearman, this.getOrAddSpearmanJobComponent() ..setEnabled(false))
+    registerJobComponent(SurvivorJobs.medic,    this.getOrAddMedicJobComponent()    ..setEnabled(false))
+    registerJobComponent(SurvivorJobs.marksman, this.getOrAddMarksmanJobComponent() ..setEnabled(false))
 
   // --------------------------------------------------------------------------
   private function initializeStats(SurvivorData survivorData)
@@ -135,16 +139,7 @@ public class Survivor extends CampUnit
     ..setTooltip("The number of enemies killed by getting the last hit")
 
     survivorData.addStatistic(SurvivorStats.kills, killsStat)
-    addComponent(new KillsStatisticComponent(this))
-
-    // Distance traveled
-    let distanceTraveledStat = new RealStatistic("Distance Traveled")
-    ..setIcon(Icons.bTNBootsOfSpeed)
-    ..setUnits("meters")
-    ..setTooltip("The meters traveled")
-
-    survivorData.addStatistic(SurvivorStats.distanceTraveled, distanceTraveledStat)
-    addComponent(new DistanceTraveledStatisticComponent(this))
+    addComponent(new KillsStat(this))
 
     // Days survived
     let daysSurvivedStat = new IntStatistic("Days Survived")
@@ -153,7 +148,7 @@ public class Survivor extends CampUnit
     ..setTooltip("The number of days survived")
 
     survivorData.addStatistic(SurvivorStats.daysSurvived, daysSurvivedStat)
-    addComponent(new DaysSurvivedStatisticComponent(this))
+    addComponent(new DaysSurvivedStat(this))
 
     // Nights survived
     let nightsSurvivedStat = new IntStatistic("Nights Survived")
@@ -162,7 +157,7 @@ public class Survivor extends CampUnit
     ..setTooltip("The number of nights survived")
 
     survivorData.addStatistic(SurvivorStats.nightsSurvived, nightsSurvivedStat)
-    addComponent(new NightsSurvivedStatisticComponent(this))
+    addComponent(new NightsSurvivedStat(this))
 
     // m_stats.createIntStatistic(Stats.assists, "Assists", 0)
     // ..setIcon(Icons.bTNImmolationOff)
@@ -178,16 +173,6 @@ public class Survivor extends CampUnit
     // ..setIcon(Icons.bTNStatUp)
     // ..setUnits("hp")
     // ..setTooltip("The amount of health healed")
-
-// ============================================================================
-public function unit.isSurvivor() returns bool
-  let targetTypeId = this.getTypeId()
-  return  targetTypeId == TlsUnitIds.Survivors.survivorMale or
-          targetTypeId == TlsUnitIds.Survivors.survivorBuilder or
-          targetTypeId == TlsUnitIds.Survivors.survivorMarksman or
-          targetTypeId == TlsUnitIds.Survivors.survivorMedic or
-          targetTypeId == TlsUnitIds.Survivors.survivorMilitia or
-          targetTypeId == TlsUnitIds.Survivors.survivorSpearman
 
 // ============================================================================
 public function unit.isRescuedSurvivor() returns bool

@@ -1,94 +1,88 @@
 package RandomSpawnPointProvider
 import Spawning
 import ISpawnPointProvider
-import ErrorHandling
 
 constant int RETRY_COUNT = 10
 
 // ============================================================================
 public class RandomSpawnPointProvider implements ISpawnPointProvider
   private ISpawnManager m_spawnPointManager
-  private real m_rangeMin
-  private real m_rangeMax
-  private real m_resizeMinFactor
-  private real m_resizeMaxFactor
+  private ISpawnManager m_fallback
+  private SpawnRange m_range
 
   // --------------------------------------------------------------------------
-  construct(ISpawnManager spawnPointManager)
+  construct(ISpawnManager spawnPointManager, ISpawnManager fallback, SpawnRange range)
     m_spawnPointManager = spawnPointManager
-    m_rangeMin = 0.0
-    m_rangeMax = 0.0
-    m_resizeMinFactor = 1.1
-    m_resizeMaxFactor = 1.2
+    m_range = range
+    m_fallback = fallback
 
   // --------------------------------------------------------------------------
-  function setRange(real min, real max)
-    setMinRange(min)
-    setMaxRange(max)
+  function getRange() returns SpawnRange
+    return m_range
 
   // --------------------------------------------------------------------------
-  function getMinRange() returns real
-    return m_rangeMin
+  function setRange(SpawnRange range)
+    m_range = range
 
   // --------------------------------------------------------------------------
-  function setMinRange(real range)
-    m_rangeMin = range
-
-  // --------------------------------------------------------------------------
-  function getMaxRange() returns real
-    return m_rangeMax
-
-  // --------------------------------------------------------------------------
-  function setMaxRange(real range)
-    m_rangeMax = range
-
-  // --------------------------------------------------------------------------
-  private function growRange()
-    m_rangeMin *= m_resizeMinFactor
-    m_rangeMax *= m_resizeMaxFactor
+  private function growRange(SpawnRange currentSpawnRange) returns SpawnRange
     Log.debug("Grew spawn point provider range!")
-
+    switch (currentSpawnRange)
+      case SpawnRange.CLOSE
+        return SpawnRange.NEAR
+      case SpawnRange.NEAR
+        return SpawnRange.MID
+      case SpawnRange.MID
+        return SpawnRange.FAR
+      case SpawnRange.FAR
+        return SpawnRange.FAR
+  
   // --------------------------------------------------------------------------
-  override function getSpawnPoint(vec2 center) returns vec2
-    vec2 spawnPoint = ZERO2
-
-    for i = 0 to RETRY_COUNT - 1
-      spawnPoint = m_spawnPointManager.getRandomSpawnPointInRange(center, m_rangeMin, m_rangeMax)
-      
-      // Found a point no need to resize range
-      if (spawnPoint != INVALID_SPAWN_POINT)
-        break
-      
-      // Could not find a spawn point within the range, grow the range and try again
-      growRange()
-
-    if (spawnPoint == INVALID_SPAWN_POINT)
-      error("Resized range " + RETRY_COUNT.toString() + " times and still could not find a spawn point")
-
-    return spawnPoint
-
-  // --------------------------------------------------------------------------
-  override function getSpawnPoints(vec2 center, int count) returns SpawnPointCollection
+  override function getSpawnPoint() returns spawnPointResult
     
-    let result = new SpawnPointCollection()
+    var currentSpawnRange = m_range
 
     for i = 0 to RETRY_COUNT - 1
-      let remainingCount = max(count - result.getCount(), 0)
+      let result = m_spawnPointManager.getRandomSpawnPointInRange(currentSpawnRange)
+      if (result.succeeded)
+        return result
+      // Could not find a spawn point within the range, grow the range and try again
+      currentSpawnRange = growRange(currentSpawnRange)
+
+    if (m_fallback != null)
+      Log.debug("Using fallback spawn manager after " + RETRY_COUNT.toString() + " attempts")
+      return m_fallback.getRandomSpawnPointInRange(m_range)
+
+    return spawnPointResult(false, ZERO2)
+
+
+  // --------------------------------------------------------------------------
+  override function getSpawnPoints(int count) returns spawnPointsResult
+    
+    var currentSpawnRange = m_range
+    let spawnPoints = new SpawnPointCollection()
+
+    for i = 0 to RETRY_COUNT - 1
+      let remainingCount = max(count - spawnPoints.getCount(), 0)
       if (remainingCount == 0)
         break
 
-      let spawnPoints = m_spawnPointManager.getRandomSpawnPointsInRange(center, m_rangeMin, m_rangeMax, remainingCount)
-      for sp in spawnPoints
-        result.pushPoint(sp)
-      destroy spawnPoints
+      let result = m_spawnPointManager.getRandomSpawnPointsInRange(currentSpawnRange, remainingCount)
+      if (result.succeeded)
+        for sp in result.spawnPoints
+          spawnPoints.pushPoint(sp)
+        destroy result.spawnPoints
 
-      if (result.getCount() == count)
+      if (spawnPoints.getCount() == count)
         break
-      
-      // Could not find enough spawn points within the range, grow the range and try again
-      growRange()
 
-    if (result.getCount() != count)
-      error("Resized range " + RETRY_COUNT.toString() + " times and still could not find enough spawn points")
+      // Could not find a spawn point within the range, grow the range and try again
+      currentSpawnRange = growRange(currentSpawnRange)
 
-    return result
+    if (spawnPoints.getCount() != count)
+      if (m_fallback != null)
+        Log.debug("Using fallback spawn manager after " + RETRY_COUNT.toString() + " attempts")
+        return m_fallback.getRandomSpawnPointsInRange(m_range, count)
+      return spawnPointsResult(false, null)
+
+    return spawnPointsResult(true, spawnPoints)

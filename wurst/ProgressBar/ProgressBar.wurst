@@ -1,9 +1,9 @@
 package ProgressBar
 import UnitPool
 import ClosureTimers
-import Events
 import Unit_ProgressBar
 import Math
+import LinkedList
 
 constant player PROGRESS_BAR_OWNER = DUMMY_PLAYER
 constant real PROGRESS_BAR_UPDATE_PROGRESS_INTERVAL = ANIMATION_PERIOD//0.01
@@ -11,8 +11,8 @@ constant real PROGRESS_BAR_UPDATE_POSITION_INTERVAL = ANIMATION_PERIOD
 constant int DEATH_ANIMATION_INDEX = 0
 constant int ZERO_ANIMATION_INDEX = 1
 
-AnonymousEvent g_updateProgressBarProgressEvent
-AnonymousEvent g_updateProgressBarPositionEvent
+LinkedList<ProgressBar> g_updateVisuals
+LinkedList<ProgressBar> g_updatePositions
 
 // ============================================================================
 public class ProgressBar
@@ -27,9 +27,6 @@ public class ProgressBar
   private real _currentAlpha
   private real _targetAlpha
   private real _alphaSpeed
-
-  private Action _updateProgressCb
-  private Action _updatePositionCb
 
   // --------------------------------------------------------------------------
   construct()
@@ -144,11 +141,16 @@ public class ProgressBar
     _currentValue = 0.0
 
   // --------------------------------------------------------------------------
-  private function updateVisuals(real dt)
+  function updateVisuals(real dt)
     let doneUpdatingProgress = updateProgress(dt)
     let doneUpdatingAlpha = updateAlpha(dt)
     if (doneUpdatingProgress and doneUpdatingAlpha)
       unregisterForVisualUpdate()
+        
+  // --------------------------------------------------------------------------
+  function updatePosition()
+    if (_target != null)
+      setPos(_target.getPos())
 
   // --------------------------------------------------------------------------
   private function updateProgress(real dt) returns bool
@@ -175,11 +177,6 @@ public class ProgressBar
       return true
 
     return false
-        
-  // --------------------------------------------------------------------------
-  private function updatePosition()
-    if (_target != null)
-      setPos(_target.getPos())
 
   // --------------------------------------------------------------------------
   private function setAnimationIndexByPercentage(real t)
@@ -189,30 +186,20 @@ public class ProgressBar
   // --------------------------------------------------------------------------
   private function registerForVisualUpdate()
     unregisterForVisualUpdate()
-    if (_updateProgressCb == null)
-      _updateProgressCb = () -> updateVisuals(PROGRESS_BAR_UPDATE_PROGRESS_INTERVAL)
-      g_updateProgressBarProgressEvent.add(_updateProgressCb)
+    g_updateVisuals.add(this)
 
   // --------------------------------------------------------------------------
   private function unregisterForVisualUpdate()
-    if (_updateProgressCb != null)
-      g_updateProgressBarProgressEvent.remove(_updateProgressCb)
-      destroy _updateProgressCb
-      _updateProgressCb = null
+    g_updateVisuals.remove(this)
 
   // --------------------------------------------------------------------------
   private function registerForPositionUpdate()
     unregisterForPositionUpdate()
-    if (_updatePositionCb == null)
-      _updatePositionCb = () -> updatePosition()
-      g_updateProgressBarPositionEvent.add(_updatePositionCb)
+    g_updatePositions.add(this)
 
   // --------------------------------------------------------------------------
   private function unregisterForPositionUpdate()
-    if (_updatePositionCb != null)
-      g_updateProgressBarPositionEvent.remove(_updatePositionCb)
-      destroy _updatePositionCb
-      _updatePositionCb = null
+    g_updatePositions.remove(this)
 
 // ============================================================================
 function getDummyUnit(int unitId) returns unit
@@ -225,12 +212,15 @@ function releaseDummyUnit(unit u)
   
 // ============================================================================
 init
-  g_updateProgressBarProgressEvent = new AnonymousEvent()
-  g_updateProgressBarPositionEvent = new AnonymousEvent()
+  g_updateVisuals = new LinkedList<ProgressBar>()
+  g_updatePositions = new LinkedList<ProgressBar>()
 
   doPeriodically(PROGRESS_BAR_UPDATE_PROGRESS_INTERVAL) (CallbackPeriodic cb) ->
-    g_updateProgressBarProgressEvent.call()
+    for progressBar in g_updateVisuals
+      if (progressBar != null)
+        progressBar.updateVisuals(PROGRESS_BAR_UPDATE_PROGRESS_INTERVAL)
   
   doPeriodically(PROGRESS_BAR_UPDATE_POSITION_INTERVAL) (CallbackPeriodic cb) ->
-    g_updateProgressBarPositionEvent.call()   
-    
+    for progressBar in g_updatePositions
+      if (progressBar != null)
+        progressBar.updateVisuals(PROGRESS_BAR_UPDATE_POSITION_INTERVAL)
