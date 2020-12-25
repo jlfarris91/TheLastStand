@@ -15,6 +15,7 @@ import HumanPlayerMetadata
 import LinkedList
 import WeatherManager
 import TimeOfDay
+import HungerComponent
 
 constant string COMMAND_MEMORYTRACKER = "mem"
 constant string COMMAND_GODLIKE = "godlike"
@@ -41,6 +42,11 @@ constant string COMMAND_SETLEVEL = "setlevel"
 constant string COMMAND_TODSCALE = "timescale"
 constant string COMMAND_TOD = "time"
 constant string COMMAND_TOGGLE_GRACE_PERIOD = "graceperiod"
+constant string COMMAND_FOOD_AMOUNT = "setcampfoodamt"
+constant string COMMAND_FOOD_REQUIRED = "setcampfoodreq"
+constant string COMMAND_FEED_CAMP = "feedcamp"
+constant string COMMAND_STARVE_CAMP = "starvecamp"
+constant string COMMAND_FEEDORSTARVE_CAMP = "feedorstarvecamp"
 
 DebugChatCommandHandler g_commandHandler
 MemoryTrackingMultiboard g_memoryTrackingMultiboard
@@ -421,6 +427,103 @@ function toggleGracePeriod()
   displayMessageToPlayer(commandPlayer, "Grace period is {0}".format(g_GameInstance.isGracePeriodActive() ? "active" : "inactive"))
 
 // ============================================================================
+function setCampFoodAmount()
+  let command = getChatCommand()
+  let commandPlayer = getChatCommandPlayer()
+  let playerId = command.getArgument(0).getInt()
+  let amountArg = command.getArgument(1)
+
+  let p = Player(playerId)
+  if (p == null)
+    error("Player id argument is invalid")
+    return
+
+  let camp = p.getHumanMetadataRequired().getCamp()
+
+  if (amountArg != null)
+    camp.setCampFoodAmount(amountArg.getInt())
+
+  let amount = camp.getCampFoodAmount()
+  displayMessageToPlayer(commandPlayer, "Player {0} camp food amount: {1}".format(p.getName(), amount.toString()))
+
+// ============================================================================
+function setCampFoodRequired()
+  let command = getChatCommand()
+  let commandPlayer = getChatCommandPlayer()
+  let playerId = command.getArgument(0).getInt()
+  let amountArg = command.getArgument(1)
+
+  let p = Player(playerId)
+  if (p == null)
+    error("Player id argument is invalid")
+    return
+
+  let camp = p.getHumanMetadataRequired().getCamp()
+
+  if (amountArg != null)
+    camp.setCampFoodRequired(amountArg.getInt())
+
+  let amount = camp.getCampFoodRequired()
+  displayMessageToPlayer(commandPlayer, "Player {0} camp food required: {1}".format(p.getName(), amount.toString()))
+
+// ============================================================================
+function feedCamp()
+  let command = getChatCommand()
+  let commandPlayer = getChatCommandPlayer()
+  let playerId = command.getArgument(0).getInt()
+  let hungerLevel = command.getArgument(1).getInt()
+
+  let p = Player(playerId)
+  if (p == null)
+    error("Player id argument is invalid")
+    return
+
+  let camp = p.getHumanMetadataRequired().getCamp()
+
+  camp.feedSurvivors(hungerLevel castTo HungerLevel)
+  displayMessageToPlayer(commandPlayer, "Fed survivors for player {0}.".format(p.getName()))
+  
+  let amount = camp.getCampFoodAmount()
+  let required = camp.getCampFoodRequired()
+  displayMessageToPlayer(commandPlayer, "Camp food: {0} -{1}".format(amount.toString(), required.toString()))
+
+// ============================================================================
+function starveCamp()
+  let command = getChatCommand()
+  let commandPlayer = getChatCommandPlayer()
+  let playerId = command.getArgument(0).getInt()
+
+  let p = Player(playerId)
+  if (p == null)
+    error("Player id argument is invalid")
+    return
+
+  let camp = p.getHumanMetadataRequired().getCamp()
+
+  camp.starveSurvivors()
+  displayMessageToPlayer(commandPlayer, "Starved survivors for player {0}".format(p.getName()))
+
+// ============================================================================
+function feedOrStarveCamp()
+  let command = getChatCommand()
+  let commandPlayer = getChatCommandPlayer()
+  let playerId = command.getArgument(0).getInt()
+
+  let p = Player(playerId)
+  if (p == null)
+    error("Player id argument is invalid")
+    return
+
+  let camp = p.getHumanMetadataRequired().getCamp()
+
+  camp.feedOrStarveSurvivors()
+  displayMessageToPlayer(commandPlayer, "Fed or starved survivors for player {0}".format(p.getName()))
+  
+  let amount = camp.getCampFoodAmount()
+  let required = camp.getCampFoodRequired()
+  displayMessageToPlayer(commandPlayer, "Camp food: {0} -{1}".format(amount.toString(), required.toString()))
+
+// ============================================================================
 function registerDebugCommands()
 
   g_commandHandler.registerCommandDefinition(COMMAND_MEMORYTRACKER, function showMemoryTrackerMultiboard)  
@@ -495,6 +598,29 @@ function registerDebugCommands()
   g_commandHandler.registerCommandDefinition(COMMAND_TOGGLE_GRACE_PERIOD, function toggleGracePeriod)
     ..setDescription("Gets and sets whether the grace period is enabled")
     ..addBoolArgument("VALUE", true, "Whether or not the grace period is enabled.")
+  
+  g_commandHandler.registerCommandDefinition(COMMAND_FOOD_AMOUNT, function setCampFoodAmount)
+    ..setDescription("Gets or sets the food amount for a player's camp.")
+    ..addIntegerArgument("PLAYER_ID", false, "The id of the player.")
+    ..addIntegerArgument("AMOUNT", true, "The amount of food.")
+
+  g_commandHandler.registerCommandDefinition(COMMAND_FOOD_REQUIRED, function setCampFoodRequired)
+    ..setDescription("Gets or sets the required food for a player's camp.")
+    ..addIntegerArgument("PLAYER_ID", false, "The id of the player.")
+    ..addIntegerArgument("AMOUNT", true, "The amount of food required for the camp.")
+
+  g_commandHandler.registerCommandDefinition(COMMAND_FEED_CAMP, function feedCamp)
+    ..setDescription("Try to give food to each survivor in a player's camp but don't starve survivors if there is no food.")
+    ..addIntegerArgument("PLAYER_ID", false, "The id of the player.")
+    ..addIntegerArgument("HUNGER_LEVEL", false, "[0-3] Only feed survivors with hunger levels less than this value.")
+
+  g_commandHandler.registerCommandDefinition(COMMAND_STARVE_CAMP, function starveCamp)
+    ..setDescription("Reduce the hunger value of each survivor in a player's camp.")
+    ..addIntegerArgument("PLAYER_ID", false, "The id of the player.")
+
+  g_commandHandler.registerCommandDefinition(COMMAND_FEEDORSTARVE_CAMP, function feedOrStarveCamp)
+    ..setDescription("Feed survivors until there is no food or all are well fed and starve survivors when food runs out.")
+    ..addIntegerArgument("PLAYER_ID", false, "The id of the player.")
 
 // ============================================================================
 init

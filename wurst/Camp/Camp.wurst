@@ -9,9 +9,14 @@ import UnitMetadata
 import public initlater CampUnit
 import public initlater CampUnitFactory
 import HumanPlayerMetadata
+import CampResourceBarFrame
+import GroupUtils
+import HungerComponent
+import HumanPlayers
 
-HashMap<player, ICamp> g_PlayerCamps
 group g_tempGroup
+trigger g_onFeedTrigger
+constant real FEED_TIME_OF_DAY = 12.0
 
 // ============================================================================
 public interface ICamp
@@ -28,6 +33,14 @@ public interface ICamp
 
   function getUnits() returns LinkedList<ICampUnitMetadata>
 
+  function getCampFoodAmount() returns int
+  function setCampFoodAmount(int value)
+  function getCampFoodRequired() returns int
+  function setCampFoodRequired(int value)
+  function feedSurvivors(HungerLevel maxHungerLevel)
+  function starveSurvivors()
+  function feedOrStarveSurvivors()
+
   function reset()
 
 // ============================================================================
@@ -42,6 +55,8 @@ public class Camp implements ICamp
   protected unit _campFlag
   protected int _worth
   protected bool _isSecure
+  protected int m_campFoodAmt
+  protected int m_campFoodReq
 
   // --------------------------------------------------------------------------
   construct(HumanPlayerMetadata owner)
@@ -66,6 +81,10 @@ public class Camp implements ICamp
   // --------------------------------------------------------------------------
   override function getOwner() returns IPlayerMetadata
     return this._owner
+
+  // --------------------------------------------------------------------------
+  function getOwnerPlayer() returns player
+    return getOwner().getPlayer()
 
   // --------------------------------------------------------------------------
   override function getCampTent() returns unit
@@ -115,3 +134,144 @@ public class Camp implements ICamp
     for campUnit in this._units
       campUnits.add(campUnit)
     return campUnits
+
+  // --------------------------------------------------------------------------
+  override function getCampFoodAmount() returns int
+    return m_campFoodAmt
+
+  // --------------------------------------------------------------------------
+  override function setCampFoodAmount(int value)
+    if (m_campFoodAmt == value)
+      return
+    
+    let prevCampFoodAmt = m_campFoodAmt
+    m_campFoodAmt = IMaxBJ(value, 0)
+
+    let barFrame = getCampResourceBarFrame(getOwnerPlayer())
+    if (barFrame != null)
+      barFrame.setFoodAmount(value)
+    
+    // Feed hungry and starving survivors right away
+    if (m_campFoodAmt > prevCampFoodAmt)
+      feedSurvivors(HungerLevel.Hungry)
+
+  // --------------------------------------------------------------------------
+  override function getCampFoodRequired() returns int
+    return m_campFoodReq
+
+  // --------------------------------------------------------------------------
+  override function setCampFoodRequired(int value)
+    m_campFoodReq = value
+    let barFrame = getCampResourceBarFrame(getOwnerPlayer())
+    if (barFrame != null)
+      barFrame.setFoodRequirement(value)
+
+  // --------------------------------------------------------------------------
+  function calculateFoodRequirement() returns int
+    let tempGroup = getGroup()
+    tempGroup.enumUnitsOfPlayer(getOwnerPlayer(), null)
+    var foodReq = 0
+    for u in tempGroup
+      let hungerComponent = u.getMetadata().getHungerComponent()
+      if (hungerComponent != null)
+        foodReq += hungerComponent.getFoodRequirement()
+    tempGroup.release()
+    return foodReq        
+
+  // --------------------------------------------------------------------------
+  override function starveSurvivors()
+    let tempGroup = getGroup()
+    tempGroup.enumUnitsOfPlayer(getOwnerPlayer(), null)
+    for u in tempGroup
+      let hungerComponent = u.getMetadata().getHungerComponent()
+      if (hungerComponent != null)
+        hungerComponent.starve(hungerComponent.getFoodRequirement())
+    tempGroup.release()
+
+  // --------------------------------------------------------------------------
+  override function feedSurvivors(HungerLevel maxHungerLevel)
+    let hungerComponents = new LinkedList<HungerComponent>()
+
+    let tempGroup = getGroup()
+    tempGroup.enumUnitsOfPlayer(getOwnerPlayer(), null)
+    for u in tempGroup
+      let hungerComponent = u.getMetadata().getHungerComponent()
+      if (hungerComponent != null and
+         (hungerComponent.getHungerLevel() castTo int) <= (maxHungerLevel castTo int))
+        hungerComponents.add(hungerComponent)
+    tempGroup.release()
+
+    // Sort by hunger value in ascending order
+    hungerComponents.sortWith() (HungerComponent o1, HungerComponent o2) ->
+      return o1.getHungerValue() - o2.getHungerValue()
+
+    var foodAmount = m_campFoodAmt
+    for hungerComponent in hungerComponents
+      if (foodAmount <= 0)
+        break
+      hungerComponent.feed(1)
+      foodAmount--
+
+    setCampFoodAmount(foodAmount)
+
+    destroy hungerComponents
+
+  // --------------------------------------------------------------------------
+  override function feedOrStarveSurvivors()
+    let hungerComponents = new LinkedList<HungerComponent>()
+
+    let tempGroup = getGroup()
+    tempGroup.enumUnitsOfPlayer(getOwnerPlayer(), null)
+    for u in tempGroup
+      let hungerComponent = u.getMetadata().getHungerComponent()
+      if (hungerComponent != null)
+        hungerComponents.add(hungerComponent)
+    tempGroup.release()
+
+    // Sort by hunger value in ascending order
+    hungerComponents.sortWith() (HungerComponent o1, HungerComponent o2) ->
+      return o1.getHungerValue() - o2.getHungerValue()
+
+    var foodAmount = m_campFoodAmt
+    for hungerComponent in hungerComponents
+      // Feed the most hungry first
+      if (foodAmount > 0)
+        hungerComponent.feed(1)
+        foodAmount--
+      // if the food has run out starve the remaining units
+      else
+        hungerComponent.starve(1)
+
+    setCampFoodAmount(foodAmount)
+
+    destroy hungerComponents
+
+// ============================================================================
+function feedAllPlayerSurvivors(HungerLevel maxHungerLevel)
+  for p in g_PlayingHumanPlayers
+    let metadata = p.getHumanMetadataRequired()
+    let camp = metadata.getCamp()
+    if (camp != null)
+      camp.feedSurvivors(maxHungerLevel)
+
+// ============================================================================
+function starveAllPlayerSurvivors()
+  for p in g_PlayingHumanPlayers
+    let metadata = p.getHumanMetadataRequired()
+    let camp = metadata.getCamp()
+    if (camp != null)
+      camp.starveSurvivors()
+
+// ============================================================================
+function feedOrStarveAllPlayerSurvivors()
+  for p in g_PlayingHumanPlayers
+    let metadata = p.getHumanMetadataRequired()
+    let camp = metadata.getCamp()
+    if (camp != null)
+      camp.feedOrStarveSurvivors()
+
+// ============================================================================
+init
+  g_onFeedTrigger = CreateTrigger()
+  g_onFeedTrigger.registerGameStateEvent(GAME_STATE_TIME_OF_DAY, EQUAL, FEED_TIME_OF_DAY)
+  g_onFeedTrigger.addCondition(Filter(function feedOrStarveAllPlayerSurvivors))

@@ -1,0 +1,149 @@
+package HungerComponent
+import UnitComponent
+import Math
+import TlsAbilityIds
+import ClosureTimers
+import LinkedList
+import FX
+
+constant int MAX_HUNGER_LEVEL = 3
+constant real STARVING_DAMAGE_INTERVAL = 10.0
+constant real STARVING_DAMAGE_MAXHP_PERCENT = 0.1
+
+LinkedList<HungerComponent> g_starvingHungerComponents = new LinkedList<HungerComponent>()
+
+// ============================================================================
+public enum HungerLevel
+  Starving
+  Hungry
+  Fed
+  WellFed
+
+// ============================================================================
+public class HungerComponent extends UnitComponent
+  private int m_hungerValue = HungerLevel.Fed castTo int
+  private int m_foodReq = 1
+
+  // --------------------------------------------------------------------------
+  construct(IUnitMetadata owner)
+    super(owner)
+
+  // --------------------------------------------------------------------------
+  override function getTypeId() returns int
+    return HungerComponent.typeId
+
+  // --------------------------------------------------------------------------
+  function getHungerLevel() returns HungerLevel
+    return R2I(m_hungerValue / m_foodReq) castTo HungerLevel
+
+  // --------------------------------------------------------------------------
+  function setHungerLevel(HungerLevel value)
+    m_hungerValue = (value castTo int) * m_foodReq
+
+  // --------------------------------------------------------------------------
+  function getHungerValue() returns int
+    return m_hungerValue
+
+  // --------------------------------------------------------------------------
+  function setHungerValue(int value)
+    let oldHungerValue = m_hungerValue
+    let oldHungerLevel = getHungerLevel()
+    m_hungerValue = clamp(value, 0, getMaxHungerValue())
+    let newHungerLevel = getHungerLevel()
+    if (newHungerLevel != oldHungerLevel)
+      let diff = m_hungerValue - oldHungerValue
+      if (diff > 0)
+        Log.debug("Fed {0} {1} food Hunger Value: {2}".format(getOwnerUnit().getName(), diff.toString(), m_hungerValue.toString()))
+      else
+        Log.debug("Starved {0} {1} food Hunger Value: {2}".format(getOwnerUnit().getName(), IAbsBJ(diff).toString(), m_hungerValue.toString()))
+
+      onHungerLevelChanged(oldHungerLevel, newHungerLevel)
+
+  // --------------------------------------------------------------------------
+  function getMaxHungerValue() returns int
+    return m_foodReq * MAX_HUNGER_LEVEL
+
+  // --------------------------------------------------------------------------
+  function getFoodRequirement() returns int
+    return m_foodReq
+
+  // --------------------------------------------------------------------------
+  function setFoodRequirement(int value)
+    let currentHungerLevel = getHungerLevel()
+    m_foodReq = value
+    setHungerLevel(currentHungerLevel)
+
+  // --------------------------------------------------------------------------
+  override function onEnabled()
+    super.onEnabled()
+
+    let ownerUnit = getOwnerUnit()
+    
+    if (not ownerUnit.hasAbility(TlsAbilityIds.hunger))
+      ownerUnit.addAbility(TlsAbilityIds.hunger)
+    
+    if (not ownerUnit.hasAbility(TlsAbilityIds.hungerIcon))
+      ownerUnit.addAbility(TlsAbilityIds.hungerIcon)
+
+    updateUnitState()
+
+  // --------------------------------------------------------------------------
+  function feed(int amount)
+    setHungerValue(getHungerValue() + amount)
+
+  // --------------------------------------------------------------------------
+  function starve(int amount)
+    setHungerValue(getHungerValue() - amount)
+
+  // --------------------------------------------------------------------------
+  function dealStarveDamage()
+    let ownerUnit = getOwnerUnit()
+    let ownerPlayer = ownerUnit.getOwner()
+    let pos = ownerUnit.getPos()
+
+    FX.createStarvingTag(pos, ownerPlayer)
+
+    doAfter(0.6) () -> 
+      let damage = ownerUnit.getMaxHP() * STARVING_DAMAGE_MAXHP_PERCENT
+      ownerUnit.subHP(damage)
+      FX.createStarvingDamageTag(R2I(damage), pos, ownerPlayer)
+    
+  // --------------------------------------------------------------------------
+  private function updateUnitState()
+
+    let ownerUnit = getOwnerUnit()
+    let hungerLevel = getHungerLevel()
+
+    // Update hunger ability
+    let hungerLevelInt = hungerLevel castTo int
+    ownerUnit.setAbilityLevel(TlsAbilityIds.hunger, hungerLevelInt + 1)
+    ownerUnit.setAbilityLevel(TlsAbilityIds.hungerIcon, hungerLevelInt + 1)
+
+  // --------------------------------------------------------------------------
+  private function onHungerLevelChanged(HungerLevel oldValue, HungerLevel newValue)
+    updateUnitState()
+
+    if (oldValue == HungerLevel.Starving)
+      g_starvingHungerComponents.remove(this)
+    else if (newValue == HungerLevel.Starving)
+      g_starvingHungerComponents.add(this)
+
+// ============================================================================
+public function IUnitMetadata.getHungerComponent() returns HungerComponent
+  return this.getComponent(typeInfo(HungerComponent.typeId)) castTo HungerComponent
+
+// ============================================================================
+public function IUnitMetadata.getOrAddHungerComponent() returns HungerComponent
+  var component = this.getHungerComponent()
+  if (component == null)
+    component = this.addComponent(new HungerComponent(this)) castTo HungerComponent
+  return component
+
+// ============================================================================
+function damageStarvingUnits()
+  for hungerComponent in g_starvingHungerComponents
+    hungerComponent.dealStarveDamage()
+
+// ============================================================================
+init
+  doPeriodically(STARVING_DAMAGE_INTERVAL, (CallbackPeriodic cb) -> damageStarvingUnits())
