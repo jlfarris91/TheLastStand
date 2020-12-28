@@ -7,7 +7,6 @@ import WeightedSet
 import DisplayTextToPlayer
 import StringExtensions
 import SurvivorComponent
-import Orders
 import ColorUtility
 import ErrorHandling
 import SurvivorSpawnManager
@@ -21,11 +20,13 @@ import HumanPlayers
 import TentComponent
 import FriendlyCircularCachedSpawnManager
 import RandomSpawnPointProvider
+import Action
+import Optional
 
 group g_tempGroup = CreateGroup()
 
 // ============================================================================
-public function spawnSurvivorUnitForPlayer(player p) returns unit
+public function spawnSurvivorUnitForPlayer(player p, optionalVec2 walkToPos) returns unit
 
   if (p == null)
     error("[spawnSurvivorUnitForPlayer] Argument 'p' cannot be null")
@@ -36,14 +37,13 @@ public function spawnSurvivorUnitForPlayer(player p) returns unit
     Log.debug("[spawnSurvivorUnitForPlayer] Player {0} is dead".format(p.getName()))
     return null
 
-  let camp = playerMetadata.getCamp()
-
   let weightedSet = new WeightedSet<int>()
-  ..add(TlsUnitIds.Survivors.survivorMale, 50)
+  ..add(TlsUnitIds.Survivors.jobless, 50)
   ..add(TlsUnitIds.Survivors.survivorMilitia1, 1)
-  ..add(TlsUnitIds.Survivors.survivorSpearman, 1)
-  ..add(TlsUnitIds.Survivors.survivorMedic, 1)
-  ..add(TlsUnitIds.Survivors.survivorMarksman, 1)
+  ..add(TlsUnitIds.Survivors.spearman1, 1)
+  ..add(TlsUnitIds.Survivors.medic1, 1)
+  ..add(TlsUnitIds.Survivors.marksman1, 1)
+  ..add(TlsUnitIds.Survivors.hunter1, 1)
 
   let unitId = weightedSet.getRandom()
 
@@ -54,10 +54,7 @@ public function spawnSurvivorUnitForPlayer(player p) returns unit
 
   let survivor = createUnitTLS(p, unitId, spawnPointResult.spawnPoint, GetRandomDirectionDeg())
   let survivorMetadata = survivor.getMetadataRequired()
-
   let survivorUnit = survivorMetadata.getUnit()
-  survivorUnit.issuePointOrderById(OrderIds.move, camp.getCenter())
-
   let survivorDataComponent = survivorMetadata.getSurvivorComponent()
   let survivorData = survivorDataComponent.getSurvivorData()
   
@@ -68,21 +65,30 @@ public function spawnSurvivorUnitForPlayer(player p) returns unit
 
   AddIndicator(survivorUnit, 0, 255, 0, 255)
 
-  doPeriodicallyTimed(SURVIVOR_FADE_INTERVAL, SURVIVOR_FADE_DURATION) (CallbackCounted cb) ->
-    if (survivorUnit != null)
-      survivorUnit.setVertexColor(colorA(150, 150, 150, 0).mix(colorA(150, 150, 150, 255), cb.getPercentage()))
+  let actualWalkToPos = walkToPos.reduce() () ->
+    let camp = playerMetadata.getCamp()
+    return camp.getCenter()  
+
+  walkTowardsPointAndFadeAlpha(
+    survivorUnit,
+    actualWalkToPos,
+    SURVIVOR_FADE_INTERVAL,
+    SURVIVOR_FADE_DURATION,
+    /*startAlpha255*/ 0,
+    /*endAlpha255*/ 255,
+    /*callback*/null)
 
   return survivorUnit
 
 // ============================================================================
-public function trySpawnSurvivorForPlayer(player p)
+public function trySpawnSurvivorForPlayer(player p, optionalVec2 walkToPos)
   if (not p.isPlayingHumanPlayer())
     return
   let numberOfTents = countNumberOfConstructedTentsOwnedByPlayer(p)
   let numberOfSurvivors = countNumberOfSurvivorsOwnedByPlayer(p)
   Log.debug("[trySpawnSurvivorForPlayer] Player {0} has {1} tent(s) and {2} survivor(s)".format(p.getName(), numberOfTents.toString(), numberOfSurvivors.toString()))
   if (numberOfTents > numberOfSurvivors)
-    spawnSurvivorUnitForPlayer(p)
+    spawnSurvivorUnitForPlayer(p, walkToPos)
 
 // ============================================================================
 public function countNumberOfConstructedTentsOwnedByPlayer(player p) returns int
@@ -122,7 +128,7 @@ public function owningPlayerBanishSurvivor(unit targetUnit)
   AddIndicator(targetUnit, 0, 255, 0, 255)
 
   // Try to spawn another survivor for the player later
-  doAfter(SURVIVORS_RESPAWN_BANISHED_INTERVAL_RANGE.getRandom(), () -> trySpawnSurvivorForPlayer(owningPlayer))
+  doAfter(SURVIVORS_RESPAWN_BANISHED_INTERVAL_RANGE.getRandom(), () -> trySpawnSurvivorForPlayer(owningPlayer, none_vec2()))
 
   banishSurvivor(targetUnit)
 
@@ -132,16 +138,31 @@ public function banishSurvivor(unit targetUnit)
   // Give to the villagers player so the human player can't control it anymore
   targetUnit.setOwner(PLAYER_VILLAGERS, false)
 
+  walkTowardsPointAndFadeAlpha(
+    targetUnit,
+    playableBounds.getRandomPoint(),
+    SURVIVOR_FADE_INTERVAL,
+    SURVIVOR_FADE_DURATION,
+    /* startAlpha255 */ 255,
+    /* endAlpha255 */ 0,
+    u -> u.remove())
+
+// ============================================================================
+public function walkTowardsPointAndFadeAlpha(unit targetUnit, vec2 pos, real interval, real duration, int startAlpha255, int endAlpha255, Action1<unit> callback)
+  
   // Make the target move to a random point in the map while it is being banished
-  targetUnit.issuePointOrder("move", playableBounds.getRandomPoint())
+  targetUnit.issuePointOrder("move", pos)
 
   // Fade out the survivor over time
-  doPeriodicallyTimed(SURVIVOR_FADE_INTERVAL, SURVIVOR_FADE_DURATION) (CallbackCounted cb) ->
+  doPeriodicallyTimed(interval, duration) (CallbackCounted cb) ->
     if (targetUnit != null)
-      targetUnit.setVertexColor(colorA(150, 150, 150, 255).mix(colorA(150, 150, 150, 0), cb.getPercentage()))
-  
+      targetUnit.setVertexColor(colorA(150, 150, 150, startAlpha255).mix(colorA(150, 150, 150, endAlpha255), cb.getPercentage()))
+
   // Remove the survivor once it is invisible
-  doAfter(SURVIVOR_FADE_DURATION, () -> targetUnit.remove())
+  doAfter(duration) () ->
+    if (callback != null)
+      callback.call(targetUnit)
+      destroy callback
 
 // ============================================================================
 function getSpawnPoint(player p) returns spawnPointResult

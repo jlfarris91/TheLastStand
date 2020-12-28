@@ -1,0 +1,189 @@
+package HuntingComponent
+import UnitComponent
+import RegisterEvents
+import TlsAbilityIds
+import AbilityIds
+import DisplayTextToPlayer
+import StringExtensions
+import ColorUtility
+import Survivors
+import Bounds
+import BoundsExtensions
+import GameConstants
+import FX
+import TimerDialogUtility
+import Range
+import HumanPlayerMetadata
+
+constant real HUNT_DURATION = 30.0
+constant rangeInt HUNT_FOOD_RANGE = rangeInt(2, 4)
+
+// ============================================================================
+public class HuntingComponent extends UnitComponent
+  private bool m_isHunting = false
+  private real m_huntDuration = HUNT_DURATION
+  private rangeInt m_foodRange = HUNT_FOOD_RANGE
+  private vec2 m_returnPos
+
+  // --------------------------------------------------------------------------
+  construct (IUnitMetadata owner)
+    super(owner)
+
+  // --------------------------------------------------------------------------
+  override function getTypeId() returns int
+    return HuntingComponent.typeId
+
+  // --------------------------------------------------------------------------
+  function getHuntDuration() returns real
+    return m_huntDuration
+
+  // --------------------------------------------------------------------------
+  function setHuntDuration(real value)
+    m_huntDuration = value
+
+  // --------------------------------------------------------------------------
+  function getFoodRange() returns rangeInt
+    return m_foodRange
+
+  // --------------------------------------------------------------------------
+  function setFoodRange(rangeInt value)
+    m_foodRange = value
+
+  // --------------------------------------------------------------------------
+  override function onEnabled()
+    super.onEnabled()
+
+  // --------------------------------------------------------------------------
+  override function onDisabled()
+    super.onDisabled()
+    cleanup()
+
+  // --------------------------------------------------------------------------
+  function sendUnitHunting()
+    let huntingUnit = getOwnerUnit()
+
+    if (m_isHunting)
+      Log.debug("Unit {0} is already hunting".format(huntingUnit.getName()))
+      return
+
+    m_isHunting = true
+    m_returnPos = huntingUnit.getPos()
+
+    let owningPlayer = huntingUnit.getOwner()
+
+    FX.createGoneHuntingTag(huntingUnit.getPos(), owningPlayer)
+
+    displayMessageToPlayer(
+      owningPlayer,
+      "Sent {0} off to hunt for food.".format(
+        huntingUnit.getProperName().colorize(TAG_COLOR_HUNTING)))
+
+    AddIndicator(huntingUnit, 0, 255, 0, 255)
+
+    huntingUnit.setFieldWeapon(UNIT_WEAPON_BF_ATTACKS_ENABLED, 1, false)
+    huntingUnit.addAbility(AbilityIds.locust)
+    huntingUnit.addAbility(AbilityIds.invulnerable)
+
+    walkTowardsPointAndFadeAlpha(
+      huntingUnit,
+      playableBounds.getRandomPoint(),
+      SURVIVOR_FADE_INTERVAL,
+      SURVIVOR_FADE_DURATION,
+      /* startAlpha255 */ 255,
+      /* endAlpha255 */ 0,
+      /* callback */ u -> onHuntLeave())
+
+  // --------------------------------------------------------------------------
+  function onHuntLeave()
+    let huntingUnit = getOwnerUnit()
+    let owningPlayer = huntingUnit.getOwner()
+
+    let cb = createTimerAndDialog(HUNT_DURATION, () -> onHuntReturn())
+    cb.getTimerDialog()
+    ..setRealTimeRemaining(HUNT_DURATION)
+    ..setTitle("{0} Hunting".format(huntingUnit.getProperName()))
+    ..setTitleColor(Colors.emerald)
+    ..display(owningPlayer, true)
+
+    huntingUnit.hide()
+    huntingUnit.pause()
+
+  // --------------------------------------------------------------------------
+  function onHuntReturn()
+    let huntingUnit = getOwnerUnit()
+    let owningPlayer = huntingUnit.getOwner()
+
+    huntingUnit.unpause()
+    huntingUnit.show()
+
+    AddIndicator(huntingUnit, 0, 255, 0, 255)
+
+    let foodFound = getFoodRange().getRandom()
+
+    displayMessageToPlayer(
+      owningPlayer,
+      "{0} has returned with {1} food.".format(
+        huntingUnit.getProperName().colorize(TAG_COLOR_HUNTING),
+        foodFound.toString().colorize(TAG_COLOR_FOOD)))
+        
+    walkTowardsPointAndFadeAlpha(
+      huntingUnit,
+      m_returnPos,
+      SURVIVOR_FADE_INTERVAL,
+      SURVIVOR_FADE_DURATION,
+      /* startAlpha255 */ 0,
+      /* endAlpha255 */ 255,
+      /* callback */ u -> onStopHunting(foodFound))
+
+  // --------------------------------------------------------------------------
+  function onStopHunting(int foodFound)
+    let huntingUnit = getOwnerUnit()
+    let owningPlayer = huntingUnit.getOwner()
+
+    FX.createFoundCampFoodTag(foodFound, huntingUnit.getPos(), owningPlayer)
+
+    let camp = owningPlayer.getHumanMetadataRequired().getCamp()
+    if (camp != null)
+      camp.setCampFoodAmount(camp.getCampFoodAmount() + foodFound)
+
+    cleanup()
+
+  // --------------------------------------------------------------------------
+  function cleanup()
+    let huntingUnit = getOwnerUnit()
+    huntingUnit.removeAbility(AbilityIds.locust)
+    huntingUnit.removeAbility(AbilityIds.invulnerable)
+    huntingUnit.setFieldWeapon(UNIT_WEAPON_BF_ATTACKS_ENABLED, 1, true)
+    huntingUnit.setVertexColor(colorA(150,150,150,255))
+    m_isHunting = false
+
+// ============================================================================
+public function IUnitMetadata.getHuntingComponent() returns HuntingComponent
+  return this.getComponent(typeInfo(HuntingComponent.typeId)) castTo HuntingComponent
+
+// ============================================================================
+public function IUnitMetadata.getOrAddHuntingComponent() returns HuntingComponent
+  var component = this.getHuntingComponent()
+  if (component == null)
+    component = this.addComponent(new HuntingComponent(this)) castTo HuntingComponent
+  return component
+
+// ============================================================================
+function onHuntCast()
+  let castingUnit = GetSpellAbilityUnit()
+
+  Log.debug("Cast hunt")
+
+  let metadata = castingUnit.getMetadata()
+  if (metadata == null)
+    return
+
+  let comp = metadata.getHuntingComponent()
+  if (comp == null)
+    return
+
+  comp.sendUnitHunting()
+
+// ============================================================================
+init
+  registerSpellEffectEvent(TlsAbilityIds.hunt, function onHuntCast)
