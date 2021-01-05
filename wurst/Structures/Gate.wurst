@@ -1,27 +1,30 @@
 package Gate
 import RegisterEvents
 import Camp
-import Unit_Gate
+import Unit_GateCommon
 import UnitMetadata
 import TerrainUtils
+import CardinalUnitDefinition
+import GateCardinalUnitDefinition
+import ClosureTimers
 
 // ============================================================================
 public class Gate extends CampUnit
-  private bool _isOpen
-  private int _angle
+  private bool m_isOpen
+  private CardinalUnitAngle m_angle
+  private GateCardinalUnitDefinitionHelper m_helper
 
   // --------------------------------------------------------------------------
   construct(ICamp camp)
     super(camp)
-    this.updateState()
 
   // --------------------------------------------------------------------------
   function getIsOpen() returns bool
-    return this._isOpen
+    return this.m_isOpen
 
   // --------------------------------------------------------------------------
   function getIsClosed() returns bool
-    return not this._isOpen
+    return not this.m_isOpen
 
   // --------------------------------------------------------------------------
   override function onUnitChanged(unit oldUnit, unit newUnit)
@@ -30,37 +33,47 @@ public class Gate extends CampUnit
 
   // --------------------------------------------------------------------------
   function openGate()
-    if (this._isOpen)
+    if (this.m_isOpen)
       return
     let unitId = this.getUnit().getTypeId()
-    let upgradeId = GateUtility.getOpenGateId(_angle)
+    let upgradeId = m_helper.getOpenId(m_angle)
     if (unitId != upgradeId)
       IssueTrainOrderByIdBJ(this.getUnit(), upgradeId)
     updateState()
 
   // --------------------------------------------------------------------------
   function closeGate()
-    if (not this._isOpen)
+    if (not this.m_isOpen)
       return
     let unitId = this.getUnit().getTypeId()
-    let upgradeId = GateUtility.getClosedGateId(_angle)
+    let upgradeId = m_helper.getClosedId(m_angle)
     if (unitId != upgradeId)
       IssueTrainOrderByIdBJ(this.getUnit(), upgradeId)
     updateState()
 
   // --------------------------------------------------------------------------
   protected function updateState()
-    let u = getUnit()
-    _angle = GateUtility.getGateAngle(u.getTypeId())
-    if (u.isClosedGate())
-      u.setAnimation("stand")
-      u.setPathing(true)
-      _isOpen = false
-    else if (u.isOpenGate())
-      u.setAnimation("death alternate")
-      u.setPathing(false)
-      _isOpen = true
-    triggerPathingUpdate()
+    let gateUnit = getUnit()
+    let unitId = gateUnit.getTypeId()
+
+    m_helper = getGateHelperForUnitType(unitId)
+    if (m_helper == null)
+      Log.error("Gate does not have an associated helper")
+      return
+    
+    let optionalAngle = m_helper.getAngleForUnitType(unitId)
+    if (not optionalAngle.hasValue)
+      Log.error("Somehow this unit does not have an associated CardinalUnitAngle")
+      return
+
+    m_angle = optionalAngle.value
+    m_isOpen = gateUnit.isOpenGate()
+
+    removeAllGateAnimationProperties(gateUnit)
+    gateUnit.addAnimationProperties(getGateAnimationProperties(m_angle, m_isOpen))
+    gateUnit.setPathing(not m_isOpen)
+
+    nullTimer(() -> triggerPathingUpdate())
 
   // --------------------------------------------------------------------------
   private function triggerPathingUpdate()

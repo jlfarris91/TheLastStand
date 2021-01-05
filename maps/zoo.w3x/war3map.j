@@ -4,6 +4,9 @@ ability udg_Untitled_Variable_001= null
 
     // Generated
 trigger gg_trg_Untitled_Trigger_001= null
+camerasetup gg_cam_0= null
+camerasetup gg_cam_45= null
+camerasetup gg_cam_315= null
 
 
 //JASSHelper struct globals:
@@ -93,6 +96,8 @@ function CreateBuildingsForPlayer0 takes nothing returns nothing
     set u=BlzCreateUnitWithSkin(p, 'h00O', - 1664.0, - 1408.0, 270.000, 'h00O')
     set u=BlzCreateUnitWithSkin(p, 'h00O', - 2240.0, - 1920.0, 270.000, 'h00O')
     set u=BlzCreateUnitWithSkin(p, 'h00O', - 2688.0, - 1920.0, 270.000, 'h00O')
+    set u=BlzCreateUnitWithSkin(p, 'h010', 320.0, - 896.0, 270.000, 'h010')
+    set u=BlzCreateUnitWithSkin(p, 'h012', 1024.0, - 3072.0, 270.000, 'h012')
 endfunction
 
 //===========================================================================
@@ -205,7 +210,7 @@ function CreateUnitsForPlayer0 takes nothing returns nothing
     set u=BlzCreateUnitWithSkin(p, 'n007', - 1779.1, 647.3, 264.707, 'n007')
     set u=BlzCreateUnitWithSkin(p, 'n003', - 1476.0, 1008.4, 279.871, 'n003')
     set u=BlzCreateUnitWithSkin(p, 'h00N', - 354.0, - 1641.1, 267.670, 'h00N')
-    set u=BlzCreateUnitWithSkin(p, 'h00P', - 2073.2, - 2464.2, - 74.273, 'h00P')
+    set u=BlzCreateUnitWithSkin(p, 'h00P', - 2073.2, - 2464.2, 285.727, 'h00P')
     set u=BlzCreateUnitWithSkin(p, 'h00P', - 2686.2, - 1406.4, 285.727, 'h00P')
     set u=BlzCreateUnitWithSkin(p, 'h00P', - 1750.0, - 2462.3, 244.772, 'h00P')
     set u=BlzCreateUnitWithSkin(p, 'h00P', - 1432.1, - 2462.6, 234.445, 'h00P')
@@ -213,6 +218,8 @@ function CreateUnitsForPlayer0 takes nothing returns nothing
     set u=BlzCreateUnitWithSkin(p, 'h00P', - 1662.4, - 1413.3, 285.727, 'h00P')
     set u=BlzCreateUnitWithSkin(p, 'h00P', - 2237.6, - 1928.7, 285.727, 'h00P')
     set u=BlzCreateUnitWithSkin(p, 'h00P', - 2688.7, - 1922.4, 285.727, 'h00P')
+    set u=BlzCreateUnitWithSkin(p, 'H00Z', 155.8, - 1015.5, 305.242, 'H00Z')
+    set u=BlzCreateUnitWithSkin(p, 'h011', 277.9, - 2385.5, 302.838, 'h011')
 endfunction
 
 //===========================================================================
@@ -342,7 +349,7 @@ function CreateNeutralPassive takes nothing returns nothing
     local real life
 
     set u=BlzCreateUnitWithSkin(p, 'nvlw', 203.8, 1760.2, 269.111, 'nvlw')
-    set u=BlzCreateUnitWithSkin(p, 'nlur', 599.0, 2684.3, - 83.600, 'nlur')
+    set u=BlzCreateUnitWithSkin(p, 'nlur', 599.0, 2684.3, 276.400, 'nlur')
 endfunction
 
 //===========================================================================
@@ -374,6 +381,58 @@ endfunction
 
 //***************************************************************************
 //*
+//*  Cameras
+//*
+//***************************************************************************
+
+function CreateCameras takes nothing returns nothing
+
+    set gg_cam_0=CreateCameraSetup()
+    call CameraSetupSetField(gg_cam_0, CAMERA_FIELD_ZOFFSET, 0.0, 0.0)
+    call CameraSetupSetField(gg_cam_0, CAMERA_FIELD_ROTATION, 90.0, 0.0)
+    call CameraSetupSetField(gg_cam_0, CAMERA_FIELD_ANGLE_OF_ATTACK, 335.0, 0.0)
+    call CameraSetupSetField(gg_cam_0, CAMERA_FIELD_TARGET_DISTANCE, 1650.0, 0.0)
+    call CameraSetupSetField(gg_cam_0, CAMERA_FIELD_ROLL, 0.0, 0.0)
+    call CameraSetupSetField(gg_cam_0, CAMERA_FIELD_FIELD_OF_VIEW, 70.0, 0.0)
+    call CameraSetupSetField(gg_cam_0, CAMERA_FIELD_FARZ, 5000.0, 0.0)
+    call CameraSetupSetField(gg_cam_0, CAMERA_FIELD_NEARZ, 16.0, 0.0)
+    call CameraSetupSetField(gg_cam_0, CAMERA_FIELD_LOCAL_PITCH, 0.0, 0.0)
+    call CameraSetupSetField(gg_cam_0, CAMERA_FIELD_LOCAL_YAW, 0.0, 0.0)
+    call CameraSetupSetField(gg_cam_0, CAMERA_FIELD_LOCAL_ROLL, 0.0, 0.0)
+    call CameraSetupSetDestPosition(gg_cam_0, 1036.1, - 3053.2, 0.0)
+
+    set gg_cam_45=CreateCameraSetup()
+    call CameraSetupSetField(gg_cam_45, CAMERA_FIELD_ZOFFSET, 0.0, 0.0)
+    call CameraSetupSetField(gg_cam_45, CAMERA_FIELD_ROTATION, 135.0, 0.0)
+    call CameraSetupSetField(gg_cam_45, CAMERA_FIELD_ANGLE_OF_ATTACK, 335.0, 0.0)
+    call CameraSetupSetField(gg_cam_45, CAMERA_FIELD_TARGET_DISTANCE, 1650.0, 0.0)
+    call CameraSetupSetField(gg_cam_45, CAMERA_FIELD_ROLL, 0.0, 0.0)
+    call CameraSetupSetField(gg_cam_45, CAMERA_FIELD_FIELD_OF_VIEW, 70.0, 0.0)
+    call CameraSetupSetField(gg_cam_45, CAMERA_FIELD_FARZ, 5000.0, 0.0)
+    call CameraSetupSetField(gg_cam_45, CAMERA_FIELD_NEARZ, 16.0, 0.0)
+    call CameraSetupSetField(gg_cam_45, CAMERA_FIELD_LOCAL_PITCH, 0.0, 0.0)
+    call CameraSetupSetField(gg_cam_45, CAMERA_FIELD_LOCAL_YAW, 0.0, 0.0)
+    call CameraSetupSetField(gg_cam_45, CAMERA_FIELD_LOCAL_ROLL, 0.0, 0.0)
+    call CameraSetupSetDestPosition(gg_cam_45, 1036.1, - 3053.2, 0.0)
+
+    set gg_cam_315=CreateCameraSetup()
+    call CameraSetupSetField(gg_cam_315, CAMERA_FIELD_ZOFFSET, 0.0, 0.0)
+    call CameraSetupSetField(gg_cam_315, CAMERA_FIELD_ROTATION, 45.0, 0.0)
+    call CameraSetupSetField(gg_cam_315, CAMERA_FIELD_ANGLE_OF_ATTACK, 335.0, 0.0)
+    call CameraSetupSetField(gg_cam_315, CAMERA_FIELD_TARGET_DISTANCE, 1650.0, 0.0)
+    call CameraSetupSetField(gg_cam_315, CAMERA_FIELD_ROLL, 0.0, 0.0)
+    call CameraSetupSetField(gg_cam_315, CAMERA_FIELD_FIELD_OF_VIEW, 70.0, 0.0)
+    call CameraSetupSetField(gg_cam_315, CAMERA_FIELD_FARZ, 5000.0, 0.0)
+    call CameraSetupSetField(gg_cam_315, CAMERA_FIELD_NEARZ, 16.0, 0.0)
+    call CameraSetupSetField(gg_cam_315, CAMERA_FIELD_LOCAL_PITCH, 0.0, 0.0)
+    call CameraSetupSetField(gg_cam_315, CAMERA_FIELD_LOCAL_YAW, 0.0, 0.0)
+    call CameraSetupSetField(gg_cam_315, CAMERA_FIELD_LOCAL_ROLL, 0.0, 0.0)
+    call CameraSetupSetDestPosition(gg_cam_315, 1036.1, - 3053.2, 0.0)
+
+endfunction
+
+//***************************************************************************
+//*
 //*  Triggers
 //*
 //***************************************************************************
@@ -382,6 +441,7 @@ endfunction
 // Trigger: Untitled Trigger 001
 //===========================================================================
 function Trig_Untitled_Trigger_001_Actions takes nothing returns nothing
+    call UnitRemoveBuffBJ('Babr', GetTriggerUnit())
 endfunction
 
 //===========================================================================
@@ -740,6 +800,7 @@ function main takes nothing returns nothing
     call SetAmbientDaySound("LordaeronSummerDay")
     call SetAmbientNightSound("LordaeronSummerNight")
     call SetMapMusic("Music", true, 0)
+    call CreateCameras()
     call CreateAllItems()
     call CreateAllUnits()
     call InitBlizzard()
