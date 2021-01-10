@@ -14,7 +14,8 @@ import UnitMetadata
 import HumanPlayerMetadata
 import LinkedList
 import WeatherManager
-import TimeOfDay
+import Time
+import Reputation
 
 constant string COMMAND_MEMORYTRACKER = "mem"
 constant string COMMAND_GODLIKE = "godlike"
@@ -41,6 +42,9 @@ constant string COMMAND_SETLEVEL = "setlevel"
 constant string COMMAND_TODSCALE = "timescale"
 constant string COMMAND_TOD = "time"
 constant string COMMAND_TOGGLE_GRACE_PERIOD = "graceperiod"
+constant string COMMAND_REPUTATION = "rep"
+constant string COMMAND_SETREPUTATION = "setrep"
+constant string COMMAND_UPDATEREPUTATION = "updaterep"
 
 DebugChatCommandHandler g_commandHandler
 MemoryTrackingMultiboard g_memoryTrackingMultiboard
@@ -421,6 +425,83 @@ function toggleGracePeriod()
   displayMessageToPlayer(commandPlayer, "Grace period is {0}".format(g_GameInstance.isGracePeriodActive() ? "active" : "inactive"))
 
 // ============================================================================
+function printReputation()
+  let command = getChatCommand()
+  let commandPlayer = getChatCommandPlayer()
+  
+  let playerId = command.getArgument(0).getInt()
+  let _player = Player(playerId)
+  if (_player == null)
+    error("Player id argument is invalid")
+    return
+
+  let playerRep = ReputationUtility.getPlayerReputation(_player)
+
+  displayMessageToPlayer(commandPlayer, "Total Rep: {0}".format(playerRep.getTotalReputation01().toString()))
+  displayMessageToPlayer(commandPlayer, "Shelter: {0} Defense: {1} Power: {2} Tech: {3}".format(
+    playerRep.getReputation(ReputationType.Shelter).toString(),
+    playerRep.getReputation(ReputationType.Defense).toString(),
+    playerRep.getReputation(ReputationType.Power).toString(),
+    playerRep.getReputation(ReputationType.Tech).toString()))
+
+// ============================================================================
+function setReputation()
+  let command = getChatCommand()
+  let commandPlayer = getChatCommandPlayer()
+  let playerId = command.getArgument(0).getInt()
+  let repTypeStr = command.getArgument(1).getString().toLowerCase()
+  let repValue = command.getArgument(2).getInt()
+  
+  let _player = Player(playerId)
+  if (_player == null)
+    error("Player id argument is invalid")
+    return
+
+  let playerRep = ReputationUtility.getPlayerReputation(_player)
+  
+  var repType = ReputationType.Shelter
+
+  switch (repTypeStr)
+    case "Shelter"
+      repType = ReputationType.Shelter
+    case "Defense"
+      repType = ReputationType.Defense
+    case "Power"
+      repType = ReputationType.Power
+    case "Tech"
+      repType = ReputationType.Tech
+
+  playerRep.setReputation(repType, repValue)
+
+  displayMessageToPlayer(commandPlayer, "Set player {0} {1} rep to {2}".format(
+    _player.getName(),
+    repTypeStr,
+    repValue.toString()))
+
+// ============================================================================
+function updateReputation()
+  let command = getChatCommand()
+  let commandPlayer = getChatCommandPlayer()
+  let playerId = command.getArgument(0).getInt()
+  
+  let _player = Player(playerId)
+  if (_player == null)
+    error("Player id argument is invalid")
+    return
+
+  let playerRep = ReputationUtility.getPlayerReputation(_player)
+  playerRep.update()
+
+  displayMessageToPlayer(commandPlayer, "Updated player {0} reputation".format(_player.getName()))
+
+  displayMessageToPlayer(commandPlayer, "Total Rep: {0}".format(playerRep.getTotalReputation01().toString()))
+  displayMessageToPlayer(commandPlayer, "Shelter: {0} Defense: {1} Power: {2} Tech: {3}".format(
+    playerRep.getReputation(ReputationType.Shelter).toString(),
+    playerRep.getReputation(ReputationType.Defense).toString(),
+    playerRep.getReputation(ReputationType.Power).toString(),
+    playerRep.getReputation(ReputationType.Tech).toString()))
+
+// ============================================================================
 function registerDebugCommands()
 
   g_commandHandler.registerCommandDefinition(COMMAND_MEMORYTRACKER, function showMemoryTrackerMultiboard)  
@@ -495,6 +576,20 @@ function registerDebugCommands()
   g_commandHandler.registerCommandDefinition(COMMAND_TOGGLE_GRACE_PERIOD, function toggleGracePeriod)
     ..setDescription("Gets and sets whether the grace period is enabled")
     ..addBoolArgument("VALUE", true, "Whether or not the grace period is enabled.")
+  
+  g_commandHandler.registerCommandDefinition(COMMAND_REPUTATION, function printReputation)
+    ..setDescription("Prints a player's reputation values")
+    ..addIntegerArgument("PLAYER_ID", false)
+  
+  g_commandHandler.registerCommandDefinition(COMMAND_SETREPUTATION, function setReputation)
+    ..setDescription("Sets a player's reputation values")
+    ..addIntegerArgument("PLAYER_ID", false)
+    ..addArgument(new ChatCommandArgument("REP_TYPE", ChatCommandArgumentType.STRING, false)..setStringOptions("Shelter", "Defense", "Power", "Tech"))
+    ..addIntegerArgument("REP_VALUE", false)
+  
+  g_commandHandler.registerCommandDefinition(COMMAND_UPDATEREPUTATION, function updateReputation)
+    ..setDescription("Updates a player's reputation values")
+    ..addIntegerArgument("PLAYER_ID", false)
 
 // ============================================================================
 init

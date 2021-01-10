@@ -1,0 +1,339 @@
+package Reputation
+import HashMap
+import Unit_WoodFence
+import Unit_StoneWall
+import Unit_MetalWall
+import GroupUtils
+import Range
+import HumanPlayers
+import TlsUpgradeIds
+import TlsUnitDefinition
+import StringExtensions
+import Unit_Gate1
+import Unit_Gate2
+import Unit_Gate3
+import Unit_Gate4
+
+HashMap<player, PlayerReputation> g_playerReputationMap = new HashMap<player, PlayerReputation>()
+HashMap<int, int> g_unitTypeToShelterReputationMap = new HashMap<int, int>()
+HashMap<int, int> g_unitTypeToDefenseReputationMap = new HashMap<int, int>()
+HashMap<int, int> g_unitTypeToPowerReputationMap = new HashMap<int, int>()
+IterableMap<int, int> g_techIdToTechReputationMap = new IterableMap<int, int>()
+
+rangeInt g_shelterRepRange = rangeInt(14, 14 * 5 * 2) // max shelter count * shelter 3 value * (1 for shelters, 1 for decorations)
+rangeInt g_defenseRepRange = rangeInt(0, 100)
+rangeInt g_techRepRange = rangeInt(0, 100)
+rangeInt g_powerRepRange = rangeInt(0, 100)
+
+constant real REP_WEIGHT_SHELTER = 0.4
+constant real REP_WEIGHT_DEFENSE = 0.2
+constant real REP_WEIGHT_TECH = 0.2
+constant real REP_WEIGHT_POWER = 0.2
+
+constant color REP_COLOR_SHELTER = color(100, 255, 0)
+constant color REP_COLOR_DEFENSE = color(0, 100, 255)
+constant color REP_COLOR_TECH = color(255, 100, 0)
+constant color REP_COLOR_POWER = color(255, 0, 100)
+
+bool g_initialized = false
+
+// ============================================================================
+public enum ReputationType
+  Shelter
+  Defense
+  Power
+  Tech
+
+// ============================================================================
+public tuple reputation(ReputationType reputationType, int value)
+public tuple optionalReputation(bool hasValue, reputation value, string errorMessage)
+
+// ============================================================================
+public function some(reputation rep) returns optionalReputation
+  return optionalReputation(true, rep, null)
+
+// ============================================================================
+public function none_reputation() returns optionalReputation
+  return optionalReputation(false, reputation(ReputationType.Shelter, 0), null)
+
+// ============================================================================
+public class PlayerReputation
+  private player m_player
+  private int array[4] m_reputation
+
+  // --------------------------------------------------------------------------
+  construct(player _player)
+    m_player = _player
+
+  // --------------------------------------------------------------------------
+  function getReputation(ReputationType reputationType) returns int
+    return m_reputation[reputationType castTo int]
+
+  // --------------------------------------------------------------------------
+  function setReputation(ReputationType reputationType, int value)
+    m_reputation[reputationType castTo int] = value
+
+  // --------------------------------------------------------------------------
+  function getTotalReputation01() returns real
+    let shelterRep01 = g_shelterRepRange.parameterize01(getReputation(ReputationType.Shelter))
+    let defenseRep01 = g_defenseRepRange.parameterize01(getReputation(ReputationType.Defense))
+    let powerRep01 = g_powerRepRange.parameterize01(getReputation(ReputationType.Power))
+    let techRep01 = g_techRepRange.parameterize01(getReputation(ReputationType.Tech))
+    return shelterRep01 * REP_WEIGHT_SHELTER +
+           defenseRep01 * REP_WEIGHT_DEFENSE +
+           powerRep01 * REP_WEIGHT_POWER +
+           techRep01 * REP_WEIGHT_TECH
+
+  // --------------------------------------------------------------------------
+  function update()
+
+    let tempGroup = getGroup()
+    tempGroup.enumUnitsOfPlayer(m_player, null)
+
+    var shelterRep = 0
+    var defenseRep = 0
+    var powerRep = 0
+
+    for u in tempGroup
+      let unitTypeId = u.getTypeId()
+
+      let shelter = ReputationUtility.getShelterReputationForUnitType(unitTypeId)
+      if (shelter.hasValue)
+        shelterRep += shelter.value.value
+
+      let defense = ReputationUtility.getDefenseReputationForUnitType(unitTypeId)
+      if (defense.hasValue)
+        defenseRep += defense.value.value
+
+      let power = ReputationUtility.getPowerReputationForUnitType(unitTypeId)
+      if (power.hasValue)
+        powerRep += power.value.value
+
+    setReputation(ReputationType.Shelter, shelterRep)
+    setReputation(ReputationType.Defense, defenseRep)
+    setReputation(ReputationType.Power, powerRep)
+
+    var techRep = 0
+
+    for techId in g_techIdToTechReputationMap
+      let techLevel = GetPlayerTechCountSimple(techId, m_player)
+      techRep += g_techIdToTechReputationMap.get(techId) * techLevel
+
+    setReputation(ReputationType.Tech, techRep)
+
+// ============================================================================
+public class ReputationUtility
+
+  // --------------------------------------------------------------------------
+  static function getShelterReputationForUnitType(int unitTypeId) returns optionalReputation
+    if (g_unitTypeToShelterReputationMap.has(unitTypeId))
+      return some(reputation(ReputationType.Shelter, g_unitTypeToShelterReputationMap.get(unitTypeId)))
+    return none_reputation()
+
+  // --------------------------------------------------------------------------
+  static function getDefenseReputationForUnitType(int unitTypeId) returns optionalReputation
+    if (g_unitTypeToDefenseReputationMap.has(unitTypeId))
+      return some(reputation(ReputationType.Defense, g_unitTypeToDefenseReputationMap.get(unitTypeId)))
+    return none_reputation()
+
+  // --------------------------------------------------------------------------
+  static function getPowerReputationForUnitType(int unitTypeId) returns optionalReputation
+    if (g_unitTypeToPowerReputationMap.has(unitTypeId))
+      return some(reputation(ReputationType.Power, g_unitTypeToPowerReputationMap.get(unitTypeId)))
+    return none_reputation()
+
+  // --------------------------------------------------------------------------
+  static function getTechReputationForUnitType(int unitTypeId) returns optionalReputation
+    if (g_techIdToTechReputationMap.has(unitTypeId))
+      return some(reputation(ReputationType.Tech, g_techIdToTechReputationMap.get(unitTypeId)))
+    return none_reputation()
+
+  // --------------------------------------------------------------------------
+  static function registerUnitTypeShelterReputation(int unitTypeId, int value)
+    g_unitTypeToShelterReputationMap.put(unitTypeId, value)
+
+  // --------------------------------------------------------------------------
+  static function registerUnitTypeDefenseReputation(int unitTypeId, int value)
+    g_unitTypeToDefenseReputationMap.put(unitTypeId, value)
+
+  // --------------------------------------------------------------------------
+  static function registerPowerReputation(int unitTypeId, int value)
+    g_unitTypeToPowerReputationMap.put(unitTypeId, value)
+
+  // --------------------------------------------------------------------------
+  static function registerTechReputation(int techId, int value)
+    g_techIdToTechReputationMap.put(techId, value)
+
+  // --------------------------------------------------------------------------
+  static function getPlayerReputation(player _player) returns PlayerReputation
+    return g_playerReputationMap.get(_player)
+
+// ============================================================================
+function initializeReputation()
+
+  if (g_initialized)
+    return
+
+  g_initialized = true
+
+  ReputationUtility.registerUnitTypeShelterReputation(TlsUnitIds.shelter1, 1)
+  ReputationUtility.registerUnitTypeShelterReputation(TlsUnitIds.shelter2, 3)
+  ReputationUtility.registerUnitTypeShelterReputation(TlsUnitIds.shelter3, 5)
+
+  ReputationUtility.registerUnitTypeDefenseReputation(TlsUnitIds.barricade1, 1)
+  ReputationUtility.registerUnitTypeDefenseReputation(TlsUnitIds.barricade2, 3)
+  ReputationUtility.registerUnitTypeDefenseReputation(TlsUnitIds.barricade3, 5)
+
+  var value = 1
+  ReputationUtility.registerUnitTypeDefenseReputation(WoodFenceIds.ew, value)
+  ReputationUtility.registerUnitTypeDefenseReputation(WoodFenceIds.nesw, value)
+  ReputationUtility.registerUnitTypeDefenseReputation(WoodFenceIds.ns, value)
+  ReputationUtility.registerUnitTypeDefenseReputation(WoodFenceIds.nwse, value)
+
+  value = 2
+  ReputationUtility.registerUnitTypeDefenseReputation(StoneWallIds.ew, value)
+  ReputationUtility.registerUnitTypeDefenseReputation(StoneWallIds.nesw, value)
+  ReputationUtility.registerUnitTypeDefenseReputation(StoneWallIds.ns, value)
+  ReputationUtility.registerUnitTypeDefenseReputation(StoneWallIds.nwse, value)
+
+  value = 3
+  ReputationUtility.registerUnitTypeDefenseReputation(MetalWallIds.ew, value)
+  ReputationUtility.registerUnitTypeDefenseReputation(MetalWallIds.nesw, value)
+  ReputationUtility.registerUnitTypeDefenseReputation(MetalWallIds.ns, value)
+  ReputationUtility.registerUnitTypeDefenseReputation(MetalWallIds.nwse, value)
+
+  value = 1
+  ReputationUtility.registerUnitTypeDefenseReputation(Gate1Ids.ew_build, value)
+  ReputationUtility.registerUnitTypeDefenseReputation(Gate1Ids.ew_open, value)
+  ReputationUtility.registerUnitTypeDefenseReputation(Gate1Ids.ew_closed, value)
+  ReputationUtility.registerUnitTypeDefenseReputation(Gate1Ids.nesw_build, value)
+  ReputationUtility.registerUnitTypeDefenseReputation(Gate1Ids.nesw_open, value)
+  ReputationUtility.registerUnitTypeDefenseReputation(Gate1Ids.nesw_closed, value)
+  ReputationUtility.registerUnitTypeDefenseReputation(Gate1Ids.ns_build, value)
+  ReputationUtility.registerUnitTypeDefenseReputation(Gate1Ids.ns_open, value)
+  ReputationUtility.registerUnitTypeDefenseReputation(Gate1Ids.ns_closed, value)
+  ReputationUtility.registerUnitTypeDefenseReputation(Gate1Ids.nwse_build, value)
+  ReputationUtility.registerUnitTypeDefenseReputation(Gate1Ids.nwse_open, value)
+  ReputationUtility.registerUnitTypeDefenseReputation(Gate1Ids.nwse_closed, value)
+
+  value = 2
+  ReputationUtility.registerUnitTypeDefenseReputation(Gate2Ids.ew_build, value)
+  ReputationUtility.registerUnitTypeDefenseReputation(Gate2Ids.ew_open, value)
+  ReputationUtility.registerUnitTypeDefenseReputation(Gate2Ids.ew_closed, value)
+  ReputationUtility.registerUnitTypeDefenseReputation(Gate2Ids.nesw_build, value)
+  ReputationUtility.registerUnitTypeDefenseReputation(Gate2Ids.nesw_open, value)
+  ReputationUtility.registerUnitTypeDefenseReputation(Gate2Ids.nesw_closed, value)
+  ReputationUtility.registerUnitTypeDefenseReputation(Gate2Ids.ns_build, value)
+  ReputationUtility.registerUnitTypeDefenseReputation(Gate2Ids.ns_open, value)
+  ReputationUtility.registerUnitTypeDefenseReputation(Gate2Ids.ns_closed, value)
+  ReputationUtility.registerUnitTypeDefenseReputation(Gate2Ids.nwse_build, value)
+  ReputationUtility.registerUnitTypeDefenseReputation(Gate2Ids.nwse_open, value)
+  ReputationUtility.registerUnitTypeDefenseReputation(Gate2Ids.nwse_closed, value)
+
+  value = 3
+  ReputationUtility.registerUnitTypeDefenseReputation(Gate3Ids.ew_build, value)
+  ReputationUtility.registerUnitTypeDefenseReputation(Gate3Ids.ew_open, value)
+  ReputationUtility.registerUnitTypeDefenseReputation(Gate3Ids.ew_closed, value)
+  ReputationUtility.registerUnitTypeDefenseReputation(Gate3Ids.nesw_build, value)
+  ReputationUtility.registerUnitTypeDefenseReputation(Gate3Ids.nesw_open, value)
+  ReputationUtility.registerUnitTypeDefenseReputation(Gate3Ids.nesw_closed, value)
+  ReputationUtility.registerUnitTypeDefenseReputation(Gate3Ids.ns_build, value)
+  ReputationUtility.registerUnitTypeDefenseReputation(Gate3Ids.ns_open, value)
+  ReputationUtility.registerUnitTypeDefenseReputation(Gate3Ids.ns_closed, value)
+  ReputationUtility.registerUnitTypeDefenseReputation(Gate3Ids.nwse_build, value)
+  ReputationUtility.registerUnitTypeDefenseReputation(Gate3Ids.nwse_open, value)
+  ReputationUtility.registerUnitTypeDefenseReputation(Gate3Ids.nwse_closed, value)
+
+  value = 4
+  ReputationUtility.registerUnitTypeDefenseReputation(Gate4Ids.ew_build, value)
+  ReputationUtility.registerUnitTypeDefenseReputation(Gate4Ids.ew_open, value)
+  ReputationUtility.registerUnitTypeDefenseReputation(Gate4Ids.ew_closed, value)
+  ReputationUtility.registerUnitTypeDefenseReputation(Gate4Ids.nesw_build, value)
+  ReputationUtility.registerUnitTypeDefenseReputation(Gate4Ids.nesw_open, value)
+  ReputationUtility.registerUnitTypeDefenseReputation(Gate4Ids.nesw_closed, value)
+  ReputationUtility.registerUnitTypeDefenseReputation(Gate4Ids.ns_build, value)
+  ReputationUtility.registerUnitTypeDefenseReputation(Gate4Ids.ns_open, value)
+  ReputationUtility.registerUnitTypeDefenseReputation(Gate4Ids.ns_closed, value)
+  ReputationUtility.registerUnitTypeDefenseReputation(Gate4Ids.nwse_build, value)
+  ReputationUtility.registerUnitTypeDefenseReputation(Gate4Ids.nwse_open, value)
+  ReputationUtility.registerUnitTypeDefenseReputation(Gate4Ids.nwse_closed, value)
+
+  ReputationUtility.registerUnitTypeDefenseReputation(TlsUnitIds.spikes[0], 1)
+  ReputationUtility.registerUnitTypeDefenseReputation(TlsUnitIds.spikes[1], 2)
+  ReputationUtility.registerUnitTypeDefenseReputation(TlsUnitIds.spikes[2], 3)
+  ReputationUtility.registerUnitTypeDefenseReputation(TlsUnitIds.spikes[3], 4)
+  ReputationUtility.registerUnitTypeDefenseReputation(TlsUnitIds.spikes[4], 5)
+
+  ReputationUtility.registerPowerReputation(TlsUnitIds.Survivors.survivorMilitia1, 1)
+  ReputationUtility.registerPowerReputation(TlsUnitIds.Survivors.survivorMilitia2, 3)
+  ReputationUtility.registerPowerReputation(TlsUnitIds.Survivors.survivorMilitia3, 5)
+  ReputationUtility.registerPowerReputation(TlsUnitIds.Survivors.survivorSpearman, 3)
+  ReputationUtility.registerPowerReputation(TlsUnitIds.Survivors.survivorMarksman, 5)
+
+  ReputationUtility.registerTechReputation(TlsUpgradeIds.spearmanArmor, 1)
+  ReputationUtility.registerTechReputation(TlsUpgradeIds.spearmanAttackDamage, 1)
+  ReputationUtility.registerTechReputation(TlsUpgradeIds.spearmanAttackRange, 2)
+  
+  ReputationUtility.registerTechReputation(TlsUpgradeIds.militiaArmor, 1)
+  ReputationUtility.registerTechReputation(TlsUpgradeIds.militiaAttackDamage, 1)
+  ReputationUtility.registerTechReputation(TlsUpgradeIds.militiaAttackSpeed, 2)
+  
+  ReputationUtility.registerTechReputation(TlsUpgradeIds.campDefense, 5)
+
+  ReputationUtility.registerTechReputation(TlsUnitIds.headquarters1, 10)
+  ReputationUtility.registerTechReputation(TlsUnitIds.headquarters2, 20)
+  ReputationUtility.registerTechReputation(TlsUnitIds.headquarters3, 30)
+  ReputationUtility.registerTechReputation(TlsUnitIds.headquarters4, 40)
+  ReputationUtility.registerTechReputation(TlsUnitIds.headquarters5, 50)
+
+  ReputationUtility.registerTechReputation(TlsUnitIds.workshop, 5)
+  ReputationUtility.registerTechReputation(TlsUnitIds.spearmansTent, 5)
+  ReputationUtility.registerTechReputation(TlsUnitIds.armory, 5)
+
+// ============================================================================
+public function addReputationToUnitDefinitionTooltipExtended(int unitTypeId, string origTooltipExt) returns string
+
+  if (not compiletime)
+    return origTooltipExt
+
+  initializeReputation()
+    
+  let shelter = ReputationUtility.getShelterReputationForUnitType(unitTypeId)
+  let defense = ReputationUtility.getDefenseReputationForUnitType(unitTypeId)
+  let power = ReputationUtility.getPowerReputationForUnitType(unitTypeId)
+  let tech = ReputationUtility.getTechReputationForUnitType(unitTypeId)
+
+  var tooltipExtended = origTooltipExt
+
+  if (shelter.hasValue or defense.hasValue or power.hasValue or tech.hasValue)
+    tooltipExtended = origTooltipExt + "|n|nReputation:"
+
+    if (shelter.hasValue)
+      tooltipExtended += " +{0} Shelter".format(shelter.value.value.toString()).colorize(REP_COLOR_SHELTER)
+    if (defense.hasValue)
+      tooltipExtended += " +{0} Defense".format(defense.value.value.toString()).colorize(REP_COLOR_DEFENSE)
+    if (power.hasValue)
+      tooltipExtended += " +{0} Power".format(power.value.value.toString()).colorize(REP_COLOR_POWER)
+    if (tech.hasValue)
+      tooltipExtended += " +{0} Tech".format(tech.value.value.toString()).colorize(REP_COLOR_TECH)
+
+  return tooltipExtended
+
+// ============================================================================
+init
+  initializeReputation()
+
+  g_playerReputationMap = new HashMap<player, PlayerReputation>()
+
+  for p in g_PlayingHumanPlayers
+    g_playerReputationMap.put(p, new PlayerReputation(p))
+
+// ============================================================================
+@compiletime
+function init_compiletime()
+  g_unitTypeToShelterReputationMap = new HashMap<int, int>()
+  g_unitTypeToDefenseReputationMap = new HashMap<int, int>()
+  g_unitTypeToPowerReputationMap = new HashMap<int, int>()
+  g_techIdToTechReputationMap = new IterableMap<int, int>()
+  g_initialized = false
+  initializeReputation()
