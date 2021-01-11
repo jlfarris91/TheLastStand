@@ -10,6 +10,11 @@ import ErrorHandling
 import Time
 import LinkedList
 import Range
+import LooterComponent
+import Math
+import DisplayTextToPlayer
+import StringExtensions
+import ColorUtility
 
 constant int ABILITY_ID_LOOTABLE = 'A02C'
 constant colorA LOOTABLE_COLOR = colorA(255, 255, 255, 255)
@@ -122,13 +127,33 @@ public class LootableUnit extends UnitMetadata
     this._cooldown = LOOTABLES_COOLDOWN_RANGE.getRandom()
     this._isBeingLooted = true
     lootingUnit.pause()
-    startLootOperation(lootingUnit, this, _searchDuration)
+
+    var searchDuration = _searchDuration
+
+    // Shapeshifting Key decreases duration by 50%
+    let metadata = lootingUnit.getMetadata()
+    if (metadata != null)
+      let comp = metadata.getLooterComponent()
+      if (comp != null)
+        searchDuration = comp.scaleLootDuration(searchDuration)
+
+    startLootOperation(lootingUnit, this, searchDuration)
 
   // --------------------------------------------------------------------------
   protected function onLootingFinished(unit lootingUnit)
     this._isBeingLooted = false
     lootingUnit.unpause()
     this.giveLoot(lootingUnit)
+    
+    // Lucky Horseshoe item grants a small chance to immediately loot a second time
+    let metadata = lootingUnit.getMetadata()
+    if (metadata != null)
+      let comp = metadata.getLooterComponent()
+      if (comp != null)
+        if (passesChanceCheck(comp.getChanceToLootTwice()))
+          this.giveLoot(lootingUnit)
+          displayMessageToPlayer(lootingUnit.getOwner(), "Lucky Horseshoe!".colorize(Colors.lightBlue))
+
     this.onLooted()
 
   // --------------------------------------------------------------------------
