@@ -3,10 +3,10 @@ globals
 ability udg_Untitled_Variable_001= null
 
     // Generated
-trigger gg_trg_Untitled_Trigger_001= null
 camerasetup gg_cam_0= null
 camerasetup gg_cam_45= null
 camerasetup gg_cam_315= null
+trigger gg_trg_Untitled_Trigger_001= null
 
 
 //JASSHelper struct globals:
@@ -83,6 +83,9 @@ function CreateBuildingsForPlayer0 takes nothing returns nothing
     set u=BlzCreateUnitWithSkin(p, 'h004', 1696.0, 864.0, 270.000, 'h004')
     set u=BlzCreateUnitWithSkin(p, 'h00L', 704.0, - 1088.0, 270.000, 'h00L')
     set u=BlzCreateUnitWithSkin(p, 'h00M', 832.0, - 1088.0, 270.000, 'h00M')
+    set u=BlzCreateUnitWithSkin(p, 'h016', 1792.0, 1792.0, 270.000, 'h016')
+    set u=BlzCreateUnitWithSkin(p, 'h018', 2112.0, 1792.0, 270.000, 'h018')
+    set u=BlzCreateUnitWithSkin(p, 'h019', 2432.0, 1792.0, 270.000, 'h019')
     set u=BlzCreateUnitWithSkin(p, 'h00O', - 1984.0, - 2432.0, 270.000, 'h00O')
     set u=BlzCreateUnitWithSkin(p, 'h00R', - 1344.0, - 2432.0, 270.000, 'h00R')
     set u=BlzCreateUnitWithSkin(p, 'h00T', - 1024.0, - 2432.0, 270.000, 'h00T')
@@ -98,6 +101,10 @@ function CreateBuildingsForPlayer0 takes nothing returns nothing
     set u=BlzCreateUnitWithSkin(p, 'h00O', - 2688.0, - 1920.0, 270.000, 'h00O')
     set u=BlzCreateUnitWithSkin(p, 'h010', 320.0, - 896.0, 270.000, 'h010')
     set u=BlzCreateUnitWithSkin(p, 'h012', 1024.0, - 3072.0, 270.000, 'h012')
+    set u=BlzCreateUnitWithSkin(p, 'h014', 1152.0, 1792.0, 270.000, 'h014')
+    set u=BlzCreateUnitWithSkin(p, 'h015', 1472.0, 1792.0, 270.000, 'h015')
+    set u=BlzCreateUnitWithSkin(p, 'h01B', 2752.0, 1792.0, 270.000, 'h01B')
+    set u=BlzCreateUnitWithSkin(p, 'nheb', 2944.0, 1344.0, 270.000, 'nheb')
 endfunction
 
 //===========================================================================
@@ -220,6 +227,7 @@ function CreateUnitsForPlayer0 takes nothing returns nothing
     set u=BlzCreateUnitWithSkin(p, 'h00P', - 2688.7, - 1922.4, 285.727, 'h00P')
     set u=BlzCreateUnitWithSkin(p, 'H00Z', 155.8, - 1015.5, 305.242, 'H00Z')
     set u=BlzCreateUnitWithSkin(p, 'h011', 277.9, - 2385.5, 302.838, 'h011')
+    set u=BlzCreateUnitWithSkin(p, 'h00N', 954.3, 1713.0, 267.670, 'h00N')
 endfunction
 
 //===========================================================================
@@ -329,15 +337,17 @@ function CreateNeutralPassiveBuildings takes nothing returns nothing
     local trigger t
     local real life
 
-    set u=BlzCreateUnitWithSkin(p, 'ntn3', 1504.0, 2208.0, 270.000, 'ntn3')
-    set u=BlzCreateUnitWithSkin(p, 'ngnh', 1568.0, 2656.0, 270.000, 'ngnh')
-    set u=BlzCreateUnitWithSkin(p, 'ngt2', 1824.0, 2656.0, 270.000, 'ngt2')
-    set u=BlzCreateUnitWithSkin(p, 'nten', 992.0, 2208.0, 270.000, 'nten')
-    set u=BlzCreateUnitWithSkin(p, 'ntn2', 1248.0, 2208.0, 270.000, 'ntn2')
-    set u=BlzCreateUnitWithSkin(p, 'ndh4', 1536.0, 1856.0, 270.000, 'ndh4')
-    set u=BlzCreateUnitWithSkin(p, 'ndh2', 1152.0, 1856.0, 270.000, 'ndh2')
-    set u=BlzCreateUnitWithSkin(p, 'ndh3', 1920.0, 1856.0, 270.000, 'ndh3')
+    set u=BlzCreateUnitWithSkin(p, 'ntn3', 1760.0, 2336.0, 270.000, 'ntn3')
+    set u=BlzCreateUnitWithSkin(p, 'ngnh', 2016.0, 2336.0, 270.000, 'ngnh')
+    set u=BlzCreateUnitWithSkin(p, 'ngt2', 2272.0, 2336.0, 270.000, 'ngt2')
+    set u=BlzCreateUnitWithSkin(p, 'ntn2', 1504.0, 2336.0, 270.000, 'ntn2')
+    set u=BlzCreateUnitWithSkin(p, 'nmer', 2304.0, 1152.0, 270.000, 'nmer')
+    call SetUnitColor(u, ConvertPlayerColor(0))
     set u=BlzCreateUnitWithSkin(p, 'nhn2', 960.0, 2624.0, 270.000, 'nhn2')
+    set u=BlzCreateUnitWithSkin(p, 'nfh1', 2272.0, 544.0, 270.000, 'nfh1')
+    set u=BlzCreateUnitWithSkin(p, 'nfh0', 2560.0, 576.0, 270.000, 'nfh0')
+    set u=BlzCreateUnitWithSkin(p, 'nmrf', 2752.0, 256.0, 270.000, 'nmrf')
+    call SetUnitColor(u, ConvertPlayerColor(3))
 endfunction
 
 //===========================================================================
@@ -440,15 +450,25 @@ endfunction
 //===========================================================================
 // Trigger: Untitled Trigger 001
 //===========================================================================
+function Trig_Untitled_Trigger_001_Conditions takes nothing returns boolean
+    if ( not ( GetPlayerTechCountSimple(GetResearched(), Player(0)) == 0 ) ) then
+        return false
+    endif
+    return true
+endfunction
+
 function Trig_Untitled_Trigger_001_Actions takes nothing returns nothing
     call UnitRemoveBuffBJ('Babr', GetTriggerUnit())
+    call UnitRemoveItemFromSlotSwapped(1, null)
 endfunction
 
 //===========================================================================
 function InitTrig_Untitled_Trigger_001 takes nothing returns nothing
     set gg_trg_Untitled_Trigger_001=CreateTrigger()
+    call TriggerAddCondition(gg_trg_Untitled_Trigger_001, Condition(function Trig_Untitled_Trigger_001_Conditions))
     call TriggerAddAction(gg_trg_Untitled_Trigger_001, function Trig_Untitled_Trigger_001_Actions)
 endfunction
+
 
 //===========================================================================
 function InitCustomTriggers takes nothing returns nothing
