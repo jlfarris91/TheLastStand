@@ -1,0 +1,230 @@
+package UnitPropertiesComponent
+import UnitComponent
+import AbilityObjEditing
+import ObjectIdGenerator
+import Action
+import DamageEvent
+import FX
+import Damage
+
+constant int ABILITY_ID_CRIT = compiletime(ABIL_ID_GEN.next())
+constant int ABILITY_ID_EVASION = compiletime(ABIL_ID_GEN.next())
+
+// ============================================================================
+@compiletime function createAbilities()
+  
+  new AbilityDefinitionCriticalStrikecreep(ABILITY_ID_CRIT)
+  ..setName("STAT_CRIT")
+  ..setLevels(2)
+  ..setChancetoCriticalStrike(1, 0.0)
+  ..setDamageMultiplier(1, 0.0)
+  ..setDamageBonus(1, 0.0)
+  
+  new AbilityDefinitionEvasioncreep(ABILITY_ID_EVASION)
+  ..setName("STAT_EVASION")
+  ..setLevels(2)
+  ..setChancetoEvade(1, 0.0)
+
+// ============================================================================
+public class UnitPropertiesComponent extends UnitComponent
+  private real m_critChancePercentage = 0.0
+  private real m_critDamageMultiplierPercentage = 2.0
+  private real m_critBonusDamage = 0.0
+  private real m_evadeChancePercentage = 0.0
+  private real m_lifeStealPercentage = 0.0
+  private ability m_abilCritStrike
+  private ability m_abilEvasion
+
+  // --------------------------------------------------------------------------
+  construct(IUnitMetadata owner)
+    super(owner)
+
+  // --------------------------------------------------------------------------
+  override function getTypeId() returns int
+    return UnitPropertiesComponent.getTypeId()
+
+  // --------------------------------------------------------------------------
+  // Gets the critical chance percentage e.g. 100.0%
+  function getCritChancePercentage() returns real
+    return m_critChancePercentage
+
+  // --------------------------------------------------------------------------
+  // Sets the critical chance percentage e.g. 100.0%
+  function setCritChancePercentage(real value)
+    m_critChancePercentage = value
+    update()
+
+  // --------------------------------------------------------------------------
+  // Gets the damage multiplier applied when the unit crits e.g. 2.0
+  function getCritDamageMultiplier() returns real
+    return m_critDamageMultiplierPercentage
+
+  // --------------------------------------------------------------------------
+  // Sets the damage multiplier applied when the unit crits e.g. 2.0
+  function setCritDamageMultiplier(real value)
+    m_critDamageMultiplierPercentage = value
+    update()
+
+  // --------------------------------------------------------------------------
+  // Gets the evade chance percentage e.g. 100.0%
+  function getEvadeChancePercentage() returns real
+    return m_evadeChancePercentage
+
+  // --------------------------------------------------------------------------
+  // Sets the evade chance percentage e.g. 100.0%
+  function setEvadeChancePercentage(real value)
+    m_evadeChancePercentage = value
+    update()
+
+  // --------------------------------------------------------------------------
+  function getCritBonusDamage() returns real
+    return m_critBonusDamage
+
+  // --------------------------------------------------------------------------
+  function setCritBonusDamage(real value)
+    m_critBonusDamage = value
+    update()
+
+  // --------------------------------------------------------------------------
+  function getLifeStealPercentage() returns real
+    return m_lifeStealPercentage
+
+  // --------------------------------------------------------------------------
+  function setLifeStealPercentage(real value)
+    m_lifeStealPercentage = value
+    update()
+
+  // --------------------------------------------------------------------------
+  override function onEnabled()
+    super.onEnabled()
+
+    let ownerUnit = getOwnerUnit()
+
+    if (not ownerUnit.hasAbility(ABILITY_ID_CRIT))
+      ownerUnit.addAbility(ABILITY_ID_CRIT)
+      ownerUnit.hideAbility(ABILITY_ID_CRIT, true)
+    m_abilCritStrike = ownerUnit.getAbility(ABILITY_ID_CRIT)
+
+    if (not ownerUnit.hasAbility(ABILITY_ID_EVASION))
+      ownerUnit.addAbility(ABILITY_ID_EVASION)
+      ownerUnit.hideAbility(ABILITY_ID_EVASION, true)
+    m_abilEvasion = ownerUnit.getAbility(ABILITY_ID_EVASION)
+
+    update()
+
+  // --------------------------------------------------------------------------
+  override function onDisabled()
+    super.onDisabled()
+
+    let ownerUnit = getOwnerUnit()
+
+    ownerUnit.removeAbility(ABILITY_ID_CRIT)
+    ownerUnit.removeAbility(ABILITY_ID_EVASION)
+
+    m_abilCritStrike = null
+    m_abilEvasion = null
+
+  // --------------------------------------------------------------------------
+  private function update()
+
+    let ownerUnit = getOwnerUnit()
+
+    if (m_abilCritStrike != null)
+      let lvl = 0
+      ownerUnit.setAbilityLevel(ABILITY_ID_CRIT, lvl + 1)
+      setAbilityField(m_abilCritStrike, ABILITY_RLF_CHANCE_TO_CRITICAL_STRIKE, lvl, m_critChancePercentage)
+      setAbilityField(m_abilCritStrike, ABILITY_RLF_DAMAGE_MULTIPLIER_OCR2, lvl, m_critDamageMultiplierPercentage)
+      setAbilityField(m_abilCritStrike, ABILITY_RLF_DAMAGE_BONUS_OCR3, lvl, m_critBonusDamage)
+      ownerUnit.setAbilityLevel(ABILITY_ID_CRIT, lvl)
+
+    if (m_abilEvasion != null)
+      let lvl = 0
+      ownerUnit.setAbilityLevel(ABILITY_ID_EVASION, lvl + 1)
+      setAbilityField(m_abilEvasion, ABILITY_RLF_CHANCE_TO_EVADE_EEV1, lvl, m_evadeChancePercentage)
+      ownerUnit.setAbilityLevel(ABILITY_ID_EVASION, lvl)
+
+  // --------------------------------------------------------------------------
+  private function setAbilityField(ability _ability, abilityreallevelfield field, int lvl, real value)
+    if (not _ability.setField(field, lvl, value))
+      Log.debug("Failed to set ability real level field: {0} lvl {1} {2} to {3}".format(
+        getAbilityName(_ability),
+        lvl.toString(),
+        getAbilityFieldName(field),
+        value.toString()))
+    Log.debug("{0} lvl {1} {2} : {3}".format(
+        getAbilityName(_ability),
+        lvl.toString(),
+        getAbilityFieldName(field),
+        value.toString()))
+
+  // --------------------------------------------------------------------------
+  private function getAbilityName(ability _ability) returns string
+    if (_ability == m_abilCritStrike)
+      return "crit"
+    if (_ability == m_abilEvasion)
+      return "evade"
+    return "unknown"
+
+  // --------------------------------------------------------------------------
+  private function getAbilityFieldName(abilityreallevelfield field) returns string
+    if (field == ABILITY_RLF_CHANCE_TO_CRITICAL_STRIKE)
+      return "critchance"
+    if (field == ABILITY_RLF_DAMAGE_MULTIPLIER_OCR2)
+      return "critmult"
+    if (field == ABILITY_RLF_DAMAGE_BONUS_OCR3)
+      return "critbonus"
+    if (field == ABILITY_RLF_CHANCE_TO_EVADE_EEV1)
+      return "evade"
+    return "unknown"
+
+// ============================================================================
+public function UnitPropertiesComponent.printDebug(Action1<string> print)
+  let ownerUnit = this.getOwnerUnit()
+  print.call("===== Unit Properties for {0}: =====".format(ownerUnit.getName()))
+  print.call("Crit Chance : {0}%".format(this.getCritChancePercentage().toString()))
+  print.call("Crit Damage Multiplier : {0}x".format(this.getCritDamageMultiplier().toString()))
+  print.call("Crit Bonus Damage : {0}".format(this.getCritBonusDamage().toString()))
+  print.call("Evade Chance : {0}%".format(this.getEvadeChancePercentage().toString()))
+  print.call("Life Steal : {0}%".format((this.getLifeStealPercentage()).toString()))
+  destroy print
+
+// ============================================================================
+public function IUnitMetadata.getUnitPropertiesComponent() returns UnitPropertiesComponent
+  return this.getComponent(typeInfo(UnitPropertiesComponent.typeId)) castTo UnitPropertiesComponent
+
+// ============================================================================
+public function IUnitMetadata.getOrAddUnitPropertiesComponent() returns UnitPropertiesComponent
+  var component = this.getUnitPropertiesComponent()
+  if (component == null)
+    component = this.addComponent(new UnitPropertiesComponent(this)) castTo UnitPropertiesComponent
+  return component
+
+// ============================================================================
+function onUnitDamagedDoLifeSteal()
+  let source = DamageEvent.getSource()
+
+  if (DamageEvent.getType() != DamageType.ATTACK)
+    return
+
+  let metadata = source.getMetadata()
+  if (metadata == null)
+    return
+
+  let comp = metadata.getUnitPropertiesComponent()
+  if (comp == null)
+    return
+
+  let target = DamageEvent.getTarget()
+  let damageDone = min(DamageEvent.getAmount(), target.getHP())
+  let hpStolen = damageDone * comp.getLifeStealPercentage()
+
+  source.addHP(hpStolen)
+
+  let amountHealed = max(source.getMaxHP() - source.getHP(), 0.0)
+  if (amountHealed > 0.0)
+    FX.createEffectOneShot("Abilities\\Spells\\Undead\\VampiricAura\\VampiricAuraTarget.mdl", source.getPos())
+
+// ============================================================================
+init
+  DamageEvent.addListener(DAMAGE_EVENT_PRIO_FINAL, () -> onUnitDamagedDoLifeSteal())
+    

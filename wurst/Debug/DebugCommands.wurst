@@ -16,6 +16,8 @@ import LinkedList
 import WeatherManager
 import Time
 import Reputation
+import PlayerExtensions
+import UnitPropertiesComponent
 
 constant string COMMAND_MEMORYTRACKER = "mem"
 constant string COMMAND_GODLIKE = "godlike"
@@ -46,6 +48,10 @@ constant string COMMAND_REPUTATION = "rep"
 constant string COMMAND_SETREPUTATION = "setrep"
 constant string COMMAND_UPDATEREPUTATION = "updaterep"
 constant string COMMAND_SPAWNALLITEMS = "spawnitems"
+constant string COMMAND_UNITPROPS = "showprops"
+constant string COMMAND_SETUNITPROP = "setprop"
+constant string COMMAND_SETHEALTH = "sethp"
+constant string COMMAND_SETMANA = "setmana"
 
 DebugChatCommandHandler g_commandHandler
 MemoryTrackingMultiboard g_memoryTrackingMultiboard
@@ -535,6 +541,90 @@ function spawnAllItems()
     displayMessageToPlayer(commandPlayer, "Created legendary item {0} ({1})".format(itm.getName(), itm.getTypeId().toString()))
 
 // ============================================================================
+function showSelectedUnitStats()
+  let commandPlayer = getChatCommandPlayer()
+
+  let selectedUnit = commandPlayer.getFirstSelectedUnit()
+  if (selectedUnit == null)
+    displayMessageToPlayer(commandPlayer, "Must have a unit selected")
+    return
+
+  let metadata = selectedUnit.getMetadata()
+  if (metadata == null)
+    displayMessageToPlayer(commandPlayer, "Selected unit does not have metadata")
+    return
+
+  let comp = metadata.getUnitPropertiesComponent()
+  if (comp == null)
+    displayMessageToPlayer(commandPlayer, "Unit does not have properties component")
+    return
+
+  comp.printDebug((message) -> displayMessageToPlayer(commandPlayer, message))
+
+// ============================================================================
+function setSelectedUnitProperty()
+  let command = getChatCommand()
+  let commandPlayer = getChatCommandPlayer()
+  let propName = command.getArgument(0).getString()
+  let propValue = command.getArgument(1).getReal()
+
+  let selectedUnit = commandPlayer.getFirstSelectedUnit()
+  if (selectedUnit == null)
+    displayMessageToPlayer(commandPlayer, "Must have a unit selected")
+    return
+
+  let metadata = selectedUnit.getMetadata()
+  if (metadata == null)
+    displayMessageToPlayer(commandPlayer, "Selected unit does not have metadata")
+    return
+
+  let comp = metadata.getOrAddUnitPropertiesComponent()
+
+  switch (propName)
+    case "critchance"
+      comp.setCritChancePercentage(propValue)
+    case "critmult"
+      comp.setCritDamageMultiplier(propValue)
+    case "critbonus"
+      comp.setCritBonusDamage(propValue)
+    case "evade"
+      comp.setEvadeChancePercentage(propValue)
+    case "lifesteal"
+      comp.setLifeStealPercentage(propValue)
+
+  comp.printDebug((message) -> displayMessageToPlayer(commandPlayer, message))
+
+// ============================================================================
+function setSelectedUnitHealth()
+  let command = getChatCommand()
+  let commandPlayer = getChatCommandPlayer()
+  let value = command.getArgument(0).getReal()
+
+  let selectedUnit = commandPlayer.getFirstSelectedUnit()
+  if (selectedUnit == null)
+    displayMessageToPlayer(commandPlayer, "Must have a unit selected")
+    return
+
+  selectedUnit.setHP(value)
+
+  displayMessageToPlayer(commandPlayer, "Set unit's health to {0}".format(value.toString()))
+
+// ============================================================================
+function setSelectedUnitMana()
+  let command = getChatCommand()
+  let commandPlayer = getChatCommandPlayer()
+  let value = command.getArgument(0).getReal()
+
+  let selectedUnit = commandPlayer.getFirstSelectedUnit()
+  if (selectedUnit == null)
+    displayMessageToPlayer(commandPlayer, "Must have a unit selected")
+    return
+
+  selectedUnit.setMana(value)
+
+  displayMessageToPlayer(commandPlayer, "Set unit's mana to {0}".format(value.toString()))
+
+// ============================================================================
 function registerDebugCommands()
 
   g_commandHandler.registerCommandDefinition(COMMAND_MEMORYTRACKER, function showMemoryTrackerMultiboard)  
@@ -626,6 +716,23 @@ function registerDebugCommands()
   
   g_commandHandler.registerCommandDefinition(COMMAND_SPAWNALLITEMS, function spawnAllItems)
     ..setDescription("Spawns all items in the main item library")
+  
+  g_commandHandler.registerCommandDefinition(COMMAND_UNITPROPS, function showSelectedUnitStats)
+    ..setDescription("Prints the stats of a selected unit")
+  
+  g_commandHandler.registerCommandDefinition(COMMAND_SETUNITPROP, function setSelectedUnitProperty)
+    ..setDescription("Sets the property of a selected unit")
+    ..addArgument(new ChatCommandArgument("PROP_NAME", ChatCommandArgumentType.STRING, false)
+      ..setStringOptions("critchance", "critmult", "critbonus", "evade", "lifesteal"))
+    ..addRealArgument("PROP_VALUE", false)
+  
+  g_commandHandler.registerCommandDefinition(COMMAND_SETHEALTH, function setSelectedUnitHealth)
+    ..setDescription("Sets the health of the selected unit")
+    ..addRealArgument("VALUE", false)
+  
+  g_commandHandler.registerCommandDefinition(COMMAND_SETMANA, function setSelectedUnitMana)
+    ..setDescription("Sets the mana of the selected unit")
+    ..addRealArgument("VALUE", false)
 
 // ============================================================================
 init
