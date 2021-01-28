@@ -1,0 +1,73 @@
+package BrassContraption
+import ItemEffectComponent
+import UnitMetadata
+import TlsItemIds
+import DamageEvent
+import GameConstants
+import Elites
+import Math
+import FX
+import Damage
+import Abilities
+
+// ============================================================================
+class BrassContraptionComponent extends ItemEffectComponent
+
+  // --------------------------------------------------------------------------
+  construct (IUnitMetadata owner)
+    super(owner)
+
+    setMode(ItemEffectApplication.ACQUIRED)
+    setItemTypeId(TlsItemIds.brassContraption)
+    setDestroyOnDrop(true)
+
+  // --------------------------------------------------------------------------
+  override function getTypeId() returns int
+    return BrassContraptionComponent.typeId
+
+  // --------------------------------------------------------------------------
+  function onDamageDealt()
+    let damageTarget = DamageEvent.getTarget()
+    if (damageTarget.getOwner() != PLAYER_UNDEAD)
+      return
+
+    if (not damageTarget.isElite() or damageTarget.isBoss())
+      return
+
+    let chanceToInstantlyKill = 0.2 + getStacks() * 0.05
+    if (not passesChanceCheck(chanceToInstantlyKill))
+      return
+    
+    DamageEvent.setAmount(9999999.0)
+
+    FX.createEffectOneShot(Abilities.holyBoltSpecialArt, damageTarget.getPos())
+
+// ============================================================================
+function IUnitMetadata.getBrassContraptionComponent() returns BrassContraptionComponent
+  return this.getComponent(typeInfo(BrassContraptionComponent.typeId)) castTo BrassContraptionComponent
+
+// ============================================================================
+function IUnitMetadata.getOrAddBrassContraptionComponent() returns BrassContraptionComponent
+  var component = this.getBrassContraptionComponent()
+  if (component == null)
+    component = this.addComponent(new BrassContraptionComponent(this)) castTo BrassContraptionComponent
+  return component
+
+// ============================================================================
+function onUnitDamageDealt()
+  let source = DamageEvent.getSource()
+
+  let metadata = source.getMetadata()
+  if (metadata == null)
+    return
+
+  let comp = metadata.getBrassContraptionComponent()
+  if (comp == null)
+    return
+
+  comp.onDamageDealt()
+
+// ============================================================================
+init
+  g_itemIdToComponentFactoryMap.put(TlsItemIds.brassContraption, _unit -> _unit.getMetadata().getOrAddBrassContraptionComponent())
+  DamageEvent.addListener(DAMAGE_EVENT_PRIO_FINAL, () -> onUnitDamageDealt())

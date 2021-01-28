@@ -1,0 +1,94 @@
+package LightningRod
+import ItemEffectComponent
+import UnitMetadata
+import TlsItemIds
+import DamageEvent
+import GameConstants
+import Elites
+import Math
+import Damage
+import DummyCaster
+import TlsAbilityIds
+import Orders
+import GroupUtils
+
+// ============================================================================
+class LightningRodComponent extends ItemEffectComponent
+
+  // --------------------------------------------------------------------------
+  construct (IUnitMetadata owner)
+    super(owner)
+
+    setMode(ItemEffectApplication.ACQUIRED)
+    setItemTypeId(TlsItemIds.lightningRod)
+    setDestroyOnDrop(true)
+
+  // --------------------------------------------------------------------------
+  override function getTypeId() returns int
+    return LightningRodComponent.typeId
+
+  // --------------------------------------------------------------------------
+  function onDamageDealt()
+    let damageTarget = DamageEvent.getTarget()
+    if (damageTarget.getOwner() != PLAYER_UNDEAD)
+      return
+
+    if (not damageTarget.isElite() or damageTarget.isBoss())
+      return
+
+    let chanceToCastChainLightning = 0.1 + getStacks() * 0.05
+    if (not passesChanceCheck(chanceToCastChainLightning))
+      return
+
+    unit chainLightningTarget = null
+
+    let tempGroup = getGroup()
+    tempGroup.enumUnitsInRange(damageTarget.getPos(), 256.0)
+    for _unit in tempGroup
+      if (_unit.isAllyOf(damageTarget) and _unit.isAlive())
+        chainLightningTarget = _unit
+        break
+    tempGroup.release()
+
+    if (chainLightningTarget == null)
+      return
+
+    new DummyCaster()
+      ..origin(damageTarget.getPos())
+      ..delay(10)
+      ..owner(getOwnerUnit().getOwner())
+      ..castTarget(
+          TlsAbilityIds.Items.lightningRodChainLighting,
+          getStacks(),
+          OrderIds.chainlightning,
+          chainLightningTarget)
+
+// ============================================================================
+function IUnitMetadata.getLightningRodComponent() returns LightningRodComponent
+  return this.getComponent(typeInfo(LightningRodComponent.typeId)) castTo LightningRodComponent
+
+// ============================================================================
+function IUnitMetadata.getOrAddLightningRodComponent() returns LightningRodComponent
+  var component = this.getLightningRodComponent()
+  if (component == null)
+    component = this.addComponent(new LightningRodComponent(this)) castTo LightningRodComponent
+  return component
+
+// ============================================================================
+function onUnitDamageDealt()
+  let source = DamageEvent.getSource()
+
+  let metadata = source.getMetadata()
+  if (metadata == null)
+    return
+
+  let comp = metadata.getLightningRodComponent()
+  if (comp == null)
+    return
+
+  comp.onDamageDealt()
+
+// ============================================================================
+init
+  g_itemIdToComponentFactoryMap.put(TlsItemIds.lightningRod, _unit -> _unit.getMetadata().getOrAddLightningRodComponent())
+  DamageEvent.addListener(DAMAGE_EVENT_PRIO_FINAL, () -> onUnitDamageDealt())

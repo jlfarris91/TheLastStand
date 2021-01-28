@@ -1,0 +1,211 @@
+package ItemEffectComponent
+import UnitComponent
+import RegisterEvents
+import DamageEvent
+import Damage
+import Unit2
+import HashMap
+import Func
+import ClosureTimers
+
+public HashMap<int, Func1<unit, ItemEffectComponent>> g_itemIdToComponentFactoryMap = new HashMap<int, Func1<unit, ItemEffectComponent>>()
+
+// ============================================================================
+public enum ItemEffectApplication
+  ACTIVATED
+  ACQUIRED
+  KILL
+
+// ============================================================================
+public abstract class ItemEffectComponent extends UnitComponent
+  private int m_stacks
+  private int m_stacksWhenApplied
+  private int m_itemTypeId
+  private ItemEffectApplication m_mode
+  private bool m_destroyOnLastItemDrop = true
+
+  // --------------------------------------------------------------------------
+  construct (IUnitMetadata owner)
+    super(owner)
+
+  // --------------------------------------------------------------------------
+  function getMode() returns ItemEffectApplication
+    return m_mode
+
+  // --------------------------------------------------------------------------
+  function setMode(ItemEffectApplication value)
+    m_mode = value
+
+  // --------------------------------------------------------------------------
+  function getTotalItemCharges() returns int
+    return getOwnerUnit().countTotalItemCharges(m_itemTypeId)
+
+  // --------------------------------------------------------------------------
+  function getStacks() returns int
+    return m_stacks
+
+  // --------------------------------------------------------------------------
+  function setStacks(int value)
+    m_stacks = value
+
+  // --------------------------------------------------------------------------
+  function getStacksWhenApplied() returns int
+    return m_stacksWhenApplied
+
+  // --------------------------------------------------------------------------
+  function getItemTypeId() returns int
+    return m_itemTypeId
+
+  // --------------------------------------------------------------------------
+  function setItemTypeId(int value)
+    m_itemTypeId = value
+
+  // --------------------------------------------------------------------------
+  function getDestroyOnDrop() returns bool
+    return m_destroyOnLastItemDrop
+
+  // --------------------------------------------------------------------------
+  function setDestroyOnDrop(bool value)
+    m_destroyOnLastItemDrop = value
+
+  // --------------------------------------------------------------------------
+  function apply()
+
+    if (m_stacks == m_stacksWhenApplied)
+      return
+
+    if (m_stacksWhenApplied != 0)
+      revert()
+
+    if (m_stacks != 0)
+      m_stacksWhenApplied = m_stacks
+      onApplied(m_stacksWhenApplied)
+
+  // --------------------------------------------------------------------------
+  function revert()
+    if (m_stacksWhenApplied == 0)
+      return
+    let stacksToRevert = m_stacksWhenApplied
+    m_stacksWhenApplied = 0
+    onReverted(stacksToRevert)
+
+  // --------------------------------------------------------------------------
+  function onAcquiredItem(item _item)
+
+    let prevStacks = m_stacks
+    updateStacks()
+
+    if (prevStacks == 0 and m_stacks > 0)
+      onFirstItemAcquired()
+
+    if (m_mode == ACQUIRED)
+      apply()
+
+  // --------------------------------------------------------------------------
+  function onDroppedItem(item _item)
+    
+    let prevStacks = m_stacks
+    updateStacks()
+    m_stacks -= _item.getCharges()
+
+    if (prevStacks > 0 and m_stacks == 0)
+      onLastItemDropped()
+  
+  // --------------------------------------------------------------------------
+  function onActivatedItem(item _item)
+    if (m_mode == ACTIVATED)
+      apply()
+
+  // --------------------------------------------------------------------------
+  function onUnitKilled(unit _unit)
+    if (m_mode == KILL)
+      apply()
+
+  // --------------------------------------------------------------------------
+  override function onEnabled()
+    super.onEnabled()
+
+  // --------------------------------------------------------------------------
+  override function onDisabled()
+    super.onDisabled()
+    revert()
+
+  // --------------------------------------------------------------------------
+  protected function onApplied(int _stacks)
+    skip
+
+  // --------------------------------------------------------------------------
+  protected function onReverted(int _stacks)
+    skip
+
+  // --------------------------------------------------------------------------
+  protected function onFirstItemAcquired()
+    skip
+
+  // --------------------------------------------------------------------------
+  protected function onLastItemDropped()
+    if (m_destroyOnLastItemDrop)
+      nullTimer(() -> destroy this)
+
+  // --------------------------------------------------------------------------
+  private function updateStacks()
+    m_stacks = getTotalItemCharges()
+
+// ============================================================================
+function getComponentForItem(unit _unit, item _item) returns ItemEffectComponent
+  if (not g_itemIdToComponentFactoryMap.has(_item.getTypeId()))
+    return null
+  let compTypeFunc = g_itemIdToComponentFactoryMap.get(_item.getTypeId())
+  return compTypeFunc.call(_unit)
+
+// ============================================================================
+function onUnitAcquiredItem()
+  let manipulatingUnit = GetManipulatingUnit()
+  let manipulatingItem = GetManipulatedItem()
+
+  let comp = getComponentForItem(manipulatingUnit, manipulatingItem)
+  if (comp == null)
+    return
+
+  comp.onAcquiredItem(manipulatingItem)
+  Log.debug("Acquired item with {0} charges : {1} stacks".format(manipulatingItem.getCharges().toString(), comp.getStacks().toString()))
+
+// ============================================================================
+function onUnitDroppedItem()
+  let manipulatingUnit = GetManipulatingUnit()
+  let manipulatingItem = GetManipulatedItem()
+
+  let comp = getComponentForItem(manipulatingUnit, manipulatingItem)
+  if (comp == null)
+    return
+
+  comp.onDroppedItem(manipulatingItem)
+  Log.debug("Dropped item with {0} charges : {1} stacks remaining".format(manipulatingItem.getCharges().toString(), comp.getStacks().toString()))
+
+// ============================================================================
+function onUnitUsedItem()
+  let manipulatingUnit = GetManipulatingUnit()
+  let manipulatingItem = GetManipulatedItem()
+
+  let comp = getComponentForItem(manipulatingUnit, manipulatingItem)
+  if (comp == null)
+    return
+  
+  comp.onActivatedItem(manipulatingItem)
+
+// ============================================================================
+function onUnitKilled()
+  let killingUnit = GetKillingUnit()
+  let dyingUnit = GetDyingUnit()
+
+  for _item in killingUnit.inventory()
+    let comp = getComponentForItem(killingUnit, _item)
+    if (comp != null)
+      comp.onUnitKilled(dyingUnit)
+
+// ============================================================================
+init
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_PICKUP_ITEM, function onUnitAcquiredItem)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_DROP_ITEM, function onUnitDroppedItem)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_USE_ITEM, function onUnitUsedItem)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_DEATH, function onUnitKilled)

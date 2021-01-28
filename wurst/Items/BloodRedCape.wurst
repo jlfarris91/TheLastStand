@@ -1,0 +1,178 @@
+package BloodRedCape
+import TlsItemIds
+import UnitPropertiesComponent
+import UnitComponent
+import ClosureTimers
+import TimerUtils
+import Abilities
+import SoundUtils
+import TlsAbilityIds
+import GroupUtils
+import ItemEffectComponent
+
+constant real BLOODREDCAPE_LIFESTEAL = 5.0
+constant real BLOODREDCAPE_DURATION = 10.0
+constant string BLOODREDCAPE_FX_PATH = Abilities.vampPotionCaster
+constant real BLOODREDCAPE_AOE = 256.0
+constant SoundDefinition BLOODREDCAPE_SOUND = new SoundDefinition(Sounds.soulPreservation)
+
+// ============================================================================
+class BloodRedCapeComponent extends ItemEffectComponent
+
+  private CallbackManual m_durationCallback
+  private CallbackSingle m_destroyCallback
+  private effect m_fx
+  private bool m_playedSound
+
+  // --------------------------------------------------------------------------
+  construct (IUnitMetadata owner)
+    super(owner)
+
+    setMode(ItemEffectApplication.KILL)
+    setItemTypeId(TlsItemIds.bloodRedCape)
+    setDestroyOnDrop(false)
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    resetState()
+
+    if (m_durationCallback != null)
+      destroy m_durationCallback
+      m_durationCallback = null
+
+    if (m_destroyCallback != null)
+      destroy m_destroyCallback
+      m_destroyCallback = null
+
+  // --------------------------------------------------------------------------
+  override function getTypeId() returns int
+    return BloodRedCapeComponent.getTypeId()
+
+  // --------------------------------------------------------------------------
+  override function onDisabled()
+    super.onDisabled()
+    resetState()
+
+  // --------------------------------------------------------------------------
+  function getIsCaster() returns bool
+    return getTotalItemCharges() > 0
+
+  // --------------------------------------------------------------------------
+  protected override function onApplied(int stacks)
+    super.onApplied(stacks)
+
+    if (stacks == 0)
+      return
+
+    let comp = getOwner().getOrAddUnitPropertiesComponent()
+    comp.setLifeStealPercentage(comp.getLifeStealPercentage() + stacks * BLOODREDCAPE_LIFESTEAL)
+
+  // --------------------------------------------------------------------------
+  protected override function onReverted(int stacks)
+    super.onReverted(stacks)
+
+    if (stacks == 0)
+      return
+
+    let comp = getOwner().getOrAddUnitPropertiesComponent()
+    comp.setLifeStealPercentage(comp.getLifeStealPercentage() - stacks * BLOODREDCAPE_LIFESTEAL)
+
+  // --------------------------------------------------------------------------
+  override function apply()
+
+    let ownerUnit = getOwnerUnit()
+
+    if (m_durationCallback == null)
+      m_durationCallback = getTimer().doManual(BLOODREDCAPE_DURATION, true, () -> resetState())
+      ownerUnit.addAbility(TlsAbilityIds.Items.bloodRedCape_BuffOnly)
+      ownerUnit.hideAbility(TlsAbilityIds.Items.bloodRedCape_BuffOnly, true)
+    else
+      m_durationCallback.restart()
+
+    super.apply()
+
+    createFX()
+
+    if (not m_playedSound)
+      BLOODREDCAPE_SOUND.playOnPoint(getOwnerUnit().getPos().toVec3())
+      m_playedSound = true
+
+    if (getIsCaster())
+      triggerAoe()
+
+  // --------------------------------------------------------------------------
+  function triggerAoe()
+    let ownerUnit = getOwnerUnit()
+    let tempGroup = getGroup()
+    tempGroup.enumUnitsInRange(ownerUnit.getPos(), BLOODREDCAPE_AOE)
+    for _unit in tempGroup
+      if (_unit.isAllyOf(ownerUnit) and _unit != ownerUnit)
+        triggerBloodRedCape(_unit)
+    tempGroup.release()
+
+  // --------------------------------------------------------------------------
+  function triggerBloodRedCape(unit _unit)
+    let metadata = _unit.getMetadata()
+    if (metadata == null)
+      return
+
+    let comp = metadata.getOrAddBloodRedCapeComponent()
+    if (comp.getIsCaster())
+      return
+
+    let greaterStackCount = max(getStacks(), comp.getStacks())
+    comp.setStacks(greaterStackCount)
+    comp.apply()
+
+  // --------------------------------------------------------------------------
+  function resetState()
+    revert()
+    destroyFX()
+    m_playedSound = false
+    getOwnerUnit().removeAbility(TlsAbilityIds.Items.bloodRedCape_BuffOnly)
+
+  // --------------------------------------------------------------------------
+  function markForDestruction()
+    if (m_destroyCallback != null)
+      return
+    let owner = getOwner()
+    m_destroyCallback = doAfter(5.0) () ->
+      // The callback will destroy itself since the timer has expired
+      m_destroyCallback = null
+      owner.removeComponent(this)
+      Log.info("Destroyed self")
+    Log.info("Self destruction initiated")
+
+  // --------------------------------------------------------------------------
+  function cancelDestruction()
+    if (m_destroyCallback == null)
+      return
+    destroy m_destroyCallback
+    m_destroyCallback = null
+    Log.info("Self destruction canceled")
+
+  // --------------------------------------------------------------------------
+  function createFX()
+    if (m_fx == null)
+      m_fx = AddSpecialEffectTarget(BLOODREDCAPE_FX_PATH, getOwnerUnit(), "origin")
+
+  // --------------------------------------------------------------------------
+  function destroyFX()
+    if (m_fx != null)
+      m_fx.destr()
+      m_fx = null
+
+// ============================================================================
+function IUnitMetadata.getBloodRedCapeComponent() returns BloodRedCapeComponent
+  return this.getComponent(typeInfo(BloodRedCapeComponent.typeId)) castTo BloodRedCapeComponent
+
+// ============================================================================
+function IUnitMetadata.getOrAddBloodRedCapeComponent() returns BloodRedCapeComponent
+  var component = this.getBloodRedCapeComponent()
+  if (component == null)
+    component = this.addComponent(new BloodRedCapeComponent(this)) castTo BloodRedCapeComponent
+  return component
+
+// ============================================================================
+init
+  g_itemIdToComponentFactoryMap.put(TlsItemIds.bloodRedCape, _unit -> _unit.getMetadata().getOrAddBloodRedCapeComponent())

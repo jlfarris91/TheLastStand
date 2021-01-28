@@ -1,0 +1,69 @@
+package WisdomKnuckle
+import ItemEffectComponent
+import UnitMetadata
+import TlsItemIds
+import DamageEvent
+import GameConstants
+import Elites
+import FX
+import Damage
+import Abilities
+
+// ============================================================================
+class WisdomKnuckleComponent extends ItemEffectComponent
+
+  // --------------------------------------------------------------------------
+  construct (IUnitMetadata owner)
+    super(owner)
+
+    setMode(ItemEffectApplication.ACQUIRED)
+    setItemTypeId(TlsItemIds.wisdomKnuckle)
+    setDestroyOnDrop(true)
+
+  // --------------------------------------------------------------------------
+  override function getTypeId() returns int
+    return WisdomKnuckleComponent.typeId
+
+  // --------------------------------------------------------------------------
+  function onDamageDealt()
+    let damageTarget = DamageEvent.getTarget()
+    if (damageTarget.getOwner() != PLAYER_UNDEAD or damageTarget.isElite())
+      return
+
+    let maxHealthToInstantlyKill = damageTarget.getMaxHP() * (0.2 + getStacks() * 0.05)
+    if (damageTarget.getHP() >= maxHealthToInstantlyKill)
+      return
+    
+    DamageEvent.setAmount(9999999.0)
+
+    FX.createEffectOneShot(Abilities.holyBoltSpecialArt, damageTarget.getPos())
+
+// ============================================================================
+function IUnitMetadata.getWisdomKnuckleComponent() returns WisdomKnuckleComponent
+  return this.getComponent(typeInfo(WisdomKnuckleComponent.typeId)) castTo WisdomKnuckleComponent
+
+// ============================================================================
+function IUnitMetadata.getOrAddWisdomKnuckleComponent() returns WisdomKnuckleComponent
+  var component = this.getWisdomKnuckleComponent()
+  if (component == null)
+    component = this.addComponent(new WisdomKnuckleComponent(this)) castTo WisdomKnuckleComponent
+  return component
+
+// ============================================================================
+function onUnitDamageDealt()
+  let source = DamageEvent.getSource()
+
+  let metadata = source.getMetadata()
+  if (metadata == null)
+    return
+
+  let comp = metadata.getWisdomKnuckleComponent()
+  if (comp == null)
+    return
+
+  comp.onDamageDealt()
+
+// ============================================================================
+init
+  g_itemIdToComponentFactoryMap.put(TlsItemIds.wisdomKnuckle, _unit -> _unit.getMetadata().getOrAddWisdomKnuckleComponent())
+  DamageEvent.addListener(DAMAGE_EVENT_PRIO_FINAL, () -> onUnitDamageDealt())
