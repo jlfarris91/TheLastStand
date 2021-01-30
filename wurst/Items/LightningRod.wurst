@@ -4,13 +4,13 @@ import UnitMetadata
 import TlsItemIds
 import DamageEvent
 import GameConstants
-import Elites
 import Math
 import Damage
 import DummyCaster
 import TlsAbilityIds
 import Orders
-import GroupUtils
+import GainXpPerKillComponent
+import ClosureTimers
 
 // ============================================================================
 class LightningRodComponent extends ItemEffectComponent
@@ -33,35 +33,31 @@ class LightningRodComponent extends ItemEffectComponent
     if (damageTarget.getOwner() != PLAYER_UNDEAD)
       return
 
-    if (not damageTarget.isElite() or damageTarget.isBoss())
-      return
-
     let chanceToCastChainLightning = 0.1 + getStacks() * 0.05
     if (not passesChanceCheck(chanceToCastChainLightning))
       return
+    
+    let ownerUnit = getOwnerUnit()
 
-    unit chainLightningTarget = null
-
-    let tempGroup = getGroup()
-    tempGroup.enumUnitsInRange(damageTarget.getPos(), 256.0)
-    for _unit in tempGroup
-      if (_unit.isAllyOf(damageTarget) and _unit.isAlive())
-        chainLightningTarget = _unit
-        break
-    tempGroup.release()
-
-    if (chainLightningTarget == null)
-      return
-
-    new DummyCaster()
+    let caster = new DummyCaster()
       ..origin(damageTarget.getPos())
-      ..delay(10)
-      ..owner(getOwnerUnit().getOwner())
-      ..castTarget(
+      ..delay(10.0)
+      ..owner(ownerUnit.getOwner())
+
+    let casterUnit = caster.castTarget(
           TlsAbilityIds.Items.lightningRodChainLighting,
           getStacks(),
           OrderIds.chainlightning,
-          chainLightningTarget)
+          damageTarget)
+
+    if (casterUnit == null)
+      Log.debug("Failed to cast Lightning Rod chain lightning")
+      return
+
+    // Give xp gained to the unit carrying the lightning rod
+    setXpSource(casterUnit, ownerUnit)
+    doAfter(10.0) ->
+      clearXpSource(casterUnit)
 
 // ============================================================================
 function IUnitMetadata.getLightningRodComponent() returns LightningRodComponent

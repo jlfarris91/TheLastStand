@@ -3,6 +3,9 @@ import UnitComponent
 import RegisterEvents
 import Elites
 import GrantXpOnDeathComponent
+import HashMap
+
+HashMap<unit, unit> m_xpSourceToTargetMap = new HashMap<unit, unit>()
 
 // ============================================================================
 public class GainXpPerKillComponent extends UnitComponent
@@ -48,6 +51,18 @@ public class GainXpPerKillComponent extends UnitComponent
       return getExpPerKill()
 
 // ============================================================================
+public function setXpSource(unit source, unit target)
+  m_xpSourceToTargetMap.put(source, target)
+
+// ============================================================================
+public function clearXpSource(unit source)
+  m_xpSourceToTargetMap.remove(source)
+
+// ============================================================================
+public function getXpTarget(unit source) returns unit
+  return m_xpSourceToTargetMap.get(source)
+
+// ============================================================================
 public function IUnitMetadata.getGainXpPerKillComponent() returns GainXpPerKillComponent
   return this.getComponent(typeInfo(GainXpPerKillComponent.typeId)) castTo GainXpPerKillComponent
 
@@ -62,19 +77,24 @@ public function IUnitMetadata.getOrAddGainXpPerKillComponent() returns GainXpPer
 function onUnitKilled()
 
   let killingUnit = GetKillingUnit()
-  let metadata = killingUnit.getMetadata()
+  let dyingUnit = GetDyingUnit()
+
+  if (not dyingUnit.isEnemyOf(killingUnit))
+    return
+
+  var xpRecipient = getXpTarget(killingUnit)
+  if (xpRecipient == null)
+    xpRecipient = killingUnit
+
+  let metadata = xpRecipient.getMetadata()
   if (metadata == null)
     return
 
   let gainXpComp = metadata.getGainXpPerKillComponent()
   if (gainXpComp == null or not gainXpComp.getEnabled())
     return
-  
-  let dyingUnit = GetDyingUnit()
-  if (not dyingUnit.isEnemyOf(killingUnit))
-    return
 
-  killingUnit.addXp(gainXpComp.getExpValueForDyingUnit(dyingUnit), true)
+  xpRecipient.addXp(gainXpComp.getExpValueForDyingUnit(dyingUnit), true)
 
 // ============================================================================
 init
