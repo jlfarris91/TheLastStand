@@ -6,6 +6,7 @@ import Action
 import DamageEvent
 import FX
 import Damage
+import Elites
 
 constant int ABILITY_ID_CRIT = compiletime(ABIL_ID_GEN.next())
 constant int ABILITY_ID_EVASION = compiletime(ABIL_ID_GEN.next())
@@ -32,6 +33,9 @@ public class UnitPropertiesComponent extends UnitComponent
   private real m_critBonusDamage = 0.0
   private real m_evadeChancePercentage = 0.0
   private real m_lifeStealPercentage = 0.0
+  private real m_normalDamageMultiplier = 100.0
+  private real m_eliteDamageMultiplier = 100.0
+  private real m_bossDamageMultiplier = 100.0
   private ability m_abilCritStrike
   private ability m_abilEvasion
 
@@ -92,6 +96,36 @@ public class UnitPropertiesComponent extends UnitComponent
   // --------------------------------------------------------------------------
   function setLifeStealPercentage(real value)
     m_lifeStealPercentage = value
+
+  // --------------------------------------------------------------------------
+  // Gets the damage amount done to normal enemies e.g. 100.0%
+  function getNormalDamagePercentage() returns real
+    return m_normalDamageMultiplier
+
+  // --------------------------------------------------------------------------
+  // Sets the damage amount done to normal enemies e.g. 100.0%
+  function setNormalDamagePercentage(real value)
+    m_normalDamageMultiplier = value
+
+  // --------------------------------------------------------------------------
+  // Gets the damage amount done to elite enemies e.g. 100.0%
+  function getEliteDamagePercentage() returns real
+    return m_eliteDamageMultiplier
+
+  // --------------------------------------------------------------------------
+  // Sets the damage amount done to elite enemies e.g. 100.0%
+  function setEliteDamagePercentage(real value)
+    m_eliteDamageMultiplier = value
+
+  // --------------------------------------------------------------------------
+  // Gets the damage amount done to boss enemies e.g. 100.0%
+  function getBossDamagePercentage() returns real
+    return m_bossDamageMultiplier
+
+  // --------------------------------------------------------------------------
+  // Sets the damage amount done to boss enemies e.g. 100.0%
+  function setBossDamagePercentage(real value)
+    m_bossDamageMultiplier = value
 
   // --------------------------------------------------------------------------
   override function onEnabled()
@@ -199,7 +233,7 @@ public function IUnitMetadata.getOrAddUnitPropertiesComponent() returns UnitProp
   return component
 
 // ============================================================================
-function onUnitDamagedDoLifeSteal()
+function onDamageEventRelative()
   let source = DamageEvent.getSource()
 
   if (DamageEvent.getType() != DamageType.ATTACK)
@@ -214,16 +248,44 @@ function onUnitDamagedDoLifeSteal()
     return
 
   let target = DamageEvent.getTarget()
-  let damageDone = min(DamageEvent.getAmount(), target.getHP())
-  let hpStolen = damageDone * (comp.getLifeStealPercentage() / 100.0)
 
-  source.addHP(hpStolen)
+  if (target.isElite())
+    if (target.isBoss())
+      DamageEvent.setAmount(DamageEvent.getAmount() * comp.getBossDamagePercentage() / 100.0)
+    else
+      DamageEvent.setAmount(DamageEvent.getAmount() * comp.getEliteDamagePercentage() / 100.0)
+  else
+    DamageEvent.setAmount(DamageEvent.getAmount() * comp.getNormalDamagePercentage() / 100.0)
 
-  let amountHealed = max(source.getMaxHP() - source.getHP(), 0.0)
-  if (amountHealed > 0.0)
-    FX.createEffectOneShot("Abilities\\Spells\\Undead\\VampiricAura\\VampiricAuraTarget.mdl", source.getPos())
+// ============================================================================
+function onDamageEventFinal()
+  let source = DamageEvent.getSource()
+
+  if (DamageEvent.getType() != DamageType.ATTACK)
+    return
+
+  let metadata = source.getMetadata()
+  if (metadata == null)
+    return
+
+  let comp = metadata.getUnitPropertiesComponent()
+  if (comp == null)
+    return
+
+  let target = DamageEvent.getTarget()
+
+  // Apply lifesteal
+  let lifesteal = comp.getLifeStealPercentage()
+  if (lifesteal != 0.0)
+    let damageDone = min(DamageEvent.getAmount(), target.getHP())
+    let hpStolen = damageDone * (comp.getLifeStealPercentage() / 100.0)
+    source.addHP(hpStolen)
+    let amountHealed = max(source.getMaxHP() - source.getHP(), 0.0)
+    if (amountHealed > 0.0)
+      FX.createEffectOneShot("Abilities\\Spells\\Undead\\VampiricAura\\VampiricAuraTarget.mdl", source.getPos())
 
 // ============================================================================
 init
-  DamageEvent.addListener(DAMAGE_EVENT_PRIO_FINAL, () -> onUnitDamagedDoLifeSteal())
+  DamageEvent.addListener(DAMAGE_EVENT_PRIO_RELATIVE, () -> onDamageEventRelative())
+  DamageEvent.addListener(DAMAGE_EVENT_PRIO_FINAL, () -> onDamageEventFinal())
     
