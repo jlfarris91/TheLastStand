@@ -1,0 +1,497 @@
+package LootableComponent
+import UnitComponent
+import GameConstants
+import Range
+import WeightedSet
+import LootableReward
+import LinkedList
+import Math
+import LooterComponent
+import DisplayTextToPlayer
+import StringExtensions
+import ColorUtility
+import ErrorHandling
+import Time
+import TlsAbilityIds
+import Orders
+import FX
+import LootableTypes
+import RegisterEvents
+import TextProgressBar
+import ClosureTimers
+import TextProgressBarTag
+import HashMap
+import TimerUtils
+
+constant int ABILITY_ID_SEARCH = TlsAbilityIds.search
+constant int ABILITY_SEARCH_ORDER = Orders.phaseshift
+constant int ABILITY_ID_LOOTABLE = 'A02C'
+
+constant colorA LOOTABLE_COLOR = colorA(255, 255, 255, 255)
+constant colorA LOOTED_COLOR = colorA(150, 150, 150, 150)
+
+constant int PROGRESS_BAR_LENGTH = 20
+constant colorA PROGRESS_BAR_FOREGROUND = colorA(0, 170, 0, 255)
+constant colorA PROGRESS_BAR_BACKGROUND = colorA(0, 64, 0, 255)
+constant real PROGRESS_BAR_UPDATE_PERIOD = 0.1
+
+constant colorA COUNTDOWN_COLOR = colorA(0, 170, 0, 255)
+
+LinkedList<LootOperation> g_activeOperations
+HashMap<unit, LootOperation> g_looterToOperationMap = new HashMap<unit, LootOperation>()
+
+TextProgressBar g_LootOperationProgressBar
+LinkedList<LootableComponent> g_lootableUnits
+
+// ============================================================================
+public class LootableComponent extends UnitComponent
+  private WeightedSet<ILootableReward> m_rewards
+  private real m_searchDuration
+  private int m_cooldownDays
+  private unit m_lootingUnit
+  private texttag m_cooldownDayTextTag
+
+  // --------------------------------------------------------------------------
+  construct(IUnitMetadata owner)
+    super(owner)
+
+    m_cooldownDayTextTag = CreateTextTag()
+    ..setPermanent(true)
+    ..setColor(COUNTDOWN_COLOR)
+    ..setVisibility(false)
+
+    m_searchDuration = 3.0
+    m_cooldownDays = 0
+    m_rewards = new WeightedSet<ILootableReward>()
+
+    if (g_lootableUnits == null)
+      g_lootableUnits = new LinkedList<LootableComponent>()
+
+    g_lootableUnits.add(this)
+
+  // --------------------------------------------------------------------------
+  ondestroy
+
+    if (m_cooldownDayTextTag != null)
+      m_cooldownDayTextTag.destr()
+      m_cooldownDayTextTag = null
+    
+    if (m_rewards != null)
+      for reward in m_rewards
+        destroy reward
+      destroy m_rewards
+      m_rewards = null
+
+  // --------------------------------------------------------------------------
+  override function getTypeId() returns int
+    return LootableComponent.typeId
+
+  // --------------------------------------------------------------------------
+  override function onEnabled()
+    super.onEnabled()
+
+    getOwnerUnit().setOwner(PLAYER_LOOTABLES, true)
+    
+    m_cooldownDayTextTag.setPos(getOwnerUnit().getPos().withZ(20.0))
+
+    resetCooldown()
+    onLootable()
+
+  // --------------------------------------------------------------------------
+  function canLoot() returns bool
+    return not getIsLooted() and not getIsBeingLooted()
+
+  // --------------------------------------------------------------------------
+  function getIsLooted() returns bool
+    return m_cooldownDays > 0
+
+  // --------------------------------------------------------------------------
+  function getIsBeingLooted() returns bool
+    return m_lootingUnit != null
+
+  // --------------------------------------------------------------------------
+  function getSearchDuration() returns real
+    return m_searchDuration
+
+  // --------------------------------------------------------------------------
+  function setSearchDuration(real duration)
+    m_searchDuration = duration
+  
+  // --------------------------------------------------------------------------
+  function getRewardsSet() returns WeightedSet<ILootableReward>
+    return m_rewards
+
+  // --------------------------------------------------------------------------
+  function getCooldownDays() returns int
+    return m_cooldownDays
+
+  // --------------------------------------------------------------------------
+  function setCooldownDays(int value)
+    
+    let oldValue = m_cooldownDays
+    m_cooldownDays = value
+    
+    if (m_cooldownDayTextTag != null)
+      if (m_cooldownDays == 1)
+        m_cooldownDayTextTag.setText("{0} DAY".format(m_cooldownDays.toString()), 10.0)
+      else
+        m_cooldownDayTextTag.setText("{0} DAYS".format(m_cooldownDays.toString()), 10.0)
+      m_cooldownDayTextTag.setVisibility(value > 0)
+
+    if (oldValue != value and m_cooldownDays == 0)
+      onLootable()
+
+  // --------------------------------------------------------------------------
+  function resetCooldown()
+    if (m_cooldownDays == 0)
+      return
+    setCooldownDays(0)
+
+  // --------------------------------------------------------------------------
+  function decrementCooldown()
+    if (m_cooldownDays == 0)
+      return
+    setCooldownDays(m_cooldownDays - 1)
+
+  // --------------------------------------------------------------------------
+  function getUnitSearchDuration(unit lootingUnit) returns real
+    var searchDuration = m_searchDuration
+
+    // Shapeshifting Key decreases duration by 50%
+    let metadata = lootingUnit.getMetadata()
+    if (metadata != null)
+      let comp = metadata.getLooterComponent()
+      if (comp != null)
+        searchDuration = comp.scaleLootDuration(searchDuration)
+
+    return searchDuration
+
+  // --------------------------------------------------------------------------
+  function startLooting(unit lootingUnit)
+
+    if (not canLoot() or getIsBeingLooted())
+      return
+
+    m_lootingUnit = lootingUnit
+
+    // Stand 4 in HD
+    m_lootingUnit.setAnimation(15)
+
+    new LootOperation(lootingUnit, this, getUnitSearchDuration(lootingUnit))
+
+  // --------------------------------------------------------------------------
+  function onLootingFinished(unit lootingUnit)
+    if (lootingUnit == null)
+      error("lootingUnit is null")
+      return
+
+    if (m_lootingUnit != lootingUnit)
+      error("Not the same unit that started looting")
+      return
+
+    setCooldownDays(LOOTABLES_COOLDOWN_RANGE.getRandom())
+
+    m_lootingUnit.setAbilityCooldown(ABILITY_ID_SEARCH, 0, 0.0)
+
+    m_lootingUnit = null
+    giveRewards(lootingUnit)
+    onLooted()
+
+  // --------------------------------------------------------------------------
+  function onLootingCanceled(unit lootingUnit)    
+    if (lootingUnit == null)
+      error("lootingUnit is null")
+      return
+
+    if (m_lootingUnit != lootingUnit)
+      error("Not the same unit that started looting")
+      return
+
+    m_lootingUnit.resetAbilityCooldown(ABILITY_ID_SEARCH)
+
+    FX.createLootingCanceledTag(getOwnerUnit().getPos())
+
+    // reset state so it can be looted again
+    m_lootingUnit = null
+    resetCooldown()
+    onLootable()
+
+  // --------------------------------------------------------------------------
+  protected function giveRewards(unit lootingUnit)
+
+    // Lucky Horseshoe item grants a small chance to immediately loot a second time
+    let metadata = lootingUnit.getMetadata()
+    if (metadata != null)
+      let comp = metadata.getLooterComponent()
+      if (comp != null)
+        if (passesChanceCheck(comp.getChanceToLootTwice()))
+          giveOneReward(lootingUnit)
+          displayMessageToPlayer(lootingUnit.getOwner(), "Lucky Horseshoe!".colorize(Colors.lightBlue))
+
+    giveOneReward(lootingUnit)
+
+  // --------------------------------------------------------------------------
+  protected function giveOneReward(unit lootingUnit)
+    let reward = m_rewards.getRandom()
+    if (reward == null)
+      error("No reward registered for lootable")
+    reward.giveReward(this, lootingUnit)
+
+  // --------------------------------------------------------------------------
+  private function onLooted()
+    getOwnerUnit().removeAbility(ABILITY_ID_LOOTABLE)
+    getOwnerUnit().setVertexColor(LOOTED_COLOR)
+    UnitRemoveType(getOwnerUnit(), UNIT_TYPE_ANCIENT)
+
+  // --------------------------------------------------------------------------
+  private function onLootable()
+    getOwnerUnit().addAbility(ABILITY_ID_LOOTABLE)
+    getOwnerUnit().setVertexColor(LOOTABLE_COLOR)
+    // Makes the unit targettable by the search ability
+    UnitAddType(getOwnerUnit(), UNIT_TYPE_ANCIENT)
+
+// ============================================================================
+public function IUnitMetadata.getLootableComponent() returns LootableComponent
+  return this.getComponent(typeInfo(LootableComponent.typeId)) castTo LootableComponent
+
+// ============================================================================
+public function IUnitMetadata.getOrAddLootableComponent() returns LootableComponent
+  var component = this.getLootableComponent()
+  if (component == null)
+    component = this.addComponent(new LootableComponent(this)) castTo LootableComponent
+  return component
+
+// ============================================================================
+public class LootOperation
+  private unit m_lootingUnit
+  private LootableComponent m_lootable
+  private ProgressBarTag m_progressBar
+  private real m_duration
+  private timer m_timer
+  private timerdialog m_timerDialog
+  private int m_secondsElapsed
+  private int m_manaCost
+
+  // --------------------------------------------------------------------------
+  construct(unit lootingUnit, LootableComponent lootable, real duration)
+    m_lootingUnit = lootingUnit
+    m_lootable = lootable
+    m_duration = duration
+
+    if (m_duration <= 0.0)
+      error("Argument 'duration' must be greater than zero")
+    
+    m_progressBar = new ProgressBarTag(g_LootOperationProgressBar, m_lootable.getOwnerUnit().getPos().withZ(0.0), 10.0)
+    m_progressBar.showForPlayer(m_lootingUnit.getOwner())
+
+    m_timer = getTimer()
+    m_timer.doAfter(duration, () -> onOperationFinished())
+
+    m_timerDialog = CreateTimerDialog(m_timer)
+    ..setTitle("Looting...")
+    ..display(lootingUnit.getOwner(), true)
+
+    g_looterToOperationMap.put(lootingUnit, this)
+
+    m_manaCost = m_lootingUnit.getAbility(ABILITY_ID_SEARCH).getField(ABILITY_ILF_MANA_COST, 0)
+
+    registerForUpdate()
+
+  // --------------------------------------------------------------------------
+  ondestroy
+
+    if (m_timerDialog != null)
+      m_timerDialog.destr()
+      m_timerDialog = null
+
+    if (m_timer != null)
+      m_timer.release()
+      m_timer = null
+
+    g_looterToOperationMap.remove(m_lootingUnit)
+
+    unregisterForUpdate()
+    
+    if (m_progressBar != null)
+      destroy m_progressBar
+      m_progressBar = null
+
+  // --------------------------------------------------------------------------
+  function getLootable() returns LootableComponent
+    return m_lootable
+
+  // --------------------------------------------------------------------------
+  function getTimeRemaining() returns real
+    return m_timer != null ? m_timer.getRemaining() : 0.0
+
+  // --------------------------------------------------------------------------
+  private function registerForUpdate()
+    unregisterForUpdate()
+    g_activeOperations.add(this)
+
+  // --------------------------------------------------------------------------
+  private function unregisterForUpdate()
+    g_activeOperations.remove(this)
+
+  // --------------------------------------------------------------------------
+  function update()
+    if (m_progressBar != null)
+      m_progressBar.update(1.0 - (m_timer.getRemaining() / m_duration))
+
+    // Remove mana per second
+    let secondsElapsed = m_timer.getElapsed().floor()
+    if (m_secondsElapsed != secondsElapsed)
+      m_secondsElapsed = secondsElapsed
+      m_lootingUnit.addMana(-m_manaCost.toReal())
+      if (m_lootingUnit.getMana() == 0)
+        cancel()
+
+  // --------------------------------------------------------------------------
+  function cancel()
+    m_lootable.onLootingCanceled(m_lootingUnit)
+    destroy this
+  
+  // --------------------------------------------------------------------------
+  private function onOperationFinished()
+    m_lootable.onLootingFinished(m_lootingUnit)
+    
+    // The callback will handle destroying the timer
+    m_timer = null
+
+    destroy this
+
+// ============================================================================
+public function displayLootRewardText(player _player, string message)
+  displayMessageToPlayer(
+      _player,
+      "Finished Looting ".colorize(Colors.gold) + message)
+
+// ============================================================================
+function updateProgressBars()
+  for operation in g_activeOperations
+    operation.update()
+
+// ============================================================================
+function onDayStart()
+  for lootableUnit in g_lootableUnits
+    lootableUnit.decrementCooldown()
+
+// ============================================================================
+function onRightClick()
+  let orderedUnit = GetOrderedUnit()
+  let targetUnit = GetOrderTargetUnit()
+  let orderedToSearch = GetIssuedOrderId() == Orders.smart and targetUnit.isLootableUnitType()
+
+  // If the ordered unit was in the middle of looting
+  let lootOperation = g_looterToOperationMap.get(orderedUnit)
+  if (lootOperation != null)
+
+    let lootable = lootOperation.getLootable()
+
+    // If the player right clicks the same lootable that the ordered unit is currently looting
+    // just ignore the order. Unfortunately the order was already given so we need to reset
+    // the state of the ordered unit to act as if they never stopped looting.
+    if (orderedToSearch and lootable != null and lootable.getOwnerUnit() == targetUnit)
+      resetUnitAnimationAfterRightClickingSameLootable(orderedUnit, lootOperation)        
+      return
+
+    lootOperation.cancel()
+  
+  if (orderedToSearch)
+    orderedUnit.issueTargetOrderById(ABILITY_SEARCH_ORDER, targetUnit)
+
+// ============================================================================
+function resetUnitAnimationAfterRightClickingSameLootable(unit lootingUnit, LootOperation lootOperation)
+  // Stand 4 in HD
+  lootingUnit.setAnimation(15)
+
+  // Reset the cooldown since
+  let searchAbility = lootingUnit.getAbility(ABILITY_ID_SEARCH)
+  if (searchAbility != null)
+    lootingUnit.setAbilityCooldown(ABILITY_ID_SEARCH, 0, lootOperation.getTimeRemaining())
+
+// ============================================================================
+function prepareSearchSpell(unit lootingUnit, unit lootableUnit)
+  
+  let lootableUnitMetadata = lootableUnit.getMetadata()
+  if (lootableUnitMetadata == null)
+    return
+
+  let lootableComp = lootableUnitMetadata.getLootableComponent()
+  if (lootableComp == null)
+    Log.debug("Target unit does not have a lootable component")
+    return
+
+  let searchAbility = lootingUnit.getAbility(ABILITY_ID_SEARCH)
+  if (searchAbility == null)
+    return
+
+  let searchDuration = lootableComp.getUnitSearchDuration(lootingUnit)
+  let lvl = 0
+
+  let currentSearchDuration = searchAbility.getField(ABILITY_RLF_DURATION_NORMAL, lvl)
+  if (currentSearchDuration == searchDuration)
+    return
+
+  lootingUnit.setAbilityLevel(ABILITY_ID_SEARCH, lvl + 1)
+  searchAbility.setField(ABILITY_RLF_DURATION_NORMAL, lvl, searchDuration)
+  searchAbility.setField(ABILITY_RLF_DURATION_HERO, lvl, searchDuration)
+  searchAbility.setField(ABILITY_RLF_ART_DURATION, lvl, searchDuration)
+  searchAbility.setField(ABILITY_RLF_FOLLOW_THROUGH_TIME, lvl, searchDuration)
+  searchAbility.setField(ABILITY_RLF_COOLDOWN, lvl, searchDuration)
+  lootingUnit.setAbilityLevel(ABILITY_ID_SEARCH, lvl)
+
+// ============================================================================
+function onSpellChannel()
+  if (GetSpellAbilityId() != ABILITY_ID_SEARCH)
+    return
+
+  let lootingUnit = GetSpellAbilityUnit()  
+  let lootableUnit = GetSpellTargetUnit()
+  
+  let looterMetadata = lootingUnit.getMetadata()
+  if (looterMetadata == null)
+    return
+  
+  let lootableMetadata = lootableUnit.getMetadata()
+  if (lootableMetadata == null)
+    return
+
+  let lootable = lootableMetadata.getLootableComponent()
+  if (lootable == null or not lootable.getEnabled())
+    lootingUnit.issueImmediateOrderById(Orders.stop)
+    displayMessageToPlayer(lootingUnit.getOwner(), "Failed To Search".colorize(Colors.red) + " Must target a lootable unit to search")
+    return
+
+  if (lootable.getIsBeingLooted())
+    lootingUnit.issueImmediateOrderById(Orders.stop)
+    displayMessageToPlayer(lootingUnit.getOwner(), "Failed To Search".colorize(Colors.red) + " Lootable is already being looted")
+    return
+  
+  prepareSearchSpell(lootingUnit, lootableUnit)
+
+  lootable.startLooting(lootingUnit)
+
+// ============================================================================
+function onSpellEndCast()
+  if (GetSpellAbilityId() != ABILITY_ID_SEARCH)
+    return
+  
+  let lootingUnit = GetSpellAbilityUnit()
+  let lootingOperation = g_looterToOperationMap.get(lootingUnit)
+  if (lootingOperation == null)
+    return
+
+  lootingOperation.cancel()
+
+// ============================================================================
+init
+  registerDayEvent(function onDayStart)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_SPELL_CHANNEL, function onSpellChannel)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_SPELL_ENDCAST, function onSpellEndCast)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ISSUED_UNIT_ORDER, function onRightClick)
+  
+  g_LootOperationProgressBar = new TextProgressBar(PROGRESS_BAR_LENGTH, PROGRESS_BAR_FOREGROUND, PROGRESS_BAR_BACKGROUND)
+  g_activeOperations = new LinkedList<LootOperation>()
+
+  doPeriodically(PROGRESS_BAR_UPDATE_PERIOD, (cb) -> updateProgressBars())

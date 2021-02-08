@@ -172,22 +172,22 @@ public class GameInstance extends Runnable
 
     updateNoHeadquartersUpgrade(p)
 
-    doAfter(1.0) () ->
-      new GameStatsMultiboard(p).show()
-
   // --------------------------------------------------------------------------
   function updateGracePeriod()
     let wasGracePeriod = m_gracePeriod
-    m_gracePeriod = m_day <= GRACE_PERIOD_END_DAY
-    if (wasGracePeriod and not m_gracePeriod)
+    m_gracePeriod = m_day < GRACE_PERIOD_END_DAY
+    
+    if (m_gracePeriod)
+      if (m_day == GRACE_PERIOD_END_DAY - 1)
+        displayMessageToPlayers("Grace period ends tomorrow!".colorize(COLOR_GOLD))
+      else
+        displayMessageToPlayers("Grace period ends in {0} days!".format((GRACE_PERIOD_END_DAY - m_day).toString()).colorize(COLOR_GOLD))
+    else if (wasGracePeriod)
       displayMessageToPlayers("Grace period has ended. Hero death is now permanent.".colorize(COLOR_GOLD))
 
   // --------------------------------------------------------------------------
   function startDay()
     m_day++
-
-    if (m_updateGracePeriod)
-      updateGracePeriod()
 
     Log.debug("Starting day {0}...".format(m_day.toString()))
 
@@ -196,6 +196,13 @@ public class GameInstance extends Runnable
     if (GameSettings.allowRespawn)
       respawnDeadPlayers()
 
+    if (m_updateGracePeriod)
+      updateGracePeriod()
+
+    // Show the player's multiboards on day 1
+    if (m_day == 1)
+      showMultiboardsForPlayers()
+
     // Start day waves for players
     for p in g_PlayingHumanPlayers
       let waves = m_playerWaves.getOrCreatePlayerWaves(p)
@@ -203,6 +210,11 @@ public class GameInstance extends Runnable
       waves.getRunner().startDayWave(m_day)
 
     Log.debug("Day {0} started.".format(m_day.toString()))
+
+  // --------------------------------------------------------------------------
+  function showMultiboardsForPlayers()
+    for _player in g_PlayingHumanPlayers
+      new GameStatsMultiboard(_player).show()
 
   // --------------------------------------------------------------------------
   function startNight()
@@ -235,7 +247,9 @@ public class GameInstance extends Runnable
     SetCreepCampFilterState(false)
     SetTimeOfDayScalePercentBJ(GAME_SPEED_INITIAL)
     SetTimeOfDay(TIME_OF_DAY_INITIAL)
+    
     FogEnableOn()
+    FogMaskEnableOff()
 
     // We control experience gain manually
     for p in g_HumanPlayers
@@ -275,6 +289,10 @@ public class GameInstance extends Runnable
       SetPlayerAllianceStateBJ(p, PLAYER_VILLAGERS, bj_ALLIANCE_NEUTRAL )
       // Make villagers treat player as nuetral
       SetPlayerAllianceStateBJ(PLAYER_VILLAGERS, p, bj_ALLIANCE_NEUTRAL )
+      // Make player treat lootables as nuetral
+      SetPlayerAllianceStateBJ(p, PLAYER_LOOTABLES, bj_ALLIANCE_NEUTRAL )
+      // Make lootables treat player as nuetral
+      SetPlayerAllianceStateBJ(PLAYER_LOOTABLES, p, bj_ALLIANCE_NEUTRAL )
       // Make player treat raiders as an enemy
       SetPlayerAllianceStateBJ(p, PLAYER_UNDEAD, bj_ALLIANCE_UNALLIED)
       // Make raiders treat player as an enemy
