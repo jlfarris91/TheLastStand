@@ -99,7 +99,7 @@ endfunction
 //***************************************************************************
 
 //===========================================================================
-function CreateUnitsForPlayer20 takes nothing returns nothing
+function CreateBuildingsForPlayer20 takes nothing returns nothing
     local player p= Player(20)
     local unit u
     local integer unitID
@@ -277,17 +277,17 @@ endfunction
 
 //===========================================================================
 function CreatePlayerBuildings takes nothing returns nothing
+    call CreateBuildingsForPlayer20()
 endfunction
 
 //===========================================================================
 function CreatePlayerUnits takes nothing returns nothing
-    call CreateUnitsForPlayer20()
 endfunction
 
 //===========================================================================
 function CreateAllUnits takes nothing returns nothing
-    call CreatePlayerBuildings()
-    call CreateUnitsForPlayer20() // INLINED!!
+    call CreateBuildingsForPlayer20() // INLINED!!
+    call CreatePlayerUnits()
 endfunction
 
 //***************************************************************************
@@ -522,47 +522,47 @@ endfunction
 
 function InitAllyPriorities takes nothing returns nothing
 
-    call SetStartLocPrioCount(0, 3)
-    call SetStartLocPrio(0, 0, 1, MAP_LOC_PRIO_LOW)
-    call SetStartLocPrio(0, 1, 2, MAP_LOC_PRIO_HIGH)
-    call SetStartLocPrio(0, 2, 7, MAP_LOC_PRIO_LOW)
+    call SetStartLocPrioCount(0, 4)
+    call SetStartLocPrio(0, 0, 2, MAP_LOC_PRIO_LOW)
+    call SetStartLocPrio(0, 1, 4, MAP_LOC_PRIO_LOW)
+    call SetStartLocPrio(0, 2, 5, MAP_LOC_PRIO_LOW)
+    call SetStartLocPrio(0, 3, 6, MAP_LOC_PRIO_HIGH)
 
-    call SetStartLocPrioCount(1, 1)
-    call SetStartLocPrio(1, 0, 7, MAP_LOC_PRIO_HIGH)
+    call SetStartLocPrioCount(1, 5)
+    call SetStartLocPrio(1, 0, 2, MAP_LOC_PRIO_HIGH)
+    call SetStartLocPrio(1, 1, 3, MAP_LOC_PRIO_HIGH)
+    call SetStartLocPrio(1, 2, 4, MAP_LOC_PRIO_HIGH)
+    call SetStartLocPrio(1, 3, 5, MAP_LOC_PRIO_HIGH)
+    call SetStartLocPrio(1, 4, 7, MAP_LOC_PRIO_LOW)
 
-    call SetStartLocPrioCount(2, 5)
-    call SetStartLocPrio(2, 0, 0, MAP_LOC_PRIO_HIGH)
-    call SetStartLocPrio(2, 1, 1, MAP_LOC_PRIO_HIGH)
-    call SetStartLocPrio(2, 2, 4, MAP_LOC_PRIO_LOW)
-    call SetStartLocPrio(2, 3, 6, MAP_LOC_PRIO_LOW)
-    call SetStartLocPrio(2, 4, 7, MAP_LOC_PRIO_HIGH)
+    call SetStartLocPrioCount(2, 2)
+    call SetStartLocPrio(2, 0, 4, MAP_LOC_PRIO_HIGH)
+    call SetStartLocPrio(2, 1, 5, MAP_LOC_PRIO_HIGH)
 
-    call SetStartLocPrioCount(3, 7)
-    call SetStartLocPrio(3, 0, 0, MAP_LOC_PRIO_HIGH)
-    call SetStartLocPrio(3, 1, 1, MAP_LOC_PRIO_LOW)
-    call SetStartLocPrio(3, 2, 2, MAP_LOC_PRIO_HIGH)
-    call SetStartLocPrio(3, 3, 4, MAP_LOC_PRIO_LOW)
-    call SetStartLocPrio(3, 4, 5, MAP_LOC_PRIO_HIGH)
-    call SetStartLocPrio(3, 5, 6, MAP_LOC_PRIO_LOW)
-    call SetStartLocPrio(3, 6, 7, MAP_LOC_PRIO_LOW)
+    call SetStartLocPrioCount(3, 1)
+    call SetStartLocPrio(3, 0, 1, MAP_LOC_PRIO_HIGH)
 
-    call SetStartLocPrioCount(4, 1)
-    call SetStartLocPrio(4, 0, 6, MAP_LOC_PRIO_HIGH)
+    call SetStartLocPrioCount(4, 2)
+    call SetStartLocPrio(4, 0, 2, MAP_LOC_PRIO_HIGH)
+    call SetStartLocPrio(4, 1, 5, MAP_LOC_PRIO_HIGH)
 
-    call SetStartLocPrioCount(5, 7)
-    call SetStartLocPrio(5, 0, 0, MAP_LOC_PRIO_LOW)
-    call SetStartLocPrio(5, 1, 1, MAP_LOC_PRIO_HIGH)
-    call SetStartLocPrio(5, 2, 2, MAP_LOC_PRIO_HIGH)
-    call SetStartLocPrio(5, 3, 3, MAP_LOC_PRIO_HIGH)
-    call SetStartLocPrio(5, 4, 4, MAP_LOC_PRIO_LOW)
-    call SetStartLocPrio(5, 5, 6, MAP_LOC_PRIO_HIGH)
-    call SetStartLocPrio(5, 6, 7, MAP_LOC_PRIO_LOW)
+    call SetStartLocPrioCount(5, 2)
+    call SetStartLocPrio(5, 0, 2, MAP_LOC_PRIO_HIGH)
+    call SetStartLocPrio(5, 1, 4, MAP_LOC_PRIO_HIGH)
 
-    call SetStartLocPrioCount(6, 1)
-    call SetStartLocPrio(6, 0, 4, MAP_LOC_PRIO_HIGH)
+    call SetStartLocPrioCount(6, 5)
+    call SetStartLocPrio(6, 0, 0, MAP_LOC_PRIO_LOW)
+    call SetStartLocPrio(6, 1, 2, MAP_LOC_PRIO_LOW)
+    call SetStartLocPrio(6, 2, 4, MAP_LOC_PRIO_LOW)
+    call SetStartLocPrio(6, 3, 5, MAP_LOC_PRIO_LOW)
+    call SetStartLocPrio(6, 4, 7, MAP_LOC_PRIO_HIGH)
 
-    call SetStartLocPrioCount(7, 1)
-    call SetStartLocPrio(7, 0, 1, MAP_LOC_PRIO_HIGH)
+    call SetStartLocPrioCount(7, 5)
+    call SetStartLocPrio(7, 0, 1, MAP_LOC_PRIO_LOW)
+    call SetStartLocPrio(7, 1, 2, MAP_LOC_PRIO_HIGH)
+    call SetStartLocPrio(7, 2, 4, MAP_LOC_PRIO_HIGH)
+    call SetStartLocPrio(7, 3, 5, MAP_LOC_PRIO_HIGH)
+    call SetStartLocPrio(7, 4, 6, MAP_LOC_PRIO_HIGH)
 endfunction
 
 //***************************************************************************
@@ -603,17 +603,17 @@ function config takes nothing returns nothing
     call SetTeams(11)
     call SetGamePlacement(MAP_PLACEMENT_TEAMS_TOGETHER)
 
-    call DefineStartLocation(0, - 192.0, - 6656.0)
-    call DefineStartLocation(1, - 8256.0, - 5632.0)
-    call DefineStartLocation(2, - 4288.0, - 2688.0)
-    call DefineStartLocation(3, 6272.0, 4608.0)
-    call DefineStartLocation(4, - 10176.0, - 5248.0)
-    call DefineStartLocation(5, - 5824.0, 9536.0)
-    call DefineStartLocation(6, - 10240.0, - 4096.0)
-    call DefineStartLocation(7, - 7680.0, - 5824.0)
-    call DefineStartLocation(8, 64.0, - 4864.0)
-    call DefineStartLocation(9, - 9984.0, - 9344.0)
-    call DefineStartLocation(10, 5696.0, - 5696.0)
+    call DefineStartLocation(0, 11648.0, - 10880.0)
+    call DefineStartLocation(1, 11648.0, - 11072.0)
+    call DefineStartLocation(2, 11648.0, - 11008.0)
+    call DefineStartLocation(3, 11648.0, - 11136.0)
+    call DefineStartLocation(4, 11648.0, - 11008.0)
+    call DefineStartLocation(5, 11648.0, - 11008.0)
+    call DefineStartLocation(6, 11584.0, - 10944.0)
+    call DefineStartLocation(7, 11584.0, - 11008.0)
+    call DefineStartLocation(8, 11648.0, - 11008.0)
+    call DefineStartLocation(9, 11648.0, - 11072.0)
+    call DefineStartLocation(10, 11648.0, - 11072.0)
 
     // Player setup
     call InitCustomPlayerSlots()
