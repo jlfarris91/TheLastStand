@@ -17,6 +17,8 @@ import OnUnitEnterLeave
 import Interpolation
 import InstantDummyCaster
 import SoundUtils
+import HashMap
+import LinkedList
 
 constant int GRENADE_DUMMY_CASTER_THROW_ABIL_ID = compiletime(ABIL_ID_GEN.next()) // 'A046'
 constant int GRENADE_DUMMY_CASTER_STOMP_ABIL_ID = compiletime(ABIL_ID_GEN.next())
@@ -24,12 +26,41 @@ constant int GRENADE_DUMMY_CASTER_UNIT_ID = compiletime(UNIT_ID_GEN.next()) // '
 
 constant real GRENADE_RANGE = 700.0
 constant real GRENADE_AOE = 300.0
-constant real GRENADE_FULL_DAMAGE = 500.0
+constant real GRENADE_FULL_DAMAGE_SCALE = 8.0
 constant real GRENADE_CHARGE_DURATION = 0.75
 constant real GRENADE_STUN_DURATION = 3.0
 constant boolexpr GRENADE_DAMAGE_TARGETS_FILTER = Filter(function isFilterUnitGrenadeDamageTarget)
 
 SoundDefinition g_GrenadeExplosionSoundDef
+HashMap<unit, real> g_dummyUnitToDamageMap = new HashMap<unit, real>()
+LinkedList<GrenadeCaster> g_recentGrenadeCasters = new LinkedList<GrenadeCaster>()
+
+// ============================================================================
+class GrenadeCaster
+  unit m_caster
+  vec2 m_targetPos
+
+  // --------------------------------------------------------------------------
+  construct(unit caster, vec2 targetPos)
+    m_caster = caster
+    m_targetPos = targetPos
+
+  // --------------------------------------------------------------------------
+  function isCasterForDummyUnit(unit dummyUnit) returns bool
+    return dummyUnit.getOwner() == m_caster.getOwner() and
+           m_targetPos.distanceToSq(dummyUnit.getPos()) < 128.0
+
+// ============================================================================
+function getMatchingGrenadeCaster(unit dummyUnit) returns GrenadeCaster
+  for grenadeCaster in g_recentGrenadeCasters
+    if (grenadeCaster.isCasterForDummyUnit(dummyUnit))
+      return grenadeCaster
+  return null
+
+// ============================================================================
+function removeGrenadeCaster(GrenadeCaster grenadeCaster)
+  g_recentGrenadeCasters.remove(grenadeCaster)
+  destroy grenadeCaster
 
 // ============================================================================
 public class ThrowGrenadeItemAbilityDefinition extends AbilityDefinitionTinkererSummonFactoryLevel0
@@ -114,12 +145,26 @@ function onAbilityCast()
   ResetUnitAnimation(caster)
   caster.setAnimation("spell")
 
+  g_recentGrenadeCasters.add(new GrenadeCaster(caster, targetPos))
+
 // ============================================================================
 function onUnitEnter()
   let enteringUnit = getEnterLeaveUnit()
 
   if (enteringUnit.getTypeId() != GRENADE_DUMMY_CASTER_UNIT_ID)
     return
+
+  let grenadeCaster = getMatchingGrenadeCaster(enteringUnit)
+  if (grenadeCaster == null)
+    Log.error("Could not find matching grenade caster")
+    enteringUnit.remove()
+    return
+
+  let throwingUnit = grenadeCaster.m_caster
+  let throwingUnitDamage = throwingUnit.getBaseDamage(0)
+  let damage = throwingUnitDamage * GRENADE_FULL_DAMAGE_SCALE
+
+  removeGrenadeCaster(grenadeCaster)
 
   let pos = enteringUnit.getPos()
 
@@ -132,11 +177,11 @@ function onUnitEnter()
   doAfter(GRENADE_CHARGE_DURATION) () ->
     preExplosionFx1.destr()
     preExplosionFx2.destr()
-    doExplosion(pos, enteringUnit)
+    doExplosion(pos, enteringUnit, damage)
     enteringUnit.remove()
 
 // ============================================================================
-function doExplosion(vec2 pos, unit damageSource)
+function doExplosion(vec2 pos, unit damageSource, real fullDamage)
 
   //g_GrenadeExplosionSoundDef.playOnPoint(pos.withTerrainZ())
 
@@ -167,7 +212,7 @@ function doExplosion(vec2 pos, unit damageSource)
     let targetPos = targetUnit.getPos()
     let distance = targetPos.distanceTo(pos)
     let distanceT = clamp01(distance / GRENADE_AOE)
-    let damage = linear(GRENADE_FULL_DAMAGE, 0.0, distanceT)
+    let damage = linear(fullDamage, 0.0, distanceT)
     explosionDamageTarget(targetUnit, damageSource, damage)
 
   damageGroup.release()
