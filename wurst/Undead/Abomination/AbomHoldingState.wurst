@@ -11,6 +11,7 @@ import Orders
 import UnitExtensions
 import UndeadTargetingComponent
 import HumanPlayers
+import Units
 
 constant real ABOM_MIN_THROW_RANGE = 400.0
 constant real ABOM_MAX_THROW_RANGE = 700.0
@@ -22,15 +23,16 @@ rect g_minThrowArea
 
 // ============================================================================
 public class AbomHoldingState extends BaseStateMachineState
-  private Abomination _abom
-  private real _timer
-  private bool _threwZombie
-  private effect _targetIndicatorEffect
+  private Abomination m_abom
+  private real m_timer
+  private bool m_threwZombie
+  private effect m_heldZombieEffect
+  private effect m_targetIndicatorEffect
 
   // --------------------------------------------------------------------------
   construct(Abomination abom, IStateMachine machine)
     super(machine)
-    _abom = abom
+    m_abom = abom
 
   // --------------------------------------------------------------------------
   ondestroy
@@ -42,39 +44,41 @@ public class AbomHoldingState extends BaseStateMachineState
 
   // --------------------------------------------------------------------------
   override function enter()
-    _timer = 0.0
-    _threwZombie = false
+    m_timer = 0.0
+    m_threwZombie = false
 
-    let zombie = _abom.getHoldingZombie()
+    let zombie = m_abom.getHoldingZombie()
     if (zombie == null)
       error("Expected Abomination to be holding a zombie when entering this state")
 
-    let abomUnit = _abom.getUnit()
-    if (zombie.isFemaleZombie())
-      abomUnit.addAbility(TlsAbilityIds.holdingZombieFemale)
-    else
-      abomUnit.addAbility(TlsAbilityIds.holdingZombieMale)
-
+    let abomUnit = m_abom.getUnit()
     abomUnit.addAbility(TlsAbilityIds.abomThrowZombie)
+
+    if (m_heldZombieEffect == null)
+      m_heldZombieEffect = AddSpecialEffectTargetUnitBJ("hand left", abomUnit, Units.zombie)
 
   // --------------------------------------------------------------------------
   override function exit()
-    _timer = 0.0
-    _threwZombie = false
-    let abomUnit = _abom.getUnit()
+    m_timer = 0.0
+    m_threwZombie = false
+    let abomUnit = m_abom.getUnit()
     abomUnit.removeAbility(TlsAbilityIds.holdingZombieFemale)
     abomUnit.removeAbility(TlsAbilityIds.holdingZombieMale)
     abomUnit.removeAbility(TlsAbilityIds.abomThrowZombie)
     hideTargetIndicator()
 
+    if (m_heldZombieEffect != null)
+      m_heldZombieEffect.destr()
+      m_heldZombieEffect = null
+
   // --------------------------------------------------------------------------
   override function update(real dt)
-    _timer += dt
+    m_timer += dt
 
-    if (_timer >= ABOM_HOLD_DURATION and not _threwZombie)
-      _threwZombie = tryThrowZombie()
-      if (_threwZombie == false)
-        _timer -= ABOM_HOLD_DURATION
+    if (m_timer >= ABOM_HOLD_DURATION and not m_threwZombie)
+      m_threwZombie = tryThrowZombie()
+      if (m_threwZombie == false)
+        m_timer -= ABOM_HOLD_DURATION
         attackPlayer()
 
   // --------------------------------------------------------------------------
@@ -87,10 +91,10 @@ public class AbomHoldingState extends BaseStateMachineState
 
     Log.debug("[AbomHoldingState] Found target to throw zombie at: " + target.getName())
 
-    let abomUnit = _abom.getUnit()
+    let abomUnit = m_abom.getUnit()
     let currentPos = abomUnit.getPos()
     let targetPos = target.getPos()
-    let throwRange = _abom.getThrowRange()
+    let throwRange = m_abom.getThrowRange()
     let angle = currentPos.angleTo(targetPos)
     var dist = currentPos.distanceTo(targetPos)
     dist = clamp(dist, ABOM_MIN_THROW_RANGE, throwRange)
@@ -104,7 +108,7 @@ public class AbomHoldingState extends BaseStateMachineState
 
   // --------------------------------------------------------------------------
   private function findThrowTarget() returns unit
-    let abomUnit = _abom.getUnit()
+    let abomUnit = m_abom.getUnit()
 
     // === These must be cleaned up
     let ug = getGroup()
@@ -125,19 +129,20 @@ public class AbomHoldingState extends BaseStateMachineState
 
   // --------------------------------------------------------------------------
   private function attackPlayer()
-    _abom.getOrAddUndeadTargetingComponent()
+    m_abom.getOrAddUndeadTargetingComponent()
     ..issueOrderTargetingPlayer()
 
   // --------------------------------------------------------------------------
   private function showTargetIndicator(vec2 pos)
     hideTargetIndicator()
-    _targetIndicatorEffect = FX.createEffect(ABOM_TARGET_INDICATOR_EFFECT, pos)
+    m_targetIndicatorEffect = FX.createEffect(ABOM_TARGET_INDICATOR_EFFECT, pos)
 
   // --------------------------------------------------------------------------
   private function hideTargetIndicator()
-    if (_targetIndicatorEffect != null)
-      _targetIndicatorEffect.destr()
-      _targetIndicatorEffect = null
+    if (m_targetIndicatorEffect != null)
+      m_targetIndicatorEffect.setAlpha(0)
+      m_targetIndicatorEffect.destr()
+      m_targetIndicatorEffect = null
 
 // ============================================================================
 function isFilterUnitAValidThrowTarget() returns bool

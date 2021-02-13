@@ -50,6 +50,7 @@ public class LootableComponent extends UnitComponent
   private int m_cooldownDays
   private unit m_lootingUnit
   private texttag m_cooldownDayTextTag
+  private real m_chanceToRetrigger01
 
   // --------------------------------------------------------------------------
   construct(IUnitMetadata owner)
@@ -116,6 +117,14 @@ public class LootableComponent extends UnitComponent
   // --------------------------------------------------------------------------
   function setSearchDuration(real duration)
     m_searchDuration = duration
+
+  // --------------------------------------------------------------------------
+  function getChanceToRetrigger() returns real
+    return m_chanceToRetrigger01
+
+  // --------------------------------------------------------------------------
+  function setChanceToRetrigger(real value)
+    m_chanceToRetrigger01 = value
   
   // --------------------------------------------------------------------------
   function getRewardsSet() returns WeightedSet<ILootableReward>
@@ -216,26 +225,71 @@ public class LootableComponent extends UnitComponent
     resetCooldown()
     onLootable()
 
+  int m_lootRewardMultiplier = 1
+
+  // --------------------------------------------------------------------------
+  function displayLootRewardText(player _player, string message)
+    if (m_lootRewardMultiplier == 1)
+      displayMessageToPlayer(
+        _player,
+        "Finished Looting : ".colorize(Colors.gold) + message)
+    else
+      displayMessageToPlayer(
+        _player,
+        "Finished Looting x{0} : ".format(m_lootRewardMultiplier.toString()).colorize(Colors.gold) + message)
+    m_lootRewardMultiplier++
+
   // --------------------------------------------------------------------------
   protected function giveRewards(unit lootingUnit)
+    m_lootRewardMultiplier = 1
+    let rewardsSet = new WeightedSet<ILootableReward>(m_rewards)
+    giveRewardsWithChanceToRetrigger(rewardsSet, lootingUnit, m_chanceToRetrigger01, true)
+    destroy rewardsSet
+
+  // --------------------------------------------------------------------------
+  private function giveRewardsWithChanceToRetrigger(
+    WeightedSet<ILootableReward> rewards,
+    unit lootingUnit,
+    real chanceToRetrigger01,
+    bool allowLuckyHorseshoe)
+
+    // No more rewards to give
+    if (rewards.isEmpty())
+      return
+
+    // Give the player their reward
+    let reward = rewards.popRandom()
+    if (reward == null)
+      Log.error("No reward registered for lootable")
+      return
+
+    reward.giveReward(this, lootingUnit)
+
+    // Some rewards necessarily must stop the retrigger loop
+    if (reward.getStopsRetrigger())
+      return
+
+    var chanceToRetriggerWithHoreshoe01 = chanceToRetrigger01
+    var mutableLuckyHorseshoe = allowLuckyHorseshoe
 
     // Lucky Horseshoe item grants a small chance to immediately loot a second time
     let metadata = lootingUnit.getMetadata()
     if (metadata != null)
       let comp = metadata.getLooterComponent()
       if (comp != null)
-        if (passesChanceCheck(comp.getChanceToLootTwice()))
-          giveOneReward(lootingUnit)
-          displayMessageToPlayer(lootingUnit.getOwner(), "Lucky Horseshoe!".colorize(Colors.lightBlue))
+        chanceToRetriggerWithHoreshoe01 = clamp01(chanceToRetriggerWithHoreshoe01 + comp.getChanceToLootTwice())
+    
+    let roll = GetRandomReal(0, 1)
+    if (not passesChanceCheck(chanceToRetriggerWithHoreshoe01, roll))
+      return
 
-    giveOneReward(lootingUnit)
+    // The chance check would not have passed if it weren't for the effects of lucky horseshoe
+    if (not passesChanceCheck(chanceToRetrigger01, roll))
+      displayMessageToPlayer(lootingUnit.getOwner(), "Lucky Horseshoe!".colorize(Colors.lightBlue) + " You found even more loot!")
+      mutableLuckyHorseshoe = false // Lucky horseshoe can only fire once
 
-  // --------------------------------------------------------------------------
-  protected function giveOneReward(unit lootingUnit)
-    let reward = m_rewards.getRandom()
-    if (reward == null)
-      error("No reward registered for lootable")
-    reward.giveReward(this, lootingUnit)
+    // Give the player another reward and give it another shot to retrigger
+    giveRewardsWithChanceToRetrigger(rewards, lootingUnit, chanceToRetrigger01 / 3.0, mutableLuckyHorseshoe)
 
   // --------------------------------------------------------------------------
   private function onLooted()
@@ -300,6 +354,8 @@ public class LootOperation
   // --------------------------------------------------------------------------
   ondestroy
 
+    g_looterToOperationMap.remove(m_lootingUnit)
+
     if (m_timerDialog != null)
       m_timerDialog.destr()
       m_timerDialog = null
@@ -307,8 +363,6 @@ public class LootOperation
     if (m_timer != null)
       m_timer.release()
       m_timer = null
-
-    g_looterToOperationMap.remove(m_lootingUnit)
 
     unregisterForUpdate()
     
@@ -359,12 +413,6 @@ public class LootOperation
     m_timer = null
 
     destroy this
-
-// ============================================================================
-public function displayLootRewardText(player _player, string message)
-  displayMessageToPlayer(
-      _player,
-      "Finished Looting ".colorize(Colors.gold) + message)
 
 // ============================================================================
 function updateProgressBars()
@@ -419,7 +467,6 @@ function prepareSearchSpell(unit lootingUnit, unit lootableUnit)
 
   let lootableComp = lootableUnitMetadata.getLootableComponent()
   if (lootableComp == null)
-    Log.debug("Target unit does not have a lootable component")
     return
 
   let searchAbility = lootingUnit.getAbility(ABILITY_ID_SEARCH)

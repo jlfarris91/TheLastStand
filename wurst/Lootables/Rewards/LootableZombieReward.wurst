@@ -11,12 +11,19 @@ import LootableComponent
 import TlsSounds
 import ColorUtility
 import StringExtensions
+import ClosureTimers
+
+constant real ZOMBIE_SPAWN_INTERVAL = 0.8
 
 // ============================================================================
 public class LootableZombieReward implements ILootableReward
   private int _minZombies
   private int _maxZombies
   private ItemChances _itemChances
+
+  // --------------------------------------------------------------------------
+  override function getStopsRetrigger() returns bool
+    return true
 
   // --------------------------------------------------------------------------
   function getMinZombies() returns int
@@ -51,23 +58,22 @@ public class LootableZombieReward implements ILootableReward
     let lootableUnit = lootable.getOwnerUnit()
     let zombieCount = GetRandomInt(_minZombies, _maxZombies)
     
-    unit lastCreatedZombie = null
-
-    for i = 0 to zombieCount - 1
-      lastCreatedZombie = createUnitTLS(
-        PLAYER_UNDEAD,
-        TlsUnitIds.Undead.zombieDay,
-        looter.getX(),
-        looter.getY(),
-        GetRandomDirectionDeg())
-      lastCreatedZombie.issueTargetOrderById(OrderIds.attack, looter)
-
-    // Give a random item to the last created zombie
-    g_MainItemLibrary.giveRandomItemToUnit(lastCreatedZombie, _itemChances)
-
     // Play a sound to alert the player
     PlaySoundOnUnitBJ(TlsSounds.zombieDeath, 30.00, lootableUnit)
 
-    displayLootRewardText(
+    lootable.displayLootRewardText(
       looter.getOwner(),
-      "Found only zombies!".colorize(Colors.red))
+      "Found... zombies!".colorize(Colors.red))
+
+    doPeriodicallyCounted(ZOMBIE_SPAWN_INTERVAL, zombieCount) (cb) ->
+      let lastCreatedZombie = createUnitTLS(
+        PLAYER_UNDEAD,
+        TlsUnitIds.Undead.zombieDay,
+        lootableUnit.getX(),
+        lootableUnit.getY(),
+        GetRandomDirectionDeg())
+      lastCreatedZombie.issueTargetOrderById(OrderIds.attack, looter)
+
+      // Give a random item to the last created zombie
+      if (cb.isLast())
+        g_MainItemLibrary.giveRandomItemToUnit(lastCreatedZombie, _itemChances)

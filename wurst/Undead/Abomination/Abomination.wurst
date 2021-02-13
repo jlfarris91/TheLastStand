@@ -1,7 +1,5 @@
 package Abomination
 import UndeadUnit
-import TlsUnitIds
-import Orders
 import ClosureEvents
 import TlsAbilityIds
 import UnitMetadata
@@ -15,16 +13,24 @@ import initlater AbomIdleState
 import initlater AbomHoldingState
 import UndeadTargetingComponent
 import Events
+import LinkedList
+import Math
+import Interpolation
 
-constant real ABOM_THROW_PROJ_DURATION = 1.0
-constant real ABOM_THROW_ANIM_DURATION = 1.0
+constant real ABOM_THROW_PROJ_DURATION = 1.5
+constant real ABOM_THROW_PROJ_HEIGHT = 300.0
+constant real ABOM_THROW_ANIM_DURATION = 1.667
 constant real ABOM_THROW_ANIM_PROJECTILE_POINT = 0.5
 constant int ABOM_THROW_ANIM_INDEX = 7
 
-constant real ABOM_ANIM_GRAB_DURATION = 0.6
-constant int ABOM_ANIM_GRAB_INDEX = 2
+constant real ABOM_ANIM_GRAB_ZOMBIE_POINT = 0.6
+constant real ABOM_ANIM_GRAB_DURATION = 1.667
+constant int ABOM_GRAB_ANIM_INDEX = 2
 
 constant string ABOM_THROW_DUST_EFFECT = "Objects\\Spawnmodels\\Undead\\ImpaleTargetDust\\ImpaleTargetDust.mdl"
+
+LinkedList<ZombieProjectile> g_zombieProjectiles = new LinkedList<ZombieProjectile>()
+trigger g_updateZombieProjectilesTrigger
 
 // ============================================================================
 public class Abomination extends UndeadUnit
@@ -130,25 +136,34 @@ function onAbomGrabbedZombie(unit caster, unit target)
   if (stateMachine == null)
     return
 
-  target.setInvulnerable(true)
-  abom.getUnit().setAnimation(ABOM_ANIM_GRAB_INDEX)
+  let abomUnit = abom.getUnit()
 
-  doAfter(ABOM_ANIM_GRAB_DURATION) () ->
+  target.setInvulnerable(true)
+
+  abomUnit.pauseEx()
+
+  // Looks like he's grabbing the zombie
+  abomUnit.setAnimation(ABOM_GRAB_ANIM_INDEX)
+
+  // "Grab" the zombie half way through the animation when the abom's hand comes closest to the target
+  doAfter(ABOM_ANIM_GRAB_ZOMBIE_POINT) () ->
     if (abom != null)
       abom.setHoldingZombie(target)
       if (target != null)
         target.hide()
-      doAfter(0.2) () ->
-        if (stateMachine != null)
-          stateMachine.transitionToState("HoldingZombie")
+
+  // Switch to the holding state after the full grab animation has played
+  doAfter(ABOM_ANIM_GRAB_DURATION) () ->
+    if (stateMachine != null)
+      stateMachine.transitionToState("HoldingZombie")
+    abomUnit.unpauseEx()
 
 // ============================================================================
-function getZombieArtPath(unit zombie) returns string
-  let id = zombie.getTypeId()
-
-  if (id == TlsUnitIds.Undead.zombieFemale)
-    return "Units\\Creeps\\ZombieFemale\\ZombieFemale.mdl"
-
+function getZombieArtPath(unit _) returns string
+  // Doesn't work for SD
+  //let id = zombie.getTypeId()
+  // if (id == TlsUnitIds.Undead.zombieFemale)
+  //   return "Units\\Creeps\\ZombieFemale\\ZombieFemale.mdl"
   return Units.zombie
 
 // ============================================================================
@@ -171,45 +186,41 @@ function onAbomThrowZombie(unit caster)
 
   let facingAngle = throwStartPos.angleTo(throwEndPos)
 
+  // Create a dummy target just to get a valid point for the zombie to land
+  // Otherwise, the arc could show the zombie landing in a different place
   let dummyTarget = createDummy(throwEndPos, DUMMY_PLAYER, facingAngle)
   throwEndPos = dummyTarget.getPos()
+  nullTimer(() -> dummyTarget.remove())
 
   let distance = throwStartPos.distanceTo(throwEndPos)
   let throwRange = abom.getThrowRange()
   let rangeScalar = distance / throwRange
 
-  let dummyCaster = CreateUnit(
-    DUMMY_PLAYER,
-    TlsUnitIds.Undead.abomThrowCaster,
-    throwStartPos.x,
-    throwStartPos.y,
-    facingAngle.radians)
-
-  // set the dummy's projectile art to match the held zombie
-  let projectileArtPath = getZombieArtPath(zombie)
-  dummyCaster.setFieldWeapon(UNIT_WEAPON_SF_ATTACK_PROJECTILE_ART, 1, projectileArtPath)
+  let abomUnit = abom.getUnit()
 
   // Start the animation for throwing the held zombie
-  abom.getUnit().setAnimation(ABOM_THROW_ANIM_INDEX)
+  abomUnit.pauseEx()
+  abomUnit.setAnimation(ABOM_THROW_ANIM_INDEX)
+
   doAfter(ABOM_THROW_ANIM_DURATION) () ->
     // Get the statemachine again here in case the abom dies before this is called
     let stateMachine2 = getAliveAbomStateMachine(caster)
     if (stateMachine2 != null)
       stateMachine2.transitionToState("Idle")
+    abomUnit.unpauseEx()
 
   // At the peak of the throw animation order the dummy to attack ground
-  doAfter(ABOM_THROW_ANIM_PROJECTILE_POINT) ->    
-    dummyCaster.issuePointOrderById(OrderIds.attackground, throwEndPos)
+  doAfter(ABOM_THROW_ANIM_PROJECTILE_POINT) ->
     
     // Get the abom metadata again here in case the abom dies before this is called
     let abom2 = getAliveAbom(caster)
     if (abom2 != null)
+    //{
 
       let projectileDuration = rangeScalar * ABOM_THROW_PROJ_DURATION
-      doAfter(projectileDuration) () ->
-        // cleanup casters
-        dummyCaster.remove()
-        dummyTarget.remove()
+      new ZombieProjectile(throwStartPos, throwEndPos, ABOM_THROW_PROJ_HEIGHT, projectileDuration)
+       
+      doAfter(projectileDuration) ->
 
         // create a dust effect
         addEffect(ABOM_THROW_DUST_EFFECT, throwEndPos)
@@ -226,6 +237,7 @@ function onAbomThrowZombie(unit caster)
         else
           moveAndUnhideZombie(zombie, throwEndPos, facingAngle)
 
+    //}
     else
       moveAndUnhideZombie(zombie, throwEndPos, facingAngle)
 
@@ -243,6 +255,7 @@ function getAliveAbomStateMachine(unit abom) returns StateMachineComponent
 // ==========================================================================
 function moveAndUnhideZombie(unit zombie, vec2 pos, angle facingAngle)
   if (zombie == null)
+    Log.error("[moveAndUnhideZombie] : zombie was null")
     return
   // move and unhide the actual zombie unit
   zombie.setInvulnerable(false)
@@ -252,7 +265,98 @@ function moveAndUnhideZombie(unit zombie, vec2 pos, angle facingAngle)
   zombie.show()
 
 // ==========================================================================
+class ZombieProjectile
+  private vec2 m_startPos
+  private vec2 m_endPos
+  private real m_height
+  private real m_elapsed
+  private real m_duration
+  private effect m_effect
+
+  // --------------------------------------------------------------------------
+  construct(vec2 startPos, vec2 endPos, real height, real duration)
+
+    m_startPos = startPos
+    m_endPos = endPos
+    m_height = height
+    m_duration = duration
+    m_elapsed = 0
+
+    m_effect = AddSpecialEffect(Units.zombie, startPos.x, startPos.y)
+    m_effect.playAnimation(ANIM_TYPE_BIRTH)
+    m_effect.setTimeScale(0.0)
+    m_effect.setYaw(startPos.angleTo(endPos))
+
+    registerZombieProjectile(this)
+
+    update(0)
+
+  // --------------------------------------------------------------------------
+  ondestroy
+
+    if (m_effect != null)
+      m_effect.destr()
+      m_effect = null
+
+  // --------------------------------------------------------------------------
+  function update(real dt)
+
+    m_elapsed += dt
+
+    let t = clamp01(m_elapsed / m_duration)
+    let pos = calculatePos(t)
+    let pitch = calculatePitch(t)
+
+    m_effect.setPos(pos)
+    m_effect.setPitch(pitch)
+
+    if (t >= 1.0)
+      onCompleted()
+      
+  // --------------------------------------------------------------------------
+  private function calculatePos(real t) returns vec3
+    let xy = m_startPos.lerp(m_endPos, t)
+    let z = clamp01(Sin(t * PI)) * m_height
+    return xy.withTerrainZ(z)
+
+  // --------------------------------------------------------------------------
+  private function calculatePitch(real t) returns real
+    return lerp(60, -60, t)
+
+  // --------------------------------------------------------------------------
+  function onCompleted()
+
+    // Hide the effect
+    m_effect.setColor(colorA(0, 0, 0, 0))
+    m_effect.setAlpha(0)
+
+    unregisterZombieProjectile(this)
+
+    destroy this
+
+// ==========================================================================
+function registerZombieProjectile(ZombieProjectile zombieProjectile)
+  g_zombieProjectiles.add(zombieProjectile)
+  if (g_zombieProjectiles.size() == 1)
+    g_updateZombieProjectilesTrigger.enable()
+
+// ==========================================================================
+function unregisterZombieProjectile(ZombieProjectile zombieProjectile)
+  g_zombieProjectiles.remove(zombieProjectile)
+  if (g_zombieProjectiles.isEmpty())
+    g_updateZombieProjectilesTrigger.disable()
+
+// ==========================================================================
+function updateZombieProjectiles()
+  for zombieProjectile in g_zombieProjectiles
+    zombieProjectile.update(ANIMATION_PERIOD)
+
+// ==========================================================================
 init
+
+  g_updateZombieProjectilesTrigger = CreateTrigger()
+  g_updateZombieProjectilesTrigger.addAction(function updateZombieProjectiles)
+  TriggerRegisterTimerEventPeriodic(g_updateZombieProjectilesTrigger, ANIMATION_PERIOD)
 
   EventListener.onTargetCast(TlsAbilityIds.abomGrabZombie) (caster, target) ->
     onAbomGrabbedZombie(caster, target)
