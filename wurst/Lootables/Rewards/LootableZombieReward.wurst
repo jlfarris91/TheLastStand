@@ -12,6 +12,8 @@ import TlsSounds
 import ColorUtility
 import StringExtensions
 import ClosureTimers
+import UnitModifier
+import GameInstance
 
 constant real ZOMBIE_SPAWN_INTERVAL = 0.8
 
@@ -20,10 +22,26 @@ public class LootableZombieReward implements ILootableReward
   private int _minZombies
   private int _maxZombies
   private ItemChances _itemChances
+  private IFunctionalUnitModifier m_zombieModifier
+
+  // --------------------------------------------------------------------------
+  ondestroy
+
+    if (m_zombieModifier != null)
+      destroy m_zombieModifier
+      m_zombieModifier = null
 
   // --------------------------------------------------------------------------
   override function getStopsRetrigger() returns bool
     return true
+
+  // --------------------------------------------------------------------------
+  function getUnitMofidier() returns IFunctionalUnitModifier
+    return m_zombieModifier
+
+  // --------------------------------------------------------------------------
+  function setUnitModifier(IFunctionalUnitModifier value)
+    m_zombieModifier = value
 
   // --------------------------------------------------------------------------
   function getMinZombies() returns int
@@ -65,15 +83,23 @@ public class LootableZombieReward implements ILootableReward
       looter.getOwner(),
       "Found... zombies!".colorize(Colors.red))
 
+    let gameProgressT = g_GameInstance.getPlayerGameProgress01(looter.getOwner())
+
     doPeriodicallyCounted(ZOMBIE_SPAWN_INTERVAL, zombieCount) (cb) ->
+    //{
       let lastCreatedZombie = createUnitTLS(
         PLAYER_UNDEAD,
         TlsUnitIds.Undead.zombieDay,
         lootableUnit.getX(),
         lootableUnit.getY(),
         GetRandomDirectionDeg())
+
+      if (m_zombieModifier != null)
+        m_zombieModifier.apply(lastCreatedZombie, gameProgressT)
+
       lastCreatedZombie.issueTargetOrderById(OrderIds.attack, looter)
 
       // Give a random item to the last created zombie
       if (cb.isLast())
         g_MainItemLibrary.giveRandomItemToUnit(lastCreatedZombie, _itemChances)
+    //}

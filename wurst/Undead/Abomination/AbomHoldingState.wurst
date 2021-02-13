@@ -2,7 +2,6 @@ package AbomHoldingState
 import StateMachine
 import Abomination
 import TlsAbilityIds
-import Zombie
 import ErrorHandling
 import Math
 import GroupUtils
@@ -12,9 +11,10 @@ import UnitExtensions
 import UndeadTargetingComponent
 import HumanPlayers
 import Units
+import ColorUtility
 
-constant real ABOM_MIN_THROW_RANGE = 400.0
-constant real ABOM_MAX_THROW_RANGE = 700.0
+constant real ABOM_MIN_THROW_RANGE = 200.0
+constant real ABOM_MAX_THROW_RANGE = 1024.0
 constant real ABOM_HOLD_DURATION = 3.0
 constant int ABOM_THROW_ORDER_ID = OrderIds.flare
 constant string ABOM_TARGET_INDICATOR_EFFECT = "Abilities\\Spells\\NightElf\\TrueshotAura\\TrueshotAura.mdl"
@@ -28,6 +28,7 @@ public class AbomHoldingState extends BaseStateMachineState
   private bool m_threwZombie
   private effect m_heldZombieEffect
   private effect m_targetIndicatorEffect
+  private effect m_alertEffect
 
   // --------------------------------------------------------------------------
   construct(Abomination abom, IStateMachine machine)
@@ -37,6 +38,8 @@ public class AbomHoldingState extends BaseStateMachineState
   // --------------------------------------------------------------------------
   ondestroy
     hideTargetIndicator()
+    hideAlertEffect()
+    hideHeldZombieEffect()
 
   // --------------------------------------------------------------------------
   override function getName() returns string
@@ -54,22 +57,19 @@ public class AbomHoldingState extends BaseStateMachineState
     let abomUnit = m_abom.getUnit()
     abomUnit.addAbility(TlsAbilityIds.abomThrowZombie)
 
-    if (m_heldZombieEffect == null)
-      m_heldZombieEffect = AddSpecialEffectTargetUnitBJ("hand left", abomUnit, Units.zombie)
+    showAlertEffect(abomUnit)
+    showHeldZombieEffect(abomUnit)
 
   // --------------------------------------------------------------------------
   override function exit()
     m_timer = 0.0
     m_threwZombie = false
     let abomUnit = m_abom.getUnit()
-    abomUnit.removeAbility(TlsAbilityIds.holdingZombieFemale)
-    abomUnit.removeAbility(TlsAbilityIds.holdingZombieMale)
     abomUnit.removeAbility(TlsAbilityIds.abomThrowZombie)
+    
     hideTargetIndicator()
-
-    if (m_heldZombieEffect != null)
-      m_heldZombieEffect.destr()
-      m_heldZombieEffect = null
+    hideAlertEffect()
+    hideHeldZombieEffect()
 
   // --------------------------------------------------------------------------
   override function update(real dt)
@@ -143,6 +143,29 @@ public class AbomHoldingState extends BaseStateMachineState
       m_targetIndicatorEffect.setAlpha(0)
       m_targetIndicatorEffect.destr()
       m_targetIndicatorEffect = null
+
+  // --------------------------------------------------------------------------
+  private function showAlertEffect(unit _unit)
+    hideAlertEffect()
+    m_alertEffect = AddSpecialEffectTargetUnitBJ("overhead", _unit, "Abilities\\Spells\\Other\\TalkToMe\\TalkToMe.mdl")
+      ..setColor(Colors.red)
+
+  // --------------------------------------------------------------------------
+  private function hideAlertEffect()
+    if (m_alertEffect != null)
+      m_alertEffect.destr()
+      m_alertEffect = null
+
+  // --------------------------------------------------------------------------
+  private function showHeldZombieEffect(unit _unit)
+    hideHeldZombieEffect()
+    m_heldZombieEffect = AddSpecialEffectTargetUnitBJ("hand left", _unit, Units.zombie)
+
+  // --------------------------------------------------------------------------
+  private function hideHeldZombieEffect()
+    if (m_heldZombieEffect != null)
+      m_heldZombieEffect.destr()
+      m_heldZombieEffect = null
 
 // ============================================================================
 function isFilterUnitAValidThrowTarget() returns bool

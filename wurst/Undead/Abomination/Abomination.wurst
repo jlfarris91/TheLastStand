@@ -16,6 +16,7 @@ import Events
 import LinkedList
 import Math
 import Interpolation
+import Orders
 
 constant real ABOM_THROW_PROJ_DURATION = 1.5
 constant real ABOM_THROW_PROJ_HEIGHT = 300.0
@@ -147,16 +148,22 @@ function onAbomGrabbedZombie(unit caster, unit target)
 
   // "Grab" the zombie half way through the animation when the abom's hand comes closest to the target
   doAfter(ABOM_ANIM_GRAB_ZOMBIE_POINT) () ->
-    if (abom != null)
-      abom.setHoldingZombie(target)
-      if (target != null)
-        target.hide()
+  //{
+    if (caster != null)
+      let abom2 = caster.getMetadata() castTo Abomination
+      if (abom2 != null)
+        abom2.setHoldingZombie(target)
+        let stateMachine2 = abom2.getStateMachine()
+        if (stateMachine2 != null)
+          stateMachine2.transitionToState("HoldingZombie")
+    if (target != null)
+      target.hide()
+  //}
 
   // Switch to the holding state after the full grab animation has played
   doAfter(ABOM_ANIM_GRAB_DURATION) () ->
-    if (stateMachine != null)
-      stateMachine.transitionToState("HoldingZombie")
     abomUnit.unpauseEx()
+    abomUnit.setAnimation("stand")
 
 // ============================================================================
 function getZombieArtPath(unit _) returns string
@@ -203,25 +210,31 @@ function onAbomThrowZombie(unit caster)
   abomUnit.setAnimation(ABOM_THROW_ANIM_INDEX)
 
   doAfter(ABOM_THROW_ANIM_DURATION) () ->
-    // Get the statemachine again here in case the abom dies before this is called
-    let stateMachine2 = getAliveAbomStateMachine(caster)
-    if (stateMachine2 != null)
-      stateMachine2.transitionToState("Idle")
-    abomUnit.unpauseEx()
+  //{
+    let abom2 = getAliveAbom(caster)
+    if (abom2 != null)
+      let abomUnit2 = abom2.getUnit()
+      // Get the statemachine again here in case the abom dies before this is called
+      let stateMachine2 = getAliveAbomStateMachine(caster)
+      if (stateMachine2 != null)
+        stateMachine2.transitionToState("Idle")
+      abomUnit2.unpauseEx()
+      abomUnit2.setAnimation("stand")
+      abomUnit2.issuePointOrderById(OrderIds.attack, abomUnit2.getPos())
+  //}
 
   // At the peak of the throw animation order the dummy to attack ground
   doAfter(ABOM_THROW_ANIM_PROJECTILE_POINT) ->
-    
+  //{
     // Get the abom metadata again here in case the abom dies before this is called
     let abom2 = getAliveAbom(caster)
     if (abom2 != null)
     //{
-
       let projectileDuration = rangeScalar * ABOM_THROW_PROJ_DURATION
       new ZombieProjectile(throwStartPos, throwEndPos, ABOM_THROW_PROJ_HEIGHT, projectileDuration)
        
       doAfter(projectileDuration) ->
-
+      //{
         // create a dust effect
         addEffect(ABOM_THROW_DUST_EFFECT, throwEndPos)
         ..setScale(0.5)
@@ -236,10 +249,11 @@ function onAbomThrowZombie(unit caster)
           abom3.dropZombieAtPos(throwEndPos, facingAngle)
         else
           moveAndUnhideZombie(zombie, throwEndPos, facingAngle)
-
+      //}
     //}
     else
       moveAndUnhideZombie(zombie, throwEndPos, facingAngle)
+  //}
 
 // ==========================================================================
 function getAliveAbom(unit abom) returns Abomination
@@ -305,7 +319,7 @@ class ZombieProjectile
 
     let t = clamp01(m_elapsed / m_duration)
     let pos = calculatePos(t)
-    let pitch = calculatePitch(t)
+    let pitch = calculatePitchRads(t)
 
     m_effect.setPos(pos)
     m_effect.setPitch(pitch)
@@ -320,8 +334,8 @@ class ZombieProjectile
     return xy.withTerrainZ(z)
 
   // --------------------------------------------------------------------------
-  private function calculatePitch(real t) returns real
-    return lerp(60, -60, t)
+  private function calculatePitchRads(real t) returns real
+    return lerp(-60, 60, t) * DEGTORAD
 
   // --------------------------------------------------------------------------
   function onCompleted()
