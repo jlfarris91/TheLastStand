@@ -4,7 +4,7 @@
 
 ![TLS Loading Screen](https://github.com/jlfarris91/TheLastStand/blob/master/wiki/LoadingScreen.jpg)
 
-[![Join our Discord server!](https://invidget.switchblade.xyz/VzjbPkGN3r)](https://invidget.switchblade.xyz/VzjbPkGN3r)
+[![Join our Discord server!](https://invidget.switchblade.xyz/VzjbPkGN3r)](https://discord.gg/VzjbPkGN3r)
 
 Find The Last Stand on the [Warcraft III Map Database](https://maps.w3reforged.com/maps/categories/hero-defense-and-survival/The%20Last%20Stand%20by%20Ozymandias)
 
