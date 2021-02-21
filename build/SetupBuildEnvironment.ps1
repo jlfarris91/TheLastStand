@@ -51,3 +51,5 @@ $env:WurstMapFileName = "{0}.w3x" -f $env:WurstMapName
 $env:WurstSourceMapFilePath = [System.IO.Path]::Combine($env:ProjectRoot, $env:WurstMapFileName)
 $env:WurstOutputMapFilePath = [System.IO.Path]::Combine($env:TempRoot, $env:WurstMapFileName)
 $env:WurstOutputMapArtifactFilePath = [System.IO.Path]::Combine($env:ArtifactRoot, $env:WurstMapFileName)
+
+$env:DiscordLink = "discord.gg/VzjbPkGN3r"
