@@ -1,0 +1,122 @@
+package Bases
+import TlsUnitIds
+import ClosureTimers
+import TimerUtils
+import GroupUtils
+
+constant color BASE_EASY_COLOR = color(0, 255, 0)
+constant color BASE_MEDIUM_COLOR = color(255, 255, 0)
+constant color BASE_HARD_COLOR = color(255, 0, 0)
+constant string BASE_MODEL_PATH = "UI\\Minimap\\MiniMap-CreepLoc-Small.mdl"
+constant fogstate BASE_FOG_STATE = FOG_OF_WAR_FOGGED
+
+minimapicon array g_easyBaseIcons
+int g_easyBaseIconsCount
+
+minimapicon array g_mediumBaseIcons
+int g_mediumBaseIconsCount
+
+minimapicon array g_hardBaseIcons
+int g_hardBaseIconsCount
+
+CallbackManual array g_playerShowBasesTimers
+
+// ============================================================================
+public enum BaseDifficulty
+  EASY
+  MEDIUM
+  HARD
+  ALL
+
+// ============================================================================
+public function showPlayerBases(player _player, real duration)
+  showPlayerBases(_player, BaseDifficulty.ALL, duration)
+
+// ============================================================================
+public function showPlayerBases(player _player, BaseDifficulty difficulty, real duration)
+
+  let playerId =_player.getId()
+
+  // Hide all currently visible bases
+  showPlayerBases(_player, false)
+
+  // Show only the ones the player wanted to see
+  showPlayerBases(_player, difficulty, true)
+
+  var showTimerCallback = g_playerShowBasesTimers[playerId]
+  if (showTimerCallback == null)
+    let showTimer = getTimer()
+    showTimerCallback = showTimer.doManual(duration, true) -> 
+      g_playerShowBasesTimers[playerId] = null
+      showPlayerBases(_player, false)
+    g_playerShowBasesTimers[playerId] = showTimerCallback
+  else
+    showTimerCallback.restart(duration)
+
+// ============================================================================
+public function showPlayerBases(player _player, bool visible)
+  showPlayerBases(_player, BaseDifficulty.ALL, visible)
+
+// ============================================================================
+public function showPlayerBases(player _player, BaseDifficulty difficulty, bool visible)
+
+  if (difficulty == BaseDifficulty.EASY or difficulty == BaseDifficulty.ALL)
+    for i = 0 to g_easyBaseIconsCount - 1
+      if (GetLocalPlayer() == _player)
+        SetMinimapIconVisible(g_easyBaseIcons[i], visible)
+
+  if (difficulty == BaseDifficulty.MEDIUM or difficulty == BaseDifficulty.ALL)
+    for i = 0 to g_mediumBaseIconsCount - 1
+      if (GetLocalPlayer() == _player)
+        SetMinimapIconVisible(g_mediumBaseIcons[i], visible)
+
+  if (difficulty == BaseDifficulty.HARD or difficulty == BaseDifficulty.ALL)
+    for i = 0 to g_hardBaseIconsCount - 1
+      if (GetLocalPlayer() == _player)
+        SetMinimapIconVisible(g_hardBaseIcons[i], visible)
+
+// ============================================================================
+function unit.isBaseUnit() returns bool
+  return this.getTypeId() == TlsUnitIds.BaseUnits.baseEasy or
+         this.getTypeId() == TlsUnitIds.BaseUnits.baseMedium or
+         this.getTypeId() == TlsUnitIds.BaseUnits.baseHard
+
+// ============================================================================
+function indexBaseUnit(unit baseUnit)
+
+  let baseUnitId = baseUnit.getTypeId()
+  let unitPos = baseUnit.getPos()
+  minimapicon icon = null
+  
+  if (baseUnitId == TlsUnitIds.BaseUnits.baseEasy)
+    icon = CreateMinimapIcon(unitPos.x, unitPos.y, BASE_EASY_COLOR.red, BASE_EASY_COLOR.green, BASE_EASY_COLOR.blue, BASE_MODEL_PATH, BASE_FOG_STATE)
+    g_easyBaseIcons[g_easyBaseIconsCount] = icon
+    g_easyBaseIconsCount++
+  
+  if (baseUnitId == TlsUnitIds.BaseUnits.baseMedium)
+    icon = CreateMinimapIcon(unitPos.x, unitPos.y, BASE_MEDIUM_COLOR.red, BASE_MEDIUM_COLOR.green, BASE_MEDIUM_COLOR.blue, BASE_MODEL_PATH, BASE_FOG_STATE)
+    g_mediumBaseIcons[g_mediumBaseIconsCount] = icon
+    g_mediumBaseIconsCount++
+  
+  if (baseUnitId == TlsUnitIds.BaseUnits.baseHard)
+    icon = CreateMinimapIcon(unitPos.x, unitPos.y, BASE_HARD_COLOR.red, BASE_HARD_COLOR.green, BASE_HARD_COLOR.blue, BASE_MODEL_PATH, BASE_FOG_STATE)
+    g_hardBaseIcons[g_hardBaseIconsCount] = icon
+    g_hardBaseIconsCount++
+
+  if (icon != null)
+    baseUnit.remove()
+    SetMinimapIconVisible(icon, false)
+
+// ============================================================================
+function indexAllBaseUnits()
+
+  let temp = getGroup()
+  temp.enumUnitsAll(null)
+  for _unit in temp
+    if (_unit.isBaseUnit())
+      indexBaseUnit(_unit)
+  temp.release()
+
+// ============================================================================
+init
+  nullTimer(() -> indexAllBaseUnits())
