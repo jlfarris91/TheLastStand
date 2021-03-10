@@ -5,7 +5,6 @@ import Events
 import LinkedList
 import WaveActivator
 import HumanPlayerMetadata
-import UnitMetadata
 import GameConstants
 import ErrorHandling
 import ClosureEvents
@@ -13,6 +12,7 @@ import Math
 import IProgress
 import HashMap
 import SpawnManager
+import UnitRecycler
 
 HashMap<unit, SpawnWave> g_unitToSpawnWaveMap
 
@@ -177,6 +177,8 @@ public class SpawnWave extends Runnable implements IProgress
       error("[SpawnWave.onActivated] Found no spawn points!")
       return
 
+    Log.info(getDefinition().getName() + " activated")
+
     var numSpawnsAvailable = getNumSpawnsAvailable(aliveCountMax, spawnCountMax)
 
     // For each spawn point
@@ -235,11 +237,12 @@ public class SpawnWave extends Runnable implements IProgress
 
   // --------------------------------------------------------------------------
   private function spawnSingleUnit(int unitTypeId, vec2 pos) returns unit
-    let spawnedUnit = createUnitTLS(
+    
+    let spawnedUnit = createUnitRecycled(
       PLAYER_UNDEAD,
       unitTypeId,
-      pos.x, pos.y,
-      GetRandomDirectionDeg())
+      pos,
+      GetRandomDirectionDeg().asAngleDegrees())
 
     let progress = getProgress()
 
@@ -265,7 +268,10 @@ public class SpawnWave extends Runnable implements IProgress
   
   // --------------------------------------------------------------------------
   function unregisterSpawnedUnit(unit spawnedUnit)
-    m_aliveSpawnedUnits.remove(spawnedUnit)
+    if (m_aliveSpawnedUnits.remove(spawnedUnit))
+      Log.debug("unregisterSpawnedUnit : Removed unit from spawn wave - " + m_aliveSpawnedUnits.size().toString() + " left")
+    else
+      Log.debug("unregisterSpawnedUnit : Tried to remove unit that does not belong to spawn wave - " + m_aliveSpawnedUnits.size().toString() + " left")
     g_unitToSpawnWaveMap.remove(spawnedUnit)
 
   // --------------------------------------------------------------------------
