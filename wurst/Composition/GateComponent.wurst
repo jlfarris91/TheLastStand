@@ -1,22 +1,25 @@
-package Gate
+package GateComponent
 import RegisterEvents
-import Camp
 import Unit_GateCommon
-import UnitMetadata
 import TerrainUtils
 import CardinalUnitDefinition
 import GateCardinalUnitDefinition
 import ClosureTimers
+import UnitComponent
 
 // ============================================================================
-public class Gate extends CampUnit
+public class GateComponent extends UnitComponent
   private bool m_isOpen
   private CardinalUnitAngle m_angle
   private GateCardinalUnitDefinitionHelper m_helper
 
   // --------------------------------------------------------------------------
-  construct(ICamp camp)
-    super(camp)
+  construct(IUnitMetadata metadata)
+    super(metadata)
+
+  // --------------------------------------------------------------------------
+  override function getTypeId() returns int
+    return GateComponent.typeId
 
   // --------------------------------------------------------------------------
   function getIsOpen() returns bool
@@ -35,25 +38,25 @@ public class Gate extends CampUnit
   function openGate()
     if (this.m_isOpen)
       return
-    let unitId = this.getUnit().getTypeId()
+    let unitId = this.getOwnerUnit().getTypeId()
     let upgradeId = m_helper.getOpenId(m_angle)
     if (unitId != upgradeId)
-      IssueTrainOrderByIdBJ(this.getUnit(), upgradeId)
+      IssueTrainOrderByIdBJ(this.getOwnerUnit(), upgradeId)
     updateState()
 
   // --------------------------------------------------------------------------
   function closeGate()
     if (not this.m_isOpen)
       return
-    let unitId = this.getUnit().getTypeId()
+    let unitId = this.getOwnerUnit().getTypeId()
     let upgradeId = m_helper.getClosedId(m_angle)
     if (unitId != upgradeId)
-      IssueTrainOrderByIdBJ(this.getUnit(), upgradeId)
+      IssueTrainOrderByIdBJ(this.getOwnerUnit(), upgradeId)
     updateState()
 
   // --------------------------------------------------------------------------
   protected function updateState()
-    let gateUnit = getUnit()
+    let gateUnit = getOwnerUnit()
     let unitId = gateUnit.getTypeId()
 
     m_helper = getGateHelperForUnitType(unitId)
@@ -77,16 +80,32 @@ public class Gate extends CampUnit
 
   // --------------------------------------------------------------------------
   private function triggerPathingUpdate()
-    let tile = this.getUnit().getPos().getTile()
+    let tile = this.getOwnerUnit().getPos().getTile()
     tile.setPathing(PATHING_TYPE_WALKABILITY, false)
     tile.setPathing(PATHING_TYPE_WALKABILITY, true)
+
+// ============================================================================
+public function IUnitMetadata.getGateComponent() returns GateComponent
+  return this.getComponent(typeInfo(GateComponent.typeId)) castTo GateComponent
+
+// ============================================================================
+public function IUnitMetadata.getOrAddGateComponent() returns GateComponent
+  var component = this.getGateComponent()
+  if (component == null)
+    component = this.addComponent(new GateComponent(this)) castTo GateComponent
+  return component
 
 // ============================================================================
 function onGateUpgradeFinished()
   let caster = GetTriggerUnit()
   if (not caster.isGate())
     return
-  let gate = caster.getMetadata() castTo Gate
+  
+  let metadata = caster.getMetadata()
+  if (metadata == null)
+    return
+
+  let gate = metadata.getGateComponent()
   if (gate != null)
     gate.updateState()
 
@@ -95,7 +114,12 @@ function onGateUpgradeStart()
   let caster = GetTriggerUnit()
   if (not caster.isGate())
     return
-  let gate = caster.getMetadata() castTo Gate
+  
+  let metadata = caster.getMetadata()
+  if (metadata == null)
+    return
+
+  let gate = metadata.getGateComponent()
   if (gate != null)
     gate.updateState()
 
@@ -104,10 +128,15 @@ function onGateAttacked()
   let caster = GetTriggerUnit()
   if (not caster.isGate())
     return
-  let gate = caster.getMetadata() castTo Gate
+  
+  let metadata = caster.getMetadata()
+  if (metadata == null)
+    return
+
+  let gate = metadata.getGateComponent()
   if (gate != null and gate.getIsClosed())
-    gate.getUnit().setAnimation("hit")
-    ResetUnitAnimation(gate.getUnit())
+    gate.getOwnerUnit().setAnimation("hit")
+    ResetUnitAnimation(gate.getOwnerUnit())
 
 // ============================================================================
 init

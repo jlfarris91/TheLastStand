@@ -1,0 +1,139 @@
+package UnitModifiers
+import GrantXpOnDeathComponent
+import ObjEditingCommons
+import ItemSet
+import Math
+import ErrorHandling
+import UnitMetadata
+import DropItemOnDeathComponent
+import Range
+import Unit2
+import Necromancer
+import TlsUnitIds
+import UnitExtensions
+import TlsAbilityIds
+import ObjectIds
+
+// ============================================================================
+public function unit.awardItemOnDeath(ItemSet itemSet, int itemType, real chance)
+  
+  if (not passesChanceCheck(chance))
+    return
+
+  if (itemSet == null)
+    error("No item set library assigned for DropItemModifier")
+    return
+
+  if (itemSet == null)
+    error("No item type assigned for DropItemModifier")
+    return
+
+  let metadata = this.getMetadataRequired()
+  let comp = metadata.getOrAddDropItemOnDeathComponent()
+  comp.setItemSet(itemSet)
+  comp.setItemType(itemType)
+
+// ============================================================================
+public function unit.awardRandomItemOnDeath(ItemSet itemSet, real chance)
+  
+  if (not passesChanceCheck(chance))
+    return
+
+  if (itemSet == null)
+    error("No item set assigned for DropRandomItemModifier")
+    return
+
+  let metadata = this.getMetadataRequired()
+  let comp = metadata.getOrAddDropItemOnDeathComponent()
+  comp.setItemSet(itemSet)
+
+// ============================================================================
+public function unit.awardXpOnDeath(int xp)
+  this.getMetadata().getOrAddGrantXpOnDeathComponent()..setExpValue(xp)
+
+// ============================================================================
+public function unit.awardGoldOnDeath(rangeInt amountRange, real chance)
+  if (not passesChanceCheck(chance))
+    return
+  this.setGoldAwarded(amountRange)
+
+// ============================================================================
+public function unit.awardLumberOnDeath(rangeInt amountRange, real chance)
+  if (not passesChanceCheck(chance))
+    return
+  this.setLumberAwarded(amountRange)
+
+// ============================================================================
+public function unit.setDefenseType(ArmorType armorType)
+  this.setField(UNIT_IF_DEFENSE_TYPE, (armorType castTo int))
+
+// ============================================================================
+public function unit.setAcquisitionRange(real range)
+  this.setField(UNIT_RF_ACQUISITION_RANGE, range)
+
+// ============================================================================
+public function unit.setSightRadius(real radius)
+  this.setField(UNIT_RF_SIGHT_RADIUS, radius)
+
+// ============================================================================
+public function unit.setAttackRange(int weaponIndex, real range)
+  this.setFieldWeapon(UNIT_WEAPON_RF_ATTACK_RANGE, weaponIndex, range)
+
+// ============================================================================
+public function unit.setMaxHPandHP(int hp)
+  this.setMaxHP(hp)
+  this.setHP(hp.toReal())
+
+// ============================================================================
+public function unit.setupSkeletonWarrior(real progress)
+  this.setDamageRange(1, lerp(rangeInt(8, 13), rangeInt(1000, 1300), progress))
+  this.setMaxHP(lerpInt(240, 3000, progress))
+  this.setArmor(lerp(0.0, 5.0, progress))
+  this.setAttackCooldown(lerp(1.5, 1.0, progress), 0)
+
+// ============================================================================
+public function unit.setupSkeletonMage(real progress)
+  this.setDamageRange(1, lerp(rangeInt(8, 13), rangeInt(1000, 1300), progress))
+  this.setMaxHP(lerpInt(240, 3000, progress))
+  this.setArmor(lerp(0.0, 5.0, progress))
+  this.setAttackCooldown(lerp(1.5, 1.0, progress), 0)
+
+// ============================================================================
+public function unit.setupSkeletonChampion(real progress)
+  this.setDamageRange(1, lerp(rangeInt(8, 13), rangeInt(1000, 1300), progress))
+  this.setMaxHP(lerpInt(240, 3000, progress))
+  this.setArmor(lerp(0.0, 5.0, progress))
+  this.setAttackCooldown(lerp(1.5, 1.0, progress), 0)
+
+// ============================================================================
+public function unit.setupNecromancer(real progress)
+
+  let metadata = this.getMetadata() castTo Necromancer
+  if (metadata == null)
+    Log.error("Unit does not have Necromancer metadata")
+    return
+
+  metadata.addSummonedUnitModifier(TlsUnitIds.Undead.skeletonWarrior, (unit u, real t) -> u.setupSkeletonWarrior(progress))
+  metadata.addSummonedUnitModifier(TlsUnitIds.Undead.skeletonMage, (unit u, real t) -> u.setupSkeletonMage(progress))
+  metadata.addSummonedUnitModifier(TlsUnitIds.Undead.skeletonChampion, (unit u, real t) -> u.setupSkeletonChampion(progress))
+
+  let abil = this.getAbility(TlsAbilityIds.necromancerRaiseDead)
+  abil.setField(ABILITY_RLF_COOLDOWN, 1, 10.0)
+  // Level 1
+  abil.setField(ABILITY_ILF_UNIT_TYPE_FOR_LIMIT_CHECK, 1, 0)
+  abil.setField(ABILITY_SLF_UNIT_TYPE_ONE, 1, TlsUnitIds.Undead.skeletonWarrior.toRawCode())
+  abil.setField(ABILITY_SLF_UNIT_TYPE_TWO, 1, "")
+  abil.setField(ABILITY_ILF_UNITS_SUMMONED_TYPE_ONE, 1, 2)
+  abil.setField(ABILITY_ILF_UNITS_SUMMONED_TYPE_TWO, 1, 0)
+  // Level 2
+  abil.setField(ABILITY_ILF_UNIT_TYPE_FOR_LIMIT_CHECK, 1, 0)
+  abil.setField(ABILITY_SLF_UNIT_TYPE_ONE, 1, TlsUnitIds.Undead.skeletonWarrior.toRawCode())
+  abil.setField(ABILITY_SLF_UNIT_TYPE_TWO, 1, TlsUnitIds.Undead.skeletonMage.toRawCode())
+  abil.setField(ABILITY_ILF_UNITS_SUMMONED_TYPE_ONE, 1, 2)
+  abil.setField(ABILITY_ILF_UNITS_SUMMONED_TYPE_TWO, 1, 0)
+  // Level 3
+  abil.setField(ABILITY_ILF_UNIT_TYPE_FOR_LIMIT_CHECK, 1, 0)
+  abil.setField(ABILITY_SLF_UNIT_TYPE_ONE, 1, TlsUnitIds.Undead.skeletonChampion.toRawCode())
+  abil.setField(ABILITY_SLF_UNIT_TYPE_TWO, 1, TlsUnitIds.Undead.skeletonMage.toRawCode())
+  abil.setField(ABILITY_ILF_UNITS_SUMMONED_TYPE_ONE, 1, 1)
+  abil.setField(ABILITY_ILF_UNITS_SUMMONED_TYPE_TWO, 1, 2)

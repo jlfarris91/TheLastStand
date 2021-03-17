@@ -3,24 +3,16 @@ import NightWave
 import WaveCollection
 import IWaveGenerator
 import GameWaveProgress
-import PoisonZombieUnitModifier
 import SpawnWaveDefinition
 import TimeOfDayProgress
-import Functional
 import Math
 import PeriodicWaveActivator
 import GameConstants
 import SingleUnitTypeProvider
 import TlsUnitIds
 import Range
-import RandomSpawnPointProvider
-import UnitModifier
 import IGameWaveProgress
 import SpawnWave
-import CrowUnitModifier
-import NecromancerUnitModifier
-import SpawnWaveDefinitionExtensions
-import ZombieUnitModifier
 import RandomUnitTypeProvider
 import FixedGroupUnitTypeProvider
 import ItemSet
@@ -30,9 +22,12 @@ import ObjEditingCommons
 import SpawnDefinitionTags
 import ISpawnPointProvider
 import UndeadSpawnManager
-import HostileCircularCachedSpawnManager
-import GrantXpOnDeathModifier
 import Time
+import UnitModifiers
+import UnitExtensions
+import UnitMetadata
+import InfectedComponent
+import IProgress
 
 Func1<real, real> g_coinSmallWeightTFunc
 Func1<real, real> g_coinMediumWeightTFunc
@@ -43,10 +38,6 @@ constant timespan WAVE_NIGHT_LENGTH = NIGHT_LENGTH * 0.75
 constant time NIGHT_WAVE_START_TIME = NIGHT_TIME
 constant time NIGHT_WAVE_END_TIME = NIGHT_WAVE_START_TIME + WAVE_NIGHT_LENGTH
 
-constant TimeOfDayProgress g_waveProgress = new TimeOfDayProgress()
-  ..setStartTime(NIGHT_TIME)
-  ..setDuration(WAVE_NIGHT_LENGTH)
-
 // ============================================================================
 public class NormalNightWaveGenerator implements IWaveGenerator<NightWave>
 
@@ -54,470 +45,485 @@ public class NormalNightWaveGenerator implements IWaveGenerator<NightWave>
   private ISpawnPointProvider array[4] m_randomSpawnPointProviders
 
   // --------------------------------------------------------------------------
-  override function generateWavesForPlayer(player p, WaveCollection<NightWave> waves)
+  override function generateWavesForPlayer(player targetPlayer, WaveCollection<NightWave> waves)
     
     let gameProgress = new GameWaveProgress()
     ..setTotalWaves(TOTAL_NUM_NIGHTS)
-
-    let currentSpawnManager = getPlayerCachedHostileSpawnManager(p)
-    let fallbackSpawnManager = getPlayerUndeadSpawnManager(p)
-    m_randomSpawnPointProviders[SpawnRange.CLOSE castTo int] = new RandomSpawnPointProvider(currentSpawnManager, fallbackSpawnManager, SpawnRange.CLOSE)
-    m_randomSpawnPointProviders[SpawnRange.NEAR castTo int] = new RandomSpawnPointProvider(currentSpawnManager, fallbackSpawnManager, SpawnRange.NEAR)
-    m_randomSpawnPointProviders[SpawnRange.MID castTo int] = new RandomSpawnPointProvider(currentSpawnManager, fallbackSpawnManager, SpawnRange.MID)
-    m_randomSpawnPointProviders[SpawnRange.FAR castTo int] = new RandomSpawnPointProvider(currentSpawnManager, fallbackSpawnManager, SpawnRange.FAR)
 
     // Zombies spawn every night
     for i = 1 to TOTAL_NUM_NIGHTS
       gameProgress.setCurrentWaveNumber(i)
       waves.getOrCreateWave(i)
-      ..setId("P{0}:Night:{1}".format(p.getId().toString(), i.toString()))
-      ..addSpawnWave(createSpawnWave_Zombies(p, gameProgress))
+      ..setId("Normal:Night:{0}".format(i.toString()))
+      ..addSpawnWave(new SpawnWave(targetPlayer, createSpawnWave_Zombies(gameProgress)))
       ..setXpReward(100)
 
     gameProgress.setCurrentWaveNumber(1)
 
-    // // Poison Zombies         (Group, Melee)
+    // Poison Zombies         (GrouMelee)
+    waves.getOrCreateWave(gameProgress.nextWave())
+    ..addSpawnWave(new SpawnWave(targetPlayer, createSpawnWave_InfectiousZombies(gameProgress)))
+
+    // Skeleton Archers       (Ranged)
+    waves.getOrCreateWave(gameProgress.nextWave())
+    ..addSpawnWave(new SpawnWave(targetPlayer, createSpawnWave_SkeletonArchers(gameProgress)))
+
+    // Crows                  (Flying)
+    waves.getOrCreateWave(gameProgress.nextWave())
+    ..addSpawnWave(new SpawnWave(targetPlayer, createSpawnWave_Crows(gameProgress)))
+
+    // Aboms                  (Boss)
+    waves.getOrCreateWave(gameProgress.nextWave())
+    ..addSpawnWave(new SpawnWave(targetPlayer, createSpawnWave_Abominations(gameProgress)))
+
+    // Dark Minions           (GrouMelee)
+    waves.getOrCreateWave(gameProgress.nextWave())
+    ..addSpawnWave(new SpawnWave(targetPlayer, createSpawnWave_DarkMinions(gameProgress)))
+
+    // Necromancers           (Summoner, Ranged)
+    waves.getOrCreateWave(gameProgress.nextWave())
+    ..addSpawnWave(new SpawnWave(targetPlayer, createSpawnWave_Necromancers(gameProgress)))
+
+    // Ghouls                 (Melee, Self-Healing)
+    waves.getOrCreateWave(gameProgress.nextWave())
+    ..addSpawnWave(new SpawnWave(targetPlayer, createSpawnWave_Ghouls(gameProgress)))
+
+    // Burning Archers        (Ranged)
+    waves.getOrCreateWave(gameProgress.nextWave())
+    ..addSpawnWave(new SpawnWave(targetPlayer, createSpawnWave_BurningArchers(gameProgress)))
+
+    // Crypt Fiends           (Invade, Burrow)
+    waves.getOrCreateWave(gameProgress.nextWave())
+    ..addSpawnWave(new SpawnWave(targetPlayer, createSpawnWave_CryptFiends(gameProgress)))
+
+    // Mutants                (Puller, Ranged)
+    waves.getOrCreateWave(gameProgress.nextWave())
+    ..addSpawnWave(new SpawnWave(targetPlayer, createSpawnWave_Mutants(gameProgress)))
+
+    // Ghosts                 (Invade, Ethereal, Melee)
+    waves.getOrCreateWave(gameProgress.nextWave())
+    ..addSpawnWave(new SpawnWave(targetPlayer, createSpawnWave_Ghosts(gameProgress)))
+
+    // Tentacles              (Invade, Melee)
     // waves.getOrCreateWave(gameProgress.nextWave())
-    // ..addSpawnWave(createSpawnWave_InfectiousZombies(p, gameProgress))
+    // ..addSpawnWave(createSpawnWave_ForgottenOne(gameProgress))
 
-    // // Skeleton Archers       (Ranged)
+    // Skeleton Marksman      (Ranged)
+    waves.getOrCreateWave(gameProgress.nextWave())
+    ..addSpawnWave(new SpawnWave(targetPlayer, createSpawnWave_SkeletonMarksmen(gameProgress)))
+
+    // Skeleton Champions     (Leader, Siege, Melee)
+    waves.getOrCreateWave(gameProgress.nextWave())
+    ..addSpawnWave(new SpawnWave(targetPlayer, createSpawnWave_SkeletonChampions(gameProgress)))
+
+    // Wraiths                (Invade, Ethereal, Melee)
+    waves.getOrCreateWave(gameProgress.nextWave())
+    ..addSpawnWave(new SpawnWave(targetPlayer, createSpawnWave_Wraiths(gameProgress)))
+
+    // Greater Necromancers   (Summoner)
+    waves.getOrCreateWave(gameProgress.nextWave())
+    ..addSpawnWave(new SpawnWave(targetPlayer, createSpawnWave_GreaterNecromancers(gameProgress)))
+
+    // Gargoyles              (Flying)
+    waves.getOrCreateWave(gameProgress.nextWave())
+    ..addSpawnWave(new SpawnWave(targetPlayer, createSpawnWave_Gargoyles(gameProgress)))
+
+    // Orc Skeletons          (Group, Melee)
+    waves.getOrCreateWave(gameProgress.nextWave())
+    ..addSpawnWave(new SpawnWave(targetPlayer, createSpawnWave_OrcSkeletons(gameProgress)))
+
+    // Banshees               (Invade, Ethereal, Ranged)
+    waves.getOrCreateWave(gameProgress.nextWave())
+    ..addSpawnWave(new SpawnWave(targetPlayer, createSpawnWave_Banshees(gameProgress)))
+
+    // Meat Wagons            (Siege, Ranged)
+    waves.getOrCreateWave(gameProgress.nextWave())
+    ..addSpawnWave(new SpawnWave(targetPlayer, createSpawnWave_MeatWagons(gameProgress)))
+
+    // Raiders                (GrouMelee, Ranged)
+    waves.getOrCreateWave(gameProgress.nextWave())
+    ..addSpawnWave(new SpawnWave(targetPlayer, createSpawnWave_Raiders(gameProgress)))
+
+    // Ethereal Necromancers  (Summoner)
+    waves.getOrCreateWave(gameProgress.nextWave())
+    ..addSpawnWave(new SpawnWave(targetPlayer, createSpawnWave_EtherealNecromancers(gameProgress)))
+
+    // Shades                 (Flying)
+    waves.getOrCreateWave(gameProgress.nextWave())
+    ..addSpawnWave(new SpawnWave(targetPlayer, createSpawnWave_Shades(gameProgress)))
+
+    // Monolith               (Invade, Summoner)
     // waves.getOrCreateWave(gameProgress.nextWave())
-    // ..addSpawnWave(createSpawnWave_SkeletonArchers(p, gameProgress))
-
-    // // Crows                  (Flying)
-    // waves.getOrCreateWave(gameProgress.nextWave())
-    // ..addSpawnWave(createSpawnWave_Crows(p, gameProgress))
-
-    // // Aboms                  (Boss)
-    // waves.getOrCreateWave(gameProgress.nextWave())
-    // ..addSpawnWave(createSpawnWave_Abominations(p, gameProgress))
-
-    // // Dark Minions           (Group, Melee)
-    // waves.getOrCreateWave(gameProgress.nextWave())
-    // ..addSpawnWave(createSpawnWave_DarkMinions(p, gameProgress))
-
-    // // Necromancers           (Summoner, Ranged)
-    // waves.getOrCreateWave(gameProgress.nextWave())
-    // ..addSpawnWave(createSpawnWave_Necromancers(p, gameProgress))
-
-    // // Ghouls                 (Melee, Self-Healing)
-    // waves.getOrCreateWave(gameProgress.nextWave())
-    // ..addSpawnWave(createSpawnWave_Ghouls(p, gameProgress))
-
-    // // Burning Archers        (Ranged)
-    // waves.getOrCreateWave(gameProgress.nextWave())
-    // ..addSpawnWave(createSpawnWave_BurningArchers(p, gameProgress))
-
-    // // Crypt Fiends           (Invade, Burrow)
-    // waves.getOrCreateWave(gameProgress.nextWave())
-    // ..addSpawnWave(createSpawnWave_CryptFiends(p, gameProgress))
-
-    // // Mutants                (Puller, Ranged)
-    // waves.getOrCreateWave(gameProgress.nextWave())
-    // ..addSpawnWave(createSpawnWave_Mutants(p, gameProgress))
-
-    // // Ghosts                 (Invade, Ethereal, Melee)
-    // waves.getOrCreateWave(gameProgress.nextWave())
-    // ..addSpawnWave(createSpawnWave_Ghosts(p, gameProgress))
-
-    // // Tentacles              (Invade, Melee)
-    // // waves.getOrCreateWave(gameProgress.nextWave())
-    // // ..addSpawnWave(createSpawnWave_ForgottenOne(p, gameProgress))
-
-    // // Skeleton Marksman      (Ranged)
-    // waves.getOrCreateWave(gameProgress.nextWave())
-    // ..addSpawnWave(createSpawnWave_SkeletonMarksmen(p, gameProgress))
-
-    // // Skeleton Champions     (Leader, Siege, Melee)
-    // waves.getOrCreateWave(gameProgress.nextWave())
-    // ..addSpawnWave(createSpawnWave_SkeletonChampions(p, gameProgress))
-
-    // // Wraiths                (Invade, Ethereal, Melee)
-    // waves.getOrCreateWave(gameProgress.nextWave())
-    // ..addSpawnWave(createSpawnWave_Wraiths(p, gameProgress))
-
-    // // Greater Necromancers   (Summoner)
-    // waves.getOrCreateWave(gameProgress.nextWave())
-    // ..addSpawnWave(createSpawnWave_GreaterNecromancers(p, gameProgress))
-
-    // // Gargoyles              (Flying)
-    // waves.getOrCreateWave(gameProgress.nextWave())
-    // ..addSpawnWave(createSpawnWave_Gargoyles(p, gameProgress))
-
-    // // Orc Skeletons          (Group, Melee)
-    // waves.getOrCreateWave(gameProgress.nextWave())
-    // ..addSpawnWave(createSpawnWave_OrcSkeletons(p, gameProgress))
-
-    // // Banshees               (Invade, Ethereal, Ranged)
-    // waves.getOrCreateWave(gameProgress.nextWave())
-    // ..addSpawnWave(createSpawnWave_Banshees(p, gameProgress))
-
-    // // Meat Wagons            (Siege, Ranged)
-    // waves.getOrCreateWave(gameProgress.nextWave())
-    // ..addSpawnWave(createSpawnWave_MeatWagons(p, gameProgress))
-
-    // // Raiders                (Group, Melee, Ranged)
-    // waves.getOrCreateWave(gameProgress.nextWave())
-    // ..addSpawnWave(createSpawnWave_Raiders(p, gameProgress))
-
-    // // Ethereal Necromancers  (Summoner)
-    // waves.getOrCreateWave(gameProgress.nextWave())
-    // ..addSpawnWave(createSpawnWave_EtherealNecromancers(p, gameProgress))
-
-    // // Shades                 (Flying)
-    // waves.getOrCreateWave(gameProgress.nextWave())
-    // ..addSpawnWave(createSpawnWave_Shades(p, gameProgress))
-
-    // // Monolith               (Invade, Summoner)
-    // // waves.getOrCreateWave(gameProgress.nextWave())
-    // // ..addSpawnWave(createSpawnWave_Monolith(p, gameProgress))
+    // ..addSpawnWave(createSpawnWave_Monolith(gameProgress))
   
   // --------------------------------------------------------------------------
   function getRandomSpawnPointProvider(SpawnRange range) returns ISpawnPointProvider
     return m_randomSpawnPointProviders[range castTo int]
 
   // --------------------------------------------------------------------------
-  private function createSpawnWave_Zombies(player p, IGameWaveProgress gameProgress) returns SpawnWave
+  private function createSpawnWave_Zombies(IGameWaveProgress gameProgress) returns SpawnWaveDefinition
     let def = new SpawnWaveDefinition("Zombies")
     ..setTags(SpawnDefinitionTags.ground, SpawnDefinitionTags.melee, SpawnDefinitionTags.normal)
-    ..setProgress(g_waveProgress)
-    ..setMaxAliveCount(FunctionalT.fromValue(20))
-    ..setSpawnsPerActivation(FunctionalT.fromValue(12))
-    ..setSpawnGroupingFactor(FunctionalT.fromValue(0.25))
+    ..setProgress(getProgressForSpawnWave())
+    ..setMaxAliveCount(waveT -> 20)
+    ..setSpawnsPerActivation(waveT -> 12)
+    ..setSpawnGroupingFactor(waveT -> 0.25)
     ..setActivator(new PeriodicWaveActivator(3.0))
-    ..setSpawnPointProvider(getRandomSpawnPointProvider(SpawnRange.NEAR))
+    ..setSpawnRange(SpawnRange.NEAR)
     ..setUnitTypeProvider(new RandomUnitTypeProvider()
       ..addUnitType(TlsUnitIds.Undead.zombieMale, 1)
       ..addUnitType(TlsUnitIds.Undead.zombieFemale, 1))
-    
-    def.getCommonUnitModifier()
-      ..setTargetPlayer(p)
-      ..setMaxHp(lerpInt(120, 2000, gameProgress.getCurrentGameProgress()))
-      ..setArmor(lerp(0.0, 5.0, gameProgress.getCurrentGameProgress()))
-      ..setDamageRange(0, lerp(rangeInt(8, 12), rangeInt(240, 260), gameProgress.getCurrentGameProgress()))
-      ..setMovementSpeed(lerp(100, 250, gameProgress.getCurrentGameProgress()))
-      ..setDefenseType(ArmorType.Unarmored)
-      ..grantLumberOnDeath(1.0, rangeInt(1,1))
-      ..add(new ZombieUnitModifier())
 
-    return new SpawnWave(def, p)
+    let gameT = gameProgress.getCurrentGameProgress()
+    
+    def.setCommonUnitModifier() (unit u, real waveT) ->
+      u.setMaxHPandHP(lerpInt(120, 2000, gameT))
+      u.setArmor(lerp(0.0, 5.0, gameT))
+      u.setDamageRange(0, lerp(rangeInt(8, 12), rangeInt(240, 260), gameT))
+      u.setMoveSpeed(lerp(100, 250, gameT))
+      u.setDefenseType(ArmorType.Unarmored)
+      u.awardLumberOnDeath(rangeInt(1,1), 1.0)
+
+    return def
 
   // --------------------------------------------------------------------------
-  private function createSpawnWave_InfectiousZombies(player p, IGameWaveProgress gameProgress) returns SpawnWave
+  private function createSpawnWave_InfectiousZombies(IGameWaveProgress gameProgress) returns SpawnWaveDefinition
     let def = new SpawnWaveDefinition("Infectious Zombies")
     ..setTags(SpawnDefinitionTags.ground, SpawnDefinitionTags.melee, SpawnDefinitionTags.normal, SpawnDefinitionTags.poison)
-    ..setProgress(g_waveProgress)
-    ..setMaxAliveCount(FunctionalT.fromValue(4))
-    ..setSpawnsPerActivation(FunctionalT.fromValue(4))
-    ..setSpawnGroupingFactor(FunctionalT.fromValue(0.5))
+    ..setProgress(getProgressForSpawnWave())
+    ..setMaxAliveCount(t -> 4)
+    ..setSpawnsPerActivation(t -> 4)
+    ..setSpawnGroupingFactor(t -> 0.5)
     ..setActivator(new PeriodicWaveActivator(3.0))
-    ..setSpawnPointProvider(getRandomSpawnPointProvider(SpawnRange.NEAR))
+    ..setSpawnRange(SpawnRange.NEAR)
     ..setUnitTypeProvider(new SingleUnitTypeProvider(TlsUnitIds.Undead.zombieMale))
-    
-    def.getUnitModifier(TlsUnitIds.Undead.zombieMale)
-      ..setTargetPlayer(p)
-      ..standardEliteMaxHp(gameProgress)
-      ..standardEliteArmor(gameProgress)
-      ..standardEliteAttack1DamageRange(gameProgress)
-      ..standardEliteAttack1Cooldown(gameProgress)
-      ..standardGrantCoinsOnDeath(gameProgress, 0.5)
-      ..standardEliteGrantLumberOnDeath(rangeInt(2,2))
-      ..setDefenseType(ArmorType.Unarmored)
-      ..add(new PoisonZombieUnitModifier())
 
-    return new SpawnWave(def, p)
+    let gameT = gameProgress.getCurrentGameProgress()
+    
+    def.setCommonUnitModifier() (unit u, real waveT) ->
+      u.standardEliteMaxHp(gameT)
+      u.standardEliteArmor(gameT)
+      u.standardEliteAttack1DamageRange(gameT)
+      u.standardEliteAttack1Cooldown(gameT)
+      u.standardGrantCoinsOnDeath(gameT, 0.5)
+      u.standardEliteGrantLumberOnDeath(rangeInt(2,2))
+      u.setDefenseType(ArmorType.Unarmored)
+      u.getMetadata().getOrAddInfectedComponent()
+
+    return def
 
   // --------------------------------------------------------------------------
-  private function createSpawnWave_Crows(player p, IGameWaveProgress gameProgress) returns SpawnWave
+  private function createSpawnWave_Crows(IGameWaveProgress gameProgress) returns SpawnWaveDefinition
     let def = new SpawnWaveDefinition("Crows")
     ..setTags(SpawnDefinitionTags.flying, SpawnDefinitionTags.ranged, SpawnDefinitionTags.magic)
-    ..setProgress(g_waveProgress)
-    ..setMaxAliveCount(FunctionalT.fromValue(2))
-    ..setSpawnsPerActivation(FunctionalT.fromValue(2))
-    ..setSpawnGroupingFactor(FunctionalT.fromValue(0.0))
+    ..setProgress(getProgressForSpawnWave())
+    ..setMaxAliveCount(t -> 2)
+    ..setSpawnsPerActivation(t -> 2)
+    ..setSpawnGroupingFactor(t -> 0.0)
     ..setActivator(new PeriodicWaveActivator(10.0))
-    ..setSpawnPointProvider(getRandomSpawnPointProvider(SpawnRange.MID))
+    ..setSpawnRange(SpawnRange.MID)
     ..setUnitTypeProvider(new SingleUnitTypeProvider(TlsUnitIds.Undead.crow))
 
-    def.getUnitModifier(TlsUnitIds.Undead.crow)
-      ..standardRangedElite(p, gameProgress)
-      ..setDefenseType(ArmorType.Small)
-      ..add(new CrowUnitModifier())
-      ..setMovementSpeed(300)
+    let gameT = gameProgress.getCurrentGameProgress()
 
-    return new SpawnWave(def, p)
+    def.setCommonUnitModifier() (unit u, real waveT) ->
+      u.standardRangedElite(gameT)
+      u.setDefenseType(ArmorType.Small)
+      u.setMoveSpeed(300)
+
+    return def
 
   // --------------------------------------------------------------------------
-  private function createSpawnWave_Necromancers(player p, IGameWaveProgress gameProgress) returns SpawnWave
+  private function createSpawnWave_Necromancers(IGameWaveProgress gameProgress) returns SpawnWaveDefinition
     let def = new SpawnWaveDefinition("Necromancers")
     ..setTags(SpawnDefinitionTags.summoner, SpawnDefinitionTags.ranged, SpawnDefinitionTags.magic)
-    ..setProgress(g_waveProgress)
-    ..setMaxAliveCount(FunctionalT.fromValue(6))
-    ..setSpawnsPerActivation(FunctionalT.fromValue(1))
-    ..setSpawnGroupingFactor(FunctionalT.fromValue(0.0))
+    ..setProgress(getProgressForSpawnWave())
+    ..setMaxAliveCount(t -> 6)
+    ..setSpawnsPerActivation(t -> 1)
+    ..setSpawnGroupingFactor(t -> 0.0)
     ..setActivator(new PeriodicWaveActivator(10.0)..setActivateOnStart(false))
-    ..setSpawnPointProvider(getRandomSpawnPointProvider(SpawnRange.MID))
+    ..setSpawnRange(SpawnRange.MID)
     ..setUnitTypeProvider(new SingleUnitTypeProvider(TlsUnitIds.Undead.necromancer))
 
-    def.getUnitModifier(TlsUnitIds.Undead.necromancer)
-      ..standardRangedElite(p, gameProgress)
-      ..setDefenseType(ArmorType.Unarmored)
-      ..add(new NecromancerUnitModifier(gameProgress.getCurrentGameProgress()))
-      ..add(new RaiseDeadAbilityModifier())
+    let gameT = gameProgress.getCurrentGameProgress()
 
-    return new SpawnWave(def, p)
+    def.setCommonUnitModifier() (unit u, real waveT) ->
+      u.standardRangedElite(gameT)
+      u.setDefenseType(ArmorType.Unarmored)
+      u.setupNecromancer(gameProgress.getCurrentGameProgress())
+      u.setMoveSpeed(300)
+
+    return def
 
   // --------------------------------------------------------------------------
-  private function createSpawnWave_GreaterNecromancers(player p, IGameWaveProgress gameProgress) returns SpawnWave
+  private function createSpawnWave_GreaterNecromancers(IGameWaveProgress gameProgress) returns SpawnWaveDefinition
     let def = new SpawnWaveDefinition("Greater Necromancers")
     ..setTags(SpawnDefinitionTags.summoner, SpawnDefinitionTags.ranged, SpawnDefinitionTags.magic)
-    ..setProgress(g_waveProgress)
-    ..setMaxAliveCount(FunctionalT.fromValue(8))
-    ..setSpawnsPerActivation(FunctionalT.fromValue(2))
-    ..setSpawnGroupingFactor(FunctionalT.fromValue(1.0))
+    ..setProgress(getProgressForSpawnWave())
+    ..setMaxAliveCount(t -> 8)
+    ..setSpawnsPerActivation(t -> 2)
+    ..setSpawnGroupingFactor(t -> 1.0)
     ..setActivator(new PeriodicWaveActivator(5.0))
-    ..setSpawnPointProvider(getRandomSpawnPointProvider(SpawnRange.MID))
+    ..setSpawnRange(SpawnRange.MID)
     ..setUnitTypeProvider(new SingleUnitTypeProvider(TlsUnitIds.Undead.greaterNecromancer))
 
-    def.getUnitModifier(TlsUnitIds.Undead.greaterNecromancer)
-      ..standardRangedElite(p, gameProgress)
-      ..setDefenseType(ArmorType.Unarmored)
-      ..add(new NecromancerUnitModifier(gameProgress.getCurrentGameProgress()))
-      ..add(new RaiseDeadAbilityModifier())
+    let gameT = gameProgress.getCurrentGameProgress()
 
-    return new SpawnWave(def, p)
+    def.setCommonUnitModifier() (unit u, real waveT) ->
+      u.standardRangedElite(gameT)
+      u.setDefenseType(ArmorType.Unarmored)
+      u.setupNecromancer(gameProgress.getCurrentGameProgress())
+      u.setMoveSpeed(300)
+
+    return def
 
   // --------------------------------------------------------------------------
-  private function createSpawnWave_EtherealNecromancers(player p, IGameWaveProgress gameProgress) returns SpawnWave
+  private function createSpawnWave_EtherealNecromancers(IGameWaveProgress gameProgress) returns SpawnWaveDefinition
     let def = new SpawnWaveDefinition("Ethereal Necromancers")
     ..setTags(SpawnDefinitionTags.summoner, SpawnDefinitionTags.ranged, SpawnDefinitionTags.magic)
-    ..setProgress(g_waveProgress)
-    ..setMaxAliveCount(FunctionalT.fromValue(12))
-    ..setSpawnsPerActivation(FunctionalT.fromValue(2))
-    ..setSpawnGroupingFactor(FunctionalT.fromValue(1.0))
+    ..setProgress(getProgressForSpawnWave())
+    ..setMaxAliveCount(t -> 12)
+    ..setSpawnsPerActivation(t -> 2)
+    ..setSpawnGroupingFactor(t -> 1.0)
     ..setActivator(new PeriodicWaveActivator(5.0))
-    ..setSpawnPointProvider(getRandomSpawnPointProvider(SpawnRange.MID))
+    ..setSpawnRange(SpawnRange.MID)
     ..setUnitTypeProvider(new SingleUnitTypeProvider(TlsUnitIds.Undead.etherealNecromancer))
 
-    def.getUnitModifier(TlsUnitIds.Undead.etherealNecromancer)
-      ..standardRangedElite(p, gameProgress)
-      ..setDefenseType(ArmorType.Unarmored)
-      ..add(new NecromancerUnitModifier(gameProgress.getCurrentGameProgress()))
-      ..add(new RaiseDeadAbilityModifier())
+    let gameT = gameProgress.getCurrentGameProgress()
 
-    return new SpawnWave(def, p)
+    def.setCommonUnitModifier() (unit u, real waveT) ->
+      u.standardRangedElite(gameT)
+      u.setDefenseType(ArmorType.Unarmored)
+      u.setupNecromancer(gameProgress.getCurrentGameProgress())
+      u.setMoveSpeed(300)
+
+    return def
 
   // --------------------------------------------------------------------------
-  private function createSpawnWave_Abominations(player p, IGameWaveProgress gameProgress) returns SpawnWave
+  private function createSpawnWave_Abominations(IGameWaveProgress gameProgress) returns SpawnWaveDefinition
     let def = new SpawnWaveDefinition("Abominations")
     ..setTags(SpawnDefinitionTags.leader, SpawnDefinitionTags.heavy, SpawnDefinitionTags.siege)
-    ..setProgress(g_waveProgress)
-    ..setMaxAliveCount(FunctionalT.fromValue(1))
+    ..setProgress(getProgressForSpawnWave())
+    ..setMaxAliveCount(t -> 1)
     ..setActivator(new PeriodicWaveActivator(10.0))
-    ..setSpawnPointProvider(getRandomSpawnPointProvider(SpawnRange.MID))
+    ..setSpawnRange(SpawnRange.MID)
     ..setUnitTypeProvider(new SingleUnitTypeProvider(TlsUnitIds.Undead.abomination))
-    
-    def.getUnitModifier(TlsUnitIds.Undead.abomination)
-      ..setTargetPlayer(p)
-      ..standardEliteMaxHp(gameProgress, 10.0)
-      ..standardEliteArmor(gameProgress, 4.0)
-      ..standardEliteAttack1DamageRange(gameProgress, 4.0)
-      ..standardEliteAttack1Cooldown(gameProgress)
-      ..guaranteeGrantCoinsOnDeath(gameProgress)
-      ..standardEliteGrantLumberOnDeath(rangeInt(100,100))
-      ..grantXpOnDeath(100)
-      ..setDefenseType(ArmorType.Large)
-      ..setAcquisitionRange(ELITE_SIGHT_RANGE)
-      ..setSightRadius(ELITE_SIGHT_RANGE)
-      ..setMovementSpeed(125.0)
 
-    return new SpawnWave(def, p)
+    let gameT = gameProgress.getCurrentGameProgress()
+    
+    def.setCommonUnitModifier() (unit u, real waveT) ->
+      u.standardEliteMaxHp(gameT, 10.0)
+      u.standardEliteArmor(gameT, 4.0)
+      u.standardEliteAttack1DamageRange(gameT, 4.0)
+      u.standardEliteAttack1Cooldown(gameT)
+      u.guaranteeGrantCoinsOnDeath(gameT)
+      u.standardEliteGrantLumberOnDeath(rangeInt(100,100))
+      u.awardXpOnDeath(100)
+      u.setDefenseType(ArmorType.Large)
+      u.setAcquisitionRange(ELITE_SIGHT_RANGE)
+      u.setSightRadius(ELITE_SIGHT_RANGE)
+      u.setMoveSpeed(125.0)
+
+    return def
 
   // --------------------------------------------------------------------------
-  private function createSpawnWave_SkeletonArchers(player p, IGameWaveProgress gameProgress) returns SpawnWave
+  private function createSpawnWave_SkeletonArchers(IGameWaveProgress gameProgress) returns SpawnWaveDefinition
     let def = new SpawnWaveDefinition("Skeleton Archers")
     ..setTags(SpawnDefinitionTags.ranged, SpawnDefinitionTags.normal)
-    ..setProgress(g_waveProgress)
-    ..setMaxAliveCount(FunctionalT.fromFunc((real waveProgress) -> lerpInt(2, 8, waveProgress)))
-    ..setSpawnsPerActivation(FunctionalT.fromValue(2))
-    ..setSpawnGroupingFactor(FunctionalT.fromValue(1.0))
+    ..setProgress(getProgressForSpawnWave())
+    ..setMaxAliveCount((real waveProgress) -> lerpInt(2, 8, waveProgress))
+    ..setSpawnsPerActivation(t -> 2)
+    ..setSpawnGroupingFactor(t -> 1.0)
     ..setActivator(new PeriodicWaveActivator(5.0))
-    ..setSpawnPointProvider(getRandomSpawnPointProvider(SpawnRange.MID))
+    ..setSpawnRange(SpawnRange.MID)
     ..setUnitTypeProvider(new SingleUnitTypeProvider(TlsUnitIds.Undead.skeletonArcher))
 
-    def.getUnitModifier(TlsUnitIds.Undead.skeletonArcher)
-      ..standardRangedElite(p, gameProgress)
-      ..setDefenseType(ArmorType.Medium)
+    let gameT = gameProgress.getCurrentGameProgress()
 
-    return new SpawnWave(def, p)
+    def.setCommonUnitModifier() (unit u, real waveT) ->
+      u.standardRangedElite(gameT)
+      u.setDefenseType(ArmorType.Medium)
+
+    return def
 
   // --------------------------------------------------------------------------
-  private function createSpawnWave_BurningArchers(player p, IGameWaveProgress gameProgress) returns SpawnWave
+  private function createSpawnWave_BurningArchers(IGameWaveProgress gameProgress) returns SpawnWaveDefinition
     let def = new SpawnWaveDefinition("Burning Archers")
     ..setTags(SpawnDefinitionTags.ranged, SpawnDefinitionTags.normal)
-    ..setProgress(g_waveProgress)
-    ..setMaxAliveCount(FunctionalT.fromFunc((real waveProgress) -> lerpInt(2, 8, waveProgress)))
-    ..setSpawnsPerActivation(FunctionalT.fromValue(2))
-    ..setSpawnGroupingFactor(FunctionalT.fromValue(1.0))
+    ..setProgress(getProgressForSpawnWave())
+    ..setMaxAliveCount((real waveProgress) -> lerpInt(2, 8, waveProgress))
+    ..setSpawnsPerActivation(t -> 2)
+    ..setSpawnGroupingFactor(t -> 1.0)
     ..setActivator(new PeriodicWaveActivator(5.0))
-    ..setSpawnPointProvider(getRandomSpawnPointProvider(SpawnRange.MID))
+    ..setSpawnRange(SpawnRange.MID)
     ..setUnitTypeProvider(new SingleUnitTypeProvider(TlsUnitIds.Undead.burningArcher))
 
-    def.getUnitModifier(TlsUnitIds.Undead.burningArcher)
-      ..standardRangedElite(p, gameProgress)
-      ..setDefenseType(ArmorType.Medium)
+    let gameT = gameProgress.getCurrentGameProgress()
 
-    return new SpawnWave(def, p)
+    def.setCommonUnitModifier() (unit u, real waveT) ->
+      u.standardRangedElite(gameT)
+      u.setDefenseType(ArmorType.Medium)
+
+    return def
 
   // --------------------------------------------------------------------------
-  private function createSpawnWave_SkeletonMarksmen(player p, IGameWaveProgress gameProgress) returns SpawnWave
+  private function createSpawnWave_SkeletonMarksmen(IGameWaveProgress gameProgress) returns SpawnWaveDefinition
     let def = new SpawnWaveDefinition("Skeleton Marksmen")
     ..setTags(SpawnDefinitionTags.ranged, SpawnDefinitionTags.normal)
-    ..setProgress(g_waveProgress)
-    ..setMaxAliveCount(FunctionalT.fromFunc((real waveProgress) -> lerpInt(2, 8, waveProgress)))
-    ..setSpawnsPerActivation(FunctionalT.fromValue(2))
-    ..setSpawnGroupingFactor(FunctionalT.fromValue(1.0))
+    ..setProgress(getProgressForSpawnWave())
+    ..setMaxAliveCount((real waveProgress) -> lerpInt(2, 8, waveProgress))
+    ..setSpawnsPerActivation(t -> 2)
+    ..setSpawnGroupingFactor(t -> 1.0)
     ..setActivator(new PeriodicWaveActivator(5.0))
-    ..setSpawnPointProvider(getRandomSpawnPointProvider(SpawnRange.MID))
+    ..setSpawnRange(SpawnRange.MID)
     ..setUnitTypeProvider(new SingleUnitTypeProvider(TlsUnitIds.Undead.skeletonMarksman))
 
-    def.getUnitModifier(TlsUnitIds.Undead.skeletonMarksman)
-      ..standardRangedElite(p, gameProgress)
-      ..setDefenseType(ArmorType.Medium)
+    let gameT = gameProgress.getCurrentGameProgress()
 
-    return new SpawnWave(def, p)
+    def.setCommonUnitModifier() (unit u, real waveT) ->
+      u.standardRangedElite(gameT)
+      u.setDefenseType(ArmorType.Medium)
+
+    return def
 
   // --------------------------------------------------------------------------
-  private function createSpawnWave_DarkMinions(player p, IGameWaveProgress gameProgress) returns SpawnWave
+  private function createSpawnWave_DarkMinions(IGameWaveProgress gameProgress) returns SpawnWaveDefinition
     let def = new SpawnWaveDefinition("Dark Minions")
     ..setTags(SpawnDefinitionTags.grouped, SpawnDefinitionTags.melee, SpawnDefinitionTags.normal)
-    ..setProgress(g_waveProgress)
-    ..setMaxAliveCount(FunctionalT.fromFunc((real waveProgress) -> lerpInt(6, 12, waveProgress)))
-    ..setSpawnsPerActivation(FunctionalT.fromValue(3))
-    ..setSpawnGroupingFactor(FunctionalT.fromValue(1.0))
+    ..setProgress(getProgressForSpawnWave())
+    ..setMaxAliveCount((real waveT) -> lerpInt(6, 12, waveT))
+    ..setSpawnsPerActivation(t -> 3)
+    ..setSpawnGroupingFactor(t -> 1.0)
     ..setActivator(new PeriodicWaveActivator(12.0))
-    ..setSpawnPointProvider(getRandomSpawnPointProvider(SpawnRange.MID))
+    ..setSpawnRange(SpawnRange.MID)
     ..setUnitTypeProvider(new FixedGroupUnitTypeProvider()
       ..addUnitType(TlsUnitIds.Undead.lesserDarkMinion)
       ..addUnitType(TlsUnitIds.Undead.darkMinion)
       ..addUnitType(TlsUnitIds.Undead.greaterDarkMinion))
     ..setWaitForFullSpawnGroup(true)
 
-    def.getUnitModifier(TlsUnitIds.Undead.lesserDarkMinion)
-      ..setTargetPlayer(p)
-      ..setMaxHp(lerpInt(60, 600, gameProgress.getCurrentGameProgress()))
-      ..setArmor(lerp(1.0, 5.0, gameProgress.getCurrentGameProgress()))
-      ..setDamageRange(0, lerp(rangeInt(8, 13), rangeInt(300, 330), gameProgress.getCurrentGameProgress()))
-      ..setAttackCooldown(0, lerp(1.5, 1.0, gameProgress.getCurrentGameProgress()))
-      ..setDefenseType(ArmorType.Medium)
-      ..standardGrantCoinsOnDeath(gameProgress, 0.5)
-      ..standardEliteGrantLumberOnDeath(rangeInt(10,10))
+    let gameT = gameProgress.getCurrentGameProgress()
 
-    def.getUnitModifier(TlsUnitIds.Undead.darkMinion)
-      ..setTargetPlayer(p)
-      ..setMaxHp(lerpInt(120, 1200, gameProgress.getCurrentGameProgress()))
-      ..setArmor(lerp(5.0, 15.0, gameProgress.getCurrentGameProgress()))
-      ..setDamageRange(0, lerp(rangeInt(8, 13), rangeInt(300, 330), gameProgress.getCurrentGameProgress()))
-      ..setAttackCooldown(0, lerp(1.5, 1.0, gameProgress.getCurrentGameProgress()))
-      ..setDefenseType(ArmorType.Medium)
-      ..standardGrantCoinsOnDeath(gameProgress, 0.75)
-      ..standardEliteGrantLumberOnDeath(rangeInt(10,10))
+    def.setUnitModifier(TlsUnitIds.Undead.lesserDarkMinion) (unit u, real waveT) ->
+      u.setMaxHPandHP(lerpInt(60, 600, gameT))
+      u.setArmor(lerp(1.0, 5.0, gameT))
+      u.setDamageRange(0, lerp(rangeInt(8, 13), rangeInt(300, 330), gameT))
+      u.setAttackCooldown(lerp(1.5, 1.0, gameT), 0)
+      u.setDefenseType(ArmorType.Medium)
+      u.standardGrantCoinsOnDeath(gameT, 0.5)
+      u.standardEliteGrantLumberOnDeath(rangeInt(10,10))
 
-    def.getUnitModifier(TlsUnitIds.Undead.greaterDarkMinion)
-      ..setTargetPlayer(p)
-      ..setMaxHp(lerpInt(220, 3200, gameProgress.getCurrentGameProgress()))
-      ..setArmor(lerp(5.0, 15.0, gameProgress.getCurrentGameProgress()))
-      ..setDamageRange(0, lerp(rangeInt(8, 13), rangeInt(300, 330), gameProgress.getCurrentGameProgress()))
-      ..setAttackCooldown(0, lerp(1.5, 1.0, gameProgress.getCurrentGameProgress()))
-      ..setDefenseType(ArmorType.Large)
-      ..standardGrantCoinsOnDeath(gameProgress, 1.0)
-      ..standardEliteGrantLumberOnDeath(rangeInt(10,10))
+    def.setUnitModifier(TlsUnitIds.Undead.darkMinion) (unit u, real waveT) ->
+      u.setMaxHPandHP(lerpInt(120, 1200, gameT))
+      u.setArmor(lerp(5.0, 15.0, gameT))
+      u.setDamageRange(0, lerp(rangeInt(8, 13), rangeInt(300, 330), gameT))
+      u.setAttackCooldown(lerp(1.5, 1.0, gameT), 0)
+      u.setDefenseType(ArmorType.Medium)
+      u.standardGrantCoinsOnDeath(gameT, 0.75)
+      u.standardEliteGrantLumberOnDeath(rangeInt(10,10))
 
-    return new SpawnWave(def, p)
+    def.setUnitModifier(TlsUnitIds.Undead.greaterDarkMinion) (unit u, real waveT) ->
+      u.setMaxHPandHP(lerpInt(220, 3200, gameT))
+      u.setArmor(lerp(5.0, 15.0, gameT))
+      u.setDamageRange(0, lerp(rangeInt(8, 13), rangeInt(300, 330), gameT))
+      u.setAttackCooldown(lerp(1.5, 1.0, gameT), 0)
+      u.setDefenseType(ArmorType.Large)
+      u.standardGrantCoinsOnDeath(gameT, 1.0)
+      u.standardEliteGrantLumberOnDeath(rangeInt(10,10))
+
+    return def
 
   // --------------------------------------------------------------------------
-  private function createSpawnWave_Ghosts(player p, IGameWaveProgress gameProgress) returns SpawnWave
+  private function createSpawnWave_Ghosts(IGameWaveProgress gameProgress) returns SpawnWaveDefinition
     let def = new SpawnWaveDefinition("Ghosts")
     ..setTags(SpawnDefinitionTags.invade, SpawnDefinitionTags.ethereal, SpawnDefinitionTags.melee, SpawnDefinitionTags.magic)
-    ..setProgress(g_waveProgress)
-    ..setMaxAliveCount(FunctionalT.fromFunc((real waveProgress) -> lerpInt(2, 8, waveProgress)))
-    ..setSpawnsPerActivation(FunctionalT.fromValue(2))
-    ..setSpawnGroupingFactor(FunctionalT.fromValue(1.0))
+    ..setProgress(getProgressForSpawnWave())
+    ..setMaxAliveCount((real waveProgress) -> lerpInt(2, 8, waveProgress))
+    ..setSpawnsPerActivation(t -> 2)
+    ..setSpawnGroupingFactor(t -> 1.0)
     ..setActivator(new PeriodicWaveActivator(5.0))
-    ..setSpawnPointProvider(getRandomSpawnPointProvider(SpawnRange.MID))
+    ..setSpawnRange(SpawnRange.MID)
     ..setUnitTypeProvider(new SingleUnitTypeProvider(TlsUnitIds.Undead.ghost))
 
-    def.getUnitModifier(TlsUnitIds.Undead.ghost)
-      ..standardRangedElite(p, gameProgress)
-      ..setDefenseType(ArmorType.Unarmored)
+    let gameT = gameProgress.getCurrentGameProgress()
 
-    return new SpawnWave(def, p)
+    def.setCommonUnitModifier() (unit u, real waveT) ->
+      u.standardRangedElite(gameT)
+      u.setDefenseType(ArmorType.Unarmored)
+
+    return def
 
   // --------------------------------------------------------------------------
-  private function createSpawnWave_Wraiths(player p, IGameWaveProgress gameProgress) returns SpawnWave
+  private function createSpawnWave_Wraiths(IGameWaveProgress gameProgress) returns SpawnWaveDefinition
     let def = new SpawnWaveDefinition("Wraiths")
     ..setTags(SpawnDefinitionTags.invade, SpawnDefinitionTags.ethereal, SpawnDefinitionTags.melee, SpawnDefinitionTags.magic)
-    ..setProgress(g_waveProgress)
-    ..setMaxAliveCount(FunctionalT.fromFunc((real waveProgress) -> lerpInt(2, 8, waveProgress)))
-    ..setSpawnsPerActivation(FunctionalT.fromValue(2))
-    ..setSpawnGroupingFactor(FunctionalT.fromValue(1.0))
+    ..setProgress(getProgressForSpawnWave())
+    ..setMaxAliveCount(waveT -> lerpInt(2, 8, waveT))
+    ..setSpawnsPerActivation(waveT -> 2)
+    ..setSpawnGroupingFactor(waveT -> 1.0)
     ..setActivator(new PeriodicWaveActivator(5.0))
-    ..setSpawnPointProvider(getRandomSpawnPointProvider(SpawnRange.MID))
+    ..setSpawnRange(SpawnRange.MID)
     ..setUnitTypeProvider(new SingleUnitTypeProvider(TlsUnitIds.Undead.wraith))
 
-    def.getUnitModifier(TlsUnitIds.Undead.wraith)
-      ..standardRangedElite(p, gameProgress)
-      ..setDefenseType(ArmorType.Unarmored)
+    let gameT = gameProgress.getCurrentGameProgress()
 
-    return new SpawnWave(def, p)
+    def.setCommonUnitModifier() (unit u, real waveT) ->
+      u.standardRangedElite(gameT)
+      u.setDefenseType(ArmorType.Unarmored)
+
+    return def
 
   // --------------------------------------------------------------------------
-  private function createSpawnWave_Banshees(player p, IGameWaveProgress gameProgress) returns SpawnWave
+  private function createSpawnWave_Banshees(IGameWaveProgress gameProgress) returns SpawnWaveDefinition
     let def = new SpawnWaveDefinition("Banshees")
     ..setTags(SpawnDefinitionTags.invade, SpawnDefinitionTags.ethereal, SpawnDefinitionTags.ranged, SpawnDefinitionTags.magic)
-    ..setProgress(g_waveProgress)
-    ..setMaxAliveCount(FunctionalT.fromFunc((real waveProgress) -> lerpInt(2, 8, waveProgress)))
-    ..setSpawnsPerActivation(FunctionalT.fromValue(2))
-    ..setSpawnGroupingFactor(FunctionalT.fromValue(1.0))
+    ..setProgress(getProgressForSpawnWave())
+    ..setMaxAliveCount((real waveProgress) -> lerpInt(2, 8, waveProgress))
+    ..setSpawnsPerActivation(t -> 2)
+    ..setSpawnGroupingFactor(t -> 1.0)
     ..setActivator(new PeriodicWaveActivator(5.0))
-    ..setSpawnPointProvider(getRandomSpawnPointProvider(SpawnRange.MID))
+    ..setSpawnRange(SpawnRange.MID)
     ..setUnitTypeProvider(new SingleUnitTypeProvider(TlsUnitIds.Undead.banshee))
 
-    def.getUnitModifier(TlsUnitIds.Undead.banshee)
-      ..standardRangedElite(p, gameProgress)
-      ..setDefenseType(ArmorType.Unarmored)
+    let gameT = gameProgress.getCurrentGameProgress()
 
-    return new SpawnWave(def, p)
+    def.setCommonUnitModifier() (unit u, real waveT) ->
+      u.standardRangedElite(gameT)
+      u.setDefenseType(ArmorType.Unarmored)
+
+    return def
 
   // --------------------------------------------------------------------------
-  private function createSpawnWave_Ghouls(player p, IGameWaveProgress gameProgress) returns SpawnWave
+  private function createSpawnWave_Ghouls(IGameWaveProgress gameProgress) returns SpawnWaveDefinition
     let def = new SpawnWaveDefinition("Ghouls")
     ..setTags(SpawnDefinitionTags.melee, SpawnDefinitionTags.healing, SpawnDefinitionTags.poison, SpawnDefinitionTags.normal)
-    ..setProgress(g_waveProgress)
-    ..setMaxAliveCount(FunctionalT.fromFunc((real waveProgress) -> lerpInt(4, 12, waveProgress)))
-    ..setSpawnsPerActivation(FunctionalT.fromValue(2))
-    ..setSpawnGroupingFactor(FunctionalT.fromValue(1.0))
+    ..setProgress(getProgressForSpawnWave())
+    ..setMaxAliveCount((real waveProgress) -> lerpInt(4, 12, waveProgress))
+    ..setSpawnsPerActivation(t -> 2)
+    ..setSpawnGroupingFactor(t -> 1.0)
     ..setActivator(new PeriodicWaveActivator(5.0))
-    ..setSpawnPointProvider(getRandomSpawnPointProvider(SpawnRange.MID))
+    ..setSpawnRange(SpawnRange.MID)
     ..setUnitTypeProvider(new SingleUnitTypeProvider(TlsUnitIds.Undead.ghoul))
 
-    def.getUnitModifier(TlsUnitIds.Undead.ghoul)
-      ..standardElite(p, gameProgress)
-      ..setDefenseType(ArmorType.Large)
+    let gameT = gameProgress.getCurrentGameProgress()
 
-    return new SpawnWave(def, p)
+    def.setCommonUnitModifier() (unit u, real waveT) ->
+      u.standardElite(gameT)
+      u.setDefenseType(ArmorType.Large)
+
+    return def
 
   // --------------------------------------------------------------------------
-  // private function createSpawnWave_ForgottenOne(player p, IGameWaveProgress gameProgress) returns SpawnWave
+  // private function createSpawnWave_ForgottenOne(IGameWaveProgress gameProgress) returns SpawnWaveDefinition
   //   let def = new SpawnWaveDefinition("Forgotten One")
   //   ..setTags(SpawnDefinitionTags.invade, SpawnDefinitionTags.melee, SpawnDefinitionTags.normal)
-  //   ..setProgress(g_waveprogress)
+  //   ..setProgress(getProgressForSpawnWave())
   //   ..setMaxAliveCount(FunctionalT.fromValue(1))
   //   ..setMaxSpawnCount(FunctionalT.fromValue(1))
   //   ..setSpawnsPerActivation(FunctionalT.fromValue(1))
   //   ..setSpawnGroupingFactor(FunctionalT.fromValue(0.0))
   //   ..setActivator(new PeriodicWaveActivator(5.0))
-  //   ..setSpawnPointProvider(getRandomSpawnPointProvider(SpawnRange.MID))
+  //   ..setSpawnPointProvider(SpawnRange.MID)
   //   ..setUnitTypeProvider(new SingleUnitTypeProvider(TlsUnitIds.Undead.forgottenOne))
 
   //   def.getUnitModifier(TlsUnitIds.Undead.forgottenOne)
@@ -530,72 +536,78 @@ public class NormalNightWaveGenerator implements IWaveGenerator<NightWave>
   //     ..standardEliteGrantLumberOnDeath(rangeInt(10,10))
   //     ..setDefenseType(ArmorType.Hero)
 
-  //   return new SpawnWave(def, p)
+  //   return def
 
   // --------------------------------------------------------------------------
-  private function createSpawnWave_SkeletonChampions(player p, IGameWaveProgress gameProgress) returns SpawnWave
+  private function createSpawnWave_SkeletonChampions(IGameWaveProgress gameProgress) returns SpawnWaveDefinition
     let def = new SpawnWaveDefinition("Skeleton Champions")
     ..setTags(SpawnDefinitionTags.leader, SpawnDefinitionTags.melee, SpawnDefinitionTags.normal)
-    ..setProgress(g_waveProgress)
-    ..setMaxAliveCount(FunctionalT.fromFunc((real waveProgress) -> lerpInt(2, 8, waveProgress)))
-    ..setSpawnsPerActivation(FunctionalT.fromValue(2))
-    ..setSpawnGroupingFactor(FunctionalT.fromValue(1.0))
+    ..setProgress(getProgressForSpawnWave())
+    ..setMaxAliveCount((real waveProgress) -> lerpInt(2, 8, waveProgress))
+    ..setSpawnsPerActivation(t -> 2)
+    ..setSpawnGroupingFactor(t -> 1.0)
     ..setActivator(new PeriodicWaveActivator(5.0))
-    ..setSpawnPointProvider(getRandomSpawnPointProvider(SpawnRange.MID))
+    ..setSpawnRange(SpawnRange.MID)
     ..setUnitTypeProvider(new SingleUnitTypeProvider(TlsUnitIds.Undead.skeletonChampion))
 
-    def.getUnitModifier(TlsUnitIds.Undead.skeletonChampion)
-      ..standardElite(p, gameProgress)
-      ..setDefenseType(ArmorType.Large)
+    let gameT = gameProgress.getCurrentGameProgress()
 
-    return new SpawnWave(def, p)
+    def.setCommonUnitModifier() (unit u, real waveT) ->
+      u.standardElite(gameT)
+      u.setDefenseType(ArmorType.Large)
+
+    return def
 
   // --------------------------------------------------------------------------
-  private function createSpawnWave_Gargoyles(player p, IGameWaveProgress gameProgress) returns SpawnWave
+  private function createSpawnWave_Gargoyles(IGameWaveProgress gameProgress) returns SpawnWaveDefinition
     let def = new SpawnWaveDefinition("Gargoyles")
     ..setTags(SpawnDefinitionTags.flying, SpawnDefinitionTags.ranged, SpawnDefinitionTags.fortified, SpawnDefinitionTags.magic)
-    ..setProgress(g_waveProgress)
-    ..setMaxAliveCount(FunctionalT.fromFunc((real waveProgress) -> lerpInt(2, 8, waveProgress)))
-    ..setSpawnsPerActivation(FunctionalT.fromValue(2))
-    ..setSpawnGroupingFactor(FunctionalT.fromValue(1.0))
+    ..setProgress(getProgressForSpawnWave())
+    ..setMaxAliveCount((real waveProgress) -> lerpInt(2, 8, waveProgress))
+    ..setSpawnsPerActivation(t -> 2)
+    ..setSpawnGroupingFactor(t -> 1.0)
     ..setActivator(new PeriodicWaveActivator(5.0))
-    ..setSpawnPointProvider(getRandomSpawnPointProvider(SpawnRange.MID))
+    ..setSpawnRange(SpawnRange.MID)
     ..setUnitTypeProvider(new SingleUnitTypeProvider(TlsUnitIds.Undead.gargoyle))
 
-    def.getUnitModifier(TlsUnitIds.Undead.gargoyle)
-      ..standardRangedElite(p, gameProgress)
-      ..setDefenseType(ArmorType.Small)
+    let gameT = gameProgress.getCurrentGameProgress()
 
-    return new SpawnWave(def, p)
+    def.setCommonUnitModifier() (unit u, real waveT) ->
+      u.standardRangedElite(gameT)
+      u.setDefenseType(ArmorType.Small)
+
+    return def
 
   // --------------------------------------------------------------------------
-  private function createSpawnWave_OrcSkeletons(player p, IGameWaveProgress gameProgress) returns SpawnWave
+  private function createSpawnWave_OrcSkeletons(IGameWaveProgress gameProgress) returns SpawnWaveDefinition
     let def = new SpawnWaveDefinition("Orc Skeletons")
     ..setTags(SpawnDefinitionTags.grouped, SpawnDefinitionTags.melee, SpawnDefinitionTags.heavy, SpawnDefinitionTags.normal)
-    ..setProgress(g_waveProgress)
-    ..setMaxAliveCount(FunctionalT.fromFunc((real waveProgress) -> lerpInt(2, 8, waveProgress)))
-    ..setSpawnsPerActivation(FunctionalT.fromValue(2))
-    ..setSpawnGroupingFactor(FunctionalT.fromValue(1.0))
+    ..setProgress(getProgressForSpawnWave())
+    ..setMaxAliveCount((real waveProgress) -> lerpInt(2, 8, waveProgress))
+    ..setSpawnsPerActivation(t -> 2)
+    ..setSpawnGroupingFactor(t -> 1.0)
     ..setActivator(new PeriodicWaveActivator(5.0))
-    ..setSpawnPointProvider(getRandomSpawnPointProvider(SpawnRange.MID))
+    ..setSpawnRange(SpawnRange.MID)
     ..setUnitTypeProvider(new SingleUnitTypeProvider(TlsUnitIds.Undead.skeletonOrc))
 
-    def.getUnitModifier(TlsUnitIds.Undead.skeletonOrc)
-      ..standardElite(p, gameProgress)
-      ..setDefenseType(ArmorType.Large)
+    let gameT = gameProgress.getCurrentGameProgress()
 
-    return new SpawnWave(def, p)
+    def.setCommonUnitModifier() (unit u, real waveT) ->
+      u.standardElite(gameT)
+      u.setDefenseType(ArmorType.Large)
+
+    return def
 
   // --------------------------------------------------------------------------
-  // private function createSpawnWave_Monolith(player p, IGameWaveProgress gameProgress) returns SpawnWave
+  // private function createSpawnWave_Monolith(IGameWaveProgress gameProgress) returns SpawnWaveDefinition
   //   let def = new SpawnWaveDefinition("Monolith")
   //   ..setTags(SpawnDefinitionTags.invade, SpawnDefinitionTags.ranged, SpawnDefinitionTags.fortified, SpawnDefinitionTags.magic)
-  //   ..setProgress(g_waveprogress)
+  //   ..setProgress(getProgressForSpawnWave())
   //   ..setMaxAliveCount(FunctionalT.fromFunc((real waveProgress) -> lerpInt(2, 8, waveProgress)))
   //   ..setSpawnsPerActivation(FunctionalT.fromValue(2))
   //   ..setSpawnGroupingFactor(FunctionalT.fromValue(1.0))
   //   ..setActivator(new PeriodicWaveActivator(5.0))
-  //   ..setSpawnPointProvider(getRandomSpawnPointProvider(SpawnRange.CLOSE))
+  //   ..setSpawnPointProvider(SpawnRange.CLOSE)
   //   ..setUnitTypeProvider(new SingleUnitTypeProvider(TlsUnitIds.Undead.monolith))
 
   //   def.getUnitModifier(TlsUnitIds.Undead.monolith)
@@ -608,109 +620,123 @@ public class NormalNightWaveGenerator implements IWaveGenerator<NightWave>
   //     ..standardEliteGrantLumberOnDeath(rangeInt(500,500))
   //     ..setDefenseType(ArmorType.Fortified)
 
-  //   return new SpawnWave(def, p)
+  //   return def
 
   // --------------------------------------------------------------------------
-  private function createSpawnWave_MeatWagons(player p, IGameWaveProgress gameProgress) returns SpawnWave
+  private function createSpawnWave_MeatWagons(IGameWaveProgress gameProgress) returns SpawnWaveDefinition
     let def = new SpawnWaveDefinition("Meat Wagons")
     ..setTags(SpawnDefinitionTags.ranged, SpawnDefinitionTags.siege)
-    ..setProgress(g_waveProgress)
-    ..setMaxAliveCount(FunctionalT.fromFunc((real waveProgress) -> lerpInt(2, 8, waveProgress)))
-    ..setSpawnsPerActivation(FunctionalT.fromValue(2))
-    ..setSpawnGroupingFactor(FunctionalT.fromValue(1.0))
+    ..setProgress(getProgressForSpawnWave())
+    ..setMaxAliveCount((real waveProgress) -> lerpInt(2, 8, waveProgress))
+    ..setSpawnsPerActivation(t -> 2)
+    ..setSpawnGroupingFactor(t -> 1.0)
     ..setActivator(new PeriodicWaveActivator(5.0))
-    ..setSpawnPointProvider(getRandomSpawnPointProvider(SpawnRange.MID))
+    ..setSpawnRange(SpawnRange.MID)
     ..setUnitTypeProvider(new SingleUnitTypeProvider(TlsUnitIds.Undead.meatWagon))
 
-    def.getUnitModifier(TlsUnitIds.Undead.meatWagon)
-      ..standardRangedElite(p, gameProgress)
-      ..setDefenseType(ArmorType.Large)
+    let gameT = gameProgress.getCurrentGameProgress()
 
-    return new SpawnWave(def, p)
+    def.setCommonUnitModifier() (unit u, real waveT) ->
+      u.standardRangedElite(gameT)
+      u.setDefenseType(ArmorType.Large)
+
+    return def
 
   // --------------------------------------------------------------------------
-  private function createSpawnWave_Mutants(player p, IGameWaveProgress gameProgress) returns SpawnWave
+  private function createSpawnWave_Mutants(IGameWaveProgress gameProgress) returns SpawnWaveDefinition
     let def = new SpawnWaveDefinition("Mutants")
     ..setTags(SpawnDefinitionTags.ranged, SpawnDefinitionTags.puller, SpawnDefinitionTags.chaos)
-    ..setProgress(g_waveProgress)
-    ..setMaxAliveCount(FunctionalT.fromFunc((real waveProgress) -> lerpInt(2, 8, waveProgress)))
-    ..setSpawnsPerActivation(FunctionalT.fromValue(2))
-    ..setSpawnGroupingFactor(FunctionalT.fromValue(1.0))
+    ..setProgress(getProgressForSpawnWave())
+    ..setMaxAliveCount((real waveProgress) -> lerpInt(2, 8, waveProgress))
+    ..setSpawnsPerActivation(t -> 2)
+    ..setSpawnGroupingFactor(t -> 1.0)
     ..setActivator(new PeriodicWaveActivator(5.0))
-    ..setSpawnPointProvider(getRandomSpawnPointProvider(SpawnRange.MID))
+    ..setSpawnRange(SpawnRange.MID)
     ..setUnitTypeProvider(new SingleUnitTypeProvider(TlsUnitIds.Undead.mutant))
 
-    def.getUnitModifier(TlsUnitIds.Undead.mutant)
-      ..standardRangedElite(p, gameProgress)
-      ..setDefenseType(ArmorType.Unarmored)
+    let gameT = gameProgress.getCurrentGameProgress()
 
-    return new SpawnWave(def, p)
+    def.setCommonUnitModifier() (unit u, real waveT) ->
+      u.standardRangedElite(gameT)
+      u.setDefenseType(ArmorType.Unarmored)
+
+    return def
 
   // --------------------------------------------------------------------------
-  private function createSpawnWave_CryptFiends(player p, IGameWaveProgress gameProgress) returns SpawnWave
+  private function createSpawnWave_CryptFiends(IGameWaveProgress gameProgress) returns SpawnWaveDefinition
     let def = new SpawnWaveDefinition("Crypt Fiends")
     ..setTags(SpawnDefinitionTags.invade, SpawnDefinitionTags.ranged, SpawnDefinitionTags.magic)
-    ..setProgress(g_waveProgress)
-    ..setMaxAliveCount(FunctionalT.fromFunc((real waveProgress) -> lerpInt(2, 8, waveProgress)))
-    ..setSpawnsPerActivation(FunctionalT.fromValue(2))
-    ..setSpawnGroupingFactor(FunctionalT.fromValue(1.0))
+    ..setProgress(getProgressForSpawnWave())
+    ..setMaxAliveCount((real waveProgress) -> lerpInt(2, 8, waveProgress))
+    ..setSpawnsPerActivation(t -> 2)
+    ..setSpawnGroupingFactor(t -> 1.0)
     ..setActivator(new PeriodicWaveActivator(5.0))
-    ..setSpawnPointProvider(getRandomSpawnPointProvider(SpawnRange.MID))
+    ..setSpawnRange(SpawnRange.MID)
     ..setUnitTypeProvider(new SingleUnitTypeProvider(TlsUnitIds.Undead.cryptFiend))
 
-    def.getUnitModifier(TlsUnitIds.Undead.cryptFiend)
-      ..standardRangedElite(p, gameProgress)
-      ..setDefenseType(ArmorType.Medium)
+    let gameT = gameProgress.getCurrentGameProgress()
 
-    return new SpawnWave(def, p)
+    def.setCommonUnitModifier() (unit u, real waveT) ->
+      u.standardRangedElite(gameT)
+      u.setDefenseType(ArmorType.Medium)
+
+    return def
 
   // --------------------------------------------------------------------------
-  private function createSpawnWave_Raiders(player p, IGameWaveProgress gameProgress) returns SpawnWave
+  private function createSpawnWave_Raiders(IGameWaveProgress gameProgress) returns SpawnWaveDefinition
     let def = new SpawnWaveDefinition("Raiders")
     ..setTags(SpawnDefinitionTags.grouped, SpawnDefinitionTags.melee, SpawnDefinitionTags.ranged, SpawnDefinitionTags.normal)
-    ..setProgress(g_waveProgress)
-    ..setMaxAliveCount(FunctionalT.fromFunc((real waveProgress) -> lerpInt(2, 8, waveProgress)))
-    ..setSpawnsPerActivation(FunctionalT.fromValue(2))
-    ..setSpawnGroupingFactor(FunctionalT.fromValue(1.0))
+    ..setProgress(getProgressForSpawnWave())
+    ..setMaxAliveCount((real waveProgress) -> lerpInt(2, 8, waveProgress))
+    ..setSpawnsPerActivation(t -> 2)
+    ..setSpawnGroupingFactor(t -> 1.0)
     ..setActivator(new PeriodicWaveActivator(5.0))
-    ..setSpawnPointProvider(getRandomSpawnPointProvider(SpawnRange.MID))
+    ..setSpawnRange(SpawnRange.MID)
     ..setUnitTypeProvider(new SingleUnitTypeProvider(TlsUnitIds.Undead.greaterDarkMinion))
     ..setWaitForFullSpawnGroup(true)
 
-    def.getUnitModifier(TlsUnitIds.Undead.greaterDarkMinion)
-      ..standardElite(p, gameProgress)
-      ..setDefenseType(ArmorType.Large)
+    let gameT = gameProgress.getCurrentGameProgress()
 
-    return new SpawnWave(def, p)
+    def.setCommonUnitModifier() (unit u, real waveT) ->
+      u.standardElite(gameT)
+      u.setDefenseType(ArmorType.Large)
+
+    return def
 
   // --------------------------------------------------------------------------
-  private function createSpawnWave_Shades(player p, IGameWaveProgress gameProgress) returns SpawnWave
+  private function createSpawnWave_Shades(IGameWaveProgress gameProgress) returns SpawnWaveDefinition
     let def = new SpawnWaveDefinition("Shades")
     ..setTags(SpawnDefinitionTags.flying, SpawnDefinitionTags.ranged, SpawnDefinitionTags.chaos)
-    ..setProgress(g_waveProgress)
-    ..setMaxAliveCount(FunctionalT.fromFunc((real waveProgress) -> lerpInt(2, 8, waveProgress)))
-    ..setSpawnsPerActivation(FunctionalT.fromValue(2))
-    ..setSpawnGroupingFactor(FunctionalT.fromValue(1.0))
+    ..setProgress(getProgressForSpawnWave())
+    ..setMaxAliveCount((real waveProgress) -> lerpInt(2, 8, waveProgress))
+    ..setSpawnsPerActivation(t -> 2)
+    ..setSpawnGroupingFactor(t -> 1.0)
     ..setActivator(new PeriodicWaveActivator(5.0))
-    ..setSpawnPointProvider(getRandomSpawnPointProvider(SpawnRange.MID))
+    ..setSpawnRange(SpawnRange.MID)
     ..setUnitTypeProvider(new SingleUnitTypeProvider(TlsUnitIds.Undead.shade))
 
-    def.getUnitModifier(TlsUnitIds.Undead.shade)
-      ..standardRangedElite(p, gameProgress)
-      ..setDefenseType(ArmorType.Unarmored)
+    let gameT = gameProgress.getCurrentGameProgress()
 
-    return new SpawnWave(def, p)
+    def.setCommonUnitModifier() (unit u, real waveT) ->
+      u.standardRangedElite(gameT)
+      u.setDefenseType(ArmorType.Unarmored)
+
+    return def
 
 // ============================================================================
-function getCoinItemSetForWave(IGameWaveProgress gameProgress) returns ItemSet
+function getProgressForSpawnWave() returns IProgress
+  return new TimeOfDayProgress()
+    ..setStartTime(NIGHT_TIME)
+    ..setDuration(WAVE_NIGHT_LENGTH)
+
+// ============================================================================
+function getCoinItemSetForWave(real gameT) returns ItemSet
   let itemSet = new ItemSet("Coins", COLOR_GOLD.withoutAlpha())
 
-  let t = gameProgress.getCurrentGameProgress()
-
-  let weightSmall = g_coinSmallWeightTFunc.call(t)
-  let weightMedium = g_coinMediumWeightTFunc.call(t)
-  let weightLarge = g_coinLargeWeightTFunc.call(t)
-  let weightEpic = g_coinEpicWeightTFunc.call(t)
+  let weightSmall = g_coinSmallWeightTFunc.call(gameT)
+  let weightMedium = g_coinMediumWeightTFunc.call(gameT)
+  let weightLarge = g_coinLargeWeightTFunc.call(gameT)
+  let weightEpic = g_coinEpicWeightTFunc.call(gameT)
 
   itemSet.add(TlsItemIds.coinSmall, weightSmall)
   itemSet.add(TlsItemIds.coinMedium, weightMedium)
@@ -720,77 +746,70 @@ function getCoinItemSetForWave(IGameWaveProgress gameProgress) returns ItemSet
   return itemSet
 
 // ============================================================================
-function AggregateUnitModifier.standardEliteMaxHp(IGameWaveProgress gameProgress)
-  this.standardEliteMaxHp(gameProgress, 1.0)
+function unit.standardEliteMaxHp(real gameT)
+  this.standardEliteMaxHp(gameT, 1.0)
 
 // ============================================================================
-function AggregateUnitModifier.standardEliteMaxHp(IGameWaveProgress gameProgress, real scale)
-  let t = gameProgress.getCurrentGameProgress()
-  let t2 = t * t
+function unit.standardEliteMaxHp(real gameT, real scale)
+  let t2 = gameT * gameT
   let maxHp = R2I(I2R(lerpInt(480, 8000, t2)) * scale)
-  this.setMaxHp(maxHp)
+  this.setMaxHPandHP(maxHp)
 
 // ============================================================================
-function AggregateUnitModifier.standardEliteArmor(IGameWaveProgress gameProgress)
-  this.standardEliteArmor(gameProgress, 1.0)
+function unit.standardEliteArmor(real gameT)
+  this.standardEliteArmor(gameT, 1.0)
 
 // ============================================================================
-function AggregateUnitModifier.standardEliteArmor(IGameWaveProgress gameProgress, real scale)
-  let t = gameProgress.getCurrentGameProgress()
-  let t2 = t * t
+function unit.standardEliteArmor(real gameT, real scale)
+  let t2 = gameT * gameT
   this.setArmor(lerp(4.0, 20.0, t2) * scale)
 
 // ============================================================================
-function AggregateUnitModifier.standardEliteAttack1DamageRange(IGameWaveProgress gameProgress)
-  this.standardEliteAttack1DamageRange(gameProgress, 1.0)
+function unit.standardEliteAttack1DamageRange(real gameT)
+  this.standardEliteAttack1DamageRange(gameT, 1.0)
 
 // ============================================================================
-function AggregateUnitModifier.standardEliteAttack1DamageRange(IGameWaveProgress gameProgress, real scale)
-  let t = gameProgress.getCurrentGameProgress()
-  let t2 = t * t
+function unit.standardEliteAttack1DamageRange(real gameT, real scale)
+  let t2 = gameT * gameT
   var range = lerp(rangeInt(16, 24), rangeInt(280, 300), t2)
   range.min = R2I(I2R(range.min) * scale)
   range.max = R2I(I2R(range.max) * scale)
   this.setDamageRange(0, range)
 
 // ============================================================================
-function AggregateUnitModifier.standardEliteAttack1Cooldown(IGameWaveProgress gameProgress)
-  this.standardEliteAttack1Cooldown(gameProgress, 1.0)
+function unit.standardEliteAttack1Cooldown(real gameT)
+  this.standardEliteAttack1Cooldown(gameT, 1.0)
 
 // ============================================================================
-function AggregateUnitModifier.standardEliteAttack1Cooldown(IGameWaveProgress gameProgress, real scale)
-  let t = gameProgress.getCurrentGameProgress()
-  let t2 = t * t
-  this.setAttackCooldown(0, lerp(2.0, 0.5, t2) * scale)
+function unit.standardEliteAttack1Cooldown(real gameT, real scale)
+  let t2 = gameT * gameT
+  this.setAttackCooldown(lerp(2.0, 0.5, t2) * scale, 0)
 
 // ============================================================================
-function AggregateUnitModifier.standardEliteGrantLumberOnDeath(rangeInt lumberRange)
-  this.grantLumberOnDeath(1.0, lumberRange)
+function unit.standardEliteGrantLumberOnDeath(rangeInt lumberRange)
+  this.awardLumberOnDeath(lumberRange, 1.0)
 
 // ============================================================================
-function AggregateUnitModifier.standardElite(player p, IGameWaveProgress gameProgress)
-  this.setTargetPlayer(p)
-  this.standardEliteMaxHp(gameProgress)
-  this.standardEliteArmor(gameProgress)
-  this.standardEliteAttack1DamageRange(gameProgress)
-  this.standardEliteAttack1Cooldown(gameProgress)
-  this.standardGrantCoinsOnDeath(gameProgress)
+function unit.standardElite(real gameT)
+  this.standardEliteMaxHp(gameT)
+  this.standardEliteArmor(gameT)
+  this.standardEliteAttack1DamageRange(gameT)
+  this.standardEliteAttack1Cooldown(gameT)
+  this.standardGrantCoinsOnDeath(gameT)
   this.setAcquisitionRange(ELITE_SIGHT_RANGE)
   this.setSightRadius(ELITE_SIGHT_RANGE)
   this.standardEliteGrantLumberOnDeath(rangeInt(3,3))
 
 // ============================================================================
-function AggregateUnitModifier.standardRangedElite(player p, IGameWaveProgress gameProgress)
-  this.setTargetPlayer(p)
-  this.standardEliteMaxHp(gameProgress)
-  this.standardEliteArmor(gameProgress)
-  this.standardEliteAttack1DamageRange(gameProgress)
-  this.standardEliteAttack1Cooldown(gameProgress)
-  this.standardGrantCoinsOnDeath(gameProgress)
+function unit.standardRangedElite(real gameT)
+  this.standardEliteMaxHp(gameT)
+  this.standardEliteArmor(gameT)
+  this.standardEliteAttack1DamageRange(gameT)
+  this.standardEliteAttack1Cooldown(gameT)
+  this.standardGrantCoinsOnDeath(gameT)
   this.standardEliteGrantLumberOnDeath(rangeInt(3,3))
 
-  let t = gameProgress.getCurrentGameProgress()
-  let t2 = t * t
+  let t2 = gameT * gameT
   this.setDamageRange(0, lerp(rangeInt(16, 32), rangeInt(128, 140), t2))
 
   this.setAttackRange(0, ELITE_RANGED_ATTACK_RANGE)
@@ -798,29 +817,21 @@ function AggregateUnitModifier.standardRangedElite(player p, IGameWaveProgress g
   this.setSightRadius(ELITE_SIGHT_RANGE)
 
 // ============================================================================
-function AggregateUnitModifier.standardGrantCoinsOnDeath(IGameWaveProgress gameProgress)
-  this.standardGrantCoinsOnDeath(gameProgress, 1.0)
+function unit.standardGrantCoinsOnDeath(real gameT)
+  this.standardGrantCoinsOnDeath(gameT, 1.0)
 
 // ============================================================================
-function AggregateUnitModifier.standardGrantCoinsOnDeath(IGameWaveProgress gameProgress, real chanceScale)
-  let chance = lerp(COIN_CHANCE_RANGE.min, COIN_CHANCE_RANGE.max, gameProgress.getCurrentGameProgress()) * chanceScale
-  let itemSet = getCoinItemSetForWave(gameProgress)
-  this.dropItemOnDeath(chance, itemSet)
+function unit.standardGrantCoinsOnDeath(real gameT, real chanceScale)
+  let chance = lerp(COIN_CHANCE_RANGE.min, COIN_CHANCE_RANGE.max, gameT) * chanceScale
+  let itemSet = getCoinItemSetForWave(gameT)
+  this.awardRandomItemOnDeath(itemSet, chance)
 
 // ============================================================================
-function AggregateUnitModifier.guaranteeGrantCoinsOnDeath(IGameWaveProgress gameProgress)
-  this.dropItemOnDeath(1.0, getCoinItemSetForWave(gameProgress))
-
-// ============================================================================
-function AggregateUnitModifier.grantXpOnDeath(int value)
-  this.add(new GrantXpOnDeathModifier()..setXpValue(FunctionalT.fromValue(value)))
+function unit.guaranteeGrantCoinsOnDeath(real gameT)
+  this.awardRandomItemOnDeath(getCoinItemSetForWave(gameT), 1.0)
 
 // ============================================================================
 init
-
-  registerTimeOfDayEvent(NIGHT_WAVE_START_TIME.getTimeOfDay(), () -> g_waveProgress.start())
-  registerTimeOfDayEvent(NIGHT_WAVE_END_TIME.getTimeOfDay(), () -> g_waveProgress.complete())
-
   g_coinSmallWeightTFunc = (real t) -> clamp01(Pow(1 - t, 8))
   g_coinMediumWeightTFunc = (real t) -> clamp01((Sin(clamp(t, 0.0, 0.666) * 3 * PI - PIHALF)) / 2.0 + 0.5)
   g_coinLargeWeightTFunc = (real t) -> clamp((Sin(clamp(t, 0.333, 1.0) * 3 * PI + PIHALF)) / 2.0 + 0.5, 0.001, 1.0)

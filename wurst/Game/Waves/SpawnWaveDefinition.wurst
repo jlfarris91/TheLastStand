@@ -1,34 +1,34 @@
 package SpawnWaveDefinition
 import IProgress
 import WaveActivator
-import ISpawnPointProvider
 import IUnitTypeProvider
-import UnitModifier
-import Functional
 import Math
 import HashMap
-import LinkedList
+import SpawnManager
+import Vector
+import Func
+import Events
 
 // ============================================================================
 public class SpawnWaveDefinition
   private string m_name
   private IProgress m_progress
-  private IWaveActivator m_activator
-  private ISpawnPointProvider m_spawnPointProvider
+  private WaveActivator m_activator
+  private SpawnRange m_spawnRange
   private IUnitTypeProvider m_unitTypeProvider
-  private FunctionalT<int> m_maxAliveCount
-  private FunctionalT<int> m_maxSpawnCount
-  private FunctionalT<int> m_spawnsPerActivation
-  private FunctionalT<real> m_spawnGroupingFactor
-  private IterableMap<int, AggregateUnitModifier> m_unitModifiers
-  private LinkedList<string> m_tags
+  private Func1<real, int> m_maxSpawnCount
+  private Func1<real, int> m_maxAliveCount
+  private Func1<real, int> m_spawnsPerActivation
+  private Func1<real, real> m_spawnGroupingFactor
+  private Action2<unit, real> m_commonUnitModifier
+  private IterableMap<int, Action2<unit, real>> m_unitModifiers
+  private Vector<string> m_tags
   private bool m_waitForFullSpawnGroup
 
   // --------------------------------------------------------------------------
   construct(string name)
     m_name = name
-    m_unitModifiers = new IterableMap<int, AggregateUnitModifier>()
-    m_tags = new LinkedList<string>()
+    m_tags = new Vector<string>()
 
   // --------------------------------------------------------------------------
   ondestroy
@@ -39,10 +39,6 @@ public class SpawnWaveDefinition
     if (m_activator != null)
       destroy m_activator
       m_activator = null
-
-    if (m_spawnPointProvider != null)
-      destroy m_spawnPointProvider
-      m_spawnPointProvider = null
 
     if (m_unitTypeProvider != null)
       destroy m_unitTypeProvider
@@ -64,11 +60,15 @@ public class SpawnWaveDefinition
       destroy m_spawnGroupingFactor
       m_spawnGroupingFactor = null
 
-    for unitTypeId in m_unitModifiers
-      destroy m_unitModifiers.get(unitTypeId)
+    if (m_commonUnitModifier != null)
+      destroy m_commonUnitModifier
+      m_commonUnitModifier = null
 
-    destroy m_unitModifiers
-    m_unitModifiers = null
+    if (m_unitModifiers != null)
+      for unitTypeId in m_unitModifiers
+        destroy m_unitModifiers.get(unitTypeId)
+      destroy m_unitModifiers
+      m_unitModifiers = null
 
     destroy m_tags
 
@@ -85,20 +85,20 @@ public class SpawnWaveDefinition
     return m_progress
 
   // --------------------------------------------------------------------------
-  function setActivator(IWaveActivator activator)
+  function setActivator(WaveActivator activator)
     m_activator = activator
 
   // --------------------------------------------------------------------------
-  function getActivator() returns IWaveActivator
+  function getActivator() returns WaveActivator
     return m_activator
 
   // --------------------------------------------------------------------------
-  function setSpawnPointProvider(ISpawnPointProvider spawnPointProvider)
-    m_spawnPointProvider = spawnPointProvider
+  function setSpawnRange(SpawnRange spawnRange)
+    m_spawnRange = spawnRange
 
   // --------------------------------------------------------------------------
-  function getSpawnPointProvider() returns ISpawnPointProvider
-    return m_spawnPointProvider
+  function getSpawnRange() returns SpawnRange
+    return m_spawnRange
 
   // --------------------------------------------------------------------------
   function setUnitTypeProvider(IUnitTypeProvider unitTypeProvider)
@@ -109,56 +109,64 @@ public class SpawnWaveDefinition
     return m_unitTypeProvider
 
   // --------------------------------------------------------------------------
-  function setMaxAliveCount(FunctionalT<int> value)
+  function setMaxAliveCount(Func1<real, int> value)
     m_maxAliveCount = value
 
   // --------------------------------------------------------------------------
   function getMaxAliveCount(real t) returns int
     if (m_maxAliveCount == null)
       return UNLIMITED
-    return clamp(m_maxAliveCount.getValue(t), 0, UNLIMITED)
+    return clamp(m_maxAliveCount.call(t), 0, UNLIMITED)
 
   // --------------------------------------------------------------------------
-  function setMaxSpawnCount(FunctionalT<int> value)
+  function setMaxSpawnCount(Func1<real, int> value)
     m_maxSpawnCount = value
 
   // --------------------------------------------------------------------------
   function getMaxSpawnCount(real t) returns int
     if (m_maxSpawnCount == null)
       return UNLIMITED
-    return clamp(m_maxSpawnCount.getValue(t), 0, UNLIMITED)
+    return clamp(m_maxSpawnCount.call(t), 0, UNLIMITED)
 
   // --------------------------------------------------------------------------
   function getSpawnsPerActivation(real t) returns int
     if (m_spawnsPerActivation == null)
       return 1
-    return clamp(m_spawnsPerActivation.getValue(t), 0, 1000)
+    return clamp(m_spawnsPerActivation.call(t), 0, 1000)
 
   // --------------------------------------------------------------------------
-  function setSpawnsPerActivation(FunctionalT<int> value)
+  function setSpawnsPerActivation(Func1<real, int> value)
     m_spawnsPerActivation = value
 
   // --------------------------------------------------------------------------
   function getSpawnGroupingFactor(real t) returns real
     if (m_spawnGroupingFactor == null)
       return 0.0
-    return clamp01(m_spawnGroupingFactor.getValue(t))
+    return clamp01(m_spawnGroupingFactor.call(t))
 
   // --------------------------------------------------------------------------
-  function setSpawnGroupingFactor(FunctionalT<real> value)
+  function setSpawnGroupingFactor(Func1<real, real> value)
     m_spawnGroupingFactor = value
 
   // --------------------------------------------------------------------------
-  function getCommonUnitModifier() returns AggregateUnitModifier
-    return getUnitModifier(-999)
+  function setCommonUnitModifier(Action2<unit, real> action)
+    m_commonUnitModifier = action
 
   // --------------------------------------------------------------------------
-  function getUnitModifier(int unitTypeId) returns AggregateUnitModifier
-    var unitModifier = m_unitModifiers.get(unitTypeId)
-    if (unitModifier == null)
-      unitModifier = new AggregateUnitModifier()
-      m_unitModifiers.put(unitTypeId, unitModifier)
-    return unitModifier
+  function getCommonUnitModifier() returns Action2<unit, real>
+    return m_commonUnitModifier
+
+  // --------------------------------------------------------------------------
+  function setUnitModifier(int unitTypeId, Action2<unit, real> action)
+    if (m_unitModifiers == null)
+      m_unitModifiers = new IterableMap<int, Action2<unit, real>>()
+    m_unitModifiers.put(unitTypeId, action)
+
+  // --------------------------------------------------------------------------
+  function getUnitModifier(int unitTypeId) returns Action2<unit, real>
+    if (m_unitModifiers == null)
+      return null
+    return m_unitModifiers.get(unitTypeId)
 
   // --------------------------------------------------------------------------
   function setTags(vararg string tags)
@@ -167,7 +175,7 @@ public class SpawnWaveDefinition
       m_tags.add(tag)
 
   // --------------------------------------------------------------------------
-  function getTags() returns LinkedList<string>
+  function getTags() returns Vector<string>
     return m_tags
 
   // --------------------------------------------------------------------------

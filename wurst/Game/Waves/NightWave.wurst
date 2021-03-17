@@ -1,12 +1,12 @@
 package NightWave
 import Wave
 import ClosureTimers
-import LinkedList
 import DisplayTextToPlayer
 import TimeOfDayProgress
-import IProgress
 import Events
 import ColorUtility
+import Vector
+import IProgress
 
 // ============================================================================
 public class NightWave extends Wave
@@ -19,6 +19,10 @@ public class NightWave extends Wave
     super(p)
     m_night = night
     m_timeOfDayScalePercent = 100.0
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    unlistenForNightProgressChanged()
 
   // --------------------------------------------------------------------------
   function getNight() returns int
@@ -42,6 +46,11 @@ public class NightWave extends Wave
 
     // Have to wait for some reason
     doAfter(0.1, () -> onDelayedStart())
+
+  // --------------------------------------------------------------------------
+  override function onCompleted()
+    super.onCompleted()
+    unlistenForNightProgressChanged()
 
   // --------------------------------------------------------------------------
   private function onDelayedStart()
@@ -69,22 +78,24 @@ public class NightWave extends Wave
   private function onNightWaveProgressChanged(IProgress _progress)
     raiseProgressChangedEvent()
 
-    if (getProgress() == 1.0)
-      complete()
-
   // --------------------------------------------------------------------------
   override function announceWaveToPlayer(player _player)
     let spawnWaves = getSpawnWaves()
     if (spawnWaves.isEmpty())
       return
 
-    let spawnWavesCloned = spawnWaves.copy()
+    let spawnWavesCloned = spawnWaves.clone()
 
     // Remove "Zombies" spawn wave that exists for every night after the first
     if (getNight() > 1)
       spawnWavesCloned.removeAt(0)
 
-    let firstSpawnWaveDef = spawnWavesCloned.getFirst().getDefinition()
+    let firstSpawnWave = spawnWavesCloned.getFirst()
+    if (firstSpawnWave == null)
+      Log.error("NightWave {0} has no spawn waves".format(getId()))
+      return
+
+    let firstSpawnWaveDef = firstSpawnWave.getDefinition()
     let spawnWaveName = firstSpawnWaveDef.getName()
     let spawnWaveTagsStr = firstSpawnWaveDef.getTags().joinBy(", ")
 

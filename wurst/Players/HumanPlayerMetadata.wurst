@@ -3,25 +3,27 @@ import public PlayerMetadata
 import UnitMetadata
 import HumanPlayers
 import ErrorHandling
-import initlater Camp
 import GameConstants
 import RegisterEvents
+import LinkedList
+import HostileCircularCachedSpawnManager
+import FriendlyCircularCachedSpawnManager
 
 // ============================================================================
 public class HumanPlayerMetadata extends PlayerMetadata
   private int m_kills
   private int m_score
   private IUnitMetadata m_hero
-  private ICamp m_camp
+  private LinkedList<unit> m_campCenterContributors
 
   // --------------------------------------------------------------------------
   construct(player p)
     super(p)
-    m_camp = new Camp(this)
+    m_campCenterContributors = new LinkedList<unit>()
 
   // --------------------------------------------------------------------------
-  function getCamp() returns ICamp
-    return m_camp
+  ondestroy
+    destroy m_campCenterContributors
 
   // --------------------------------------------------------------------------
   function getKills() returns int
@@ -90,6 +92,39 @@ public class HumanPlayerMetadata extends PlayerMetadata
   function setHero(IUnitMetadata hero)
     m_hero = hero
     Log.debug("Hero assigned to player: " + (hero != null).toString())
+
+  // --------------------------------------------------------------------------
+  function addCampCenter(unit centerContributor)
+    m_campCenterContributors.add(centerContributor)
+    onCampCenterChanged()
+
+  // --------------------------------------------------------------------------
+  function removeCampCenter(unit centerContributor)
+    m_campCenterContributors.remove(centerContributor)
+    onCampCenterChanged()
+
+  // --------------------------------------------------------------------------
+  function getCampCenter() returns vec2
+    if (m_campCenterContributors.isEmpty() and m_hero != null)
+      return m_hero.getUnit().getPos()
+    var center = ZERO2
+    for centerContributor in m_campCenterContributors
+      center += centerContributor.getPos()
+    center /= m_campCenterContributors.size().toReal()
+    return center
+
+  // --------------------------------------------------------------------------
+  private function onCampCenterChanged()
+    let center = getCampCenter()
+    let hostileSpawnManager = getPlayerCachedHostileSpawnManager(getPlayer())
+    if (hostileSpawnManager != null)
+      hostileSpawnManager.setCenter(center)
+      hostileSpawnManager.setIsEnabled(not m_campCenterContributors.isEmpty())
+    let friendlySpawnManager = getPlayerCachedFriendlySpawnManager(getPlayer())
+    if (friendlySpawnManager != null)
+      friendlySpawnManager.setCenter(center)
+      friendlySpawnManager.setIsEnabled(not m_campCenterContributors.isEmpty())
+    Log.info("Camp center for player " + getPlayer().getName() + " : " + center.toString())
 
 // ============================================================================
 public function player.getHumanMetadata() returns HumanPlayerMetadata
