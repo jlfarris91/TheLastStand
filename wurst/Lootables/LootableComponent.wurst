@@ -51,18 +51,15 @@ public class LootableComponent extends UnitComponent
   private unit m_lootingUnit
   private texttag m_cooldownDayTextTag
   private real m_chanceToRetrigger01
+  private rangeInt m_cooldownDaysRange
 
   // --------------------------------------------------------------------------
   construct(IUnitMetadata owner)
     super(owner)
 
-    m_cooldownDayTextTag = CreateTextTag()
-    ..setPermanent(true)
-    ..setColor(COUNTDOWN_COLOR)
-    ..setVisibility(false)
-
     m_searchDuration = 3.0
     m_cooldownDays = 0
+    m_cooldownDaysRange = LOOTABLES_DEFAULT_COOLDOWN_RANGE
     m_rewards = new WeightedSet<ILootableReward>()
 
     if (g_lootableUnits == null)
@@ -93,7 +90,8 @@ public class LootableComponent extends UnitComponent
 
     getOwnerUnit().setOwner(PLAYER_LOOTABLES, true)
     
-    m_cooldownDayTextTag.setPos(getOwnerUnit().getPos().withZ(20.0))
+    if (m_cooldownDayTextTag != null)
+      m_cooldownDayTextTag.setPos(getOwnerUnit().getPos().withZ(20.0))
 
     resetCooldown()
     onLootable()
@@ -131,6 +129,13 @@ public class LootableComponent extends UnitComponent
     return m_rewards
 
   // --------------------------------------------------------------------------
+  function getCooldownDaysRange() returns rangeInt
+    return m_cooldownDaysRange
+
+  function setCooldownDaysRange(rangeInt range)
+    m_cooldownDaysRange = range
+
+  // --------------------------------------------------------------------------
   function getCooldownDays() returns int
     return m_cooldownDays
 
@@ -139,13 +144,28 @@ public class LootableComponent extends UnitComponent
     
     let oldValue = m_cooldownDays
     m_cooldownDays = value
-    
-    if (m_cooldownDayTextTag != null)
+
+    if (m_cooldownDays == 0 and m_cooldownDayTextTag != null)
+      m_cooldownDayTextTag.destr()
+      m_cooldownDayTextTag = null
+
+    if (m_cooldownDays > 0)
+    //{
+      if (m_cooldownDayTextTag == null)
+        m_cooldownDayTextTag = CreateTextTag()
+      
+      m_cooldownDayTextTag
+        ..setVisibility(value > 0)
+        ..setPermanent(true)
+        ..setColor(COUNTDOWN_COLOR)
+        ..setPos(getOwnerUnit().getPos().withZ(20.0))
+        ..setVelocity(0, 0)
+
       if (m_cooldownDays == 1)
         m_cooldownDayTextTag.setText("{0} DAY".format(m_cooldownDays.toString()), 10.0)
       else
         m_cooldownDayTextTag.setText("{0} DAYS".format(m_cooldownDays.toString()), 10.0)
-      m_cooldownDayTextTag.setVisibility(value > 0)
+    //}
 
     if (oldValue != value and m_cooldownDays == 0)
       onLootable()
@@ -198,7 +218,7 @@ public class LootableComponent extends UnitComponent
       error("Not the same unit that started looting")
       return
 
-    setCooldownDays(LOOTABLES_COOLDOWN_RANGE.getRandom())
+    setCooldownDays(m_cooldownDaysRange.getRandom())
 
     m_lootingUnit.setAbilityCooldown(ABILITY_ID_SEARCH, 0, 0.0)
 
@@ -428,7 +448,7 @@ function onDayStart()
 function onRightClick()
   let orderedUnit = GetOrderedUnit()
   let targetUnit = GetOrderTargetUnit()
-  let orderedToSearch = GetIssuedOrderId() == Orders.smart and targetUnit.isLootableUnitType()
+  let orderedToSearch = GetIssuedOrderId() == Orders.smart and targetUnit.isLootable()
 
   // If the ordered unit was in the middle of looting
   let lootOperation = g_looterToOperationMap.get(orderedUnit)
