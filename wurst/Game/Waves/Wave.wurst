@@ -12,11 +12,13 @@ import ColorUtility
 import Vector
 import Runnable
 import Reflection
+import IProgress
 
 // ============================================================================
 public class Wave extends Runnable
   protected Vector<SpawnWave> m_spawnWaves
   protected HashMap<SpawnWave, Event1Callback<IRunnable>> m_spawnWaveStateChangeHandlers
+  protected HashMap<SpawnWave, Event1Callback<IProgress>> m_spawnWaveProgressChangeHandlers
   private player m_player
   private string m_id
   private int m_xpReward
@@ -29,6 +31,7 @@ public class Wave extends Runnable
     m_player = p
     m_spawnWaves = new Vector<SpawnWave>()
     m_spawnWaveStateChangeHandlers = new HashMap<SpawnWave, Event1Callback<IRunnable>>()
+    m_spawnWaveProgressChangeHandlers = new HashMap<SpawnWave, Event1Callback<IProgress>>()
 
   // --------------------------------------------------------------------------
   ondestroy
@@ -43,6 +46,9 @@ public class Wave extends Runnable
 
     destroy m_spawnWaveStateChangeHandlers
     m_spawnWaveStateChangeHandlers = null
+
+    destroy m_spawnWaveProgressChangeHandlers
+    m_spawnWaveProgressChangeHandlers = null
 
   // --------------------------------------------------------------------------
   function getId() returns string
@@ -162,10 +168,15 @@ public class Wave extends Runnable
   private function listenToSpawnWaveEvents(SpawnWave spawnWave)
     unlistenToSpawnWaveEvents(spawnWave)
     
-    let e = spawnWave.getStateChangedEvent()
-    if (e != null)
-      let handler = e.register((runnable) -> onSpawnWaveStateChanged(runnable))
+    let stateChangedEvent = spawnWave.getStateChangedEvent()
+    if (stateChangedEvent != null)
+      let handler = stateChangedEvent.register((runnable) -> onSpawnWaveStateChanged(runnable))
       m_spawnWaveStateChangeHandlers.put(spawnWave, handler)
+
+    let progressChangedEvent = spawnWave.getProgressChangedEvent()
+    if (progressChangedEvent != null)
+      let handler = progressChangedEvent.register((progress) -> onSpawnWaveProgressChanged(progress))
+      m_spawnWaveProgressChangeHandlers.put(spawnWave, handler)
     
   // --------------------------------------------------------------------------
   private function unlistenToAllSpawnWaveEvents()
@@ -174,19 +185,27 @@ public class Wave extends Runnable
 
   // --------------------------------------------------------------------------
   private function unlistenToSpawnWaveEvents(SpawnWave spawnWave)
-    let handler = m_spawnWaveStateChangeHandlers.get(spawnWave)
-    if (handler != null)
+    let stateChangedHandler = m_spawnWaveStateChangeHandlers.get(spawnWave)
+    if (stateChangedHandler != null)
       m_spawnWaveStateChangeHandlers.remove(spawnWave)
-      destroy handler
+      destroy stateChangedHandler
+    
+    let progressChangedHandler = m_spawnWaveProgressChangeHandlers.get(spawnWave)
+    if (progressChangedHandler != null)
+      m_spawnWaveProgressChangeHandlers.remove(spawnWave)
+      destroy progressChangedHandler
   
   // --------------------------------------------------------------------------
   private function onSpawnWaveStateChanged(IRunnable _)
     if (isCompleted())
       return
     for spawnWave in m_spawnWaves
-      if (not spawnWave.isCompleted())
-        return
       if (spawnWave.failed())
         fail(spawnWave.getError())
         return
-    complete()
+
+  // --------------------------------------------------------------------------
+  private function onSpawnWaveProgressChanged(IProgress _)
+    raiseProgressChangedEvent()
+    if (getProgress() == 1.0)
+      complete()
