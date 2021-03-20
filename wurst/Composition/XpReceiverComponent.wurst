@@ -1,0 +1,248 @@
+package XpReceiverComponent
+import UnitComponent
+import RegisterEvents
+import Elites
+import GrantXpOnDeathComponent
+import HashMap
+import Math
+import GroupUtils
+import UnitExtensions
+import ErrorHandling
+
+constant real DEFAULT_AOE_XP_RANGE = 320.0
+HashMap<unit, unit> g_xpSourceToTargetMap = new HashMap<unit, unit>()
+
+constant int g_aoeXpUnitsLength = 8
+unit array[g_aoeXpUnitsLength] g_aoeXpUnits
+int g_aoeXpUnitsCount
+
+// Prevent 
+constant int g_giveXpUnitStackMaxDepth = 16
+unit array[g_giveXpUnitStackMaxDepth] g_giveXpUnitStack
+int g_giveXpUnitStackCount
+
+// ============================================================================
+public class XpReceiverComponent extends UnitComponent
+  private int m_expPerKill = 4
+  private int m_expPerEliteKill = 10
+  private real m_aoeXpPercent01 = 0.0
+
+  // --------------------------------------------------------------------------
+  construct(IUnitMetadata owner)
+    super(owner)
+
+  // --------------------------------------------------------------------------
+  override function getTypeId() returns int
+    return XpReceiverComponent.typeId
+
+  // --------------------------------------------------------------------------
+  function getExpPerKill() returns int
+    return m_expPerKill
+
+  // --------------------------------------------------------------------------
+  function setExpPerKill(int exp)
+    m_expPerKill = exp
+
+  // --------------------------------------------------------------------------
+  function getExpPerEliteKill() returns int
+    return m_expPerEliteKill
+
+  // --------------------------------------------------------------------------
+  function setExpPerEliteKill(int exp)
+    m_expPerEliteKill = exp
+
+  // --------------------------------------------------------------------------
+  function getGiveXpAreaPercent01() returns real
+    return m_aoeXpPercent01
+
+  // --------------------------------------------------------------------------
+  function setGiveXpAreaPercent01(real percent)
+    m_aoeXpPercent01 = percent
+
+  // --------------------------------------------------------------------------
+  function scaleXp(int xp) returns int
+    return xp
+
+  // --------------------------------------------------------------------------
+  function giveOwnerUnitXp(int xp, bool showEyeCandy) returns bool
+    let ownerUnit = getOwnerUnit()
+      
+    //log("giveOwnerUnitXp", "starting xp : " + xp.toString())
+
+    if (not canPushGiveXpStackUnit(ownerUnit))
+      //log("giveOwnerUnitXp", "cannot push unit onto stack")
+      return false
+
+    pushGiveXpStackUnit(ownerUnit)
+    //log("giveOwnerUnitXp", "pushed unit onto stack : " + g_giveXpUnitStackCount.toString() +"/"+g_giveXpUnitStackMaxDepth.toString())
+  
+    let adjustedXp = scaleXp(xp)
+    var selfXp = adjustedXp
+
+    // Spread the love to nearby heroes
+    if (m_aoeXpPercent01 > 0.0)
+      let aoeXp = (adjustedXp.toReal() * clamp01(m_aoeXpPercent01)).floor()
+      //log("giveOwnerUnitXp", "aoe xp to give : " + aoeXp.toString())
+      if (aoeXp > 0 and giveAoeXp(aoeXp, showEyeCandy))
+        selfXp = adjustedXp - aoeXp
+      //log("giveOwnerUnitXp", "remaining self xp : " + selfXp.toString())
+    
+    // Give the remaining amount to this unit
+    if (selfXp > 0 and ownerUnit.isHero())
+      //log("giveOwnerUnitXp", "self xp > 0 : " + selfXp.toString())
+      ownerUnit.addXp(adjustedXp, showEyeCandy)
+
+    popGiveXpStackUnit()
+    //log("giveOwnerUnitXp", "popped unit from stack : " + g_giveXpUnitStackCount.toString() +"/"+g_giveXpUnitStackMaxDepth.toString())
+    return true
+
+  // --------------------------------------------------------------------------
+  function getXpValueForKilledUnit(unit killedUnit) returns int
+
+    let metadata = killedUnit.getMetadata()
+    if (metadata != null)
+      let comp = metadata.getGrantXpOnDeathComponent()
+      if (comp != null)
+        return comp.getExpValue()
+
+    if (killedUnit.isElite())
+      return getExpPerEliteKill()
+    else
+      return getExpPerKill()
+
+  // --------------------------------------------------------------------------
+  private function giveAoeXp(int xp, bool showEyeCandy) returns bool
+    let owningPlayer = getOwningPlayer()
+    
+    let temp = getGroup()
+    temp.enumUnitsInRange(getOwnerUnit().getPos(), DEFAULT_AOE_XP_RANGE)
+    g_aoeXpUnitsCount = 0
+    for _unit in temp
+    //{
+      if (g_aoeXpUnitsCount == g_aoeXpUnitsLength)
+        break
+      if (_unit.isHero() and
+          _unit.isAllyOf(owningPlayer) and
+          canPushGiveXpStackUnit(_unit))
+      //{
+        g_aoeXpUnits[g_aoeXpUnitsCount] = _unit
+        g_aoeXpUnitsCount++
+      //}
+    //}
+    temp.release()
+
+    if (g_aoeXpUnitsCount == 0)
+      return false
+
+    let xpPerUnit = max((xp.toReal() / g_aoeXpUnitsCount.toReal()).floor(), 1)
+    var xpToGive = xp
+    
+    //log("giveAoeXp", "aoe unit count : " + g_aoeXpUnitsCount.toString())
+    //log("giveAoeXp", "xp per unit : " + xpPerUnit.toString())
+
+    var index = 0
+    while (xpToGive > 0)
+      //log("giveAoeXp", "xp to give : " + xpToGive.toString() + " " + index.toString() +"/"+(g_aoeXpUnitsCount-1).toString())
+      let _unit = g_aoeXpUnits[index]
+      if (_unit.addUnitAdjustedXp(xpPerUnit, showEyeCandy))
+        xpToGive -= xpPerUnit
+      index = wrap(index + 1, 0, g_aoeXpUnitsCount - 1)
+
+    // I think we need to clear the array here so that the unit references don't stick around
+    for i = 0 to g_aoeXpUnitsCount-1
+      g_aoeXpUnits[i] = null
+    g_aoeXpUnitsCount = 0
+
+    return true
+    
+  // --------------------------------------------------------------------------
+  // private function log(string funcName, string message)
+  //   let ownerUnit = getOwnerUnit()
+  //   Log.info("XpReceiverComponent", funcName, ownerUnit.getName() + ":" + ownerUnit.getHandleId().toString(), message)
+
+// ============================================================================
+public function setXpSource(unit source, unit target)
+  g_xpSourceToTargetMap.put(source, target)
+
+// ============================================================================
+public function clearXpSource(unit source)
+  g_xpSourceToTargetMap.remove(source)
+
+// ============================================================================
+public function getXpTarget(unit source) returns unit
+  return g_xpSourceToTargetMap.get(source)
+
+// ============================================================================
+public function IUnitMetadata.getXpReceiverComponent() returns XpReceiverComponent
+  return this.getComponent(typeInfo(XpReceiverComponent.typeId)) castTo XpReceiverComponent
+
+// ============================================================================
+public function IUnitMetadata.getOrAddXpReceiverComponent() returns XpReceiverComponent
+  var component = this.getXpReceiverComponent()
+  if (component == null)
+    component = this.addComponent(new XpReceiverComponent(this)) castTo XpReceiverComponent
+  return component
+
+// ============================================================================
+function onUnitKilled()
+
+  let killingUnit = GetKillingUnit()
+  let dyingUnit = GetDyingUnit()
+
+  if (not dyingUnit.isEnemyOf(killingUnit))
+    return
+
+  var xpRecipient = getXpTarget(killingUnit)
+  if (xpRecipient == null)
+    xpRecipient = killingUnit
+
+  let metadata = xpRecipient.getMetadata()
+  if (metadata == null)
+    return
+
+  let gainXpComp = metadata.getXpReceiverComponent()
+  if (gainXpComp == null or not gainXpComp.getEnabled())
+    return
+
+  xpRecipient.addUnitAdjustedXp(gainXpComp.getXpValueForKilledUnit(dyingUnit), true)
+
+// ============================================================================
+public function unit.addUnitAdjustedXp(int xp, bool showEyeCandy) returns bool
+  // If the unit has an xp receiver component let it handle adding the xp
+  let metadata = this.getMetadataRequired()
+  let comp = metadata.getXpReceiverComponent()
+  if (comp != null)
+    return comp.giveOwnerUnitXp(xp, showEyeCandy)
+  // This unit does not have the xp receiver component so just add xp regularly
+  this.addXp(xp, showEyeCandy)
+  return true
+
+// ============================================================================
+function giveXpUnitStackContains(unit _unit) returns bool
+  for i = 0 to g_giveXpUnitStackCount - 1
+    if (g_giveXpUnitStack[i] == _unit)
+      return true
+  return false
+
+// ============================================================================
+function canPushGiveXpStackUnit(unit _unit) returns bool
+  return g_giveXpUnitStackCount < g_giveXpUnitStackMaxDepth and
+         not giveXpUnitStackContains(_unit)
+
+// ============================================================================
+function pushGiveXpStackUnit(unit _unit)
+  // We've reached the maximum stack depth
+  g_giveXpUnitStack[g_giveXpUnitStackCount] = _unit
+  g_giveXpUnitStackCount++
+
+// ============================================================================
+function popGiveXpStackUnit()
+  if (g_giveXpUnitStackCount == 0)
+    error("Cannot pop empty g_giveXpUnitStack")
+    return
+  g_giveXpUnitStackCount--
+  g_giveXpUnitStack[g_giveXpUnitStackCount] = null
+
+// ============================================================================
+init
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_DEATH, function onUnitKilled)
