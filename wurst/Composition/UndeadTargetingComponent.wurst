@@ -13,6 +13,8 @@ import Unit_WoodFence
 import Unit_StoneWall
 import Unit_GateCommon
 import Unit_MetalWall
+import GameConstants
+import Orders
 
 HashMap<player, LinkedList<unit>> g_validHumanStructureTargets
 HashList<int> g_validTargetStructureIds
@@ -127,7 +129,7 @@ public class UndeadTargetingComponent extends UnitComponent
 
   // --------------------------------------------------------------------------
   protected function increaseAcquisitionRange()
-    getOwnerUnit().setField(UNIT_RF_ACQUISITION_RANGE, REAL_MAX)
+    getOwnerUnit().setField(UNIT_RF_ACQUISITION_RANGE, 1024)
 
   // --------------------------------------------------------------------------
   private function raiseTargetPlayerChangedEvent()
@@ -211,6 +213,36 @@ function populateInitialValidHumanStructureTargets()
   tempGroup.release()
 
 // ============================================================================
+function onUnitIssuedPointOrder()
+  let orderedUnit = GetOrderedUnit()
+  let orderId = GetIssuedOrderId()
+  
+  if (orderedUnit.getOwner() != PLAYER_UNDEAD)
+    return
+
+  // Move is bad!
+  if (orderId != OrderIds.move)
+    return
+
+  Log.info("Ordered {0} to move!".format(orderedUnit.getName()))
+
+  let comp = orderedUnit.getMetadata().getUndeadTargetingComponent()  
+  if (comp == null)
+    return
+
+  let targetPlayer = comp.getTargetPlayer()
+  if (targetPlayer == null)
+    return
+
+  let campPos = targetPlayer.getHumanMetadataRequired().getCampCenter()
+  let unitToCampPos = campPos - orderedUnit.getPos()
+  let targetPos = campPos + unitToCampPos
+
+  // Tell the unit to attack move to the opposite side of the player's camp
+  // Hopefully they'll run into one of the player's units on the way
+  orderedUnit.issuePointOrderById(OrderIds.attack, targetPos)
+
+// ============================================================================
 init
   g_validHumanStructureTargets = new HashMap<player, LinkedList<unit>>()
 
@@ -233,6 +265,7 @@ init
 
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_CONSTRUCT_FINISH, function onConstructionFinished)
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_DEATH, function onUnitDeath)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ISSUED_POINT_ORDER, function onUnitIssuedPointOrder)
 
   // Populate with initial structures (for debug purposes)
   populateInitialValidHumanStructureTargets()
