@@ -10,8 +10,11 @@ import SpawnPointCollection
 import Arc
 import Func
 import Vector
+import FX
 
-constant int MAX_REQUEST_ATTEMPTS = 10
+public bool g_showCircularCachedSpawnManagerEffects = false
+
+constant int MAX_REQUEST_ATTEMPTS = 999
 constant real ANGLE_DELTA = PI2 / 8.0
 constant real ANGLE_DELTA_HALF = ANGLE_DELTA / 2.0
 constant real ANGLE_PAD_PERCENT = 0.1
@@ -123,15 +126,17 @@ public class CircularCachedSpawnManager implements ISpawnManager
   private Func1<unit, bool> m_spawnPointInvalidationFilter
 
   // Debug helpers
-  //private effect array[8] m_spawnRangeEffects
-  //private texttag array[8] m_spawnRangeTexts
-  //private effect array[32] m_spawnPointEffects
+  private effect array[8] m_spawnRangeEffects
+  private texttag array[8] m_spawnRangeTexts
+  private effect array[32] m_spawnPointEffects
+  private colorA m_debugColor
 
   // --------------------------------------------------------------------------
-  construct(player p, string id, Func1<unit, bool> spawnPointInvalidationFilter)
+  construct(player p, string id, Func1<unit, bool> spawnPointInvalidationFilter, colorA color)
     m_player = p
     m_id = id
     m_spawnPointInvalidationFilter = spawnPointInvalidationFilter
+    m_debugColor = color
 
   // --------------------------------------------------------------------------
   ondestroy
@@ -145,7 +150,7 @@ public class CircularCachedSpawnManager implements ISpawnManager
   function setCenter(vec2 pos)
     m_circle = circle(pos, SPAWN_RANGE_FAR.max)
     invalidateSpawnPoints()
-    // updateEffects()
+    updateEffects()
 
   // --------------------------------------------------------------------------
   function getCenter() returns vec2
@@ -227,7 +232,7 @@ public class CircularCachedSpawnManager implements ISpawnManager
     m_valid[index] = isValid
     m_processingRequest[index] = false
     
-    // updateEffects()
+    updateEffects()
 
     return isValid
 
@@ -236,7 +241,7 @@ public class CircularCachedSpawnManager implements ISpawnManager
     for i = 0 to 31
       invalidateSpawnArea(spawnArea(i))
 
-    // updateEffects()
+    updateEffects()
 
   // --------------------------------------------------------------------------
   function invalidateSpawnPoints(circle circle)
@@ -251,7 +256,7 @@ public class CircularCachedSpawnManager implements ISpawnManager
       if ((m_valid[i] or not m_processingRequest[i]) and spawnArea.overlaps(center, circle))
         invalidateSpawnArea(spawnArea)
 
-    // updateEffects()
+    updateEffects()
         
   // --------------------------------------------------------------------------
   private function invalidateSpawnArea(spawnArea spawnArea)
@@ -274,33 +279,35 @@ public class CircularCachedSpawnManager implements ISpawnManager
     return isValid
 
   // --------------------------------------------------------------------------
-  // private function updateEffects()
+  private function updateEffects()
+    if (not g_showCircularCachedSpawnManagerEffects)
+      return
 
-  //   for i = 0 to 7
-  //     let spawnRange = (i castTo SpawnRange)
-  //     let spawnRangeReal = spawnRange.toRangeReal()
+    for i = 0 to 7
+      let spawnRange = (i castTo SpawnRange)
+      let spawnRangeReal = spawnRange.toRangeReal()
       
-  //     if (m_spawnRangeEffects[i] == null)
-  //       m_spawnRangeEffects[i] = FX.createRangeEffect(m_circle.center, spawnRangeReal.max, Colors.green)
-  //     m_spawnRangeEffects[i].setPos(m_circle.center)
+      if (m_spawnRangeEffects[i] == null)
+        m_spawnRangeEffects[i] = FX.createRangeEffect(m_circle.center, spawnRangeReal.max, m_debugColor)
+      m_spawnRangeEffects[i].setPos(m_circle.center)
       
-  //     let spawnRangeTextPos = (m_circle.center + vec2(0, spawnRangeReal.max)).withZ(32.0)
-  //     if (m_spawnRangeTexts[i] == null)
-  //       m_spawnRangeTexts[i] = createTTEx(
-  //         spawnRangeTextPos,
-  //         "{0} ({1})".format(spawnRange.toString(), spawnRangeReal.max.toString()),
-  //         10.0)
-  //     m_spawnRangeTexts[i].setPos(spawnRangeTextPos)
+      let spawnRangeTextPos = (m_circle.center + vec2(0, spawnRangeReal.max)).withZ(32.0)
+      if (m_spawnRangeTexts[i] == null)
+        m_spawnRangeTexts[i] = createTTEx(
+          spawnRangeTextPos,
+          "{0} ({1})".format(spawnRange.toString(), spawnRangeReal.max.toString()),
+          10.0)
+      m_spawnRangeTexts[i].setPos(spawnRangeTextPos)
 
-  //   for i = 0 to 31
-  //     if (m_valid[i])
-  //       if (m_spawnPointEffects[i] == null)
-  //         m_spawnPointEffects[i] = AddSpecialEffect("UI\\Feedback\\WaypointFlags\\WaypointFlag.mdl", m_pos[i].x, m_pos[i].y)
-  //         m_spawnPointEffects[i].setColor(m_player.getColor().toColor())
-  //         FX.createJobChangeEffect(m_pos[i])
-  //       m_spawnPointEffects[i].setPos(m_pos[i])
-  //     if (not m_valid[i] and m_spawnPointEffects[i] != null)
-  //       m_spawnPointEffects[i].destr()
+    for i = 0 to 31
+      if (m_valid[i])
+        if (m_spawnPointEffects[i] == null)
+          m_spawnPointEffects[i] = AddSpecialEffect("UI\\Feedback\\WaypointFlags\\WaypointFlag.mdl", m_pos[i].x, m_pos[i].y)
+          m_spawnPointEffects[i].setColor(m_debugColor)
+          FX.createJobChangeEffect(m_pos[i])
+        m_spawnPointEffects[i].setPos(m_pos[i])
+      if (not m_valid[i] and m_spawnPointEffects[i] != null)
+        m_spawnPointEffects[i].destr()
 
 // ============================================================================
 function processRequests()
