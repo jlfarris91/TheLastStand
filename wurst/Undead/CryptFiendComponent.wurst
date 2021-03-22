@@ -1,0 +1,121 @@
+package CryptFiendComponent
+import UnitComponent
+import ClosureEvents
+import TlsAbilityIds
+import UnitAnimations
+import ClosureTimers
+import Orders
+import ObjectIdGenerator
+import UnitObjEditing
+
+constant real BURROW_SETTLE_DURATION = 2.0
+constant real BURROW_TRAVEL_DURATION = 3.0
+constant real BURROW_FINALIZE_DURATION = 3.0
+constant int DUMMY_ID = compiletime(UNIT_ID_GEN.next())
+
+// ============================================================================
+public class CryptFiendComponent extends UnitComponent
+  private bool m_isBurrowing
+  private angle m_facingAngle
+  private vec2 m_endPos
+
+  // --------------------------------------------------------------------------
+  construct(IUnitMetadata owner)
+    super(owner)
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    cleanup()
+
+  // --------------------------------------------------------------------------
+  override function getTypeId() returns int
+    return CryptFiendComponent.typeId
+
+  // --------------------------------------------------------------------------
+  function burrow(vec2 pos)
+    if (m_isBurrowing)
+      return
+
+    m_isBurrowing = true
+    m_endPos = pos
+
+    var ownerUnit = getOwnerUnit()
+
+    m_facingAngle = ownerUnit.getFacingAngle()
+
+    // Pause the unit so that it can't be given any more orders
+    ownerUnit.pause()
+
+    // Start the burrowing animation
+    ownerUnit.setAnimation(UnitAnimations.CryptFiend.morph.idx)
+    
+    // Let the burrow animation finish
+    doAfter(UnitAnimations.CryptFiend.morph.duration + BURROW_SETTLE_DURATION) () ->
+    //{
+      ownerUnit = getOwnerUnit()
+
+      // Move the unit to the end position while it's invisible
+      ownerUnit.setX(m_endPos.x)
+      ownerUnit.setY(m_endPos.y)
+      BlzSetUnitFacingEx(ownerUnit, m_facingAngle.degrees())
+
+      // Play the stand alternate animation
+      ownerUnit.setAnimation(UnitAnimations.CryptFiend.standAlternate.idx)
+
+      // Wait a few seconds before teleporting the unit to the target pos
+      doAfter(BURROW_TRAVEL_DURATION) () ->
+      //{
+        ownerUnit = getOwnerUnit()
+        
+        // Now that the unit is in the new location play the unborrow animation
+        ownerUnit.setAnimation(UnitAnimations.CryptFiend.morphAlternate.idx)
+        
+        // Let the unburrow animation finish
+        doAfter(UnitAnimations.CryptFiend.morphAlternate.duration) () ->
+        //{
+          ownerUnit = getOwnerUnit()
+
+          // Unpause the unit so that it can continue on with its plans
+          ownerUnit.unpause()
+          
+          // Tell it to target a unit
+          ownerUnit.issuePointOrderById(OrderIds.attack, m_endPos)
+
+          // At this point the unit is doing its thing, wait and then cleanup
+          doAfter(BURROW_FINALIZE_DURATION) () ->
+            cleanup()
+        //}
+      //}
+    //}
+      
+  // --------------------------------------------------------------------------
+  private function cleanup()
+    m_isBurrowing = false
+    m_endPos = ZERO2
+    m_facingAngle = angle(0)
+
+// ============================================================================
+public function IUnitMetadata.getCryptFiendComponent() returns CryptFiendComponent
+  return this.getComponent(typeInfo(CryptFiendComponent.typeId)) castTo CryptFiendComponent
+
+// ============================================================================
+public function IUnitMetadata.getOrAddCryptFiendComponent() returns CryptFiendComponent
+  var component = this.getCryptFiendComponent()
+  if (component == null)
+    component = this.addComponent(new CryptFiendComponent(this)) castTo CryptFiendComponent
+  return component
+
+// ============================================================================
+function onCryptFiendBurrowCast(unit _unit, vec2 pos)
+  let metadata = _unit.getMetadata()
+  if (metadata == null)
+    return
+  let comp = metadata.getCryptFiendComponent()
+  if (comp == null)
+    return
+  comp.burrow(pos)
+
+// ============================================================================
+init
+  EventListener.onPointCast(TlsAbilityIds.cryptFiendBurrow, (_unit, pos) -> onCryptFiendBurrowCast(_unit, pos))
+  
