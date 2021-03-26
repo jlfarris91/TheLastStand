@@ -12,14 +12,19 @@ Report bugs and suggestions [here](https://github.com/jlfarris91/TheLastStand/is
 
 # The Last Stand
 
-The Last Stand is a multiplayer post-apocalyptic base-building survival game for up to 8 players. Players loot and build their base during the day and defend against hordes of the undead at night.
+The Last Stand is a multiplayer post-apocalyptic zombie survival game where players build and defend a camp in a large open world.
 
-- Build together or try to survive alone!
-- With no pre-defined locations to build you can build anywhere! Carve your way into the trees to build your camp if you'd like to!
-- Each night is a wave with increasingly difficult elite enemies.
-- Loot buildings to find lumber, gold, items, survivors or undead!
-- Assign survivors jobs to give them new skills and responsibilities in your camp.
-- Continuous development with new releases every few weeks.
+#### Day Night Cycle
+Build your camp during the day but make sure you get your defenses up before nightfall! The undead spawn around your camp in vast numbers at night and each night introduces a new Elite undead type to contend with.
+
+#### Build Anywhere!
+Build solo or with your friends - with no pre-defined building locations you can set up your camp anywhere! Not sure where to build? Use the "-bases" chat command to show recommend spots identified as Green, Yellow and Red spots on the minimap. Green spots are easy to defend solo with only 1 entrance, Yellow spots are hard to defend solo with 2-3 entrances. Red spots are very hard with 4+ entrances to defend and will require working with a friend. With the Builder job a Survivor can cut down trees to expand your camp. Get creative with your bases!
+
+#### Survivor Jobs
+Assign Survivors jobs to give them new skills and abilities. Give a Survivor the Builders Tools to assign them the Builder job unlocking more advanced buildings in the tech tree. Or, give a Survivor the Rusty Sword item to assign them the Militia job to give them an attack to help defend your camp. There are additional jobs: Spearmen, Marksmen, Medics and even more jobs being added in the future.
+
+#### Explore and Loot
+Send your hero out to explore the map while your soldiers defend the camp. Loot abandoned buildings, mines, piles of junk, etc to find more resources, exciting items, more Survivors or, if you're unlucky, the undead! Bring items back to your camp to beef up your soldiers.
 
 # How to Play
 
