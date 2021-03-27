@@ -98,12 +98,16 @@ public class SpawnWave extends Runnable
     if (targetPlayer == null)
       error("[SpawnWave.onActivated] Target player has not been set")
       return
+      
+    log("activateForPlayer", m_targetPlayer.getName() + "========================")
 
     if (isCompleted())
+      log("activateForPlayer", m_targetPlayer.getName() + " : Spawn wave has already completed")
       return
 
     let playerMetadata = targetPlayer.getHumanMetadata()
     if (playerMetadata == null or playerMetadata.getIsDead())
+      log("activateForPlayer", m_targetPlayer.getName() + " : Player is dead")
       return
 
     let waveProgress = getProgress()
@@ -124,6 +128,8 @@ public class SpawnWave extends Runnable
       return
 
     var numSpawnsAvailable = getNumSpawnsAvailable(aliveCountMax, spawnCountMax)
+
+    var numberSpawned = 0
 
     // For each spawn point
     for sp in spawnPointsResult.spawnPoints
@@ -153,7 +159,8 @@ public class SpawnWave extends Runnable
           if (numSpawnsAvailable == 0)
             break
 
-          spawnSingleUnit(unitType, sp, targetPlayer)
+          if (spawnSingleUnit(unitType, sp, targetPlayer))
+            numberSpawned++
 
           numSpawnsAvailable = getNumSpawnsAvailable(aliveCountMax, spawnCountMax)
 
@@ -162,6 +169,9 @@ public class SpawnWave extends Runnable
 
     // Clean up the spawnPoints list
     destroy spawnPointsResult.spawnPoints
+
+    if (numberSpawned == 0)
+      log("activateForPlayer", m_targetPlayer.getName() + " : No unit was spawned")
 
   // --------------------------------------------------------------------------
   private function getNumSpawnsAvailable(int aliveCountMax, int spawnCountMax) returns int
@@ -172,17 +182,17 @@ public class SpawnWave extends Runnable
     let numSpawnsAvailable = max(min(remainingAlive, remainingSpawn), 0)
 
     if (spawnedCount >= spawnCountMax)
-      //Log.debug("[SpawnWave.onActivated] Reached max number of spawns for wave")
+      log("getNumSpawnsAvailable", m_targetPlayer.getName() + " : Reached max number of spawns for wave")
       return 0
 
     if (aliveCount >= aliveCountMax)
-      //Log.debug("[SpawnWave.onActivated] Reached max number of concurrent alive")
+      log("getNumSpawnsAvailable", m_targetPlayer.getName() + " : Reached max number of concurrent alive")
       return 0
 
     return numSpawnsAvailable
 
   // --------------------------------------------------------------------------
-  private function spawnSingleUnit(int unitTypeId, vec2 pos, player targetPlayer)
+  private function spawnSingleUnit(int unitTypeId, vec2 pos, player targetPlayer) returns bool
     
     unit spawnedUnit
     
@@ -201,7 +211,7 @@ public class SpawnWave extends Runnable
 
     if (spawnedUnit == null)
       error("Unable to recycle unit for spawn wave : " + UnitId2String(unitTypeId))
-      return
+      return false
 
     registerSpawnedUnit(spawnedUnit)
   
@@ -216,6 +226,8 @@ public class SpawnWave extends Runnable
       unitModifier.call(spawnedUnit, progress)
 
     setTargetPlayer(spawnedUnit, targetPlayer)
+
+    return true
 
   // --------------------------------------------------------------------------
   private function setTargetPlayer(unit _unit, player targetPlayer)
@@ -287,6 +299,7 @@ public class SpawnWave extends Runnable
   private function onDefProgressChanged()
     raiseProgressChangedEvent()
     if (getProgress() == 1.0)
+      log("onDefProgressChanged", m_targetPlayer.getName() + " : progress finished!")
       complete()
 
   // --------------------------------------------------------------------------
