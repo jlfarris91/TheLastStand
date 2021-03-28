@@ -31,8 +31,6 @@ function onPlayerHeroDied(HumanPlayerMetadata playerMetadata)
 
   giveAllUnitsToVillagersPlayer(_player)
 
-  playerMetadata.reset()
-
 // ============================================================================
 function onPlayerUnitDied()
   let dyingUnit = GetDyingUnit()
@@ -65,46 +63,44 @@ function onPlayerLostGame(player _player)
 // ============================================================================
 function onPlayerLeftGame()
   let leavingPlayer = GetTriggerPlayer()
+  
   let metadata = leavingPlayer.getHumanMetadata()
-  if (metadata == null)
-    return
+  if (metadata != null)
+  
+    metadata.setHasLeftGame(true)
+
+    // Remove their hero
+    let hero = metadata.getHero()
+    if (hero != null)
+      let heroUnit = hero.getUnit()
+      if (heroUnit != null)
+        heroUnit.remove()
 
   g_PlayingHumanPlayers.remove(leavingPlayer)
-  metadata.setHasLeftGame(true)
   leavingPlayer.setDisplayName("<Left>")
   
-  // Give the rest of their units to the villagers player
-  giveAllUnitsToVillagersPlayer(PLAYER_VILLAGERS)
-
-  // Remove their hero
-  let hero = metadata.getHero()
-  if (hero != null)
-    let heroUnit = hero.getUnit()
-    if (heroUnit != null)
-      heroUnit.remove()
-
-  // Remove their camp tent
-  let temp = getGroup()
-  for _unit in temp
-    if (_unit.isCampHeadquarters())
-      _unit.kill()
-  temp.release()
+  giveAllUnitsToVillagersPlayer(leavingPlayer)
 
 // ============================================================================
-function giveAllUnitsToVillagersPlayer(player p)
+function giveAllUnitsToVillagersPlayer(player _player)
   
   unit playerHeroUnit = null
-  let playerMetadata = p.getHumanMetadataRequired()
+  let playerMetadata = _player.getHumanMetadata()
   if (playerMetadata != null)
     let playerHero = playerMetadata.getHero()
     if (playerHero != null)
       playerHeroUnit = playerHero.getUnit()
 
   let tempGroup = getGroup()
-  tempGroup.enumUnitsOfPlayer(p, null)
+  tempGroup.enumUnitsOfPlayer(_player, null)
   for u from tempGroup
-    if (u.isStructure())
+    // We always destroy the camp headquarters
+    if (u.isCampHeadquarters())
+      u.kill()
+    // If it's a structure give it to the Villagers player so they can be reclaimed
+    else if (u.isStructure())
       u.setOwner(PLAYER_VILLAGERS, true)
+    // If it's a unit that's not the hero, banish them
     else if (u != playerHeroUnit)
       banishSurvivor(u)
   tempGroup.release()
