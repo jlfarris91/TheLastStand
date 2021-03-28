@@ -11,6 +11,8 @@ import RealtimeUpdate
 import DamageEvent
 import Damage
 import Orders
+import Time
+import HashList
 
 constant real SPIKE4_TIMESCALE_ENABLED = 1.0
 constant real SPIKE4_TIMESCALE_DISABLED = 0.0
@@ -18,6 +20,9 @@ constant real SPIKE4_TIMESCALE_ATTACK = 5.0
 constant real SPIKE4_ATTACKTIMER_DURATION = 1.0
 constant int SPIKE_DISABLED_ABILITY_ID = compiletime(ABIL_ID_GEN.next())
 constant string SPIKE_DISABLED_EFFECT_PATH = "Abilities\\Disarm\\Disarm Red\\Disarm Red.mdx"
+constant int SPIKE_REPAIR_ENABLED_TARGETFLAG = 4 // TARGET_FLAG_AIR
+constant int SPIKE_REPAIR_DISABLED_TARGETFLAG = 0 // TARGET_FLAG_...invulnerable?
+HashList<SpikesComponent> g_activeSpikeComponents = new HashList<SpikesComponent>()
 
 // ============================================================================
 public class SpikesComponent extends RealtimeUnitComponent
@@ -28,9 +33,12 @@ public class SpikesComponent extends RealtimeUnitComponent
   // --------------------------------------------------------------------------
   construct (IUnitMetadata owner)
     super(owner)
+    g_activeSpikeComponents.add(this)
 
   // --------------------------------------------------------------------------
   ondestroy
+    g_activeSpikeComponents.remove(this)
+  
     releaseSpike4AttackTimer()
 
     if (m_disabledEffect != null)
@@ -174,6 +182,14 @@ public class SpikesComponent extends RealtimeUnitComponent
       m_spike4AttackTimerCallback.restart()
 
   // --------------------------------------------------------------------------
+  function setRepairEnabled(bool enabled)
+    getOwnerUnit().setField(UNIT_IF_TARGETED_AS, (enabled ? SPIKE_REPAIR_ENABLED_TARGETFLAG : SPIKE_REPAIR_DISABLED_TARGETFLAG))
+
+  // --------------------------------------------------------------------------
+  function getRepairEnabled() returns bool
+    return getOwnerUnit().getField(UNIT_IF_TARGETED_AS) == SPIKE_REPAIR_ENABLED_TARGETFLAG
+
+  // --------------------------------------------------------------------------
   private function playSpike4AttackAnimation()
     if (not getSpikesEnabled())
       return
@@ -284,8 +300,20 @@ function onUnitIssuedTargetOrder()
   comp.onIssuedAttackOrder()
 
 // ============================================================================
+function onDayStart()
+  for comp in g_activeSpikeComponents
+    comp.setRepairEnabled(true)
+
+// ============================================================================
+function onNightStart()
+  for comp in g_activeSpikeComponents
+    comp.setRepairEnabled(false)
+
+// ============================================================================
 init
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_UPGRADE_FINISH, function onUpgradeFinished)
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ISSUED_TARGET_ORDER, function onUnitIssuedTargetOrder)
   DamageEvent.addListener(DAMAGE_EVENT_PRIO_SHIELD, () -> onDamageEventShield())
   DamageEvent.addListener(DAMAGE_EVENT_PRIO_FINAL, () -> onDamageEventFinal())
+  registerDayEvent(function onDayStart)
+  registerNightEvent(function onNightStart)
