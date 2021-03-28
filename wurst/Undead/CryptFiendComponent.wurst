@@ -17,6 +17,8 @@ import RealtimeUpdate
 import ObjectIds
 import AbilityIds
 import Vector
+import UndeadTargetingComponent
+import HashList
 
 constant real BURROW_SETTLE_DURATION = 2.0
 constant real BURROW_TRAVEL_DURATION = 3.0
@@ -31,6 +33,8 @@ constant string EFFECT_PATH = "abilities\\Burrow\\BurrowDirtClump.mdl"
 constant real EFFECT_LIFETIME = 1.0
 
 constant conditionfunc g_burrowTargetFilter = Condition(function isFilterUnitValidBurrowTarget)
+
+HashList<int> g_undeadTargetingComponentIgnoreOrderList = new HashList<int>()
 
 // ============================================================================
 public class CryptFiendComponent extends UnitComponent
@@ -60,6 +64,10 @@ public class CryptFiendComponent extends UnitComponent
   override function onEnabled()
     super.onEnabled()
     
+    let undeadTargetingComponent = getOwner().getUndeadTargetingComponent()
+    if (undeadTargetingComponent != null)
+      undeadTargetingComponent.setIgnoreOrderIdsList(g_undeadTargetingComponentIgnoreOrderList)
+
     m_burrowCastTimer = getTimer().doManual(BURROW_CAST_INTERVAL, true) ->
       burrowToNearestTarget()
 
@@ -150,8 +158,7 @@ public class CryptFiendComponent extends UnitComponent
         
         doAfter(BURROW_FINALIZE_DURATION) () ->
         //{
-          if (m_burrowCastTimer != null)
-            m_burrowCastTimer.restart()
+          restartCastTimer()
           cleanup()
         //}
       //}
@@ -165,6 +172,7 @@ public class CryptFiendComponent extends UnitComponent
       return false
     let nearestTarget = getNearestTarget()
     if (nearestTarget == null)
+      restartCastTimer()
       return false
     burrow(nearestTarget)
     return true
@@ -176,6 +184,11 @@ public class CryptFiendComponent extends UnitComponent
   // --------------------------------------------------------------------------
   private function isBurrowStillValid() returns bool
     return getOwnerUnit().isAlive() and m_targetUnit != null and m_targetUnit.isValidBurrowTarget()
+
+  // --------------------------------------------------------------------------
+  private function restartCastTimer()
+    if (m_burrowCastTimer != null)
+      m_burrowCastTimer.restart()
 
   // --------------------------------------------------------------------------
   private function cleanup()
@@ -360,11 +373,12 @@ function unit.isValidBurrowTarget() returns bool
 
 // ============================================================================
 function isFilterUnitValidBurrowTarget() returns bool
-  let filterUnit = GetFilterUnit()
-  return filterUnit.isValidBurrowTarget()
+  return GetFilterUnit().isValidBurrowTarget()
 
 // ============================================================================
 function onCryptFiendBurrowCast(unit sender, unit target)
+  if (not target.isValidBurrowTarget())
+    return
   let metadata = sender.getMetadata()
   if (metadata == null)
     return
@@ -376,4 +390,7 @@ function onCryptFiendBurrowCast(unit sender, unit target)
 // ============================================================================
 init
   EventListener.onTargetCast(TlsAbilityIds.cryptFiendBurrow, (sender, target) -> onCryptFiendBurrowCast(sender, target))
+
+  // UndeadTargetingComponent - ignore burrow order
+  g_undeadTargetingComponentIgnoreOrderList.add(TlsAbilityIds.cryptFiendBurrow)
   
