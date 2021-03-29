@@ -16,8 +16,11 @@ import PlayerSpawnPointProviders
 import UnitMetadata
 import UndeadTargetingComponent
 import Runnable
+import Dispatcher
+import ClosureTimers
 
 HashMap<unit, SpawnWave> g_unitToSpawnWaveMap
+Dispatcher g_spawnDispatcher
 
 // ============================================================================
 public class SpawnWave extends Runnable
@@ -65,11 +68,16 @@ public class SpawnWave extends Runnable
     m_aliveSpawnedUnits.clear()
     m_numSpawned = 0
 
-    m_definition.getActivator().start()
+    // Do this one frame later so that all player spawn waves that share these
+    // spawn def services get started
+    nullTimer() () ->
+    //{
+      m_definition.getActivator().start()
 
-    let runnableProgress = (m_definition.getProgress() castTo int) castTo IRunnable
-    if (runnableProgress != null)
-      runnableProgress.start()
+      let runnableProgress = (m_definition.getProgress() castTo int) castTo IRunnable
+      if (runnableProgress != null)
+        runnableProgress.start()
+    //}
 
   // --------------------------------------------------------------------------
   override function onCompleted()
@@ -78,22 +86,31 @@ public class SpawnWave extends Runnable
     unlistenToActivatedEvent()
     unlistenToDefProgressChangedEvent()
 
-    m_definition.getActivator().complete()
+    // Do this one frame later so that all player spawn waves that share these
+    // spawn def services get complete first
+    nullTimer() () ->
+    //{
+      m_definition.getActivator().complete()
 
-    let runnableProgress = (m_definition.getProgress() castTo int) castTo IRunnable
-    if (runnableProgress != null)
-      runnableProgress.complete()
+      let runnableProgress = (m_definition.getProgress() castTo int) castTo IRunnable
+      if (runnableProgress != null)
+        runnableProgress.complete()
+    //}
 
   // --------------------------------------------------------------------------
   override function getProgress() returns real
     return clamp01(m_definition.getProgress().getProgress())
 
   // --------------------------------------------------------------------------
-  function activateOnce()
+  function activate()
     activateForPlayer(m_targetPlayer)
 
   // --------------------------------------------------------------------------
   function activateForPlayer(player targetPlayer)
+    g_spawnDispatcher.invoke(() -> activate(targetPlayer), DispatchPriority.LOW)
+
+  // --------------------------------------------------------------------------
+  private function activate(player targetPlayer)
  
     if (targetPlayer == null)
       error("[SpawnWave.onActivated] Target player has not been set")
@@ -129,8 +146,6 @@ public class SpawnWave extends Runnable
 
     var numSpawnsAvailable = getNumSpawnsAvailable(aliveCountMax, spawnCountMax)
 
-    var numberSpawned = 0
-
     // For each spawn point
     for sp in spawnPointsResult.spawnPoints
       
@@ -159,8 +174,7 @@ public class SpawnWave extends Runnable
           if (numSpawnsAvailable == 0)
             break
 
-          if (spawnSingleUnit(unitType, sp, targetPlayer))
-            numberSpawned++
+          spawnSingleUnit(unitType, sp, targetPlayer)
 
           numSpawnsAvailable = getNumSpawnsAvailable(aliveCountMax, spawnCountMax)
 
@@ -169,9 +183,6 @@ public class SpawnWave extends Runnable
 
     // Clean up the spawnPoints list
     destroy spawnPointsResult.spawnPoints
-
-    if (numberSpawned == 0)
-      log("activateForPlayer", m_targetPlayer.getName() + " : No unit was spawned")
 
   // --------------------------------------------------------------------------
   private function getNumSpawnsAvailable(int aliveCountMax, int spawnCountMax) returns int
@@ -287,7 +298,7 @@ public class SpawnWave extends Runnable
     if (e == null)
       return
 
-    m_onActivatedHandler = e.register(() -> activateOnce())
+    m_onActivatedHandler = e.register(() -> activate())
 
   // --------------------------------------------------------------------------
   private function unlistenToActivatedEvent()
@@ -335,3 +346,7 @@ function onUnitDeath()
 init
   g_unitToSpawnWaveMap = new HashMap<unit, SpawnWave>()
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_DEATH, function onUnitDeath)
+
+  nullTimer() () ->
+    if (g_spawnDispatcher == null)
+      g_spawnDispatcher = new Dispatcher()..setMaxExecutions(1)

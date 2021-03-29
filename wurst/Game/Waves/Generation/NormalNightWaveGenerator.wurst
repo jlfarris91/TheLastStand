@@ -39,6 +39,7 @@ constant time NIGHT_WAVE_END_TIME = NIGHT_WAVE_START_TIME + WAVE_NIGHT_LENGTH
 constant int MAX_SPAWN_WAVES = 2
 
 SpawnWaveDefinition array[TOTAL_NIGHTS * MAX_SPAWN_WAVES] g_spawnWaveDefinitions
+ItemSet array[TOTAL_NIGHTS] g_coinItemSets
 
 // ============================================================================
 function setSpawnWaveDef(int night, int spawnWaveIndex, SpawnWaveDefinition def)
@@ -132,6 +133,22 @@ function defineSpawnWaves()
 
   // 14 Wraiths                (Invade, Ethereal, Melee)
   setSpawnWaveDef(gameProgress.nextWave(), 1, createSpawnWave_Wraiths(gameProgress))
+
+  // Generate coin item sets for each wave
+  gameProgress.setCurrentWaveNumber(1)
+  for i = 0 to TOTAL_NIGHTS - 1
+    gameProgress.nextWave()
+    let gameT = gameProgress.getCurrentGameProgress()
+    let coinItemSet = new ItemSet("Coins", COLOR_GOLD.withoutAlpha())
+    let weightSmall = g_coinSmallWeightTFunc.call(gameT)
+    let weightMedium = g_coinMediumWeightTFunc.call(gameT)
+    let weightLarge = g_coinLargeWeightTFunc.call(gameT)
+    let weightEpic = g_coinEpicWeightTFunc.call(gameT)
+    coinItemSet.add(TlsItemIds.coinSmall, weightSmall)
+    coinItemSet.add(TlsItemIds.coinMedium, weightMedium)
+    coinItemSet.add(TlsItemIds.coinLarge, weightLarge)
+    coinItemSet.add(TlsItemIds.coinEpic, weightEpic)
+    g_coinItemSets[i] = coinItemSet
 
 // ============================================================================
 public class NormalNightWaveGenerator implements IWaveGenerator<NightWave>
@@ -721,20 +738,8 @@ function getProgressForSpawnWave(IGameWaveProgress gameProgress) returns IProgre
     ..setDuration(WAVE_NIGHT_LENGTH)
 
 // ============================================================================
-function getCoinItemSetForWave(real gameT) returns ItemSet
-  let itemSet = new ItemSet("Coins", COLOR_GOLD.withoutAlpha())
-
-  let weightSmall = g_coinSmallWeightTFunc.call(gameT)
-  let weightMedium = g_coinMediumWeightTFunc.call(gameT)
-  let weightLarge = g_coinLargeWeightTFunc.call(gameT)
-  let weightEpic = g_coinEpicWeightTFunc.call(gameT)
-
-  itemSet.add(TlsItemIds.coinSmall, weightSmall)
-  itemSet.add(TlsItemIds.coinMedium, weightMedium)
-  itemSet.add(TlsItemIds.coinLarge, weightLarge)
-  itemSet.add(TlsItemIds.coinEpic, weightEpic)
-
-  return itemSet
+function getCoinItemSetForWave(int waveIndex) returns ItemSet
+  return g_coinItemSets[waveIndex]
 
 // ============================================================================
 function unit.standardEliteMaxHp(real gameT)
@@ -813,13 +818,16 @@ function unit.standardGrantCoinsOnDeath(real gameT)
 
 // ============================================================================
 function unit.standardGrantCoinsOnDeath(real gameT, real chanceScale)
+  let waveNumber = (TOTAL_NIGHTS * gameT).floor()
+  let coinItemSet = getCoinItemSetForWave(waveNumber)
   let chance = lerp(COIN_CHANCE_RANGE.min, COIN_CHANCE_RANGE.max, gameT) * chanceScale
-  let itemSet = getCoinItemSetForWave(gameT)
-  this.awardRandomItemOnDeath(itemSet, chance)
+  this.awardRandomItemOnDeath(coinItemSet, chance)
 
 // ============================================================================
 function unit.guaranteeGrantCoinsOnDeath(real gameT)
-  this.awardRandomItemOnDeath(getCoinItemSetForWave(gameT), 1.0)
+  let waveNumber = (TOTAL_NIGHTS * gameT).floor()
+  let coinItemSet = getCoinItemSetForWave(waveNumber)
+  this.awardRandomItemOnDeath(coinItemSet, 1.0)
 
 // ============================================================================
 init

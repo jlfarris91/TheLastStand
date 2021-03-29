@@ -13,19 +13,23 @@ import Unit_WoodFence
 import Unit_StoneWall
 import Unit_GateCommon
 import Unit_MetalWall
-import GameConstants
 import Orders
 import TargetUtility
 import UnitExtensions
 import ClosureTimers
-import TimerUtils
+import RealTime
+import Dispatcher
 
+constant real ATTACK_TIMER_INTERVAL = 1.0
 constant real ATTACK_TIMER_DURATION = 10.0
+
 HashMap<player, LinkedList<unit>> g_validHumanStructureTargets
 HashList<int> g_validTargetStructureIds
 conditionfunc g_filterUnitIsValidTargetStructure = Condition(function filterUnitIsValidTargetStructure)
 conditionfunc g_filterUnitIsValidTargetNonStructure = Condition(function filterUnitIsValidTargetNonStructure)
 HashMap<unit, HashList<UndeadTargetingComponent>> g_targetedUnitToUTCMap = new HashMap<unit, HashList<UndeadTargetingComponent>>()
+HashList<UndeadTargetingComponent> g_activeUndeadTargetingComponents = new HashList<UndeadTargetingComponent>()
+Dispatcher g_issueOrderDispatcher
 
 /*
 
@@ -59,20 +63,14 @@ public class UndeadTargetingComponent extends UnitComponent
   private player m_targetPlayer
   private Event m_targetPlayerChangedEvent
   private unit m_targetUnit
-  private CallbackManual m_attackTimer
-
-  // Not owned!
-  private HashList<int> m_ignoreOrderIdsList
+  private int m_attackTime
+  private bool m_awaitingOrder
 
   // --------------------------------------------------------------------------
   construct(IUnitMetadata owner)
     super(owner)
     m_targetPlayer = null
     m_targetUnit = null
-
-    m_attackTimer = getTimer().doManual(ATTACK_TIMER_DURATION, true) () ->
-      m_targetUnit = null
-      issueOrderTargetingPlayer()
 
   // --------------------------------------------------------------------------
   ondestroy
@@ -83,6 +81,16 @@ public class UndeadTargetingComponent extends UnitComponent
   // --------------------------------------------------------------------------
   override function getTypeId() returns int
     return UndeadTargetingComponent.typeId
+
+  // --------------------------------------------------------------------------
+  override function onEnabled()
+    super.onEnabled()
+    g_activeUndeadTargetingComponents.add(this)
+
+  // --------------------------------------------------------------------------
+  override function onDisabled()
+    super.onDisabled()
+    g_activeUndeadTargetingComponents.remove(this)
 
   // --------------------------------------------------------------------------
   function getTargetPlayerChangedEvent() returns Event
@@ -109,15 +117,29 @@ public class UndeadTargetingComponent extends UnitComponent
     return true
 
   // --------------------------------------------------------------------------
-  function getIgnoreOrderIdsList() returns HashList<int>
-    return m_ignoreOrderIdsList
-
-  // --------------------------------------------------------------------------
-  function setIgnoreOrderIdsList(HashList<int> orderIds)
-    m_ignoreOrderIdsList = orderIds
-
-  // --------------------------------------------------------------------------
   function issueOrderTargetingPlayer()
+
+    if (not getOwnerUnit().isAlive())
+      return
+
+    // We're already awaiting a call to issueOrderTargetingPlayer_impl so early out
+    if (m_awaitingOrder)
+      return
+
+    m_awaitingOrder = true
+
+    // Dispatch this operation to limit how often this gets executed because
+    // finding the nearest unit can be expensive
+    g_issueOrderDispatcher.invoke(() -> issueOrderTargetingPlayer_impl(), DispatchPriority.LOW)
+
+  // --------------------------------------------------------------------------
+  private function issueOrderTargetingPlayer_impl()
+
+    m_awaitingOrder = false
+    restartAttackTimer()
+
+    if (not getOwnerUnit().isAlive())
+      return
 
     if (tryReissueOrder())
       return
@@ -129,7 +151,7 @@ public class UndeadTargetingComponent extends UnitComponent
       return
 
     // At this point the target unit must not have been valid
-    m_targetUnit = null
+    setTargetUnit(null)
 
     // 3. Try attack-moving to the target player's camp center (the OT or the hero)
     if (tryTargetCampCenter())
@@ -220,10 +242,6 @@ public class UndeadTargetingComponent extends UnitComponent
     return true
 
   // --------------------------------------------------------------------------
-  protected function increaseAcquisitionRange()
-    getOwnerUnit().setField(UNIT_RF_ACQUISITION_RANGE, 1024)
-
-  // --------------------------------------------------------------------------
   protected function onTargetUnitDied()
     setTargetUnit(null)
     issueOrderTargetingPlayer()
@@ -238,9 +256,18 @@ public class UndeadTargetingComponent extends UnitComponent
       m_targetPlayerChangedEvent.call()
 
   // --------------------------------------------------------------------------
-  private function restartAttackTimer()
-    if (m_attackTimer != null)
-      m_attackTimer.restart()
+  protected function onAttackTimer()
+    if (m_awaitingOrder)
+      return
+    // If the timer has expired then this unit hasn't been able to attack
+    // it's target in a while so try to target a new enemy
+    if (getRealTimeSeconds() - m_attackTime > ATTACK_TIMER_DURATION)
+      setTargetUnit(null)
+      issueOrderTargetingPlayer()
+
+  // --------------------------------------------------------------------------
+  protected function restartAttackTimer()
+    m_attackTime = getRealTimeSeconds()
 
 // ============================================================================
 public function IUnitMetadata.getUndeadTargetingComponent() returns UndeadTargetingComponent
@@ -348,60 +375,6 @@ function populateInitialValidHumanStructureTargets()
   tempGroup.release()
 
 // ============================================================================
-function onUnitIssuedTargetOrder()
-  let orderedUnit = GetOrderedUnit()
-  let orderId = GetIssuedOrderId()
-  
-  if (orderedUnit.getOwner() != PLAYER_UNDEAD or orderId == OrderIds.attack)
-    return
-
-  let comp = orderedUnit.getMetadata().getUndeadTargetingComponent()  
-  if (comp == null)
-    return
-
-  let ignoreList = comp.getIgnoreOrderIdsList()
-  if (ignoreList != null and ignoreList.has(orderId))
-    return
-
-  comp.issueOrderTargetingPlayer()
-
-// ============================================================================
-function onUnitIssuedOrder()
-  let orderedUnit = GetOrderedUnit()
-  let orderId = GetIssuedOrderId()
-  
-  if (orderedUnit.getOwner() != PLAYER_UNDEAD or orderId == OrderIds.attack)
-    return
-
-  let comp = orderedUnit.getMetadata().getUndeadTargetingComponent()  
-  if (comp == null)
-    return
-
-  let ignoreList = comp.getIgnoreOrderIdsList()
-  if (ignoreList != null and ignoreList.has(orderId))
-    return
-
-  comp.issueOrderTargetingPlayer()
-
-// ============================================================================
-function onUnitIssuedPointOrder()
-  let orderedUnit = GetOrderedUnit()
-  let orderId = GetIssuedOrderId()
-  
-  if (orderedUnit.getOwner() != PLAYER_UNDEAD or orderId == OrderIds.attack)
-    return
-
-  let comp = orderedUnit.getMetadata().getUndeadTargetingComponent()  
-  if (comp == null)
-    return
-
-  let ignoreList = comp.getIgnoreOrderIdsList()
-  if (ignoreList != null and ignoreList.has(orderId))
-    return
-
-  comp.issueOrderTargetingPlayer()
-
-// ============================================================================
 function registerTargetedUnit(unit targetedUnit, UndeadTargetingComponent comp)
   HashList<UndeadTargetingComponent> attackerList
   if (g_targetedUnitToUTCMap.has(targetedUnit))
@@ -432,6 +405,8 @@ function unregisterTargetedUnit(unit targetedUnit)
 init
   g_validHumanStructureTargets = new HashMap<player, LinkedList<unit>>()
 
+  g_issueOrderDispatcher = new Dispatcher(1024, 1024, 1024)..setMaxExecutions(50)
+
   for p in g_PlayingHumanPlayers
     g_validHumanStructureTargets.put(p, new LinkedList<unit>())
 
@@ -453,10 +428,9 @@ init
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_DEATH, function onUnitDeath)
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ATTACKED, function onUnitAttacked)
 
-  // If an undead unit is issued ANY order other than attack the given target unit then reissue the order to attack the target unit
-  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ISSUED_POINT_ORDER, function onUnitIssuedPointOrder)
-  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ISSUED_TARGET_ORDER, function onUnitIssuedTargetOrder)
-  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ISSUED_ORDER, function onUnitIssuedOrder)
-
   // Populate with initial structures (for debug purposes)
   populateInitialValidHumanStructureTargets()
+
+  doPeriodically(ATTACK_TIMER_INTERVAL) (CallbackPeriodic cb) ->
+    for comp in g_activeUndeadTargetingComponents
+      g_issueOrderDispatcher.invoke(() -> comp.onAttackTimer(), DispatchPriority.HIGH)
