@@ -2,10 +2,16 @@ package PlayerCommands
 import ChatCommands
 import Bases
 import DisplayTextToPlayer
+import GameConstants
+import TLSMenuBar
+import CameraButton
+import ClosureTimers
 
 constant string COMMAND_BASES = "bases"
 constant string COMMAND_CLEAR = "clear"
+constant string COMMAND_ZOOM = "zoom"
 
+public quest g_playerCommandsQuest
 ChatCommandHandler g_playerChatCommandHandler
 
 // ============================================================================
@@ -37,11 +43,34 @@ function clearText()
   playerForce.destr()
 
 // ============================================================================
-init
-  g_playerChatCommandHandler = new ChatCommandHandler("Player")
+function setCameraDistance()
+  let command = getChatCommand()
+  let commandPlayer = getChatCommandPlayer()
+
+  let distanceArg = command.getArgument(0)
+  var distance = CAMERA_DISTANCE_DEFAULT
+
+  if (distanceArg != null)
+    distance = distanceArg.getReal()
+
+  SetCameraFieldForPlayer(commandPlayer, CAMERA_FIELD_TARGET_DISTANCE, distance, CAMERA_DISTANCE_SMOOTH)
+
+  let menu = getTLSMenu(commandPlayer)
+  let cameraButton = menu.m_items[MENU_ITEM_CAMERA] castTo CameraToggleButton
+  cameraButton.setCameraDistance(distance)
+
+// ============================================================================
+function setupPlayerCommandsQuest()
+  g_playerCommandsQuest = CreateQuest()
+  QuestSetIconPath(g_playerCommandsQuest, "ReplaceableTextures\\WorldEditUI\\DoodadPlaceholder.blp")
+  QuestSetTitle(g_playerCommandsQuest, "Player Commands")
+  QuestSetRequired(g_playerCommandsQuest, false)
+
+// ============================================================================
+function registerDebugCommands()
 
   g_playerChatCommandHandler.registerCommandDefinition(COMMAND_BASES, function showPlayerBasesCommand)
-    ..setDescription("Shows the player available bases and their difficulties. Optionally add 'easy', 'medium' or 'hard' to filter the bases.")
+    ..setDescription("Shows the player available bases and their difficulties.")
     ..addArgument(new ChatCommandArgument("DIFFICULTY", ChatCommandArgumentType.STRING, true)
       ..setStringOptions("easy", "medium", "hard")
       ..setDescription("Only show 'easy', 'medium' or 'hard' bases."))
@@ -49,4 +78,25 @@ init
   g_playerChatCommandHandler.registerCommandDefinition(COMMAND_CLEAR, function clearText)
     ..setDescription("Clears the screen of all text.")
 
+  g_playerChatCommandHandler.registerCommandDefinition(COMMAND_ZOOM, function setCameraDistance)
+    ..addRealArgument("DISTANCE", true)
+    ..setDescription("Sets the camera zoom. Reset to default if no number is provided.")
+
+  g_playerChatCommandHandler.addQuestItems()
+
+// ============================================================================
+init
+  setupPlayerCommandsQuest()
+
+  g_playerChatCommandHandler = new ChatCommandHandler("Player", g_playerCommandsQuest)
   registerChatCommandHandler(g_playerChatCommandHandler, 1)
+  
+  nullTimer(() -> registerDebugCommands())
+
+  // A special chat command handler that prints helpful information about registered commands
+  // HACK: This is initialized here instead of in ChatCommands so that we can access the g_playerCommandsQuest
+  let helpCommandHandler = new ChatCommandHandler("HELP", g_playerCommandsQuest)
+  helpCommandHandler.registerCommandDefinition(COMMAND_HELP_STR, function printHelp)
+    ..addStringArgument("COMMAND_NAME", true)
+
+  registerChatCommandHandler(helpCommandHandler, COMMAND_HELP_PRIORITY)
