@@ -5,7 +5,6 @@ import GameConstants
 import HumanPlayerMetadata
 import UnitMetadata
 import GroupUtils
-import UnitExtensions
 import Survivors
 import HumanPlayers
 import ClosureEvents
@@ -13,6 +12,10 @@ import GameInstance
 import ColorUtility
 import ProjectConstants
 import TlsUnitIds
+import Unit_WoodFence
+import Unit_StoneWall
+import Unit_MetalWall
+import Unit_GateCommon
 
 // ============================================================================
 function disableFogOfWarForPlayer(player p)
@@ -29,7 +32,7 @@ function onPlayerHeroDied(HumanPlayerMetadata playerMetadata)
   else
     onPlayerLostGame(_player)
 
-  giveAllUnitsToVillagersPlayer(_player)
+  processRemainingPlayerUnits(_player)
 
 // ============================================================================
 function onPlayerUnitDied()
@@ -79,10 +82,32 @@ function onPlayerLeftGame()
   g_PlayingHumanPlayers.remove(leavingPlayer)
   leavingPlayer.setDisplayName("<Left>")
   
-  giveAllUnitsToVillagersPlayer(leavingPlayer)
+  processRemainingPlayerUnits(leavingPlayer)
 
 // ============================================================================
-function giveAllUnitsToVillagersPlayer(player _player)
+function shouldBeDestroyed(unit _unit) returns bool
+  return _unit.isCampHeadquarters() or _unit.isShelter()
+
+// ============================================================================
+// Typically only defensive structures
+function shouldBeGivenToVillagersPlayer(unit _unit) returns bool
+  let unitTypeId = _unit.getTypeId()
+  return _unit.isSpikes() or
+         g_woodFenceIds.has(unitTypeId) or
+         g_stoneWallIds.has(unitTypeId) or
+         g_metalWallIds.has(unitTypeId) or
+         _unit.isGate() or
+         _unit.isBarricade() or
+         _unit.isLampPost() or
+         _unit.isChest() or
+         _unit.isRangedTarget()
+
+// ============================================================================
+function shouldBanishUnit(unit _unit) returns bool
+  return _unit.isSurvivor()
+
+// ============================================================================
+function processRemainingPlayerUnits(player _player)
   
   unit playerHeroUnit = null
   let playerMetadata = _player.getHumanMetadata()
@@ -94,15 +119,20 @@ function giveAllUnitsToVillagersPlayer(player _player)
   let tempGroup = getGroup()
   tempGroup.enumUnitsOfPlayer(_player, null)
   for u from tempGroup
-    // We always destroy the camp headquarters
-    if (u.isCampHeadquarters())
-      u.kill()
-    // If it's a structure give it to the Villagers player so they can be reclaimed
-    else if (u.isStructure())
-      u.setOwner(PLAYER_VILLAGERS, true)
-    // If it's a unit that's not the hero, banish them
-    else if (u != playerHeroUnit)
-      banishSurvivor(u)
+    if (u.isAlive())
+      // We always destroy the camp headquarters and shelters
+      if (shouldBeDestroyed(u))
+        u.kill()
+      // If it's a structure give it to the Villagers player so they can be reclaimed
+      else if (shouldBeGivenToVillagersPlayer(u))
+        u.setOwner(PLAYER_VILLAGERS, true)
+      // If it's a unit that's not the hero, banish them
+      else if (shouldBanishUnit(u))
+        banishSurvivor(u)
+      // Finally, just remove the unit from the game
+      else if (u != playerHeroUnit)
+        u.remove()
+
   tempGroup.release()
 
 // ============================================================================
