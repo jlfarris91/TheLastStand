@@ -5,6 +5,7 @@ import Math
 import Gradient
 import ColorUtility
 import Range
+import GameConstants
 
 weathereffect g_lordaeronRainLight
 weathereffect g_lordaeronRainHeavy
@@ -15,6 +16,7 @@ real g_fogFadeDT = 0.1
 real g_fogFadeT = 0.0
 real g_fogFadeDir = -1.0
 real g_fogFadeDuration = 5.0
+constant real NO_FOG_Z = 3500
 
 colorA g_fogColor = colorA(0, 77, 77, 255)
 rangeReal g_fogOnParams = rangeReal(1300.0, 2100.0)
@@ -23,8 +25,11 @@ GradientColorList g_weatherFogColorGradient
 
 bool g_updateFog = true
 GradientColorList g_dncFogColorGradient
-GradientList<real> g_dncFogZStartGradient
-GradientList<real> g_dncFogZEndGradient
+GradientList<GradientList<real, real>, real> g_camZoomDncFogZStartGradient
+GradientList<GradientList<real, real>, real> g_camZoomDncFogZEndGradient
+
+GradientList<real, real> g_camZoomWeatherFogZStartGradient
+GradientList<real, real> g_camZoomWeatherFogZEndGradient
 
 public tuple fogParams(real zstart, real zend, real density)
 
@@ -122,19 +127,27 @@ public class Weather
 
     let timeOfDay = GetTimeOfDay()
     let dayNightT = timeOfDay / 24.0
+
+    let cameraZoom = GetCameraField(CAMERA_FIELD_TARGET_DISTANCE)
+    let zoomT = parameterize01(CAMERA_DISTANCE_MIN, CAMERA_DISTANCE_MAX, cameraZoom)
     
-    let zstart_dayNight = g_dncFogZStartGradient.sample(dayNightT)
-    let zend_dayNight = g_dncFogZEndGradient.sample(dayNightT)
+    let zstart_dayNight = g_camZoomDncFogZStartGradient.sample(zoomT)
+    let zend_dayNight = g_camZoomDncFogZEndGradient.sample(zoomT)
     let color_dayNight = g_dncFogColorGradient.sample(dayNightT)
     let color_weatherFog = g_weatherFogColorGradient.sample(dayNightT)
 
-    let zstart = lerp(zstart_dayNight, g_fogOnParams.min, t)
-    let zend = lerp(zend_dayNight, g_fogOnParams.max, t)
+    let zstart_weatherFog = g_camZoomWeatherFogZStartGradient.sample(zoomT)
+    let zend_weatherFog = g_camZoomWeatherFogZEndGradient.sample(zoomT)
+
+    let zstart = lerp(zstart_dayNight, zstart_weatherFog, t)
+    let zend = lerp(zend_dayNight, zend_weatherFog, t)
     let color = color_dayNight.mix(color_weatherFog, t)
     SetTerrainFogEx(0, zstart, zend, 0.0, color.getRed01(), color.getGreen01(), color.getBlue01())
 
 // ============================================================================
 init
+
+  let defaultCameraZoomT = parameterize01(CAMERA_DISTANCE_MIN, CAMERA_DISTANCE_MAX, CAMERA_DISTANCE_DEFAULT)
 
   // Represents the fog color for the full day
   g_dncFogColorGradient = new GradientColorList((colorA a, colorA b, real t) -> a.mix(b, t), COLOR_BLACK)
@@ -146,21 +159,69 @@ init
   ..addEntry(20.0 / 24.0, colorA(26, 46, 56, 255))
   ..addEntry(1.0, colorA(26, 38, 64, 255))
 
-  g_dncFogZStartGradient = new GradientList<real>((real a, real b, real t) -> lerp(a, b, t), 0.0)
+  let dnc_FogZStart_MinZoom_Gradient = new GradientList<real, real>(0.0, (real a, real b, real t) -> lerp(a, b, t))
+  ..addEntry(0.0, 500.0)
+  ..addEntry(6.0 / 24.0, 500.0)
+  ..addEntry(8.0 / 24.0, NO_FOG_Z)
+  ..addEntry(16.0 / 24.0, NO_FOG_Z)
+  ..addEntry(18.0 / 24.0, 500.0)
+  ..addEntry(1.0, 500.0)
+
+  let dnc_FogZStart_DefZoom_Gradient = new GradientList<real, real>(0.0, (real a, real b, real t) -> lerp(a, b, t))
   ..addEntry(0.0, 1600.0)
   ..addEntry(6.0 / 24.0, 1600.0)
-  ..addEntry(8.0 / 24.0, 2800.0)
-  ..addEntry(16.0 / 24.0, 2800.0)
+  ..addEntry(8.0 / 24.0, NO_FOG_Z)
+  ..addEntry(16.0 / 24.0, NO_FOG_Z)
   ..addEntry(18.0 / 24.0, 1600.0)
   ..addEntry(1.0, 1600.0)
 
-  g_dncFogZEndGradient = new GradientList<real>((real a, real b, real t) -> lerp(a, b, t), 0.0)
+  let dnc_FogZStart_MaxZoom_Gradient = new GradientList<real, real>(0.0, (real a, real b, real t) -> lerp(a, b, t))
+  ..addEntry(0.0, 1600.0)
+  ..addEntry(6.0 / 24.0, 1600.0)
+  ..addEntry(8.0 / 24.0, NO_FOG_Z)
+  ..addEntry(16.0 / 24.0, NO_FOG_Z)
+  ..addEntry(18.0 / 24.0, 1600.0)
+  ..addEntry(1.0, 1600.0)
+
+  g_camZoomDncFogZStartGradient = new GradientList<GradientList<real, real>, real>(0.0) (a, b, zoomT) -> 
+    let timeOfDay = GetTimeOfDay()
+    let dayNightT = timeOfDay / 24.0
+    return lerp(a.sample(dayNightT), b.sample(dayNightT), zoomT)
+  g_camZoomDncFogZStartGradient.addEntry(0.0, dnc_FogZStart_MinZoom_Gradient)
+  g_camZoomDncFogZStartGradient.addEntry(defaultCameraZoomT, dnc_FogZStart_DefZoom_Gradient)
+  g_camZoomDncFogZStartGradient.addEntry(1.0, dnc_FogZStart_MaxZoom_Gradient)
+
+  let dnc_FogZEnd_MinZoom_Gradient = new GradientList<real, real>(0.0, (real a, real b, real t) -> lerp(a, b, t))
+  ..addEntry(0.0, 900.0)
+  ..addEntry(4.0 / 24.0, 900.0)
+  ..addEntry(8.0 / 24.0, NO_FOG_Z)
+  ..addEntry(16.0 / 24.0, NO_FOG_Z)
+  ..addEntry(18.0 / 24.0, 900.0)
+  ..addEntry(1.0, 900.0)
+
+  let dnc_FogZEnd_DefZoom_Gradient = new GradientList<real, real>(0.0, (real a, real b, real t) -> lerp(a, b, t))
   ..addEntry(0.0, 2300.0)
   ..addEntry(4.0 / 24.0, 2300.0)
-  ..addEntry(8.0 / 24.0, 2800.0)
-  ..addEntry(16.0 / 24.0, 2800.0)
+  ..addEntry(8.0 / 24.0, NO_FOG_Z)
+  ..addEntry(16.0 / 24.0, NO_FOG_Z)
   ..addEntry(18.0 / 24.0, 2300.0)
   ..addEntry(1.0, 2300.0)
+
+  let dnc_FogZEnd_MaxZoom_Gradient = new GradientList<real, real>(0.0, (real a, real b, real t) -> lerp(a, b, t))
+  ..addEntry(0.0, 3000.0)
+  ..addEntry(4.0 / 24.0, 3000.0)
+  ..addEntry(8.0 / 24.0, NO_FOG_Z)
+  ..addEntry(16.0 / 24.0, NO_FOG_Z)
+  ..addEntry(18.0 / 24.0, 3000.0)
+  ..addEntry(1.0, 3000.0)
+
+  g_camZoomDncFogZEndGradient = new GradientList<GradientList<real, real>, real>(0.0) (a, b, zoomT) ->
+    let timeOfDay = GetTimeOfDay()
+    let dayNightT = timeOfDay / 24.0
+    return lerp(a.sample(dayNightT), b.sample(dayNightT), zoomT)
+  g_camZoomDncFogZEndGradient.addEntry(0.0, dnc_FogZEnd_MinZoom_Gradient)
+  g_camZoomDncFogZEndGradient.addEntry(defaultCameraZoomT, dnc_FogZEnd_DefZoom_Gradient)
+  g_camZoomDncFogZEndGradient.addEntry(1.0, dnc_FogZEnd_MaxZoom_Gradient)
 
   g_weatherFogColorGradient = new GradientColorList((colorA a, colorA b, real t) -> a.mix(b, t), COLOR_BLACK)
   ..addEntry(0.0, colorA(50, 30, 90, 255))
@@ -171,7 +232,15 @@ init
   ..addEntry(20.0 / 24.0, colorA(10, 60, 60, 255))
   ..addEntry(1.0, colorA(50, 30, 90, 255))
 
-  // g_fogTimeFunc = (real t) -> 1 - (t - 1) * (t - 1)
+  g_camZoomWeatherFogZStartGradient = new GradientList<real, real>(0.0, (real a, real b, real t) -> lerp(a, b, t))
+  ..addEntry(0.0, 500)
+  ..addEntry(defaultCameraZoomT, 1300)
+  ..addEntry(1.0, 1600)
+
+  g_camZoomWeatherFogZEndGradient = new GradientList<real, real>(0.0, (real a, real b, real t) -> lerp(a, b, t))
+  ..addEntry(0.0, 1000)
+  ..addEntry(defaultCameraZoomT, 2100)
+  ..addEntry(1.0, 2700)
 
   doPeriodically(g_fogFadeDT) (CallbackPeriodic cb) ->
     g_fogFadeT = clamp01(g_fogFadeT + (g_fogFadeDT / g_fogFadeDuration) * g_fogFadeDir)
