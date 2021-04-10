@@ -24,16 +24,18 @@ import SurvivorJobChangeComponent
 import RangedTargetXpReceieverComponent
 import UnitMetadata
 import SurvivorJoblessComponent
+import RegisterEvents
+import PersistActiveAbilityComponent
 
 // ============================================================================
 public class Survivor extends UnitMetadata
-  private HashMap<SurvivorJobDefinition, SurvivorJobComponent> m_jobComponents
+  private IterableMap<SurvivorJobDefinition, SurvivorJobComponent> m_jobComponents
   private SurvivorJobComponent m_activeJobComponent
   private SurvivorData m_survivorData
 
   // --------------------------------------------------------------------------
   construct()
-    m_jobComponents = new HashMap<SurvivorJobDefinition, SurvivorJobComponent>()
+    m_jobComponents = new IterableMap<SurvivorJobDefinition, SurvivorJobComponent>()
     initialize()
 
   // --------------------------------------------------------------------------
@@ -46,43 +48,47 @@ public class Survivor extends UnitMetadata
     m_survivorData = null
 
   // --------------------------------------------------------------------------
-  protected override function onUnitChanged(unit oldUnit, unit newUnit)
-    super.onUnitChanged(oldUnit, newUnit)
+  protected override function onPreUnitChanged(unit oldUnit, unit newUnit)
+    super.onPreUnitChanged(oldUnit, newUnit)
 
     if (oldUnit != null)
       saveOldJobStats(oldUnit)
-      //Log.info("SurvivorUnit", "onUnitChanged", oldUnit.getName(), "oldUnit 1 xp " + oldUnit.getXp().toString())
+      //Log.info("SurvivorUnit", "onPreUnitChanged", oldUnit.getName(), "oldUnit 1 xp " + oldUnit.getXp().toString())
 
     if (m_activeJobComponent != null)
       m_activeJobComponent.setEnabled(false)
 
     m_activeJobComponent = null
 
+  // --------------------------------------------------------------------------
+  protected override function onPostUnitChanged(unit oldUnit, unit newUnit)
+    super.onPostUnitChanged(oldUnit, newUnit)
+
     if (newUnit == null)
       return
     
-    //Log.info("SurvivorUnit", "onUnitChanged", newUnit.getName(), "newUnit 1 xp " + newUnit.getXp().toString())
+    //Log.info("SurvivorUnit", "onPostUnitChanged", newUnit.getName(), "newUnit 1 xp " + newUnit.getXp().toString())
 
     let newUnitId = newUnit.getTypeId()
     let job = getJobDefinitionForUnitType(newUnitId)
     m_activeJobComponent = getJobComponent(job)
     
-    //Log.info("SurvivorUnit", "onUnitChanged", newUnit.getName(), "newUnit 2 xp " + newUnit.getXp().toString())
+    //Log.info("SurvivorUnit", "onPostUnitChanged", newUnit.getName(), "newUnit 2 xp " + newUnit.getXp().toString())
 
     if (m_activeJobComponent != null)
       m_activeJobComponent.setEnabled(true)
     
-    //Log.info("SurvivorUnit", "onUnitChanged", newUnit.getName(), "newUnit 3 xp " + newUnit.getXp().toString())
+    //Log.info("SurvivorUnit", "onPostUnitChanged", newUnit.getName(), "newUnit 3 xp " + newUnit.getXp().toString())
     
     // Reset to level 1?
     newUnit.removeLevels(newUnit.getLevel())
     newUnit.setXp(0, false)
     
-    //Log.info("SurvivorUnit", "onUnitChanged", newUnit.getName(), "newUnit 4 xp " + newUnit.getXp().toString())
+    //Log.info("SurvivorUnit", "onPostUnitChanged", newUnit.getName(), "newUnit 4 xp " + newUnit.getXp().toString())
 
     loadNewJobStats(newUnit)
 
-    //Log.info("SurvivorUnit", "onUnitChanged", newUnit.getName(), "newUnit 5 xp " + newUnit.getXp().toString())
+    //Log.info("SurvivorUnit", "onPostUnitChanged", newUnit.getName(), "newUnit 5 xp " + newUnit.getXp().toString())
 
   // --------------------------------------------------------------------------
   private function saveOldJobStats(unit theUnit)
@@ -125,6 +131,13 @@ public class Survivor extends UnitMetadata
     return m_jobComponents.get(job)
 
   // --------------------------------------------------------------------------
+  function onLevelChanged()
+    for key in m_jobComponents
+      let comp = m_jobComponents.get(key)
+      if (comp != null and comp.getEnabled())
+        comp.onLevelChanged()
+
+  // --------------------------------------------------------------------------
   private function initialize()
 
     let owningUnit = getUnit()
@@ -136,6 +149,7 @@ public class Survivor extends UnitMetadata
     initializeStats(m_survivorData)
 
     addComponent(new SurvivorJobChangeComponent(this))
+    addComponent(new PersistActiveAbilityComponent(this))
 
     let rangedTargetXpReceiever = new RangedTargetXpRecieverComponent(this)
     ..setXpPerHit(1)
@@ -207,3 +221,17 @@ public function unit.isUnrescuedSurvivor() returns bool
 // ============================================================================
 public function unit.isRescuableSurvivor() returns bool
   return this.isUnrescuedSurvivor()
+
+// ============================================================================
+function onHeroLeveledUp()
+  let leveledUnit = GetLevelingUnit()
+
+  let survivor = leveledUnit.getMetadata() castTo Survivor
+  if (survivor == null)
+    return
+
+  survivor.onLevelChanged()
+
+// ============================================================================
+init
+  registerPlayerUnitEvent(EVENT_PLAYER_HERO_LEVEL, function onHeroLeveledUp)

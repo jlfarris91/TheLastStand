@@ -1,13 +1,11 @@
 package SurvivorJoblessComponent
 import SurvivorJobComponent
 import UnitMetadata
-import Orders
-import RegisterEvents
-import ClosureTimers
+import TlsAbilityIds
+import Ability_Harvest
 
 // ============================================================================
 public class SurvivorJoblessComponent extends SurvivorJobComponent
-  private bool m_wasActivelyRepairing
   
   // --------------------------------------------------------------------------
   construct(IUnitMetadata owner)
@@ -18,19 +16,20 @@ public class SurvivorJoblessComponent extends SurvivorJobComponent
     return SurvivorJoblessComponent.typeId
 
   // --------------------------------------------------------------------------
-  function getWasActivelyRepairing() returns bool
-    return m_wasActivelyRepairing
+  override function onLevelChanged()
+    super.onLevelChanged()
+    let ownerUnit = getOwnerUnit()
+    let ownerUnitLevel = ownerUnit.getLevel()
+    let abilityId = TlsAbilityIds.harvest[ownerUnitLevel - 1]
 
-  // --------------------------------------------------------------------------
-  function setWasActivelyRepairing(bool value)
-    m_wasActivelyRepairing = value
+    // Remove all versions of harvest
+    for i = 0 to HARVEST_LEVELS - 1
+      if (ownerUnit.hasAbility(TlsAbilityIds.harvest[i]))
+        ownerUnit.removeAbility(TlsAbilityIds.harvest[i])
 
-  // --------------------------------------------------------------------------
-  protected override function onEnabled()
-    super.onEnabled()
-
-    if (m_wasActivelyRepairing)
-      nullTimer(() -> getOwnerUnit().issueImmediateOrder("repairon"))
+    // Add the version of harvest that matches the level of the survivor
+    if (not ownerUnit.hasAbility(abilityId))
+      ownerUnit.addAbility(abilityId, ownerUnitLevel)
 
 // ============================================================================
 public function IUnitMetadata.getSurvivorJoblessComponent() returns SurvivorJoblessComponent
@@ -42,25 +41,3 @@ public function IUnitMetadata.getOrAddSurvivorJoblessComponent() returns Survivo
   if (component == null)
     component = this.addComponent(new SurvivorJoblessComponent(this)) castTo SurvivorJoblessComponent
   return component
-
-// ============================================================================
-function onUnitIssuedOrder()
-  let orderedUnit = GetOrderedUnit()
-  let orderId = GetIssuedOrderId()
-
-  if (orderId != OrderIds.repairon and orderId != OrderIds.repairoff)
-    return
-
-  let metadata = orderedUnit.getMetadata()
-  if (metadata == null)
-    return
-
-  let comp = metadata.getSurvivorJoblessComponent()
-  if (comp != null and comp.getEnabled())
-    return
-
-  comp.setWasActivelyRepairing(orderId == OrderIds.repairon)
-
-// ============================================================================
-init
-  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ISSUED_ORDER, function onUnitIssuedOrder)
