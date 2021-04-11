@@ -3,17 +3,26 @@ import SurvivorJobComponent
 import UnitMetadata
 import TlsAbilityIds
 import Ability_Harvest
+import RegisterEvents
+import Orders
 
 // ============================================================================
 public class SurvivorJoblessComponent extends SurvivorJobComponent
+  protected destructable m_targetDestructable
   
   // --------------------------------------------------------------------------
   construct(IUnitMetadata owner)
     super(owner)
+    m_targetDestructable = null
 
   // --------------------------------------------------------------------------
   override function getTypeId() returns int
     return SurvivorJoblessComponent.typeId
+
+  // --------------------------------------------------------------------------
+  override function onDisabled()
+    super.onDisabled()
+    m_targetDestructable = null
 
   // --------------------------------------------------------------------------
   override function onLevelChanged()
@@ -31,6 +40,9 @@ public class SurvivorJoblessComponent extends SurvivorJobComponent
     if (not ownerUnit.hasAbility(abilityId))
       ownerUnit.addAbility(abilityId, ownerUnitLevel)
 
+    if (m_targetDestructable != null)
+      ownerUnit.issueTargetOrderById(OrderIds.harvest, m_targetDestructable)
+
 // ============================================================================
 public function IUnitMetadata.getSurvivorJoblessComponent() returns SurvivorJoblessComponent
   return this.getComponent(typeInfo(SurvivorJoblessComponent.typeId)) castTo SurvivorJoblessComponent
@@ -41,3 +53,27 @@ public function IUnitMetadata.getOrAddSurvivorJoblessComponent() returns Survivo
   if (component == null)
     component = this.addComponent(new SurvivorJoblessComponent(this)) castTo SurvivorJoblessComponent
   return component
+
+// ============================================================================
+function onUnitIssuedAnyOrder()
+  let orderedUnit = GetOrderedUnit()
+  let orderId = GetIssuedOrderId()
+
+  let metadata = orderedUnit.getMetadata()
+  if (metadata == null)
+    return
+
+  let comp = metadata.getSurvivorJoblessComponent()
+  if (comp == null or not comp.getEnabled())
+    return
+
+  if (orderId == OrderIds.harvest)
+    comp.m_targetDestructable = GetOrderTargetDestructable()
+  else
+    comp.m_targetDestructable = null
+
+// ============================================================================
+init
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ISSUED_ORDER, function onUnitIssuedAnyOrder)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ISSUED_POINT_ORDER, function onUnitIssuedAnyOrder)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ISSUED_TARGET_ORDER, function onUnitIssuedAnyOrder)
