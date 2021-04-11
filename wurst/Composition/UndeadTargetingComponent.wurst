@@ -22,6 +22,7 @@ import Dispatcher
 
 constant real ATTACK_TIMER_INTERVAL = 1.0
 constant real ATTACK_TIMER_DURATION = 10.0
+constant real DOT_INTERVAL = 1.0
 
 HashMap<player, LinkedList<unit>> g_validHumanStructureTargets
 HashList<int> g_validTargetStructureIds
@@ -30,6 +31,7 @@ conditionfunc g_filterUnitIsValidTargetNonStructure = Condition(function filterU
 HashMap<unit, HashList<UndeadTargetingComponent>> g_targetedUnitToUTCMap = new HashMap<unit, HashList<UndeadTargetingComponent>>()
 HashList<UndeadTargetingComponent> g_activeUndeadTargetingComponents = new HashList<UndeadTargetingComponent>()
 Dispatcher g_issueOrderDispatcher
+HashList<unit> g_dealDOTGroup = new HashList<unit>()
 
 /*
 
@@ -65,12 +67,15 @@ public class UndeadTargetingComponent extends UnitComponent
   private unit m_targetUnit
   private int m_attackTime
   private bool m_awaitingOrder
+  private bool m_dealingDOT
 
   // --------------------------------------------------------------------------
   construct(IUnitMetadata owner)
     super(owner)
     m_targetPlayer = null
     m_targetUnit = null
+    m_awaitingOrder = false
+    m_dealingDOT = false
 
   // --------------------------------------------------------------------------
   ondestroy
@@ -93,6 +98,15 @@ public class UndeadTargetingComponent extends UnitComponent
     super.onDisabled()
     g_activeUndeadTargetingComponents.remove(this)
     setTargetUnit(null)
+    stopDOT()
+
+  // --------------------------------------------------------------------------
+  override function onUnitChanged(unit oldUnit, unit _newUnit)
+    super.onUnitChanged(oldUnit, _newUnit)
+
+    if (oldUnit != null)
+      g_dealDOTGroup.remove(oldUnit)
+      m_dealingDOT = false
 
   // --------------------------------------------------------------------------
   function getTargetPlayerChangedEvent() returns Event
@@ -125,7 +139,7 @@ public class UndeadTargetingComponent extends UnitComponent
       return
 
     // We're already awaiting a call to issueOrderTargetingPlayer_impl so early out
-    if (m_awaitingOrder)
+    if (m_awaitingOrder or m_dealingDOT)
       return
 
     m_awaitingOrder = true
@@ -172,16 +186,22 @@ public class UndeadTargetingComponent extends UnitComponent
       //Log.debug("[UndeadTargetingComponent] Could not find target unit, attack-moving to camp center")
       return
 
-    // 4. The target player is either null or considered dead, so try targeting another alive player
+    // 4. The target player is either null or considered dead, so start the DOT
     if (m_targetPlayer == null or m_targetPlayer.getHumanMetadataRequired().getIsDead())
-      // If we actually picked a new target player then re-issue the order
-      if (pickNextValidTargetPlayer())
-        issueOrderTargetingPlayer()
-        return
+      startDOT()
+      return
 
-    // 5. If there are really no players left to attack then just die
-    //Log.debug("[UndeadTargetingComponent] Found no player to attack")
-    nullTimer(() -> getOwnerUnit().kill())
+  // --------------------------------------------------------------------------
+  function startDOT()
+    if (not m_dealingDOT)
+      g_dealDOTGroup.add(getOwnerUnit())
+      m_dealingDOT = true
+
+  // --------------------------------------------------------------------------
+  function stopDOT()
+    if (m_dealingDOT)
+      g_dealDOTGroup.remove(getOwnerUnit())
+      m_dealingDOT = false
 
   // --------------------------------------------------------------------------
   function tryReissueOrder() returns bool
@@ -193,16 +213,6 @@ public class UndeadTargetingComponent extends UnitComponent
       return false
       
     return getOwnerUnit().issueTargetOrderById(OrderIds.attack, m_targetUnit)
-
-  // --------------------------------------------------------------------------
-  private function pickNextValidTargetPlayer() returns bool
-    let currentTargetPlayer = m_targetPlayer
-    for _player in g_PlayingHumanPlayers
-      if (_player != m_targetPlayer and not _player.getHumanMetadataRequired().getIsDead())
-        setTargetPlayer(_player)
-        return true
-    setTargetPlayer(null)
-    return currentTargetPlayer != null
 
   // --------------------------------------------------------------------------
   private function setTargetUnit(unit targetUnit)
@@ -450,3 +460,8 @@ init
       g_issueOrderDispatcher.invoke(DispatchPriority.HIGH) () ->
         if (comp != null and g_activeUndeadTargetingComponents.has(comp))
           comp.onAttackTimer()
+
+  doPeriodically(DOT_INTERVAL) (CallbackPeriodic cb) ->
+    for _unit in g_dealDOTGroup
+      if (_unit != null and _unit.isAlive())
+        _unit.subHP(_unit.getMaxHP() * 0.1)
