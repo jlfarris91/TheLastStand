@@ -1,19 +1,18 @@
-package NecromancerComponent
+package ArchimondeComponent
 import UnitComponent
-import TlsAbilityIds
-import ClosureTimers
 import HashMap
 import Action
-import TlsUnitIds
+import TlsAbilityIds
 import ObjectIds
 import RegisterEvents
+import GameConstants
 import UndeadTargetingComponent
 
-constant string RAISEDEAD_IMMEDIATEORDERSTR = "instant" // don't ask me why
+constant string RAINOFCHAOS_ORDER = "rainofchaos"
+constant conditionfunc g_rainOfChaosTargetFilter = Condition(function isFilterUnitValidRainofChaosTarget)
 
 // ============================================================================
-public class NecromancerComponent extends UnitComponent
-  private CallbackPeriodic castTimer
+public class ArchimondeComponent extends UnitComponent
   private IterableMap<int, Action2<unit, real>> m_summonedUnitModifiers
 
   // --------------------------------------------------------------------------
@@ -23,13 +22,10 @@ public class NecromancerComponent extends UnitComponent
 
   // --------------------------------------------------------------------------
   override function getTypeId() returns int
-    return NecromancerComponent.typeId
+    return ArchimondeComponent.typeId
 
   // --------------------------------------------------------------------------
   ondestroy
-    if (castTimer != null)
-      destroy castTimer
-      castTimer = null
     for key in m_summonedUnitModifiers
       destroy m_summonedUnitModifiers.get(key)
     destroy m_summonedUnitModifiers
@@ -44,49 +40,42 @@ public class NecromancerComponent extends UnitComponent
     return m_summonedUnitModifiers.get(unitTypeId)
 
   // --------------------------------------------------------------------------
-  override function onUnitChanged(unit oldUnit, unit newUnit)
-    super.onUnitChanged(oldUnit, newUnit)
-
-    if (newUnit != null)
-      switch (newUnit.getTypeId())
-        case TlsUnitIds.Undead.necromancer
-          newUnit.setAbilityLevel(TlsAbilityIds.necromancerRaiseDead, 1)
-        case TlsUnitIds.Undead.greaterNecromancer
-          newUnit.setAbilityLevel(TlsAbilityIds.necromancerRaiseDead, 2)
-
-  // --------------------------------------------------------------------------
   override function onEnabled()
     super.onEnabled()
 
     let ownerUnit = getOwnerUnit()
-    if (not ownerUnit.hasAbility(TlsAbilityIds.necromancerRaiseDead))
-      ownerUnit.addAbility(TlsAbilityIds.necromancerRaiseDead)
-
-    let lvl = ownerUnit.getAbilityLevel(TlsAbilityIds.necromancerRaiseDead)
-    let cooldown = ownerUnit.getAbilityCooldown(TlsAbilityIds.necromancerRaiseDead, lvl) + 1.0
-
-    castTimer = doPeriodically(cooldown) (CallbackPeriodic cb) ->
-      if (ownerUnit != null and ownerUnit.isAlive())
-        ownerUnit.issueImmediateOrder(RAISEDEAD_IMMEDIATEORDERSTR)
+    
+    if (not ownerUnit.hasAbility(TlsAbilityIds.rainOfChaos))
+      ownerUnit.addAbility(TlsAbilityIds.rainOfChaos)
 
   // --------------------------------------------------------------------------
   override function onDisabled()
     super.onDisabled()
 
     let ownerUnit = getOwnerUnit()
-    if (ownerUnit.hasAbility(TlsAbilityIds.necromancerRaiseDead))
-      ownerUnit.removeAbility(TlsAbilityIds.necromancerRaiseDead)
+    if (ownerUnit.hasAbility(TlsAbilityIds.rainOfChaos))
+      ownerUnit.removeAbility(TlsAbilityIds.rainOfChaos)
 
 // ============================================================================
-public function IUnitMetadata.getNecromancerComponent() returns NecromancerComponent
-  return this.getComponent(typeInfo(NecromancerComponent.typeId)) castTo NecromancerComponent
+public function IUnitMetadata.getArchimondeComponent() returns ArchimondeComponent
+  return this.getComponent(typeInfo(ArchimondeComponent.typeId)) castTo ArchimondeComponent
 
 // ============================================================================
-public function IUnitMetadata.getOrAddNecromancerComponent() returns NecromancerComponent
-  var component = this.getNecromancerComponent()
+public function IUnitMetadata.getOrAddArchimondeComponent() returns ArchimondeComponent
+  var component = this.getArchimondeComponent()
   if (component == null)
-    component = this.addComponent(new NecromancerComponent(this)) castTo NecromancerComponent
+    component = this.addComponent(new ArchimondeComponent(this)) castTo ArchimondeComponent
   return component
+
+// ============================================================================
+function unit.isValidRainOfChaosTarget() returns bool
+  return this.isAlive() and
+         this.isEnemyOf(PLAYER_UNDEAD) and
+         not this.isInvulnerable()
+
+// ============================================================================
+function isFilterUnitValidRainofChaosTarget() returns bool
+  return GetFilterUnit().isValidRainOfChaosTarget()
 
 // ============================================================================
 function onUnitSummoned()
@@ -97,7 +86,7 @@ function onUnitSummoned()
   if (metadata == null)
     return
 
-  let comp = metadata.getNecromancerComponent()
+  let comp = metadata.getArchimondeComponent()
   if (comp == null)
     return
 
@@ -105,7 +94,7 @@ function onUnitSummoned()
 
   let modifier = comp.getModifierForSummonedUnit(summoned.getTypeId())
   if (modifier == null)
-    Log.error("No modifier for unit summoned by necromancer of type " + summonedTypeId.toRawCode())
+    Log.debug("No modifier for unit summoned by Archimonde of type " + summonedTypeId.toRawCode())
     return
 
   modifier.call(summoned, 1.0)
