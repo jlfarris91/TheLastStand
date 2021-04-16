@@ -6,21 +6,22 @@ import HumanPlayerMetadata
 import Heroes
 import ClosureTimers
 import TlsSounds
-import PlayerWaves
+import initlater PlayerWaves
 import IWaveGenerator
-import DayWave
+import initlater DayWave
 import NightWave
-import Runnable
-import NormalNightWaveGenerator
-import NormalDayWaveGenerator
+import initlater NormalNightWaveGenerator
+import initlater NormalDayWaveGenerator
 import WaveMultiboard
 import BaseUnitsRectProvider
 import Time
 import RandomWeatherPlayer
 import DisplayTextToPlayer
-import StringExtensions
 import initlater GameStatsMultiboard
 import Headquarters
+import ColorUtility
+import Bases
+import Vector
 
 public GameInstance g_GameInstance
 
@@ -28,7 +29,7 @@ constant real TIME_OF_DAY_INITIAL = 5.5
 constant real GAME_SPEED_INITIAL = 100.0
 
 // ============================================================================
-public class GameInstance extends Runnable
+public class GameInstance
   private bool m_gracePeriod
   private bool m_updateGracePeriod
   private int m_day
@@ -41,8 +42,6 @@ public class GameInstance extends Runnable
 
   // --------------------------------------------------------------------------
   ondestroy
-    if (not this.isCompleted())
-      this.cancel()
     destroy m_weatherPlayer
 
   // --------------------------------------------------------------------------
@@ -82,7 +81,7 @@ public class GameInstance extends Runnable
     return m_playerWaves.getOrCreatePlayerWaves(p)
 
   // --------------------------------------------------------------------------
-  function getPlayerGameProgress01(player _player) returns real
+  function getGameProgress01() returns real
     return getNight() / TOTAL_NIGHTS
 
   // --------------------------------------------------------------------------
@@ -108,17 +107,14 @@ public class GameInstance extends Runnable
     startNextNight()
 
   // --------------------------------------------------------------------------
-  override function reset()
-    super.reset()
-    
+  function reset()    
     m_day = 0
     m_night = 0
     SetTimeOfDay(TIME_OF_DAY_INITIAL)
     SetTimeOfDayScalePercentBJ(GAME_SPEED_INITIAL)
 
   // --------------------------------------------------------------------------
-  override function onStarted()
-    super.onStarted()
+  function start()
 
     m_updateGracePeriod = true
 
@@ -138,8 +134,7 @@ public class GameInstance extends Runnable
       postStart()
 
   // --------------------------------------------------------------------------
-  override function onCompleted()
-    super.onCompleted()
+  function complete()
 
     m_weatherPlayer.stop()
 
@@ -162,6 +157,7 @@ public class GameInstance extends Runnable
   private function postStart()
     for p in g_PlayingHumanPlayers
       initializePlayer(p)
+      showPlayerBases(p, 60.0)
 
   // --------------------------------------------------------------------------
   private function initializePlayer(player p)
@@ -175,6 +171,9 @@ public class GameInstance extends Runnable
     p.setLumber(GameSettings.startingMaterials)
 
     updateNoHeadquartersUpgrade(p)
+
+    // Initialize camera settings
+    SetCameraFieldForPlayer(p, CAMERA_FIELD_FARZ, CAMERA_FARZ, 0.0)
 
   // --------------------------------------------------------------------------
   function updateGracePeriod()
@@ -218,10 +217,22 @@ public class GameInstance extends Runnable
 
     Log.debug("Day {0} started.".format(m_day.toString()))
 
+    // End the game
+    if (m_day > TOTAL_NIGHTS)
+      doAfter(30.0) () ->
+        for p in g_PlayingHumanPlayers
+          if (p.getHumanMetadataRequired().getIsDead())
+            CustomDefeatBJ( p, "You Lose. Better luck next time!" )
+          else
+            CustomVictoryBJ( p, true, true )
+
   // --------------------------------------------------------------------------
   function showMultiboardsForPlayers()
     for _player in g_PlayingHumanPlayers
       new GameStatsMultiboard(_player).show()
+  
+    if (PLAYER_SPECTATOR.isPlayingHumanPlayer())
+      new GameStatsMultiboard(PLAYER_SPECTATOR).show()
 
   // --------------------------------------------------------------------------
   function startNight()
@@ -244,7 +255,7 @@ public class GameInstance extends Runnable
 
     g_PlayingHumanPlayers.forEach() (player p) ->
       if (p.getHumanMetadata().getIsDead())
-        spawnInitialPlayerUnitsAtRandomPoint(p, false)  
+        spawnInitialPlayerUnitsAtRandomPoint(p, false)
 
   // --------------------------------------------------------------------------
   private function initializeGeneral()
@@ -257,6 +268,11 @@ public class GameInstance extends Runnable
     
     FogEnableOn()
     FogMaskEnableOff()
+    
+    createFogOfWar(PLAYER_UNDEAD, GetPlayableMapRect(), false, false).start()
+    createBlackMask(PLAYER_UNDEAD, GetPlayableMapRect(), false, false).start()
+
+    initializeSpectator()
 
     // We control experience gain manually
     for p in g_HumanPlayers
@@ -304,16 +320,36 @@ public class GameInstance extends Runnable
       SetPlayerAllianceStateBJ(p, PLAYER_UNDEAD, bj_ALLIANCE_UNALLIED)
       // Make raiders treat player as an enemy
       SetPlayerAllianceStateBJ(PLAYER_UNDEAD, p, bj_ALLIANCE_UNALLIED)
+      // Make player treat the spectator as nuetral
+      SetPlayerAllianceStateBJ(p, PLAYER_SPECTATOR, bj_ALLIANCE_NEUTRAL )
+      // Make the spectator treat player as nuetral
+      SetPlayerAllianceStateBJ(PLAYER_SPECTATOR, p, bj_ALLIANCE_NEUTRAL )
+
+  // --------------------------------------------------------------------------
+  private function initializeSpectator()
+    createVision(PLAYER_SPECTATOR, GetPlayableMapRect(), false).start()
+
+    displayMessageToPlayer(PLAYER_SPECTATOR, "You are spectating")
+
+    // Make player treat villagers as nuetral
+    SetPlayerAllianceStateBJ(PLAYER_SPECTATOR, PLAYER_VILLAGERS, bj_ALLIANCE_NEUTRAL )
+    // Make villagers treat player as nuetral
+    SetPlayerAllianceStateBJ(PLAYER_VILLAGERS, PLAYER_SPECTATOR, bj_ALLIANCE_NEUTRAL )
+
+    // Make player treat lootables as nuetral
+    SetPlayerAllianceStateBJ(PLAYER_SPECTATOR, PLAYER_LOOTABLES, bj_ALLIANCE_NEUTRAL )
+    // Make lootables treat player as nuetral
+    SetPlayerAllianceStateBJ(PLAYER_LOOTABLES, PLAYER_SPECTATOR, bj_ALLIANCE_NEUTRAL )
 
 // ============================================================================
 function onDayStart()
   // Wait to allow Waves and SpawnWaves to complete
-  g_GameInstance.startDay()
+  nullTimer(() -> g_GameInstance.startDay())
 
 // ============================================================================
 function onNightStart()
   // Wait to allow Waves and SpawnWaves to complete
-  g_GameInstance.startNight()
+  nullTimer(() -> g_GameInstance.startNight())
 
 // ============================================================================
 init

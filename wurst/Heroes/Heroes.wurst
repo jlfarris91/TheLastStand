@@ -8,8 +8,8 @@ import Orders
 import MainItemLibrary
 import TlsItemIds
 import SurvivorSpawnManager
-import GroupUtils
 import GameConstants
+import InvulnerableComponent
 
 // ============================================================================
 public function spawnHeroForPlayer(player p, vec2 pos, bool firstTime) returns unit
@@ -22,16 +22,9 @@ public function spawnHeroForPlayer(player p, vec2 pos, bool firstTime) returns u
 
   // The hero has been respawned and the metadata already exists
   if (heroMetadata != null)
-    if (firstTime)
-      hero = heroMetadata.getUnit()
-      spawnPos = hero.getPos()
-    else
-      let oldHeroUnit = heroMetadata.getUnit()
-      spawnPos = oldHeroUnit.getPos()
-      if (oldHeroUnit != null)
-        oldHeroUnit.remove()
-      // We want to persist the hero's metadata
-      hero = createUnitTLS(heroMetadata, p, TlsUnitIds.hero, spawnPos.x, spawnPos.y, 270)
+    hero = heroMetadata.getUnit()
+    spawnPos = hero.getPos()
+    hero.revive(spawnPos, false)
 
   // This is the first time the hero has been spawned for the player
   // new hero metadata will be automatically generated
@@ -50,6 +43,10 @@ public function spawnHeroForPlayer(player p, vec2 pos, bool firstTime) returns u
   // Give starting items
   g_MainItemLibrary.createItemForUnit(hero, TlsItemIds.tent)
 
+  // Make hero invulnerable for a short period of time
+  if (not firstTime)
+    hero.makeInvulnerable(HERO_RESPAWN_INVULNERABLE_DURATION)
+
   return hero
 
 // ============================================================================
@@ -60,14 +57,6 @@ public function spawnInitialPlayerUnitsAtRandomPoint(player p, bool firstTime)
     return
 
   let hero = spawnHeroForPlayer(p, sp.spawnPoint, firstTime)
-
-  // kill nearby zombies
-  let temp = getGroup()
-  temp.enumUnitsInRange(sp.spawnPoint, 512)
-  for _unit in temp
-    if (_unit.isAlive() and _unit.getOwner() == PLAYER_UNDEAD)
-      _unit.kill()
-  temp.release()
   
   // Create survivors for the player to start with
   spawnInitialSurvivorsForPlayer(p, hero)

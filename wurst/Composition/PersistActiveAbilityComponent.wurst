@@ -1,0 +1,117 @@
+package PersistActiveAbilityComponent
+import UnitComponent
+import Orders
+import TlsAbilityIds
+import RegisterEvents
+import HashMap
+import Vector
+
+IterableMap<int, Vector<int>> g_orderIdToAbilityId = new IterableMap<int, Vector<int>>()
+IterableMap<int, int> g_abilityIdToActivateOrderId = new IterableMap<int, int>()
+IterableMap<int, int> g_abilityIdToDeactivateOrderId = new IterableMap<int, int>()
+
+// ============================================================================
+public class PersistActiveAbilityComponent extends UnitComponent
+  private IterableMap<int, bool> m_abilityStates
+  
+  // --------------------------------------------------------------------------
+  construct(IUnitMetadata owner)
+    super(owner)
+    m_abilityStates = new IterableMap<int, bool>()
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    destroy m_abilityStates
+    m_abilityStates = null
+
+  // --------------------------------------------------------------------------
+  override function getTypeId() returns int
+    return PersistActiveAbilityComponent.typeId
+
+  // --------------------------------------------------------------------------
+  function getAbilityActiveState(int abilityId) returns bool
+    return m_abilityStates.has(abilityId) and m_abilityStates.get(abilityId)
+
+  // --------------------------------------------------------------------------
+  function setAbilityActiveState(int abilityId, bool value)
+    m_abilityStates.put(abilityId, value)
+
+  // --------------------------------------------------------------------------
+  protected override function onEnabled()
+    super.onEnabled()
+    updateAbilityStates()
+  
+  // --------------------------------------------------------------------------
+  private function updateAbilityStates()
+    let ownerUnit = getOwnerUnit()
+
+    for abilityId in m_abilityStates
+      if (ownerUnit.hasAbility(abilityId))
+        ownerUnit.issueImmediateOrderById(getActiveOrderId(abilityId))
+
+  // --------------------------------------------------------------------------
+  private function getActiveOrderId(int abilityId) returns int
+    return getAbilityActiveState(abilityId)
+           ? g_abilityIdToActivateOrderId.get(abilityId)
+           : g_abilityIdToDeactivateOrderId.get(abilityId)
+
+// ============================================================================
+public function IUnitMetadata.getPersistRepairActivationComponent() returns PersistActiveAbilityComponent
+  return this.getComponent(typeInfo(PersistActiveAbilityComponent.typeId)) castTo PersistActiveAbilityComponent
+
+// ============================================================================
+public function IUnitMetadata.getOrAddPersistRepairActivationComponent() returns PersistActiveAbilityComponent
+  var component = this.getPersistRepairActivationComponent()
+  if (component == null)
+    component = this.addComponent(new PersistActiveAbilityComponent(this)) castTo PersistActiveAbilityComponent
+  return component
+
+// ============================================================================
+public function registerActiveAbility(int abilityId, int activateOrderId, int deactivateOrderId)
+  
+  var abilityIds = g_orderIdToAbilityId.get(activateOrderId)
+  if (abilityIds == null)
+    abilityIds = new Vector<int>()
+    g_orderIdToAbilityId.put(activateOrderId, abilityIds)
+  abilityIds.add(abilityId)
+
+  abilityIds = g_orderIdToAbilityId.get(deactivateOrderId)
+  if (abilityIds == null)
+    abilityIds = new Vector<int>()
+    g_orderIdToAbilityId.put(deactivateOrderId, abilityIds)
+  abilityIds.add(abilityId)
+
+  g_abilityIdToActivateOrderId.put(abilityId, activateOrderId)
+  g_abilityIdToDeactivateOrderId.put(abilityId, deactivateOrderId)
+
+// ============================================================================
+function onUnitIssuedOrder()
+  let orderedUnit = GetOrderedUnit()
+  let orderId = GetIssuedOrderId()
+
+  if (not g_orderIdToAbilityId.has(orderId))
+    return
+
+  let metadata = orderedUnit.getMetadata()
+  if (metadata == null)
+    return
+
+  let comp = metadata.getPersistRepairActivationComponent()
+  if (comp == null or not comp.getEnabled())
+    return
+  
+  let abilityIds = g_orderIdToAbilityId.get(orderId)
+
+  for abilityId in abilityIds
+    let activateOrderId = g_abilityIdToActivateOrderId.get(abilityId)
+    comp.setAbilityActiveState(abilityId, orderId == activateOrderId)
+
+// ============================================================================
+init
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ISSUED_ORDER, function onUnitIssuedOrder)
+
+  // Register active abilities
+  registerActiveAbility(TlsAbilityIds.repair, OrderIds.repairon, OrderIds.repairoff)
+  registerActiveAbility(TlsAbilityIds.builderRepair, OrderIds.repairon, OrderIds.repairoff)
+  registerActiveAbility(TlsAbilityIds.heal, OrderIds.healon, OrderIds.healoff)
+  registerActiveAbility(TlsAbilityIds.militiaStance, OrderIds.defend, OrderIds.undefend)

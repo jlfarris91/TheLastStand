@@ -1,23 +1,21 @@
 package AbomHoldingState
 import StateMachine
 import Abomination
-import TlsAbilityIds
-import ErrorHandling
 import Math
 import GroupUtils
 import FX
-import Orders
 import UnitExtensions
 import UndeadTargetingComponent
 import HumanPlayers
-import Units
 import ColorUtility
+
+public constant ABOM_HOLDING_STATE_ID = "HoldingZombie"
 
 constant real ABOM_MIN_THROW_RANGE = 200.0
 constant real ABOM_MAX_THROW_RANGE = 1024.0
 constant real ABOM_HOLD_DURATION = 3.0
-constant int ABOM_THROW_ORDER_ID = OrderIds.flare
 constant string ABOM_TARGET_INDICATOR_EFFECT = "Abilities\\Spells\\NightElf\\TrueshotAura\\TrueshotAura.mdl"
+constant string ABOM_GRABBED_ZOMBIE_EFFECT = "units\\abomination\\GrabbedZombie.mdl"
 
 rect g_minThrowArea
 
@@ -43,7 +41,7 @@ public class AbomHoldingState extends BaseStateMachineState
 
   // --------------------------------------------------------------------------
   override function getName() returns string
-    return "HoldingZombie"
+    return ABOM_HOLDING_STATE_ID
 
   // --------------------------------------------------------------------------
   override function enter()
@@ -52,10 +50,10 @@ public class AbomHoldingState extends BaseStateMachineState
 
     let zombie = m_abom.getHoldingZombie()
     if (zombie == null)
-      error("Expected Abomination to be holding a zombie when entering this state")
+      Log.debug("Expected Abomination to be holding a zombie when entering this state")
+      return
 
     let abomUnit = m_abom.getUnit()
-    abomUnit.addAbility(TlsAbilityIds.abomThrowZombie)
 
     showAlertEffect(abomUnit)
     showHeldZombieEffect(abomUnit)
@@ -64,8 +62,6 @@ public class AbomHoldingState extends BaseStateMachineState
   override function exit()
     m_timer = 0.0
     m_threwZombie = false
-    let abomUnit = m_abom.getUnit()
-    abomUnit.removeAbility(TlsAbilityIds.abomThrowZombie)
     
     hideTargetIndicator()
     hideAlertEffect()
@@ -82,14 +78,20 @@ public class AbomHoldingState extends BaseStateMachineState
         attackPlayer()
 
   // --------------------------------------------------------------------------
+  function onZombieThrown()
+    hideTargetIndicator()
+    hideAlertEffect()
+    hideHeldZombieEffect()
+
+  // --------------------------------------------------------------------------
   private function tryThrowZombie() returns bool
     let target = findThrowTarget()
     if (target == null)
-      Log.debug("[AbomHoldingState] Found no target to throw zombie at")
+      // Log.debug("[AbomHoldingState] Found no target to throw zombie at")
       hideTargetIndicator()
       return false
 
-    Log.debug("[AbomHoldingState] Found target to throw zombie at: " + target.getName())
+    // Log.debug("[AbomHoldingState] Found target to throw zombie at: " + target.getName())
 
     let abomUnit = m_abom.getUnit()
     let currentPos = abomUnit.getPos()
@@ -129,6 +131,7 @@ public class AbomHoldingState extends BaseStateMachineState
 
   // --------------------------------------------------------------------------
   private function attackPlayer()
+    // Log.debug("[AbomHoldingState] Attack Player")
     m_abom.getOrAddUndeadTargetingComponent()
     ..issueOrderTargetingPlayer()
 
@@ -158,8 +161,8 @@ public class AbomHoldingState extends BaseStateMachineState
 
   // --------------------------------------------------------------------------
   private function showHeldZombieEffect(unit _unit)
-    hideHeldZombieEffect()
-    m_heldZombieEffect = AddSpecialEffectTargetUnitBJ("hand left", _unit, Units.zombie)
+    if (m_heldZombieEffect == null)
+      m_heldZombieEffect = AddSpecialEffectTargetUnitBJ("hand left", _unit, ABOM_GRABBED_ZOMBIE_EFFECT)
 
   // --------------------------------------------------------------------------
   private function hideHeldZombieEffect()

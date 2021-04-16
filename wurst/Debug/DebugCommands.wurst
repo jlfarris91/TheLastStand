@@ -18,6 +18,9 @@ import Time
 import Reputation
 import PlayerExtensions
 import UnitPropertiesComponent
+import UnitRecycler
+import ObjectIds
+import HumanPlayers
 
 constant string COMMAND_MEMORYTRACKER = "mem"
 constant string COMMAND_GODLIKE = "godlike"
@@ -54,16 +57,19 @@ constant string COMMAND_SETHEALTH = "sethp"
 constant string COMMAND_SETMANA = "setmana"
 constant string COMMAND_PAUSE = "pause"
 constant string COMMAND_RESUME = "resume"
+constant string COMMAND_RECYCLERSTATS = "recycler"
+constant string COMMAND_ATTACKSENABLED = "setAttacksEnabled"
 
 DebugChatCommandHandler g_commandHandler
 MemoryTrackingMultiboard g_memoryTrackingMultiboard
+fogmodifier array g_seeVisionModifiers
 
 // ============================================================================
 public class DebugChatCommandHandler extends ChatCommandHandler
 
   // --------------------------------------------------------------------------
-  construct(string name)
-    super(name)
+  construct(string name, quest _quest)
+    super(name, _quest)
 
   // --------------------------------------------------------------------------
   override function handleChatCommand(player p, string command, LinkedList<string> commandArgs) returns bool
@@ -74,14 +80,31 @@ public class DebugChatCommandHandler extends ChatCommandHandler
 // ============================================================================
 function showMemoryTrackerMultiboard()
   let commandPlayer = getChatCommandPlayer()
+  let command = getChatCommand()
 
-  if (g_memoryTrackingMultiboard.isShowing())
-    displayMessageToPlayer(commandPlayer, "Hiding memory tracking multiboard")
-    g_memoryTrackingMultiboard.hide()
+  let optionArg = command.getArgument(0)
+  if (optionArg != null)
+    let option = optionArg.getString()
+    if (option == "page")
+      let pageIndex = command.getArgument(1).getString().toInt()
+      g_memoryTrackingMultiboard.setPageIndex(pageIndex)
+      displayMessageToPlayer(commandPlayer, "Setting memory tracking multiboard page index " + pageIndex.toString())
+    if (option == "sort")
+      let sortColumn = command.getArgument(1).getString().toInt()
+      g_memoryTrackingMultiboard.setSortColumn(sortColumn)
+      displayMessageToPlayer(commandPlayer, "Setting memory tracking multiboard sorting column " + sortColumn.toString())
+    if (option == "dir")
+      let sortDirection = command.getArgument(1).getString() == "asc" ? SortDirection.Ascending : SortDirection.Descending
+      g_memoryTrackingMultiboard.setSortDirection(sortDirection)
+      displayMessageToPlayer(commandPlayer, "Setting memory tracking multiboard sorting direction " + (sortDirection == SortDirection.Ascending ? "Ascending" : "Descending"))
   else
-    displayMessageToPlayer(commandPlayer, "Showing memory tracking multiboard")
-    g_memoryTrackingMultiboard.updateMultiboardRows()
-    g_memoryTrackingMultiboard.show()
+    if (g_memoryTrackingMultiboard.isShowing())
+      displayMessageToPlayer(commandPlayer, "Hiding memory tracking multiboard")
+      g_memoryTrackingMultiboard.hide()
+    else
+      displayMessageToPlayer(commandPlayer, "Showing memory tracking multiboard")
+      g_memoryTrackingMultiboard.updateMultiboardRows()
+      g_memoryTrackingMultiboard.show()
 
 // ============================================================================
 function godlike()
@@ -130,13 +153,13 @@ function spawnone()
   
   if (spawnWaveId != -1)
   // {
-    let spawnWave = spawnWaves.get(spawnWaveId)
+    let spawnWave = spawnWaves.getItem(spawnWaveId)
 
     if (spawnWave == null)
       error("Found no spawn wave at index " + spawnWaveId.toString())
       return
 
-    spawnWave.activateOnce()
+    spawnWave.activateForPlayer(p)
     displayMessageToPlayer(p, "Activated {0} {1} spawn wave {2} once".format(dayNightWave, waveId.toString(), spawnWave.getDefinition().getName()))
     return
   // }
@@ -146,7 +169,7 @@ function spawnone()
     return
 
   for spawnWave in spawnWaves
-    spawnWave.activateOnce()
+    spawnWave.activateForPlayer(p)
     displayMessageToPlayer(p, "Activated {0} {1} spawn wave {2} once".format(dayNightWave, waveId.toString(), spawnWave.getDefinition().getName()))
 
 // ============================================================================
@@ -160,14 +183,19 @@ function startNextNight()
 // ============================================================================
 function turnOnMapVisibility()
   let commandPlayer = getChatCommandPlayer()
-  if (IsFogEnabled())
-    displayMessageToPlayer(commandPlayer, "Disabled fog of war")
-    FogEnableOff()
-    FogMaskEnableOff()
-  else
-    displayMessageToPlayer(commandPlayer, "Enabled fog of war")
-    FogEnableOn()
-    FogMaskEnableOn()
+
+  var enabled = false
+  for p in g_PlayingHumanPlayers
+  //{
+    if (g_seeVisionModifiers[p.getId()] == null)
+      g_seeVisionModifiers[p.getId()] = createVision(p, GetPlayableMapRect(), false)
+      enabled = true
+    else
+      g_seeVisionModifiers[p.getId()].destr()
+      g_seeVisionModifiers[p.getId()] = null
+  //}
+  
+  displayMessageToPlayer(commandPlayer, enabled ? "Enabled vision for all players" : "Disabled vision for all players")
 
 // ============================================================================
 function killSelectedUnits()
@@ -645,9 +673,36 @@ function resumeSelectedUnits()
   displayMessageToPlayer(commandPlayer, "Resumed unit(s)")
 
 // ============================================================================
+function showRecyclerStats()
+  let commandPlayer = getChatCommandPlayer()
+
+  commandPlayer.forEachSelectedUnit() (unit arg) ->
+    arg.unpause()
+
+  displayMessageToPlayer(commandPlayer, "===== UnitRecycler =====")
+
+  for unitId in g_unitIdToUnitRecyclerMap
+    let recycler = g_unitIdToUnitRecyclerMap.get(unitId)
+    if (recycler != null)
+      let unitName = UnitId2String(unitId)
+      displayMessageToPlayer(commandPlayer, "{0} ({1}) : {2} active {3} inactive".format(unitName, unitId.toRawCode(), recycler.getActiveCount().toString(), recycler.getInactiveCount().toString()))
+
+// ============================================================================
+function setAttacksEnabled()
+  let commandPlayer = getChatCommandPlayer()
+  let attacksEnabled = getChatCommand().getArgument(0).getInt()
+
+  commandPlayer.forEachSelectedUnit() (unit _unit) ->
+    _unit.setFieldWeapon(UNIT_WEAPON_BF_ATTACKS_ENABLED, 0, attacksEnabled == 1 or attacksEnabled == 3)
+    _unit.setFieldWeapon(UNIT_WEAPON_BF_ATTACKS_ENABLED, 1, attacksEnabled == 2 or attacksEnabled == 3)
+
+// ============================================================================
 function registerDebugCommands()
 
-  g_commandHandler.registerCommandDefinition(COMMAND_MEMORYTRACKER, function showMemoryTrackerMultiboard)  
+  g_commandHandler.registerCommandDefinition(COMMAND_MEMORYTRACKER, function showMemoryTrackerMultiboard)
+    ..addStringArgument("OPT", true)
+    ..addStringArgument("OPT_VAL", true)
+
   g_commandHandler.registerCommandDefinition(COMMAND_GODLIKE, function godlike)
 
   g_commandHandler.registerCommandDefinition(COMMAND_SPAWNONE, function spawnone)
@@ -759,10 +814,17 @@ function registerDebugCommands()
   
   g_commandHandler.registerCommandDefinition(COMMAND_PAUSE, function resumeSelectedUnits)
     ..setDescription("Resumes the selected units")
+  
+  g_commandHandler.registerCommandDefinition(COMMAND_RECYCLERSTATS, function showRecyclerStats)
+    ..setDescription("Shows information about active unit recyclers")
+  
+  g_commandHandler.registerCommandDefinition(COMMAND_ATTACKSENABLED, function setAttacksEnabled)
+    ..setDescription("Sets which attacks are enabled for the selected units.")
+    ..addArgument(new ChatCommandArgument("WEAPON_INDEX", ChatCommandArgumentType.INT, false)..setIntOptions(0, 1, 2, 3)..setDescription("0 - None, 1 - Attack 1, 2 - Attack 2, 3 - Both"))
 
 // ============================================================================
 init
-  g_commandHandler = new DebugChatCommandHandler("Debug")
+  g_commandHandler = new DebugChatCommandHandler("Debug", null)
   registerChatCommandHandler(g_commandHandler, -1)
 
   nullTimer(() -> registerDebugCommands())

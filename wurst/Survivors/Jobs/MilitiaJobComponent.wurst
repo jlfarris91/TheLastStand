@@ -1,13 +1,17 @@
 package MilitiaJobComponent
 import SurvivorJobComponent
 import UnitMetadata
-import GainXpPerKillComponent
+import XpReceiverComponent
 import RangedTargetXpReceieverComponent
 import UnitPropertiesComponent
+import RegisterEvents
+import Orders
 
 constant real BONUS_DAMAGE_TO_NORMALS_PERCENTAGE = 10.0
 constant real BONUS_DAMAGE_TO_ELITES_PERCENTAGE = -10.0
 constant real BONUS_DAMAGE_TO_BOSS_PERCENTAGE = 0.0
+constant int ATTACK_INDEX_MELEE = 0
+constant int ATTACK_INDEX_RANGED = 1
 
 // ============================================================================
 public class MilitiaJobComponent extends SurvivorJobComponent
@@ -24,7 +28,7 @@ public class MilitiaJobComponent extends SurvivorJobComponent
   protected override function onEnabled()
     super.onEnabled()
     getOwner().getOrAddRangedTargetXpRecieverComponent().setEnabled(true)
-    getOwner().getOrAddGainXpPerKillComponent().setEnabled(true)
+    getOwner().getOrAddXpReceiverComponent().setEnabled(true)
 
     let unitPropsComp = getOwner().getOrAddUnitPropertiesComponent()
     if (unitPropsComp != null)
@@ -44,7 +48,7 @@ public class MilitiaJobComponent extends SurvivorJobComponent
     if (rangedTargetXpReceieverComponent != null)
       rangedTargetXpReceieverComponent.setEnabled(false)
 
-    let gainXpPerKillComponent = ownerUnit.getOrAddGainXpPerKillComponent()
+    let gainXpPerKillComponent = ownerUnit.getOrAddXpReceiverComponent()
     if (gainXpPerKillComponent != null)
       gainXpPerKillComponent.setEnabled(false)
 
@@ -53,6 +57,18 @@ public class MilitiaJobComponent extends SurvivorJobComponent
       unitPropsComp.setNormalDamagePercentage(unitPropsComp.getNormalDamagePercentage() - BONUS_DAMAGE_TO_NORMALS_PERCENTAGE)
       unitPropsComp.setEliteDamagePercentage(unitPropsComp.getEliteDamagePercentage() - BONUS_DAMAGE_TO_ELITES_PERCENTAGE)
       unitPropsComp.setBossDamagePercentage(unitPropsComp.getBossDamagePercentage() - BONUS_DAMAGE_TO_ELITES_PERCENTAGE)
+
+  // --------------------------------------------------------------------------
+  function activateMeleeAttack()
+    let ownerUnit = getOwnerUnit()
+    ownerUnit.setFieldWeapon(UNIT_WEAPON_BF_ATTACKS_ENABLED, ATTACK_INDEX_RANGED, false)
+    ownerUnit.setFieldWeapon(UNIT_WEAPON_BF_ATTACKS_ENABLED, ATTACK_INDEX_MELEE, true)
+
+  // --------------------------------------------------------------------------
+  function activateRangedAttack()
+    let ownerUnit = getOwnerUnit()
+    ownerUnit.setFieldWeapon(UNIT_WEAPON_BF_ATTACKS_ENABLED, ATTACK_INDEX_MELEE, false)
+    ownerUnit.setFieldWeapon(UNIT_WEAPON_BF_ATTACKS_ENABLED, ATTACK_INDEX_RANGED, true)
 
 // ============================================================================
 public function IUnitMetadata.getMilitiaJobComponent() returns MilitiaJobComponent
@@ -64,3 +80,28 @@ public function IUnitMetadata.getOrAddMilitiaJobComponent() returns MilitiaJobCo
   if (component == null)
     component = this.addComponent(new MilitiaJobComponent(this)) castTo MilitiaJobComponent
   return component
+
+// ============================================================================
+function onUnitIssuedOrder()
+  let orderedUnit = GetOrderedUnit()
+  let orderId = GetIssuedOrderId()
+
+  if (orderId != OrderIds.defend and orderId != OrderIds.undefend)
+    return
+
+  let metadata = orderedUnit.getMetadata()
+  if (metadata == null)
+    return
+
+  let comp = metadata.getMilitiaJobComponent()
+  if (comp == null or not comp.getEnabled())
+    return
+
+  if (orderId == OrderIds.defend)
+    comp.activateMeleeAttack()
+  else
+    comp.activateRangedAttack()
+
+// ============================================================================
+init
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ISSUED_ORDER, function onUnitIssuedOrder)

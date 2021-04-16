@@ -1,0 +1,104 @@
+package InvulnerableComponent
+import UnitComponent
+import ClosureTimers
+import TimerUtils
+import AbilityIds
+import AttachmentPoints
+import Abilities
+
+constant string EFFECT_MODEL_PATH = Abilities.divineShieldTarget
+constant real EFFECT_MODEL_SIZE = 0.8
+
+// ============================================================================
+public class InvulnerableComponent extends UnitComponent
+  private CallbackManual m_timerCallback
+  private effect m_effect
+
+  // --------------------------------------------------------------------------
+  construct(IUnitMetadata owner)
+    super(owner)
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    stopTimer()
+    hideEffect()
+
+  // --------------------------------------------------------------------------
+  override function getTypeId() returns int
+    return InvulnerableComponent.typeId
+
+  // --------------------------------------------------------------------------
+  function makeInvulnerable(real duration)
+    startTimer(duration)
+    makeInvulnerableInternal()
+
+  // --------------------------------------------------------------------------
+  function makeVulnerable()
+    stopTimer()
+    makeVulnerableInternal()
+
+  // --------------------------------------------------------------------------
+  private function makeInvulnerableInternal()
+    let ownerUnit = getOwnerUnit()
+    if (not ownerUnit.hasAbility(AbilityIds.invulnerable))
+      ownerUnit.addAbility(AbilityIds.invulnerable)
+    showEffect()
+
+  // --------------------------------------------------------------------------
+  private function makeVulnerableInternal()
+    let ownerUnit = getOwnerUnit()
+    if (ownerUnit.hasAbility(AbilityIds.invulnerable))
+      ownerUnit.removeAbility(AbilityIds.invulnerable)
+    hideEffect()
+
+  // --------------------------------------------------------------------------
+  private function startTimer(real duration)
+    if (m_timerCallback != null)
+      m_timerCallback.restart(duration)
+      return
+
+    m_timerCallback = getTimer().doManual(duration, true) -> 
+      makeVulnerableInternal()
+      getOwner().removeComponent(this)
+
+  // --------------------------------------------------------------------------
+  private function stopTimer()
+    if (m_timerCallback != null)
+      destroy m_timerCallback
+      m_timerCallback = null
+
+  // --------------------------------------------------------------------------
+  private function showEffect()
+    if (m_effect == null)
+      m_effect = createInvulnerableEffect(getOwnerUnit())
+
+  private function hideEffect()
+    if (m_effect != null)
+      m_effect.destr()
+      m_effect = null
+  
+  // --------------------------------------------------------------------------
+  private function createInvulnerableEffect(unit targetUnit) returns effect
+    return AddSpecialEffectTargetUnitBJ(AttachmentPoints.origin, targetUnit, EFFECT_MODEL_PATH)
+    ..setScale(EFFECT_MODEL_SIZE)
+
+// ============================================================================
+public function IUnitMetadata.getInvulnerableComponent() returns InvulnerableComponent
+  return this.getComponent(typeInfo(InvulnerableComponent.typeId)) castTo InvulnerableComponent
+
+// ============================================================================
+public function IUnitMetadata.getOrAddInvulnerableComponent() returns InvulnerableComponent
+  var component = this.getInvulnerableComponent()
+  if (component == null)
+    component = this.addComponent(new InvulnerableComponent(this)) castTo InvulnerableComponent
+  return component
+
+// ============================================================================
+public function unit.makeInvulnerable(real duration)
+  let metadata = this.getMetadata()
+  if (metadata == null)
+    return
+  let comp = metadata.getOrAddInvulnerableComponent()
+  if (comp == null)
+    return
+  comp.makeInvulnerable(duration)

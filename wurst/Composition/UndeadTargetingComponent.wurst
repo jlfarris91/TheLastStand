@@ -13,9 +13,25 @@ import Unit_WoodFence
 import Unit_StoneWall
 import Unit_GateCommon
 import Unit_MetalWall
+import Orders
+import TargetUtility
+import UnitExtensions
+import ClosureTimers
+import RealTime
+import Dispatcher
+
+constant real ATTACK_TIMER_INTERVAL = 1.0
+constant real ATTACK_TIMER_DURATION = 10.0
+constant real DOT_INTERVAL = 1.0
 
 HashMap<player, LinkedList<unit>> g_validHumanStructureTargets
 HashList<int> g_validTargetStructureIds
+conditionfunc g_filterUnitIsValidTargetStructure = Condition(function filterUnitIsValidTargetStructure)
+conditionfunc g_filterUnitIsValidTargetNonStructure = Condition(function filterUnitIsValidTargetNonStructure)
+HashMap<unit, HashList<UndeadTargetingComponent>> g_targetedUnitToUTCMap = new HashMap<unit, HashList<UndeadTargetingComponent>>()
+HashList<UndeadTargetingComponent> g_activeUndeadTargetingComponents = new HashList<UndeadTargetingComponent>()
+Dispatcher g_issueOrderDispatcher
+HashList<unit> g_dealDOTGroup = new HashList<unit>()
 
 /*
 
@@ -48,25 +64,59 @@ HashList<int> g_validTargetStructureIds
 public class UndeadTargetingComponent extends UnitComponent
   private player m_targetPlayer
   private Event m_targetPlayerChangedEvent
+  private unit m_targetUnit
+  private int m_attackTime
+  private bool m_awaitingOrder
+  private bool m_dealingDOT
 
   // --------------------------------------------------------------------------
   construct(IUnitMetadata owner)
     super(owner)
     m_targetPlayer = null
-    m_targetPlayerChangedEvent = new Event()
+    m_targetUnit = null
+    m_awaitingOrder = false
+    m_dealingDOT = false
 
   // --------------------------------------------------------------------------
   ondestroy
-    destroy m_targetPlayerChangedEvent
-    m_targetPlayerChangedEvent = null
+    if (m_targetPlayerChangedEvent != null)
+      destroy m_targetPlayerChangedEvent
+      m_targetPlayerChangedEvent = null
+    g_activeUndeadTargetingComponents.remove(this)
 
   // --------------------------------------------------------------------------
   override function getTypeId() returns int
     return UndeadTargetingComponent.typeId
 
   // --------------------------------------------------------------------------
+  override function onEnabled()
+    super.onEnabled()
+    g_activeUndeadTargetingComponents.add(this)
+
+  // --------------------------------------------------------------------------
+  override function onDisabled()
+    super.onDisabled()
+    g_activeUndeadTargetingComponents.remove(this)
+    setTargetUnit(null)
+    stopDOT()
+
+  // --------------------------------------------------------------------------
+  override function onUnitChanged(unit oldUnit, unit _newUnit)
+    super.onUnitChanged(oldUnit, _newUnit)
+
+    if (oldUnit != null)
+      g_dealDOTGroup.remove(oldUnit)
+      m_dealingDOT = false
+
+  // --------------------------------------------------------------------------
   function getTargetPlayerChangedEvent() returns Event
+    if (m_targetPlayerChangedEvent == null)
+      m_targetPlayerChangedEvent = new Event()
     return m_targetPlayerChangedEvent
+
+  // --------------------------------------------------------------------------
+  function getTargetUnit() returns unit
+    return m_targetUnit
 
   // --------------------------------------------------------------------------
   function getTargetPlayer() returns player
@@ -77,23 +127,103 @@ public class UndeadTargetingComponent extends UnitComponent
     if (p == m_targetPlayer)
       return false
     m_targetPlayer = p
+    setTargetUnit(null)
     raiseTargetPlayerChangedEvent()
     issueOrderTargetingPlayer()
     return true
 
   // --------------------------------------------------------------------------
   function issueOrderTargetingPlayer()
+    let ownerUnit = getOwnerUnit()
+    if (not ownerUnit.isAlive())
+      return
 
+    // We're already awaiting a call to issueOrderTargetingPlayer_impl so early out
+    if (m_awaitingOrder or m_dealingDOT)
+      return
+
+    m_awaitingOrder = true
+
+    // Dispatch this operation to limit how often this gets executed because
+    // finding the nearest unit can be expensive
+    g_issueOrderDispatcher.invoke(DispatchPriority.LOW, () -> issueOrderTargetingPlayer_impl(ownerUnit))
+
+  // --------------------------------------------------------------------------
+  private static function issueOrderTargetingPlayer_impl(unit _unit)
+    if (not _unit.isAlive())
+      return
+    
+    let metadata = _unit.getMetadata()
+    if (metadata == null)
+      return
+    
+    let comp = metadata.getUndeadTargetingComponent()
+    comp.issueOrderTargetingPlayer_impl()
+
+  // --------------------------------------------------------------------------
+  private function issueOrderTargetingPlayer_impl()
+
+    m_awaitingOrder = false
+    restartAttackTimer()
+
+    if (not getOwnerUnit().isAlive())
+      return
+
+    if (tryReissueOrder())
+      return
+
+    // 1. Try attacking the nearest structure
+    // 2. Try attacking the nearest non-structure
     if (tryTargetClosestUnit())
       //Log.debug("[UndeadTargetingComponent] Found target to attack")
       return
 
+    // At this point the target unit must not have been valid
+    setTargetUnit(null)
+
+    // 3. Try attack-moving to the target player's camp center (the OT or the hero)
     if (tryTargetCampCenter())
       //Log.debug("[UndeadTargetingComponent] Could not find target unit, attack-moving to camp center")
       return
 
-    //Log.debug("[UndeadTargetingComponent] Found no player unit to attack")
-    //increaseAcquisitionRange()
+    // 4. The target player is either null or considered dead, so start the DOT
+    if (m_targetPlayer == null or m_targetPlayer.getHumanMetadataRequired().getIsDead())
+      startDOT()
+      return
+
+  // --------------------------------------------------------------------------
+  function startDOT()
+    if (not m_dealingDOT)
+      g_dealDOTGroup.add(getOwnerUnit())
+      m_dealingDOT = true
+
+  // --------------------------------------------------------------------------
+  function stopDOT()
+    if (m_dealingDOT)
+      g_dealDOTGroup.remove(getOwnerUnit())
+      m_dealingDOT = false
+
+  // --------------------------------------------------------------------------
+  function tryReissueOrder() returns bool
+    if (m_targetUnit == null)
+      return false
+    
+    if (not unitIsValidTargetStructure(m_targetUnit) or
+        not unitIsValidTargetNonStructure(m_targetUnit))
+      return false
+      
+    return getOwnerUnit().issueTargetOrderById(OrderIds.attack, m_targetUnit)
+
+  // --------------------------------------------------------------------------
+  private function setTargetUnit(unit targetUnit)
+    if (m_targetUnit == targetUnit)
+      return
+    if (m_targetUnit != null)
+      unregisterTargetedUnit(m_targetUnit, this)
+    m_targetUnit = targetUnit
+    if (m_targetUnit != null)
+      registerTargetedUnit(m_targetUnit, this)
+    restartAttackTimer()
 
   // --------------------------------------------------------------------------
   protected function tryTargetClosestUnit() returns bool
@@ -101,12 +231,22 @@ public class UndeadTargetingComponent extends UnitComponent
     if (targetPlayer == null)
       return false
 
-    let undeadUnit = getOwnerUnit()
+    let ownerUnit = getOwnerUnit()
+    unit targetUnit
 
-    let target = getClosestValidHumanStructureTarget(targetPlayer, undeadUnit.getPos())
-    if (target != null)
-      undeadUnit.issuePointOrder("attack", target.getPos())
-      return true
+    // Try to attack the nearest structure
+    targetUnit = getClosestValidHumanStructureTarget(targetPlayer, ownerUnit.getPos())
+    if (targetUnit != null)
+      m_targetUnit = targetUnit
+      return ownerUnit.issueTargetOrderById(OrderIds.attack, m_targetUnit)
+
+    // There are no structures to attack? Try attacking a non-structure unit then
+    if (targetUnit == null)
+      targetUnit = getNearestUnitOfPlayer(targetPlayer, ownerUnit.getPos(), g_filterUnitIsValidTargetNonStructure)
+
+    if (targetUnit != null)
+      setTargetUnit(targetUnit)
+      return ownerUnit.issueTargetOrderById(OrderIds.attack, m_targetUnit)
 
     return false
 
@@ -120,18 +260,38 @@ public class UndeadTargetingComponent extends UnitComponent
     if (playerMetadata == null or playerMetadata.getIsDead())
       return false
 
-    let campCenter = playerMetadata.getCamp().getCenter()
+    let campCenter = playerMetadata.getCampCenter()
     let undeadUnit = getOwnerUnit()
     undeadUnit.issuePointOrder("attack", campCenter)
     return true
 
   // --------------------------------------------------------------------------
-  protected function increaseAcquisitionRange()
-    getOwnerUnit().setField(UNIT_RF_ACQUISITION_RANGE, REAL_MAX)
+  protected function onTargetUnitDied()
+    setTargetUnit(null)
+    issueOrderTargetingPlayer()
+
+  // --------------------------------------------------------------------------
+  protected function onAttackedTargetUnit()
+    restartAttackTimer()
 
   // --------------------------------------------------------------------------
   private function raiseTargetPlayerChangedEvent()
-    m_targetPlayerChangedEvent.call()
+    if (m_targetPlayerChangedEvent != null)
+      m_targetPlayerChangedEvent.call()
+
+  // --------------------------------------------------------------------------
+  protected function onAttackTimer()
+    if (m_awaitingOrder)
+      return
+    // If the timer has expired then this unit hasn't been able to attack
+    // it's target in a while so try to target a new enemy
+    if (getRealTimeSeconds() - m_attackTime > ATTACK_TIMER_DURATION)
+      setTargetUnit(null)
+      issueOrderTargetingPlayer()
+
+  // --------------------------------------------------------------------------
+  protected function restartAttackTimer()
+    m_attackTime = getRealTimeSeconds()
 
 // ============================================================================
 public function IUnitMetadata.getUndeadTargetingComponent() returns UndeadTargetingComponent
@@ -170,6 +330,14 @@ function filterUnitIsValidTargetStructure() returns bool
   return unitIsValidTargetStructure(GetFilterUnit())
 
 // ============================================================================
+function unitIsValidTargetNonStructure(unit u) returns bool
+  return u.isAlive() and not u.isInvulnerable() and not u.isStructure()
+
+// ============================================================================
+function filterUnitIsValidTargetNonStructure() returns bool
+  return unitIsValidTargetNonStructure(GetFilterUnit())
+
+// ============================================================================
 function onConstructionFinished()
   let constructedUnit = GetConstructedStructure()
   let owningPlayer = constructedUnit.getOwner()
@@ -185,17 +353,37 @@ function onConstructionFinished()
 
 // ============================================================================
 function onUnitDeath()
-  let constructedUnit = GetDyingUnit()
-  let owningPlayer = constructedUnit.getOwner()
+  let dyingUnit = GetDyingUnit()
+  let owningPlayer = dyingUnit.getOwner()
 
-  if (not owningPlayer.isHumanPlayer())
+  if (owningPlayer.isHumanPlayer() and unitIsValidTargetStructure(dyingUnit))
+    let targetList = g_validHumanStructureTargets.get(owningPlayer)
+    targetList.remove(dyingUnit)
+
+  unregisterTargetedUnit(dyingUnit)
+
+// ============================================================================
+function onUnitAttacked()
+  let attackedUnit = GetAttackedUnitBJ()
+  let attackingUnit = GetAttacker()
+
+  let metadata = attackingUnit.getMetadata()
+  if (metadata == null)
+    return
+  
+  let undeadTargetingComponent = metadata.getUndeadTargetingComponent()
+  if (undeadTargetingComponent == null)
     return
 
-  if (not unitIsValidTargetStructure(constructedUnit))
+  let targetUnit = undeadTargetingComponent.getTargetUnit()
+  if (targetUnit == null)
+    // Wait what? Why did he attack the non-target unit?
+    // Oh well, just issue a new attack order
+    undeadTargetingComponent.issueOrderTargetingPlayer()
     return
 
-  let targetList = g_validHumanStructureTargets.get(owningPlayer)
-  targetList.remove(constructedUnit)
+  if (targetUnit == attackedUnit)
+    undeadTargetingComponent.onAttackedTargetUnit()
 
 // ============================================================================
 function populateInitialValidHumanStructureTargets()
@@ -211,8 +399,37 @@ function populateInitialValidHumanStructureTargets()
   tempGroup.release()
 
 // ============================================================================
+function registerTargetedUnit(unit targetedUnit, UndeadTargetingComponent comp)
+  HashList<UndeadTargetingComponent> attackerList
+  if (g_targetedUnitToUTCMap.has(targetedUnit))
+    attackerList = g_targetedUnitToUTCMap.get(targetedUnit)
+  else
+    attackerList = new HashList<UndeadTargetingComponent>()
+    g_targetedUnitToUTCMap.put(targetedUnit, attackerList)
+  attackerList.add(comp)
+
+// ============================================================================
+function unregisterTargetedUnit(unit targetedUnit, UndeadTargetingComponent comp)
+  if (not g_targetedUnitToUTCMap.has(targetedUnit))
+    return
+  let attackerList = g_targetedUnitToUTCMap.get(targetedUnit)
+  attackerList.remove(comp)
+
+// ============================================================================
+function unregisterTargetedUnit(unit targetedUnit)
+  if (not g_targetedUnitToUTCMap.has(targetedUnit))
+    return
+  let attackerList = g_targetedUnitToUTCMap.get(targetedUnit)
+  g_targetedUnitToUTCMap.remove(targetedUnit)
+  for comp in attackerList
+    comp.onTargetUnitDied()
+  destroy attackerList
+
+// ============================================================================
 init
   g_validHumanStructureTargets = new HashMap<player, LinkedList<unit>>()
+
+  g_issueOrderDispatcher = new Dispatcher(1024, 1024, 1024)..setMaxExecutions(50)
 
   for p in g_PlayingHumanPlayers
     g_validHumanStructureTargets.put(p, new LinkedList<unit>())
@@ -233,6 +450,18 @@ init
 
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_CONSTRUCT_FINISH, function onConstructionFinished)
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_DEATH, function onUnitDeath)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ATTACKED, function onUnitAttacked)
 
   // Populate with initial structures (for debug purposes)
   populateInitialValidHumanStructureTargets()
+
+  doPeriodically(ATTACK_TIMER_INTERVAL) (CallbackPeriodic cb) ->
+    for comp in g_activeUndeadTargetingComponents
+      g_issueOrderDispatcher.invoke(DispatchPriority.HIGH) () ->
+        if (comp != null and g_activeUndeadTargetingComponents.has(comp))
+          comp.onAttackTimer()
+
+  doPeriodically(DOT_INTERVAL) (CallbackPeriodic cb) ->
+    for _unit in g_dealDOTGroup
+      if (_unit != null and _unit.isAlive())
+        _unit.subHP(_unit.getMaxHP() * 0.1)

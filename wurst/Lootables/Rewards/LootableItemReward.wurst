@@ -4,31 +4,29 @@ import MainItemLibrary
 import FX
 import DisplayTextToPlayer
 import LootableComponent
-import StringExtensions
 import ColorUtility
 import UnitMetadata
 import LooterComponent
+import GameInstance
 
 // ============================================================================
 public class LootableItemReward implements ILootableReward
-  private ItemChances m_itemChances
+  private ItemChances m_itemChancesStart
+  private ItemChances m_itemChancesEnd
+
+  // --------------------------------------------------------------------------
+  construct(ItemChances chancesStart, ItemChances chancesEnd)
+    m_itemChancesStart = chancesStart
+    m_itemChancesEnd = chancesEnd
 
   // --------------------------------------------------------------------------
   override function getStopsRetrigger() returns bool
     return false
 
   // --------------------------------------------------------------------------
-  function getItemChances() returns ItemChances
-    return m_itemChances
+  override function giveReward(LootableComponent lootable, unit looter) returns bool
 
-  // --------------------------------------------------------------------------
-  function setItemChances(ItemChances chances)
-    m_itemChances = chances
-
-  // --------------------------------------------------------------------------
-  override function giveReward(LootableComponent lootable, unit looter)
-
-    var itemChances = m_itemChances
+    var itemChances = lerp(m_itemChancesStart, m_itemChancesEnd, g_GameInstance.getGameProgress01())
 
     // Treasure Hunter's Pendant increases rare item chances
     let metadata = looter.getMetadata()
@@ -40,17 +38,19 @@ public class LootableItemReward implements ILootableReward
 
     let itm = g_MainItemLibrary.giveRandomItemToUnit(looter, itemChances)
 
-    if (itm == null or itm.getTypeId() == 0)
-      Log.error("No item could be found in main item library")
-      return
+    if (itm == null)
+      Log.debug("LootableItemReward", "giveReward", "", "No item could be found in main item library")
+      return false
 
     let itemSet = g_MainItemLibrary.getOwningSet(itm.getTypeId())
     if (itemSet == null)
-      Log.error("Could not find matching item set for item {0}".format(itm.getTypeId().toString()))
-      return
+      Log.debug("LootableItemReward", "giveReward", "", "Could not find matching item set for item {0}".format(itm.getTypeId().toString()))
+      return false
 
     FX.createFoundItemTag(looter.getPos(), looter.getOwner())
     lootable.displayLootRewardText(looter.getOwner(),
       "Found {0} item {1}!".format(
         itemSet.getName().colorize(itemSet.getColor()),
         itm.getName().colorize(Colors.gold)))
+
+    return true

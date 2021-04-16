@@ -1,0 +1,144 @@
+package GateComponent
+import RegisterEvents
+import Unit_GateCommon
+import TerrainUtils
+import CardinalUnitDefinition
+import GateCardinalUnitDefinition
+import ClosureTimers
+import UnitComponent
+
+// ============================================================================
+public class GateComponent extends UnitComponent
+  private bool m_isOpen
+  private CardinalUnitAngle m_angle
+  private GateCardinalUnitDefinitionHelper m_helper
+
+  // --------------------------------------------------------------------------
+  construct(IUnitMetadata metadata)
+    super(metadata)
+
+  // --------------------------------------------------------------------------
+  override function getTypeId() returns int
+    return GateComponent.typeId
+
+  // --------------------------------------------------------------------------
+  function getIsOpen() returns bool
+    return this.m_isOpen
+
+  // --------------------------------------------------------------------------
+  function getIsClosed() returns bool
+    return not this.m_isOpen
+
+  // --------------------------------------------------------------------------
+  override function onUnitChanged(unit oldUnit, unit newUnit)
+    super.onUnitChanged(oldUnit, newUnit)
+    this.updateState()
+
+  // --------------------------------------------------------------------------
+  function openGate()
+    if (this.m_isOpen)
+      return
+    let unitId = this.getOwnerUnit().getTypeId()
+    let upgradeId = m_helper.getOpenId(m_angle)
+    if (unitId != upgradeId)
+      IssueTrainOrderByIdBJ(this.getOwnerUnit(), upgradeId)
+    updateState()
+
+  // --------------------------------------------------------------------------
+  function closeGate()
+    if (not this.m_isOpen)
+      return
+    let unitId = this.getOwnerUnit().getTypeId()
+    let upgradeId = m_helper.getClosedId(m_angle)
+    if (unitId != upgradeId)
+      IssueTrainOrderByIdBJ(this.getOwnerUnit(), upgradeId)
+    updateState()
+
+  // --------------------------------------------------------------------------
+  protected function updateState()
+    let gateUnit = getOwnerUnit()
+    let unitId = gateUnit.getTypeId()
+
+    m_helper = getGateHelperForUnitType(unitId)
+    if (m_helper == null)
+      return
+    
+    let optionalAngle = m_helper.getAngleForUnitType(unitId)
+    if (not optionalAngle.hasValue)
+      Log.error("Somehow this unit does not have an associated CardinalUnitAngle")
+      return
+
+    m_angle = optionalAngle.value
+    m_isOpen = gateUnit.isOpenGate()
+
+    removeAllGateAnimationProperties(gateUnit)
+    gateUnit.addAnimationProperties(getGateAnimationProperties(m_angle, m_isOpen))
+    gateUnit.setPathing(not m_isOpen)
+
+    nullTimer(() -> triggerPathingUpdate())
+
+  // --------------------------------------------------------------------------
+  private function triggerPathingUpdate()
+    let tile = this.getOwnerUnit().getPos().getTile()
+    tile.setPathing(PATHING_TYPE_WALKABILITY, false)
+    tile.setPathing(PATHING_TYPE_WALKABILITY, true)
+
+// ============================================================================
+public function IUnitMetadata.getGateComponent() returns GateComponent
+  return this.getComponent(typeInfo(GateComponent.typeId)) castTo GateComponent
+
+// ============================================================================
+public function IUnitMetadata.getOrAddGateComponent() returns GateComponent
+  var component = this.getGateComponent()
+  if (component == null)
+    component = this.addComponent(new GateComponent(this)) castTo GateComponent
+  return component
+
+// ============================================================================
+function onGateUpgradeFinished()
+  let caster = GetTriggerUnit()
+  if (not caster.isGate())
+    return
+  
+  let metadata = caster.getMetadata()
+  if (metadata == null)
+    return
+
+  let gate = metadata.getGateComponent()
+  if (gate != null)
+    gate.updateState()
+
+// ============================================================================
+function onGateUpgradeStart()
+  let caster = GetTriggerUnit()
+  if (not caster.isGate())
+    return
+  
+  let metadata = caster.getMetadata()
+  if (metadata == null)
+    return
+
+  let gate = metadata.getGateComponent()
+  if (gate != null)
+    gate.updateState()
+
+// ============================================================================
+function onGateAttacked()
+  let caster = GetTriggerUnit()
+  if (not caster.isGate())
+    return
+  
+  let metadata = caster.getMetadata()
+  if (metadata == null)
+    return
+
+  let gate = metadata.getGateComponent()
+  if (gate != null and gate.getIsClosed())
+    gate.getOwnerUnit().setAnimation("hit")
+    ResetUnitAnimation(gate.getOwnerUnit())
+
+// ============================================================================
+init
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_UPGRADE_START, function onGateUpgradeStart)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_UPGRADE_FINISH, function onGateUpgradeFinished)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ATTACKED, function onGateAttacked)

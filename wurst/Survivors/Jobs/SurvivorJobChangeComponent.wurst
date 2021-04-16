@@ -5,11 +5,11 @@ import FX
 import SurvivorJobs
 import RegisterEvents
 import DisplayTextToPlayer
-import StringExtensions
 import MainItemLibrary
 import SurvivorComponent
 import TlsUnitDefinition
 import TlsJobItemIds
+import ColorUtility
 
 group g_temp = CreateGroup()
 
@@ -48,14 +48,17 @@ public class SurvivorJobChangeComponent extends UnitComponent
 
     let survivorComp = getOwner().getSurvivorComponent()
     if (survivorComp == null)
+      Log.debug("SurvivorJobChangeComponent", "changeJobs", ownerUnit.getName(), "Failed to change to job " + job.getTitle() + " : owner has no survivor component")
       return false
 
     let survivorData = survivorComp.getSurvivorData()
     if (survivorData == null)
+      Log.debug("SurvivorJobChangeComponent", "changeJobs", ownerUnit.getName(), "Failed to change to job " + job.getTitle() + " : survivor has no survivor data")
       return false
 
     let jobData = survivorData.getJobData(job)
     if (jobData == null)
+      Log.debug("SurvivorJobChangeComponent", "changeJobs", ownerUnit.getName(), "Failed to change to job " + job.getTitle() + " : survivor has no related job data")
       return false
 
     let replacementUnitId = jobData.getUnitId()
@@ -71,14 +74,19 @@ public class SurvivorJobChangeComponent extends UnitComponent
 
   // --------------------------------------------------------------------------
   function upgradeJob() returns bool
-    let currentUnitId = getOwnerUnit().getTypeId()
+    let ownerUnit = getOwnerUnit()
+    let currentUnitId = ownerUnit.getTypeId()
     let job = getJobDefinitionForUnitType(currentUnitId)
     
     let nextUnitId = job.getNextUpgrade(currentUnitId)
     if (nextUnitId == -1)
       return false
 
-    replaceUnit(nextUnitId)
+    let newUnit = replaceUnit(nextUnitId)
+
+    // Reset to level 1 when you upgrade
+    newUnit.removeLevels(newUnit.getLevel())
+    newUnit.setXp(0, false)
 
     // There is a bug with upgrading non-building units where the player is not
     // charged for the upgrade - so do that now.
@@ -88,7 +96,7 @@ public class SurvivorJobChangeComponent extends UnitComponent
       p.subGold(nextUnitDef.getGoldCost())
       p.subLumber(nextUnitDef.getLumberCost())
     else
-      Log.debug("No definition registered for unit type {0}".format(nextUnitId.toString()))
+      Log.debug("SurvivorJobChangeComponent", "changeJobs", ownerUnit.getName(), "No definition registered for unit type {0}".format(nextUnitId.toString()))
 
     return true
 
@@ -135,7 +143,12 @@ function onUnitUsedItem()
     return
 
   let jobId = getJobDefinitionForItemType(manipulatedItem.getTypeId())
+  if (jobId == null)
+    Log.debug("[onUnitUsedItem] jobId is null for item type " + manipulatedItem.getName())
+    return
+
   if (jobId == SurvivorJobs.none)
+    Log.debug("[onUnitUsedItem] Somehow the jobid equals SurvivorJobs.none for item type " + manipulatedItem.getName())
     return
 
   if (comp.changeJobs(jobId))

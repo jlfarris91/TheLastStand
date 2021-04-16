@@ -1,0 +1,88 @@
+package NightTimerDisplay
+import ClosureTimers
+import Time
+import Math
+import ColorUtility
+
+NightTimerDisplay g_nightTimerDisplay
+
+//=============================================================================
+class NightTimerDisplay
+  private framehandle m_frameHandle
+  private framehandle m_textFrame
+  private string m_prefix
+  private colorA m_startColor
+  private colorA m_endColor
+  private time m_startTime
+  private time m_endTime
+
+  // --------------------------------------------------------------------------
+  construct()
+    createFrames()
+    doPeriodically(1.0) (CallbackPeriodic cb) ->
+      update()
+
+  // --------------------------------------------------------------------------
+  function createFrames()
+  
+    m_frameHandle = BlzCreateFrame("NightTimerDisplay", BlzGetOriginFrame(ORIGIN_FRAME_GAME_UI, 0), 0, 0)
+    m_frameHandle.setPoint(FRAMEPOINT_TOP, BlzGetOriginFrame(ORIGIN_FRAME_TOP_MSG, 0), FRAMEPOINT_TOP, 0, -0.03)
+    m_frameHandle.setSize(0.12, 0.03)
+    m_textFrame = BlzGetFrameByName("NightTimerDisplayText", 0)
+    m_frameHandle.hide()
+
+  // --------------------------------------------------------------------------
+  function show()
+    if (m_frameHandle != null)
+      update()
+      m_frameHandle.show()
+  
+  // --------------------------------------------------------------------------
+  function hide()
+    if (m_frameHandle != null)
+      m_frameHandle.hide()
+
+  // --------------------------------------------------------------------------
+  function onDayStarted()
+    m_prefix = "Nightfall"
+    m_startColor = colorA(0, 255, 0, 255)
+    m_endColor = colorA(255, 0, 0, 255)
+    m_startTime = makeTime(getDay(), TIME_OF_DAY)
+    m_endTime = makeTime(getDay(), TIME_OF_NIGHT)
+    m_frameHandle.hide()
+
+  // --------------------------------------------------------------------------
+  function onNightStarted()
+    m_prefix = "Daybreak"
+    m_startColor = colorA(255, 0, 0, 255)
+    m_endColor = colorA(0, 255, 0, 255)
+    m_startTime = makeTime(getDay(), TIME_OF_NIGHT)
+    m_endTime = makeTime(getDay() + 1, TIME_OF_DAY)
+    m_frameHandle.hide()
+
+  // --------------------------------------------------------------------------
+  function update()
+
+    let todRemaining = m_endTime - getGameTime()
+    let totalLength = m_endTime - m_startTime
+
+    let t = 1.0 - clamp01(todRemaining.ticks / totalLength.ticks)
+    let visibleTimerT = 1.0 - clamp01(todRemaining.ticks / (totalLength.ticks * 0.5))
+    
+    // Only show the timer half way through the day
+    if (t > 0.5)
+      if (not m_frameHandle.isVisible())
+        m_frameHandle.show()
+    else
+      return
+
+    let textColor = m_startColor.mix(m_endColor, visibleTimerT)
+    m_textFrame.setText(m_prefix + " in " + todRemaining.toRealWorldTimeString().colorize(textColor))
+
+//=============================================================================
+init
+  nullTimer() () ->
+    g_nightTimerDisplay = new NightTimerDisplay()
+
+  registerDayEvent(() -> g_nightTimerDisplay.onDayStarted())
+  registerNightEvent(() -> g_nightTimerDisplay.onNightStarted())

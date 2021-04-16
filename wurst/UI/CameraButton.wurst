@@ -1,0 +1,101 @@
+package CameraButton
+import ClosureFrames
+import TLSMenuToggleButton
+import Math
+import GameConstants
+
+// ============================================================================
+public class CameraToggleButton extends TLSMenuToggleButton
+  private framehandle m_sliderFrame
+  private framehandle m_sliderLabel
+  private FrameHandleListener m_sliderValueChanged
+  private real m_value = CAMERA_DISTANCE_DEFAULT
+
+  // --------------------------------------------------------------------------
+  construct()
+    setFramePath("TLSMenuButtonTemplate")
+    setIconPath("ReplaceableTextures\\WorldEditUI\\Doodad-Cinematic.blp")
+    setIconDisabledPath("ReplaceableTextures\\WorldEditUI\\Doodad-Cinematic.blp")
+    setTooltipNormal("Camera Controls")
+    setTooltipExtended("Change camera settings")
+
+  // --------------------------------------------------------------------------
+  function getCameraDistance() returns real
+    return m_value
+
+  // --------------------------------------------------------------------------
+  function setCameraDistance(real value)
+    let clampedValue = clamp(value, CAMERA_DISTANCE_MIN, CAMERA_DISTANCE_MAX)
+    if (m_value == clampedValue)
+      return
+    
+    m_value = clampedValue
+    
+    if (m_sliderFrame != null)
+      m_sliderFrame.setValue(clampedValue)
+    
+    if (m_sliderLabel != null)
+      m_sliderLabel.setText("Distance: " + m_value.floor().toString())
+
+    updateCamera()
+
+  // --------------------------------------------------------------------------
+  protected override function createFrames()
+    super.createFrames()
+
+    m_sliderFrame = createFrame("EscMenuSliderTemplate", GAME_UI, 0, 0)
+
+    m_sliderLabel = createFrame("EscMenuLabelTextTemplate", m_sliderFrame, 0, 0)
+    m_sliderLabel.setPoint(FRAMEPOINT_LEFT, m_sliderFrame, FRAMEPOINT_RIGHT, 0, 0)
+    m_sliderLabel.setSize(0.15, 0.02)
+    m_sliderLabel.setTextAlignment(TEXT_JUSTIFY_MIDDLE, TEXT_JUSTIFY_LEFT)
+    m_sliderLabel.setText("Distance: " + m_value.floor().toString())
+
+    m_sliderFrame.setSize(0.15, 0.01)
+    m_sliderFrame.setPoint(FRAMEPOINT_BOTTOMLEFT, m_buttonFrame, FRAMEPOINT_TOPLEFT, -0.0002, 0.0)
+    m_sliderFrame.setMinMax(CAMERA_DISTANCE_MIN, CAMERA_DISTANCE_MAX)
+    m_sliderFrame.setValue(m_value)
+    m_sliderFrame.setStepSize(50)
+    m_sliderFrame.hide()
+
+    m_sliderValueChanged = m_sliderFrame.onSliderValueChange() -> 
+      onSliderValueChanged()
+
+  // --------------------------------------------------------------------------
+  protected override function destroyFrames()
+    super.destroyFrames()
+    
+    if (m_sliderValueChanged != null)
+      destroy m_sliderValueChanged
+      m_sliderValueChanged = null
+
+    if (m_sliderFrame != null)
+      m_sliderFrame.remove()
+      m_sliderFrame = null
+
+  // --------------------------------------------------------------------------
+  private function onSliderValueChanged()
+
+    if (m_sliderFrame == null)
+      return
+
+    let newValue = m_sliderFrame.getValue()
+    if (m_value == newValue)
+      return
+
+    setCameraDistance(newValue)
+
+  // --------------------------------------------------------------------------
+  private function updateCamera()
+    SetCameraFieldForPlayer(m_player, CAMERA_FIELD_TARGET_DISTANCE, m_value, CAMERA_DISTANCE_SMOOTH)
+    SetCameraFieldForPlayer(m_player, CAMERA_FIELD_FARZ, CAMERA_FARZ, 0)
+
+  // --------------------------------------------------------------------------
+  protected override function onChecked()
+    super.onChecked()
+    m_sliderFrame.show(m_player)
+
+  // --------------------------------------------------------------------------
+  protected override function onUnchecked()
+    super.onUnchecked()
+    m_sliderFrame.hide()

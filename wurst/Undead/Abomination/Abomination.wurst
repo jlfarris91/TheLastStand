@@ -1,5 +1,4 @@
 package Abomination
-import UndeadUnit
 import ClosureEvents
 import TlsAbilityIds
 import UnitMetadata
@@ -7,7 +6,6 @@ import StateMachineComponent
 import ClosureTimers
 import DummyUtils
 import Units
-import Zombie
 
 import initlater AbomIdleState
 import initlater AbomHoldingState
@@ -17,6 +15,7 @@ import LinkedList
 import Math
 import Interpolation
 import Orders
+import TlsUnitIds
 
 constant real ABOM_THROW_PROJ_DURATION = 1.5
 constant real ABOM_THROW_PROJ_HEIGHT = 300.0
@@ -28,13 +27,19 @@ constant real ABOM_ANIM_GRAB_ZOMBIE_POINT = 0.6
 constant real ABOM_ANIM_GRAB_DURATION = 1.667
 constant int ABOM_GRAB_ANIM_INDEX = 2
 
+public constant int ABOM_GRAB_ORDER_ID = OrderIds.charm
+public constant int ABOM_THROW_ORDER_ID = OrderIds.flare
+
 constant string ABOM_THROW_DUST_EFFECT = "Objects\\Spawnmodels\\Undead\\ImpaleTargetDust\\ImpaleTargetDust.mdl"
+
+constant string ABOM_PROJECTILE_EFFECT1 = "units\\abomination\\GrabbedZombie.mdl"
+constant string ABOM_PROJECTILE_EFFECT2 = "Abilities\\Weapons\\MeatwagonMissile\\MeatwagonMissile.mdl"
 
 LinkedList<ZombieProjectile> g_zombieProjectiles = new LinkedList<ZombieProjectile>()
 trigger g_updateZombieProjectilesTrigger
 
 // ============================================================================
-public class Abomination extends UndeadUnit
+public class Abomination extends UnitMetadata
   private unit _holdingZombie
   private StateMachineComponent m_stateMachine
   private EventCallback m_targetPlayerChangedHandler
@@ -84,7 +89,7 @@ public class Abomination extends UndeadUnit
     m_stateMachine.addState(new AbomHoldingState(this, m_stateMachine))
     addComponent(m_stateMachine)
 
-    m_stateMachine.transitionToState("Idle")
+    m_stateMachine.transitionToState(ABOM_IDLE_STATE_ID)
 
   // --------------------------------------------------------------------------
   private function stopStateMachine()
@@ -155,7 +160,7 @@ function onAbomGrabbedZombie(unit caster, unit target)
         abom2.setHoldingZombie(target)
         let stateMachine2 = abom2.getStateMachine()
         if (stateMachine2 != null)
-          stateMachine2.transitionToState("HoldingZombie")
+          stateMachine2.transitionToState(ABOM_HOLDING_STATE_ID)
     if (target != null)
       target.hide()
   //}
@@ -185,7 +190,7 @@ function onAbomThrowZombie(unit caster)
 
   let zombie = abom.getHoldingZombie()
   if (zombie == null)
-    Log.warn("Expected Abomination to be holding a zombie when entering this state")
+    Log.debug("Expected Abomination to be holding a zombie when entering this state")
     return
 
   let throwStartPos = caster.getPos()
@@ -217,10 +222,10 @@ function onAbomThrowZombie(unit caster)
       // Get the statemachine again here in case the abom dies before this is called
       let stateMachine2 = getAliveAbomStateMachine(caster)
       if (stateMachine2 != null)
-        stateMachine2.transitionToState("Idle")
+        stateMachine2.transitionToState(ABOM_IDLE_STATE_ID)
       abomUnit2.unpauseEx()
       abomUnit2.setAnimation("stand")
-      abomUnit2.issuePointOrderById(OrderIds.attack, abomUnit2.getPos())
+      abomUnit2.getMetadata().getUndeadTargetingComponent().issueOrderTargetingPlayer()
   //}
 
   // At the peak of the throw animation order the dummy to attack ground
@@ -232,6 +237,14 @@ function onAbomThrowZombie(unit caster)
     //{
       let projectileDuration = rangeScalar * ABOM_THROW_PROJ_DURATION
       new ZombieProjectile(throwStartPos, throwEndPos, ABOM_THROW_PROJ_HEIGHT, projectileDuration)
+
+      let stateMachine2 = getAliveAbomStateMachine(caster)
+      if (stateMachine2 != null)
+      //{
+        let holdingState = stateMachine2.getState(ABOM_HOLDING_STATE_ID) castTo AbomHoldingState
+        if (holdingState != null)
+          holdingState.onZombieThrown()
+      //}
        
       doAfter(projectileDuration) ->
       //{
@@ -286,6 +299,7 @@ class ZombieProjectile
   private real m_elapsed
   private real m_duration
   private effect m_effect
+  private effect m_effect2
 
   // --------------------------------------------------------------------------
   construct(vec2 startPos, vec2 endPos, real height, real duration)
@@ -296,10 +310,12 @@ class ZombieProjectile
     m_duration = duration
     m_elapsed = 0
 
-    m_effect = AddSpecialEffect(Units.zombie, startPos.x, startPos.y)
+    m_effect = AddSpecialEffect(ABOM_PROJECTILE_EFFECT1, startPos.x, startPos.y)
     m_effect.playAnimation(ANIM_TYPE_BIRTH)
     m_effect.setTimeScale(0.0)
     m_effect.setYaw(startPos.angleTo(endPos))
+
+    m_effect2 = AddSpecialEffect(ABOM_PROJECTILE_EFFECT2, startPos.x, startPos.y)
 
     registerZombieProjectile(this)
 
@@ -312,6 +328,10 @@ class ZombieProjectile
       m_effect.destr()
       m_effect = null
 
+    if (m_effect2 != null)
+      m_effect2.destr()
+      m_effect2 = null
+
   // --------------------------------------------------------------------------
   function update(real dt)
 
@@ -323,6 +343,8 @@ class ZombieProjectile
 
     m_effect.setPos(pos)
     m_effect.setPitch(pitch)
+
+    m_effect2.setPos(pos)
 
     if (t >= 1.0)
       onCompleted()
@@ -343,6 +365,9 @@ class ZombieProjectile
     // Hide the effect
     m_effect.setColor(colorA(0, 0, 0, 0))
     m_effect.setAlpha(0)
+    
+    m_effect2.setColor(colorA(0, 0, 0, 0))
+    m_effect2.setAlpha(0)
 
     unregisterZombieProjectile(this)
 

@@ -1,0 +1,127 @@
+package NecromancerComponent
+import UnitComponent
+import TlsAbilityIds
+import ClosureTimers
+import HashMap
+import Action
+import TlsUnitIds
+import ObjectIds
+import RegisterEvents
+import UndeadTargetingComponent
+
+constant string RAISEDEAD_IMMEDIATEORDERSTR = "instant" // don't ask me why
+
+// ============================================================================
+public class NecromancerComponent extends UnitComponent
+  private CallbackPeriodic castTimer
+  private IterableMap<int, Action2<unit, real>> m_summonedUnitModifiers
+
+  // --------------------------------------------------------------------------
+  construct (IUnitMetadata owner)
+    super(owner)
+    m_summonedUnitModifiers = new IterableMap<int, Action2<unit, real>>()
+
+  // --------------------------------------------------------------------------
+  override function getTypeId() returns int
+    return NecromancerComponent.typeId
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    if (castTimer != null)
+      destroy castTimer
+      castTimer = null
+    for key in m_summonedUnitModifiers
+      destroy m_summonedUnitModifiers.get(key)
+    destroy m_summonedUnitModifiers
+    m_summonedUnitModifiers = null
+
+  // --------------------------------------------------------------------------
+  function addSummonedUnitModifier(int unitTypeId, Action2<unit, real> modifier)
+    m_summonedUnitModifiers.put(unitTypeId, modifier)
+
+  // --------------------------------------------------------------------------
+  function getModifierForSummonedUnit(int unitTypeId) returns Action2<unit, real>
+    return m_summonedUnitModifiers.get(unitTypeId)
+
+  // --------------------------------------------------------------------------
+  override function onUnitChanged(unit oldUnit, unit newUnit)
+    super.onUnitChanged(oldUnit, newUnit)
+
+    if (newUnit != null)
+      switch (newUnit.getTypeId())
+        case TlsUnitIds.Undead.necromancer
+          newUnit.setAbilityLevel(TlsAbilityIds.necromancerRaiseDead, 1)
+        case TlsUnitIds.Undead.greaterNecromancer
+          newUnit.setAbilityLevel(TlsAbilityIds.necromancerRaiseDead, 2)
+
+  // --------------------------------------------------------------------------
+  override function onEnabled()
+    super.onEnabled()
+
+    let ownerUnit = getOwnerUnit()
+    if (not ownerUnit.hasAbility(TlsAbilityIds.necromancerRaiseDead))
+      ownerUnit.addAbility(TlsAbilityIds.necromancerRaiseDead)
+
+    let lvl = ownerUnit.getAbilityLevel(TlsAbilityIds.necromancerRaiseDead)
+    let cooldown = ownerUnit.getAbilityCooldown(TlsAbilityIds.necromancerRaiseDead, lvl) + 1.0
+
+    castTimer = doPeriodically(cooldown) (CallbackPeriodic cb) ->
+      if (ownerUnit != null and ownerUnit.isAlive())
+        ownerUnit.issueImmediateOrder(RAISEDEAD_IMMEDIATEORDERSTR)
+
+  // --------------------------------------------------------------------------
+  override function onDisabled()
+    super.onDisabled()
+
+    let ownerUnit = getOwnerUnit()
+    if (ownerUnit.hasAbility(TlsAbilityIds.necromancerRaiseDead))
+      ownerUnit.removeAbility(TlsAbilityIds.necromancerRaiseDead)
+
+// ============================================================================
+public function IUnitMetadata.getNecromancerComponent() returns NecromancerComponent
+  return this.getComponent(typeInfo(NecromancerComponent.typeId)) castTo NecromancerComponent
+
+// ============================================================================
+public function IUnitMetadata.getOrAddNecromancerComponent() returns NecromancerComponent
+  var component = this.getNecromancerComponent()
+  if (component == null)
+    component = this.addComponent(new NecromancerComponent(this)) castTo NecromancerComponent
+  return component
+
+// ============================================================================
+function onUnitSummoned()
+  let summoner = GetSummoningUnit()
+  let summoned = GetSummonedUnit()
+
+  let metadata = summoner.getMetadata()
+  if (metadata == null)
+    return
+
+  let comp = metadata.getNecromancerComponent()
+  if (comp == null)
+    return
+
+  let summonedTypeId = summoned.getTypeId()
+
+  let modifier = comp.getModifierForSummonedUnit(summoned.getTypeId())
+  if (modifier == null)
+    Log.error("No modifier for unit summoned by necromancer of type " + summonedTypeId.toRawCode())
+    return
+
+  modifier.call(summoned, 1.0)
+
+  let summonerUTC = metadata.getUndeadTargetingComponent()
+  if (summonerUTC == null)
+    return
+  
+  let summonedMetadata = summoned.getMetadata()
+  if (summonedMetadata == null)
+    return
+
+  let summonedUTC = summonedMetadata.getUndeadTargetingComponent()
+  if (summonedUTC != null)
+    summonedUTC.setTargetPlayer(summonerUTC.getTargetPlayer())
+
+// ============================================================================
+init
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_SUMMON, function onUnitSummoned)

@@ -5,22 +5,45 @@ import TlsAbilityIds
 import RegisterEvents
 import TimerUtils
 import ClosureTimers
+import ObjectIdGenerator
+import RealtimeUnitComponent
+import RealtimeUpdate
+import DamageEvent
+import Damage
+import Orders
+import Time
+import HashList
 
-constant real SPIKE4_TIMESCALE_DEFAULT = 1.0
+constant real SPIKE4_TIMESCALE_ENABLED = 1.0
+constant real SPIKE4_TIMESCALE_DISABLED = 0.0
 constant real SPIKE4_TIMESCALE_ATTACK = 5.0
 constant real SPIKE4_ATTACKTIMER_DURATION = 1.0
+constant int SPIKE_DISABLED_ABILITY_ID = compiletime(ABIL_ID_GEN.next())
+constant string SPIKE_DISABLED_EFFECT_PATH = "Abilities\\Disarm\\Disarm Red\\Disarm Red.mdx"
+constant int SPIKE_REPAIR_ENABLED_TARGETFLAG = 4 // TARGET_FLAG_AIR
+constant int SPIKE_REPAIR_DISABLED_TARGETFLAG = 0 // TARGET_FLAG_...invulnerable?
+HashList<SpikesComponent> g_activeSpikeComponents = new HashList<SpikesComponent>()
 
 // ============================================================================
-public class SpikesComponent extends UnitComponent
+public class SpikesComponent extends RealtimeUnitComponent
   private CallbackManual m_spike4AttackTimerCallback
+  private bool m_spikesEnabled
+  private effect m_disabledEffect
 
   // --------------------------------------------------------------------------
   construct (IUnitMetadata owner)
     super(owner)
+    g_activeSpikeComponents.add(this)
 
   // --------------------------------------------------------------------------
   ondestroy
+    g_activeSpikeComponents.remove(this)
+  
     releaseSpike4AttackTimer()
+
+    if (m_disabledEffect != null)
+      m_disabledEffect.destr()
+      m_disabledEffect = null
 
   // --------------------------------------------------------------------------
   override function getTypeId() returns int
@@ -29,49 +52,155 @@ public class SpikesComponent extends UnitComponent
   // --------------------------------------------------------------------------
   override function onEnabled()
     super.onEnabled()
-    update()
+    forceUpdate()
 
   // --------------------------------------------------------------------------
   override function onDisabled()
     super.onDisabled()
 
     let ownerUnit = getOwnerUnit()
-    ownerUnit.removeAbility(TlsAbilityIds.spikeAttackSlowBonus)
+    ownerUnit.removeAbility(TlsAbilityIds.spikeSlowAura)
+    ownerUnit.removeAbility(TlsAbilityIds.spikeDisabledIcon)
 
     releaseSpike4AttackTimer()
 
   // --------------------------------------------------------------------------
+  function getSpikesEnabled() returns bool
+    return m_spikesEnabled
+
+  // --------------------------------------------------------------------------
   function update()
+    updateSpikesEnabled()
+
+  // --------------------------------------------------------------------------
+  private function forceUpdate()
+    m_spikesEnabled = getOwnerUnit().getHP() > 1
+    onSpikesEnabledChanged()
+
+  // --------------------------------------------------------------------------
+  private function updateSpikesEnabled()
+    let wasEnabled = m_spikesEnabled
+    m_spikesEnabled = getOwnerUnit().getHP() > 1
+    if (wasEnabled != m_spikesEnabled)
+      onSpikesEnabledChanged()
+
+  // --------------------------------------------------------------------------
+  private function onSpikesEnabledChanged()
+    if (getSpikesEnabled())
+      onSpikesEnabled()
+    else
+      onSpikesDisabled()
+
+  // --------------------------------------------------------------------------
+  function onSpikesEnabled()
     let ownerUnit = getOwnerUnit()
     let ownerUnitId = ownerUnit.getTypeId()
+    let ownerUnitLvl = getOwnerUnitLevel() + 1
 
-    if (ownerUnitId == TlsUnitIds.spikes[4])
-      resetSpike4Animation()
+    this.unregisterForRealtimeUpdate()
 
-    if (not ownerUnit.hasAbility(TlsAbilityIds.spikeAttackSlowBonus))
-      ownerUnit.addAbility(TlsAbilityIds.spikeAttackSlowBonus)
+    // Remove abilities for disabled state
+    if (ownerUnit.hasAbility(TlsAbilityIds.spikeDisabledIcon))
+      ownerUnit.removeAbility(TlsAbilityIds.spikeDisabledIcon)
+
+    // Add abilities for enabled state
+    if (not ownerUnit.hasAbility(TlsAbilityIds.spikeSlowAura))
+      ownerUnit.addAbility(TlsAbilityIds.spikeSlowAura)
 
     if (not ownerUnit.hasAbility(TlsAbilityIds.spikeBarrage))
       ownerUnit.addAbility(TlsAbilityIds.spikeBarrage)
 
-    let ownerUnitLvl = getOwnerUnitLevel() + 1
-    ownerUnit.setAbilityLevel(TlsAbilityIds.spikeAttackSlowBonus, ownerUnitLvl)
+    if (not ownerUnit.hasAbility(TlsAbilityIds.spikeEnabledIcon))
+      ownerUnit.addAbility(TlsAbilityIds.spikeEnabledIcon)
+
+    ownerUnit.setAbilityLevel(TlsAbilityIds.spikeSlowAura, ownerUnitLvl)
     ownerUnit.setAbilityLevel(TlsAbilityIds.spikeBarrage, ownerUnitLvl)
+    ownerUnit.setAbilityLevel(TlsAbilityIds.spikeEnabledIcon, ownerUnitLvl)
+
+    ownerUnit.setFieldWeapon(UNIT_WEAPON_BF_ATTACKS_ENABLED, 0, true)
+    ownerUnit.setVertexColor(colorA(150, 150, 150, 255))
+    ownerUnit.setTimeScale(SPIKE4_TIMESCALE_ENABLED)
+
+    if (ownerUnitId == TlsUnitIds.spikes[4])
+      resetSpike4Animation()
+
+    if (m_disabledEffect != null)
+      m_disabledEffect.destr()
+      m_disabledEffect = null
 
   // --------------------------------------------------------------------------
-  function onUnitAttackedBySpikes4()
-    playSpike4AttackAnimation()
-    initializeSpike4AttackTimer()
-    m_spike4AttackTimerCallback.restart()
+  function onSpikesDisabled()
+    let ownerUnit = getOwnerUnit()
+    let ownerUnitLvl = getOwnerUnitLevel() + 1
+
+    this.registerForRealtimeUpdate(RealtimeUpdatePriority.Background)
+
+    // Remove abilities for enabled state
+    if (ownerUnit.hasAbility(TlsAbilityIds.spikeSlowAura))
+      ownerUnit.removeAbility(TlsAbilityIds.spikeSlowAura)
+
+    if (ownerUnit.hasAbility(TlsAbilityIds.spikeBarrage))
+      ownerUnit.removeAbility(TlsAbilityIds.spikeBarrage)
+
+    if (ownerUnit.hasAbility(TlsAbilityIds.spikeEnabledIcon))
+      ownerUnit.removeAbility(TlsAbilityIds.spikeEnabledIcon)
+
+    // Add abilities for disabled state
+    if (not ownerUnit.hasAbility(TlsAbilityIds.spikeDisabledIcon))
+      ownerUnit.addAbility(TlsAbilityIds.spikeDisabledIcon)
+
+    ownerUnit.setAbilityLevel(TlsAbilityIds.spikeDisabledIcon, ownerUnitLvl)
+    
+    ownerUnit.setFieldWeapon(UNIT_WEAPON_BF_ATTACKS_ENABLED, 0, false)
+    ownerUnit.setVertexColor(colorA(50, 50, 50, 255))
+    ownerUnit.setTimeScale(SPIKE4_TIMESCALE_DISABLED)
+
+    if (m_disabledEffect == null)
+      let pos = ownerUnit.getPos().withTerrainZ(120.0)
+      m_disabledEffect = AddSpecialEffect(SPIKE_DISABLED_EFFECT_PATH, pos.x, pos.y)
+      ..setPos(pos)
+
+  // --------------------------------------------------------------------------
+  override function realtimeUpdate(real dt)
+    update()
+
+  // --------------------------------------------------------------------------
+  function onUnitAttackedBySpikes()
+    let ownerUnit = getOwnerUnit()
+    // Do 1 damage to self every time the spike deals damage
+    ownerUnit.setHP(max(ownerUnit.getHP() - 1, 1))
+    // Update the enabled/disabled state
+    updateSpikesEnabled()
+
+  // --------------------------------------------------------------------------
+  function onIssuedAttackOrder()
+    if (not getSpikesEnabled())
+      return
+    if (getOwnerUnit().getTypeId() == TlsUnitIds.spikes[4])
+      playSpike4AttackAnimation()
+      initializeSpike4AttackTimer()
+      m_spike4AttackTimerCallback.restart()
+
+  // --------------------------------------------------------------------------
+  function setRepairEnabled(bool enabled)
+    getOwnerUnit().setField(UNIT_IF_TARGETED_AS, (enabled ? SPIKE_REPAIR_ENABLED_TARGETFLAG : SPIKE_REPAIR_DISABLED_TARGETFLAG))
+
+  // --------------------------------------------------------------------------
+  function getRepairEnabled() returns bool
+    return getOwnerUnit().getField(UNIT_IF_TARGETED_AS) == SPIKE_REPAIR_ENABLED_TARGETFLAG
 
   // --------------------------------------------------------------------------
   private function playSpike4AttackAnimation()
+    if (not getSpikesEnabled())
+      return
     getOwnerUnit().setTimeScale(SPIKE4_TIMESCALE_ATTACK)
 
   // --------------------------------------------------------------------------
   private function resetSpike4Animation()
+    if (not getSpikesEnabled())
+      return
     let ownerUnit = getOwnerUnit()
-    ownerUnit.setTimeScale(SPIKE4_TIMESCALE_DEFAULT)
+    ownerUnit.setTimeScale(getSpikesEnabled() ? SPIKE4_TIMESCALE_ENABLED : SPIKE4_TIMESCALE_DISABLED)
 
   // --------------------------------------------------------------------------
   private function initializeSpike4AttackTimer()
@@ -107,28 +236,84 @@ public function IUnitMetadata.getOrAddSpikesComponent() returns SpikesComponent
 // ============================================================================
 function onUpgradeFinished()
   let upgradedUnit = GetTriggerUnit()
-  
+  if (not upgradedUnit.isSpikes())
+    return  
   let metadata = upgradedUnit.getMetadata()
   if (metadata == null)
     return
-
   let spikesComponent = metadata.getSpikesComponent()
-  if (spikesComponent == null or not spikesComponent.getEnabled())
+  if (spikesComponent == null)
     return
-
   spikesComponent.update()
 
 // ============================================================================
-function onUnitAttackedBySpikes4()
-  let attackingUnit = GetAttacker()
-  if (attackingUnit.getTypeId() != TlsUnitIds.spikes[4])
+function onDamageEventShield()
+  let target = DamageEvent.getTarget()
+
+  if (not target.isSpikes())
     return
-  let spikesComponent = attackingUnit.getMetadata().getSpikesComponent()
-  if (spikesComponent == null or not spikesComponent.getEnabled())
+
+  let metadata = target.getMetadata()
+  if (metadata == null)
     return
-  spikesComponent.onUnitAttackedBySpikes4()
+
+  let comp = metadata.getSpikesComponent()
+  if (comp == null)
+    return
+
+  // Zero-out the damage done to spikes
+  DamageEvent.setAmount(0)
+
+// ============================================================================
+function onUnitAttacked()
+  let attacker = GetAttacker()
+
+  if (not attacker.isSpikes())
+    return
+
+  let metadata = attacker.getMetadata()
+  if (metadata == null)
+    return
+
+  let comp = metadata.getSpikesComponent()
+  if (comp == null)
+    return
+
+  comp.onUnitAttackedBySpikes()
+
+// ============================================================================
+function onUnitIssuedTargetOrder()
+  let orderedUnit = GetOrderedUnit()
+  let orderId = GetIssuedOrderId()
+
+  if (orderId != OrderIds.attack or not orderedUnit.isSpikes())
+    return
+
+  let metadata = orderedUnit.getMetadata()
+  if (metadata == null)
+    return
+
+  let comp = metadata.getSpikesComponent()
+  if (comp == null)
+    return
+
+  comp.onIssuedAttackOrder()
+
+// ============================================================================
+function onDayStart()
+  for comp in g_activeSpikeComponents
+    comp.setRepairEnabled(true)
+
+// ============================================================================
+function onNightStart()
+  for comp in g_activeSpikeComponents
+    comp.setRepairEnabled(false)
 
 // ============================================================================
 init
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_UPGRADE_FINISH, function onUpgradeFinished)
-  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ATTACKED, function onUnitAttackedBySpikes4)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ISSUED_TARGET_ORDER, function onUnitIssuedTargetOrder)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ATTACKED, function onUnitAttacked)
+  DamageEvent.addListener(DAMAGE_EVENT_PRIO_SHIELD, () -> onDamageEventShield())
+  registerDayEvent(function onDayStart)
+  registerNightEvent(function onNightStart)
