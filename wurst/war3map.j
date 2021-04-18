@@ -12,10 +12,6 @@ string gg_snd_UndeadX1
 sound gg_snd_QuestCompleted= null
 sound gg_snd_RiflemanDeath= null
 sound gg_snd_ZombieDeath1= null
-rect gg_rct_waygateNW= null
-rect gg_rct_waygateNE= null
-rect gg_rct_waygateSE= null
-rect gg_rct_waygateSW= null
 
 
 //JASSHelper struct globals:
@@ -470,10 +466,6 @@ function CreateRegions takes nothing returns nothing
 
     set gg_rct_BaseUnits=Rect(10944.0, - 11584.0, 11328.0, - 10816.0)
     set gg_rct_debugSurvivorSpawn=Rect(- 320.0, - 7648.0, - 128.0, - 7456.0)
-    set gg_rct_waygateNW=Rect(- 7456.0, 6720.0, - 6752.0, 7456.0)
-    set gg_rct_waygateNE=Rect(6368.0, 7360.0, 7072.0, 8096.0)
-    set gg_rct_waygateSE=Rect(5856.0, - 8768.0, 6560.0, - 8032.0)
-    set gg_rct_waygateSW=Rect(- 6560.0, - 5952.0, - 5856.0, - 5216.0)
 endfunction
 
 //***************************************************************************
