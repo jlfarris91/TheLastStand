@@ -129,8 +129,6 @@ function CreateUnitsForPlayer0 takes nothing returns nothing
     call SetUnitColor(u, ConvertPlayerColor(0))
     set u=BlzCreateUnitWithSkin(p, 'h00K', 6750.2, - 10743.8, 43.540, 'h00K')
     call SetUnitColor(u, ConvertPlayerColor(0))
-    set u=BlzCreateUnitWithSkin(p, 'h00J', 6782.4, - 8962.0, 204.923, 'h00J')
-    call SetUnitColor(u, ConvertPlayerColor(4))
     set u=BlzCreateUnitWithSkin(p, 'h00J', 9942.4, - 10997.8, 67.326, 'h00J')
     call SetUnitColor(u, ConvertPlayerColor(4))
     set u=BlzCreateUnitWithSkin(p, 'h00K', 9275.8, - 8205.8, 45.891, 'h00K')
@@ -148,8 +146,6 @@ function CreateUnitsForPlayer0 takes nothing returns nothing
     set u=BlzCreateUnitWithSkin(p, 'h00C', - 8398.9, - 7386.9, 335.379, 'h00C')
     set u=BlzCreateUnitWithSkin(p, 'h00H', - 7984.3, - 7846.2, 308.945, 'h00H')
     call SetUnitColor(u, ConvertPlayerColor(6))
-    set u=BlzCreateUnitWithSkin(p, 'h00K', - 9377.5, - 5777.2, 315.636, 'h00K')
-    call SetUnitColor(u, ConvertPlayerColor(0))
     set u=BlzCreateUnitWithSkin(p, 'h00J', - 10013.6, - 2737.0, 113.404, 'h00J')
     call SetUnitColor(u, ConvertPlayerColor(4))
     set u=BlzCreateUnitWithSkin(p, 'h00H', - 7573.4, - 4828.6, 20.172, 'h00H')
@@ -377,7 +373,7 @@ function CreateUnitsForPlayer20 takes nothing returns nothing
     set u=BlzCreateUnitWithSkin(p, 'h01N', 10799.1, 10774.0, 180.014, 'h01N')
     set u=BlzCreateUnitWithSkin(p, 'h01A', 4038.4, - 7403.8, 289.784, 'h01A')
     set u=BlzCreateUnitWithSkin(p, 'h00D', 6758.0, 6432.5, 255.710, 'h00D')
-    set u=BlzCreateUnitWithSkin(p, 'h00C', 7175.8, 7947.0, 348.066, 'h00C')
+    set u=BlzCreateUnitWithSkin(p, 'h00C', 7175.8, 7947.0, - 60.716, 'h00C')
     set u=BlzCreateUnitWithSkin(p, 'h01U', 10886.1, 5675.4, 217.966, 'h01U')
     set u=BlzCreateUnitWithSkin(p, 'h003', 10978.2, 5547.0, 218.485, 'h003')
     set u=BlzCreateUnitWithSkin(p, 'h001', 3356.4, - 10661.3, 129.170, 'h001')
@@ -428,6 +424,20 @@ function CreateUnitsForPlayer20 takes nothing returns nothing
 endfunction
 
 //===========================================================================
+function CreateNeutralPassiveBuildings takes nothing returns nothing
+    local player p= Player(PLAYER_NEUTRAL_PASSIVE)
+    local unit u
+    local integer unitID
+    local trigger t
+    local real life
+
+    set u=BlzCreateUnitWithSkin(p, 'nwgt', - 6208.0, - 5568.0, 270.000, 'nwgt')
+    set u=BlzCreateUnitWithSkin(p, 'nwgt', 6208.0, - 8384.0, 270.000, 'nwgt')
+    set u=BlzCreateUnitWithSkin(p, 'nwgt', - 7104.0, 7104.0, 270.000, 'nwgt')
+    set u=BlzCreateUnitWithSkin(p, 'nwgt', 6720.0, 7744.0, 270.000, 'nwgt')
+endfunction
+
+//===========================================================================
 function CreatePlayerBuildings takes nothing returns nothing
     call CreateBuildingsForPlayer20()
 endfunction
@@ -440,6 +450,7 @@ endfunction
 
 //===========================================================================
 function CreateAllUnits takes nothing returns nothing
+    call CreateNeutralPassiveBuildings()
     call CreateBuildingsForPlayer20() // INLINED!!
     call CreatePlayerUnits()
 endfunction
