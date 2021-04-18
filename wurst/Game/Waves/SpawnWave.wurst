@@ -16,11 +16,15 @@ import PlayerSpawnPointProviders
 import UnitMetadata
 import UndeadTargetingComponent
 import Runnable
-import Dispatcher
 import ClosureTimers
+import CircularBuffer
+
+constant real PROCESS_SPAWN_REQUEST_INTERVAL = 1.0
+constant int MAX_SPAWNS_PER_PROCESS = 25
 
 HashMap<unit, SpawnWave> g_unitToSpawnWaveMap
-Dispatcher g_spawnDispatcher
+CircularBuffer<SpawnWave> g_spawnRequests = new CircularBuffer<SpawnWave>(512)
+int g_lastNumberOfUnitsSpawned = 0
 
 // ============================================================================
 public class SpawnWave extends Runnable
@@ -34,6 +38,11 @@ public class SpawnWave extends Runnable
 
   // --------------------------------------------------------------------------
   construct(player targetPlayer, SpawnWaveDefinition def)
+    if (targetPlayer == null)
+      argumentNullError("targetPlayer")
+    if (def == null)
+      argumentNullError("def")
+
     m_targetPlayer = targetPlayer
     m_definition = def
     m_aliveSpawnedUnits = new LinkedList<unit>()
@@ -102,30 +111,22 @@ public class SpawnWave extends Runnable
     return clamp01(m_definition.getProgress().getProgress())
 
   // --------------------------------------------------------------------------
-  function activate()
-    activateForPlayer(m_targetPlayer)
+  function activate() returns bool
 
-  // --------------------------------------------------------------------------
-  function activateForPlayer(player targetPlayer)
-    g_spawnDispatcher.invoke(DispatchPriority.LOW, () -> activate(targetPlayer))
-
-  // --------------------------------------------------------------------------
-  private function activate(player targetPlayer)
+    g_lastNumberOfUnitsSpawned = 0
  
-    if (targetPlayer == null)
+    if (m_targetPlayer == null)
       error("[SpawnWave.onActivated] Target player has not been set")
-      return
-      
-    log("activateForPlayer", m_targetPlayer.getName() + "========================")
+      return false
 
     if (isCompleted())
       log("activateForPlayer", m_targetPlayer.getName() + " : Spawn wave has already completed")
-      return
+      return false
 
-    let playerMetadata = targetPlayer.getHumanMetadata()
+    let playerMetadata = m_targetPlayer.getHumanMetadata()
     if (playerMetadata == null or playerMetadata.getIsDead())
       log("activateForPlayer", m_targetPlayer.getName() + " : Player is dead")
-      return
+      return false
 
     let waveProgress = getProgress()
     let aliveCountMax = m_definition.getMaxAliveCount(waveProgress)
@@ -137,14 +138,15 @@ public class SpawnWave extends Runnable
     let numSpawnGroups = max(R2I(I2R(spawnsPerActivation) * (1.0 - spawnGroupingFactor)), 1)
     let spawnGroupSize = max(R2I(I2R(spawnsPerActivation) * spawnGroupingFactor), 1)
 
-    let spawnPointProvider = getSpawnPointProviderForPlayer(targetPlayer, m_definition.getSpawnRange())
+    let spawnPointProvider = getSpawnPointProviderForPlayer(m_targetPlayer, m_definition.getSpawnRange())
 
     let spawnPointsResult = spawnPointProvider.getSpawnPoints(numSpawnGroups)
     if (not spawnPointsResult.succeeded)
       error("[SpawnWave.onActivated] Found no spawn points!")
-      return
+      return false
 
     var numSpawnsAvailable = getNumSpawnsAvailable(aliveCountMax, spawnCountMax)
+    var numberOfUnitsSpawned = 0
 
     // For each spawn point
     for sp in spawnPointsResult.spawnPoints
@@ -174,7 +176,8 @@ public class SpawnWave extends Runnable
           if (numSpawnsAvailable == 0)
             break
 
-          spawnSingleUnit(unitType, sp, targetPlayer)
+          if (spawnSingleUnit(unitType, sp))
+            numberOfUnitsSpawned++
 
           numSpawnsAvailable = getNumSpawnsAvailable(aliveCountMax, spawnCountMax)
 
@@ -183,6 +186,10 @@ public class SpawnWave extends Runnable
 
     // Clean up the spawnPoints list
     destroy spawnPointsResult.spawnPoints
+
+    g_lastNumberOfUnitsSpawned = numberOfUnitsSpawned
+
+    return numberOfUnitsSpawned > 0
 
   // --------------------------------------------------------------------------
   private function getNumSpawnsAvailable(int aliveCountMax, int spawnCountMax) returns int
@@ -193,17 +200,17 @@ public class SpawnWave extends Runnable
     let numSpawnsAvailable = max(min(remainingAlive, remainingSpawn), 0)
 
     if (spawnedCount >= spawnCountMax)
-      log("getNumSpawnsAvailable", m_targetPlayer.getName() + " : Reached max number of spawns for wave")
+      //log("getNumSpawnsAvailable", m_targetPlayer.getName() + " : Reached max number of spawns for wave")
       return 0
 
     if (aliveCount >= aliveCountMax)
-      log("getNumSpawnsAvailable", m_targetPlayer.getName() + " : Reached max number of concurrent alive")
+      //log("getNumSpawnsAvailable", m_targetPlayer.getName() + " : Reached max number of concurrent alive")
       return 0
 
     return numSpawnsAvailable
 
   // --------------------------------------------------------------------------
-  private function spawnSingleUnit(int unitTypeId, vec2 pos, player targetPlayer) returns bool
+  private function spawnSingleUnit(int unitTypeId, vec2 pos) returns bool
     
     unit spawnedUnit
     
@@ -236,29 +243,18 @@ public class SpawnWave extends Runnable
     if (unitModifier != null)
       unitModifier.call(spawnedUnit, progress)
 
-    setTargetPlayer(spawnedUnit, targetPlayer)
-
-    return true
-
-  // --------------------------------------------------------------------------
-  private function setTargetPlayer(unit _unit, player targetPlayer)
-    
-    let unitMetadata = _unit.getMetadata()
+    let unitMetadata = spawnedUnit.getMetadata()
     if (unitMetadata == null)
-      Log.error("[SpawnWave.setTargetPlayer] : Unit has no metadata! : {0} ({1} : {2})".format(_unit.getName(), _unit.getTypeId().toString(), UnitId2StringBJ(_unit.getTypeId())))
-      return
-
-    let playerMetadata = targetPlayer.getHumanMetadataRequired()
-    if (playerMetadata == null)
-      Log.error("[SpawnWave.setTargetPlayer] : target player has no metadata")
-      return
-
-    if (playerMetadata.getIsDead())
-      return
+      Log.error("[SpawnWave.setTargetPlayer] : Unit has no metadata! : {0} ({1} : {2})".format(
+        spawnedUnit.getName(),
+        spawnedUnit.getTypeId().toString(),
+        UnitId2StringBJ(spawnedUnit.getTypeId())))
+      return false
 
     unitMetadata.getOrAddUndeadTargetingComponent()
-    ..setTargetPlayer(targetPlayer)
-    ..issueOrderTargetingPlayer()
+    ..setTargetPlayer(m_targetPlayer)
+
+    return true
 
   // --------------------------------------------------------------------------
   function registerSpawnedUnit(unit spawnedUnit)
@@ -284,6 +280,10 @@ public class SpawnWave extends Runnable
     return m_aliveSpawnedUnits.size()
 
   // --------------------------------------------------------------------------
+  private function requestActivation()
+    g_spawnRequests.enqueue(this)
+
+  // --------------------------------------------------------------------------
   private function listenToActivatedEvent()
     unlistenToActivatedEvent()
 
@@ -298,7 +298,7 @@ public class SpawnWave extends Runnable
     if (e == null)
       return
 
-    m_onActivatedHandler = e.register(() -> activate())
+    m_onActivatedHandler = e.register(() -> requestActivation())
 
   // --------------------------------------------------------------------------
   private function unlistenToActivatedEvent()
@@ -343,10 +343,19 @@ function onUnitDeath()
   spawnWave.unregisterSpawnedUnit(dyingUnit)
 
 // ============================================================================
+function processSpawnRequests()
+  int numberOfUnitsSpawned = 0
+  while (not g_spawnRequests.isEmpty() and g_lastNumberOfUnitsSpawned < MAX_SPAWNS_PER_PROCESS)
+    let spawnRequest = g_spawnRequests.dequeue()
+    if (spawnRequest != null and spawnRequest.activate())
+      numberOfUnitsSpawned += g_lastNumberOfUnitsSpawned
+  if (numberOfUnitsSpawned > 0)
+    Log.debug("Number of units spawned : {0}/{1}".format(numberOfUnitsSpawned.toString(), MAX_SPAWNS_PER_PROCESS.toString()))
+
+// ============================================================================
 init
   g_unitToSpawnWaveMap = new HashMap<unit, SpawnWave>()
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_DEATH, function onUnitDeath)
 
-  nullTimer() () ->
-    if (g_spawnDispatcher == null)
-      g_spawnDispatcher = new Dispatcher()..setMaxExecutions(1)
+  doPeriodically(PROCESS_SPAWN_REQUEST_INTERVAL, (CallbackPeriodic cb) -> processSpawnRequests())
+    
