@@ -106,7 +106,7 @@ public class UndeadTargetingComponent extends UnitComponent
     super.onDisabled()
     if (m_targetPlayer != null)
       unregisterActiveUTC(m_targetPlayer, getOwnerUnit())
-    setTargetUnit(null)
+    setTargetUnit_impl(null)
     stopDOT()
 
   // --------------------------------------------------------------------------
@@ -132,13 +132,30 @@ public class UndeadTargetingComponent extends UnitComponent
     return m_targetPlayer
 
   // --------------------------------------------------------------------------
-  function setTargetPlayer(player p) returns bool
+  function setTargetPlayer(player targetPlayer) returns bool
+    let setPlayer = setTargetPlayer_impl(targetPlayer)
+    if (setPlayer)
+      setTargetUnit_impl(null)
+      raiseTargetPlayerChangedEvent()
+      issueOrderTargetingPlayer()
+    return setPlayer
 
-    if (p == null)
+  // --------------------------------------------------------------------------
+  function setTargetUnit(unit targetUnit) returns bool
+    let targetPlayer = targetUnit != null ? targetUnit.getOwner() : null
+    let setPlayer = setTargetPlayer_impl(targetPlayer)
+    let setUnit = setTargetUnit_impl(targetUnit)
+    if (setUnit)
+      issueOrderTargetingPlayer()
+    return setPlayer
+
+  // --------------------------------------------------------------------------
+  function setTargetPlayer_impl(player targetPlayer) returns bool
+    if (targetPlayer == null)
       error("Target player was set to null")
       return false
 
-    if (p == m_targetPlayer)
+    if (targetPlayer == m_targetPlayer)
       return false
 
     let ownerUnit = getOwnerUnit()
@@ -146,14 +163,11 @@ public class UndeadTargetingComponent extends UnitComponent
     if (m_targetPlayer != null and ownerUnit != null)
       unregisterActiveUTC(m_targetPlayer, ownerUnit)
     
-    m_targetPlayer = p
+    m_targetPlayer = targetPlayer
     
     if (m_targetPlayer != null and ownerUnit != null and getEnabled())
       registerActiveUTC(m_targetPlayer, ownerUnit)
-    
-    setTargetUnit(null)
-    raiseTargetPlayerChangedEvent()
-    issueOrderTargetingPlayer()
+
     return true
 
   // --------------------------------------------------------------------------
@@ -203,7 +217,7 @@ public class UndeadTargetingComponent extends UnitComponent
       return
 
     // At this point the target unit must not have been valid
-    setTargetUnit(null)
+    setTargetUnit_impl(null)
 
     // 3. Try attack-moving to the target player's camp center (the OT or the hero)
     if (tryTargetCampCenter())
@@ -237,15 +251,16 @@ public class UndeadTargetingComponent extends UnitComponent
     return getOwnerUnit().issueTargetOrderById(OrderIds.attack, m_targetUnit)
 
   // --------------------------------------------------------------------------
-  private function setTargetUnit(unit targetUnit)
+  private function setTargetUnit_impl(unit targetUnit) returns bool
     if (m_targetUnit == targetUnit)
-      return
+      return false
     if (m_targetUnit != null)
       unregisterTargetedUnit(m_targetUnit, this)
     m_targetUnit = targetUnit
     if (m_targetUnit != null)
       registerTargetedUnit(m_targetUnit, this)
     restartAttackTimer()
+    return true
 
   // --------------------------------------------------------------------------
   protected function tryTargetClosestUnit() returns bool
@@ -267,7 +282,7 @@ public class UndeadTargetingComponent extends UnitComponent
       targetUnit = getNearestUnitOfPlayer(targetPlayer, ownerUnit.getPos(), g_filterUnitIsValidTargetNonStructure)
 
     if (targetUnit != null)
-      setTargetUnit(targetUnit)
+      setTargetUnit_impl(targetUnit)
       return ownerUnit.issueTargetOrderById(OrderIds.attack, m_targetUnit)
 
     return false
@@ -289,7 +304,7 @@ public class UndeadTargetingComponent extends UnitComponent
 
   // --------------------------------------------------------------------------
   protected function onTargetUnitDied()
-    setTargetUnit(null)
+    setTargetUnit_impl(null)
     issueOrderTargetingPlayer()
 
   // --------------------------------------------------------------------------
@@ -308,7 +323,7 @@ public class UndeadTargetingComponent extends UnitComponent
     // If the timer has expired then this unit hasn't been able to attack
     // it's target in a while so try to target a new enemy
     if (getRealTimeSeconds() - m_attackTime > ATTACK_TIMER_DURATION)
-      setTargetUnit(null)
+      setTargetUnit_impl(null)
       issueOrderTargetingPlayer()
 
   // --------------------------------------------------------------------------
