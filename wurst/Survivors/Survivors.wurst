@@ -16,22 +16,21 @@ import Bounds
 import BoundsExtensions
 import Range
 import HumanPlayers
-import TentComponent
 import FriendlyCircularCachedSpawnManager
 import RandomSpawnPointProvider
 
 group g_tempGroup = CreateGroup()
 
 // ============================================================================
-public function spawnSurvivorUnitForPlayer(player p) returns unit
+public function spawnSurvivorUnitForPlayer(player _player) returns unit
 
-  if (p == null)
-    error("[spawnSurvivorUnitForPlayer] Argument 'p' cannot be null")
+  if (_player == null)
+    argumentNullError("_player")
     return null
 
-  let playerMetadata = p.getHumanMetadataRequired()
+  let playerMetadata = _player.getHumanMetadataRequired()
   if (playerMetadata.getIsDead())
-    Log.debug("[spawnSurvivorUnitForPlayer] Player {0} is dead".format(p.getName()))
+    Log.debug("[spawnSurvivorUnitForPlayer] Player {0} is dead".format(_player.getName()))
     return null
 
   let weightedSet = new WeightedSet<int>()
@@ -44,12 +43,14 @@ public function spawnSurvivorUnitForPlayer(player p) returns unit
 
   let unitId = weightedSet.getRandom()
 
-  let spawnPointResult = getSpawnPoint(p)
+  let spawnPointResult = getSpawnPoint(_player)
   if (not spawnPointResult.succeeded)
-    Log.debug("[spawnSurvivorUnitForPlayer] Failed to find spawn point for survivor")
+    Log.debug("[spawnSurvivorUnitForPlayer] Failed to find spawn point for survivor, trying again")
+    // try again
+    doAfter(1.0, () -> spawnSurvivorUnitForPlayer(_player))
     return null
 
-  let survivor = createUnitTLS(p, unitId, spawnPointResult.spawnPoint, GetRandomDirectionDeg())
+  let survivor = createUnitTLS(_player, unitId, spawnPointResult.spawnPoint, GetRandomDirectionDeg())
   let survivorMetadata = survivor.getMetadataRequired()
 
   let survivorUnit = survivorMetadata.getUnit()
@@ -61,7 +62,7 @@ public function spawnSurvivorUnitForPlayer(player p) returns unit
   let message = "{0} {1} has joined your camp!".format(
     survivorUnit.getName().colorize(Colors.gold),
     survivorData.getName())
-  displayMessageToPlayer(p, message)
+  displayMessageToPlayer(_player, message)
 
   AddIndicator(survivorUnit, 0, 255, 0, 255)
 
@@ -72,36 +73,22 @@ public function spawnSurvivorUnitForPlayer(player p) returns unit
   return survivorUnit
 
 // ============================================================================
-public function trySpawnSurvivorForPlayer(player p)
-  if (not p.isPlayingHumanPlayer())
+public function trySpawnSurvivorForPlayer(player _player)
+  if (not _player.isPlayingHumanPlayer())
     return
-  let numberOfTents = countNumberOfConstructedTentsOwnedByPlayer(p)
-  let numberOfSurvivors = countNumberOfSurvivorsOwnedByPlayer(p)
-  Log.debug("[trySpawnSurvivorForPlayer] Player {0} has {1} tent(s) and {2} survivor(s)".format(p.getName(), numberOfTents.toString(), numberOfSurvivors.toString()))
-  if (numberOfTents > numberOfSurvivors)
-    spawnSurvivorUnitForPlayer(p)
+  let availableSurvivors = _player.getCurrentSupply()
+  let currentSurvivors = countNumberOfSurvivorsOwnedByPlayer(_player)
+  Log.debug("[trySpawnSurvivorForPlayer] Player {0} has room for {1} Survivor(s) and has {2} Survivor(s)".format(_player.getName(), availableSurvivors.toString(), currentSurvivors.toString()))
+  if (availableSurvivors > currentSurvivors)
+    spawnSurvivorUnitForPlayer(_player)
 
 // ============================================================================
-public function countNumberOfConstructedTentsOwnedByPlayer(player p) returns int
+public function countNumberOfSurvivorsOwnedByPlayer(player _player) returns int
   g_tempGroup.clear()
-  g_tempGroup.enumUnitsOfPlayer(p, null)
+  g_tempGroup.enumUnitsOfPlayer(_player, null)
   var count = 0
-  for u from g_tempGroup
-    let metadata = u.getMetadata()
-    if (metadata != null and metadata.hasComponent(TentComponent.typeId))
-      let tentComponent = metadata.getTentComponent()
-      if (tentComponent != null and tentComponent.getIsConstructed())
-        if (u.getTypeId() == TlsUnitIds.shelter1)
-        count++
-  return count
-
-// ============================================================================
-public function countNumberOfSurvivorsOwnedByPlayer(player p) returns int
-  g_tempGroup.clear()
-  g_tempGroup.enumUnitsOfPlayer(p, null)
-  var count = 0
-  for u from g_tempGroup
-    if (u.isAlive() and u.isSurvivor())
+  for _unit from g_tempGroup
+    if (_unit.isAlive() and _unit.isSurvivor())
       count++
   return count
 
