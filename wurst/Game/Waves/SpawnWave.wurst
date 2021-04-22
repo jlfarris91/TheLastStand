@@ -18,13 +18,23 @@ import UndeadTargetingComponent
 import Runnable
 import ClosureTimers
 import CircularBuffer
+import TlsItemIds
+import ItemSet
+import UnitModifiers
+import Coins
+import DropItemOnDeathComponent
 
 constant real PROCESS_SPAWN_REQUEST_INTERVAL = 1.0
 constant int MAX_SPAWNS_PER_PROCESS = 25
 
+constant real GOLD_CHANCE_MIN = 0.01
+constant real GOLD_CHANCE_MAX = 1.0
+
 HashMap<unit, SpawnWave> g_unitToSpawnWaveMap
 CircularBuffer<SpawnWave> g_spawnRequests = new CircularBuffer<SpawnWave>(512)
 int g_lastNumberOfUnitsSpawned = 0
+
+ItemSet g_coinItemSet = new ItemSet("Coins", COLOR_GOLD.withoutAlpha())
 
 // ============================================================================
 public class SpawnWave extends Runnable
@@ -35,6 +45,7 @@ public class SpawnWave extends Runnable
   private int m_numSpawned
   private string m_id
   private player m_targetPlayer
+  private int m_totalGoldAwarded
 
   // --------------------------------------------------------------------------
   construct(player targetPlayer, SpawnWaveDefinition def)
@@ -47,6 +58,7 @@ public class SpawnWave extends Runnable
     m_definition = def
     m_aliveSpawnedUnits = new LinkedList<unit>()
     m_numSpawned = 0
+    m_totalGoldAwarded = 0
     m_id = def.getName()
 
   // --------------------------------------------------------------------------
@@ -232,6 +244,11 @@ public class SpawnWave extends Runnable
       return false
 
     registerSpawnedUnit(spawnedUnit)
+
+    let goldReward = shouldGrantGoldReward()
+    if (goldReward != 0)
+      let coinTypeId = getCoinItemTypeFromGoldReward(goldReward)
+      spawnedUnit.awardItemOnDeath(g_coinItemSet, coinTypeId, 1.0)
   
     let progress = getProgress()
 
@@ -251,10 +268,31 @@ public class SpawnWave extends Runnable
         UnitId2StringBJ(spawnedUnit.getTypeId())))
       return false
 
+    // If the unit is going to drop a coin, track that
+    let dropItemOnDeathComp = unitMetadata.getDropItemOnDeathComponent()
+    if (dropItemOnDeathComp != null)
+      let itemType = dropItemOnDeathComp.getItemType()
+      if (itemType.isCoinItem())
+        m_totalGoldAwarded += getGoldRewardFromCoinItemType(itemType)
+
     unitMetadata.getOrAddUndeadTargetingComponent()
     ..setTargetPlayer(m_targetPlayer)
 
     return true
+
+  // --------------------------------------------------------------------------
+  function shouldGrantGoldReward() returns int
+    let def = getDefinition()
+    let goldReward = def.getGoldReward()
+    if (m_totalGoldAwarded == goldReward)
+      return 0
+    let waveProgress = clamp01(def.getProgress().getProgress() * 1.1)
+    let chance = lerp(GOLD_CHANCE_MIN, GOLD_CHANCE_MAX, waveProgress)
+    if (not passesChanceCheck(chance))
+      return 0
+    let goldRewardRemaining = goldReward - m_totalGoldAwarded
+    let goldToGive = (goldRewardRemaining * waveProgress).floor()
+    return max(goldToGive, 0)
 
   // --------------------------------------------------------------------------
   function registerSpawnedUnit(unit spawnedUnit)
@@ -278,6 +316,10 @@ public class SpawnWave extends Runnable
   // --------------------------------------------------------------------------
   function getAliveCount() returns int
     return m_aliveSpawnedUnits.size()
+
+  // --------------------------------------------------------------------------
+  function getGoldAwarded() returns int
+    return m_totalGoldAwarded
 
   // --------------------------------------------------------------------------
   private function requestActivation()
@@ -358,4 +400,8 @@ init
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_DEATH, function onUnitDeath)
 
   doPeriodically(PROCESS_SPAWN_REQUEST_INTERVAL, (CallbackPeriodic cb) -> processSpawnRequests())
-    
+
+  g_coinItemSet.add(TlsItemIds.coinSmall, 1.0)
+  g_coinItemSet.add(TlsItemIds.coinMedium, 1.0)
+  g_coinItemSet.add(TlsItemIds.coinLarge, 1.0)
+  g_coinItemSet.add(TlsItemIds.coinEpic, 1.0)
