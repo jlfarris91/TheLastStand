@@ -1,0 +1,72 @@
+package Deer
+import Time
+import UnitRecycler
+import TlsUnitIds
+import GameConstants
+import MainItemLibrary
+import TlsItemIds
+import RegisterEvents
+import UnitExtensions
+import GroupUtils
+import Bounds
+import BoundsExtensions
+import HumanPlayers
+import FriendlyCircularCachedSpawnManager
+import SurvivorSpawnManager
+import RandomSpawnPointProvider
+import ClosureTimers
+
+// ============================================================================
+function spawnDeerAroundTheMap()
+  for _player in g_PlayingHumanPlayers
+    spawnDeerNearPlayer(_player)
+
+// ============================================================================
+function spawnDeerNearPlayer(player _player)
+  let currentSpawnManager = getPlayerCachedFriendlySpawnManager(_player)
+  let fallbackSpawnManager = getPlayerSurvivorSpawnManager(_player)
+  let spawnPointProvider = new RandomSpawnPointProvider(currentSpawnManager, fallbackSpawnManager, SpawnRange.MID)
+  let result = spawnPointProvider.getSpawnPoints(NUMBER_DEER_PER_PLAYER)
+  if (not result.succeeded)
+    return
+  for sp in result.spawnPoints
+    spawnDeer(sp)
+  destroy result.spawnPoints
+
+// ============================================================================
+function spawnDeer(vec2 pos)
+  let deer = createUnitRecycled(PLAYER_ENVIRONMENT, TlsUnitIds.deer, pos, GetRandomDirectionDeg().asAngleDegrees())
+  deer.fadeIn()
+
+// ============================================================================
+function banishAllDeer()
+  
+  let temp = getGroup()
+  temp.enumUnitsOfType(TlsUnitIds.deer, null)
+  for deer in temp
+    if (deer.isAlive())
+      deer.setInvulnerable(true)
+      deer.issuePointOrder("move", playableBounds.getRandomPoint())
+      deer.fadeOut()
+      doAfter(UNIT_FADE_DURATION, () -> deer.remove())
+  temp.release()
+
+// ============================================================================
+function onUnitKilled()
+  let dyingUnit = GetDyingUnit()
+  if (dyingUnit.getTypeId() == TlsUnitIds.deer)
+    g_MainItemLibrary.questSet.createItem(TlsItemIds.rawMeat, dyingUnit.getPos())
+
+// ============================================================================
+function onDayStart()
+  spawnDeerAroundTheMap()
+
+// ============================================================================
+function onNightStart()
+  banishAllDeer()
+
+// ============================================================================
+init
+  registerDayEvent(function onDayStart)
+  registerNightEvent(function onNightStart)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_DEATH, function onUnitKilled)
