@@ -1,0 +1,307 @@
+package CampFireComponent
+import RegisterEvents
+import TlsUnitIds
+import TlsAbilityIds
+import UnitComponent
+import RealtimeUnitComponent
+import RealtimeUpdate
+import TlsItemIds
+import DisplayTextToPlayer
+import Ability_IgniteCampFire
+import ColorUtility
+import PersistActiveAbilityComponent
+import Orders
+import FX
+import ClosureTimers
+import Unit_CampFire
+import Ability_CampFireRestore
+
+constant string CAMPFIRE2_EFFECT_1 = "Environment\\LargeBuildingFire\\LargeBuildingFire1.mdl"
+constant string CAMPFIRE2_EFFECT_2 = "Abilities\\Spells\\Undead\\ReplenishMana\\ReplenishManaCaster.mdl"
+
+// ============================================================================
+public class CampFireComponent extends RealtimeUnitComponent
+  private PersistActiveAbilityComponent m_persistActiveAbilityComponent
+  private effect m_campFire2Effect1
+  private effect m_campFire2Effect2
+
+  // --------------------------------------------------------------------------
+  construct(IUnitMetadata owner)
+    super(owner)
+    m_persistActiveAbilityComponent = null
+
+  // --------------------------------------------------------------------------
+  override function getTypeId() returns int
+    return CampFireComponent.typeId
+
+  // --------------------------------------------------------------------------
+  override function onEnabled()
+    super.onEnabled()
+    m_persistActiveAbilityComponent = getOwner().getOrAddPersistActiveAbilityComponent()
+    this.registerForRealtimeUpdate(RealtimeUpdatePriority.Background)
+    updateState()
+
+  // --------------------------------------------------------------------------
+  override function onDisabled()
+    super.onDisabled()
+    hideCampFire2Effects()
+
+  // --------------------------------------------------------------------------
+  override function realtimeUpdate(real dt)
+    let ownerUnit = getOwnerUnit()
+    let ownerUnitId = ownerUnit.getTypeId()
+
+    switch (ownerUnitId)
+      case TlsUnitIds.campFire
+        updateCampFire()
+      case TlsUnitIds.campFire2
+        updateCampFire2()
+      case TlsUnitIds.campFireOff
+        updateCampFireOff()
+
+  // --------------------------------------------------------------------------
+  function updateCampFire()
+    let ownerUnit = getOwnerUnit()
+
+    automaticallyAddLumber()
+    
+    // lose mana per second
+    ownerUnit.subMana(CAMP_FIRE_MANA_COST_PER_SECOND.toReal())
+    
+    // when mana reaches 0 convert to camp fire off
+    if (ownerUnit.getMana() <= 0)
+      convertToCampFireOff()
+    
+  // --------------------------------------------------------------------------
+  function updateCampFireOff()
+    let ownerUnit = getOwnerUnit()
+
+    automaticallyAddLumber()
+    
+    // The off camp fire converts to a regular camp fire when any mana is restored
+    if (ownerUnit.getMana() > 0)
+      convertToCampFire()
+
+  // --------------------------------------------------------------------------
+  function updateCampFire2()
+    let ownerUnit = getOwnerUnit()
+
+    // lose mana per second
+    ownerUnit.subMana(CAMP_FIRE_MANA_COST_PER_SECOND * CAMPFIRE2_MANA_COST_SCALE)
+    
+    // The camp fire 2 converts back to a camp fire 1 with full mana when mana reaches 0
+    // Unless there is still raw meat to consume to keep at at camp fire 2
+    if (ownerUnit.getMana() <= 0)
+      ownerUnit.setMana(ownerUnit.getMaxMana())
+      if (getRawMeatCharges() >= 1)
+        consumeRawMeatCharge()
+      else
+        convertToCampFire()
+
+  // --------------------------------------------------------------------------
+  private function convertToCampFire()
+    let ownerUnit = getOwnerUnit()
+    let ownerUnitId = ownerUnit.getTypeId()
+    if (ownerUnitId == TlsUnitIds.campFire)
+      return
+    nullTimer() () ->
+      replaceUnitTLS(ownerUnit, TlsUnitIds.campFire, bj_UNIT_STATE_METHOD_ABSOLUTE)
+
+  // --------------------------------------------------------------------------
+  private function convertToCampFireOff()
+    let ownerUnit = getOwnerUnit()
+    let ownerUnitId = ownerUnit.getTypeId()
+    if (ownerUnitId == TlsUnitIds.campFireOff)
+      return
+    nullTimer() () ->
+      replaceUnitTLS(ownerUnit, TlsUnitIds.campFireOff, bj_UNIT_STATE_METHOD_ABSOLUTE)
+
+  // --------------------------------------------------------------------------
+  private function convertToCampFire2()
+    let ownerUnit = getOwnerUnit()
+    let ownerUnitId = ownerUnit.getTypeId()
+    if (ownerUnitId == TlsUnitIds.campFire2)
+      return
+    nullTimer() () ->
+      let replacedUnit = replaceUnitTLS(ownerUnit, TlsUnitIds.campFire2, bj_UNIT_STATE_METHOD_ABSOLUTE)
+      replacedUnit.setMana(replacedUnit.getMaxMana())
+
+  // --------------------------------------------------------------------------
+  private function automaticallyAddLumber()
+    let ownerUnit = getOwnerUnit()
+
+    if (m_persistActiveAbilityComponent.getAbilityActiveState(TlsAbilityIds.campFireIgniteSelf) and
+        ownerUnit.getMana() < CAMP_FIRE_IGNITE_DURATION / 2)
+    //{
+      let owningPlayer = getOwnerUnit().getOwner()
+      if (owningPlayer.getLumber() < CAMP_FIRE_IGNITE_LUMBER_COST)
+        m_persistActiveAbilityComponent.issueAbilityDeactivationOrder(TlsAbilityIds.campFireIgniteSelf)
+      else
+        owningPlayer.subLumber(CAMP_FIRE_IGNITE_LUMBER_COST)
+        FX.createLostLumberTag(ownerUnit.getPos(), CAMP_FIRE_IGNITE_LUMBER_COST, owningPlayer)
+        addLumber()
+    //}
+
+  // --------------------------------------------------------------------------
+  private function getRawMeatCharges() returns int
+    let ownerUnit = getOwnerUnit()
+    let rawMeatItem = ownerUnit.getItemById(TlsItemIds.rawMeat)
+    if (rawMeatItem == null)
+      return 0
+    return rawMeatItem.getCharges()
+
+  // --------------------------------------------------------------------------
+  private function consumeRawMeatCharge()
+    let ownerUnit = getOwnerUnit()
+    let rawMeatItem = ownerUnit.getItemById(TlsItemIds.rawMeat)
+    if (rawMeatItem == null)
+      return
+    let charges = rawMeatItem.getCharges()
+    if (charges == 1)
+      rawMeatItem.remove()
+    else
+      rawMeatItem.setCharges(charges - 1)
+
+  // --------------------------------------------------------------------------
+  function updateState()
+    let ownerUnit = getOwnerUnit()
+    let ownerUnitId = ownerUnit.getTypeId()
+
+    if (ownerUnitId == TlsUnitIds.campFire)
+      ownerUnit.addAbility(TlsAbilityIds.campFireRestoreHealth)
+      ownerUnit.addAbility(TlsAbilityIds.campFireRestoreStamina)
+    else
+      ownerUnit.removeAbility(TlsAbilityIds.campFireRestoreHealth)
+      ownerUnit.removeAbility(TlsAbilityIds.campFireRestoreStamina)
+
+    if (ownerUnitId == TlsUnitIds.campFire2)
+      ownerUnit.addAbility(TlsAbilityIds.campFire2RestoreHealth)
+      ownerUnit.addAbility(TlsAbilityIds.campFire2RestoreStamina)
+      showCampFire2Effects()
+    else
+      ownerUnit.removeAbility(TlsAbilityIds.campFire2RestoreHealth)
+      ownerUnit.removeAbility(TlsAbilityIds.campFire2RestoreStamina)
+      hideCampFire2Effects()
+
+  // --------------------------------------------------------------------------
+  protected function onRawMeatAdded()
+    if (getOwnerUnit().getTypeId() != TlsUnitIds.campFire2)
+      consumeRawMeatCharge()
+      convertToCampFire2()
+
+  // --------------------------------------------------------------------------
+  protected function addLumber()
+    getOwnerUnit().addMana(CAMP_FIRE_IGNITE_DURATION.toReal())
+
+  // --------------------------------------------------------------------------
+  private function showCampFire2Effects()
+    if (m_campFire2Effect1 == null)
+      m_campFire2Effect1 = AddSpecialEffect(CAMPFIRE2_EFFECT_1, getOwnerUnit().getX(), getOwnerUnit().getY())
+    if (m_campFire2Effect2 == null)
+      m_campFire2Effect2 = AddSpecialEffect(CAMPFIRE2_EFFECT_2, getOwnerUnit().getX(), getOwnerUnit().getY())
+
+  // --------------------------------------------------------------------------
+  private function hideCampFire2Effects()
+    if (m_campFire2Effect1 != null)
+      m_campFire2Effect1.destr()
+      m_campFire2Effect1 = null
+    if (m_campFire2Effect2 != null)
+      m_campFire2Effect2.destr()
+      m_campFire2Effect2 = null
+
+// ============================================================================
+public function IUnitMetadata.getCampFireComponent() returns CampFireComponent
+  return this.getComponent(typeInfo(CampFireComponent.typeId)) castTo CampFireComponent
+
+// ============================================================================
+public function IUnitMetadata.getOrAddCampFireComponent() returns CampFireComponent
+  var component = this.getCampFireComponent()
+  if (component == null)
+    component = this.addComponent(new CampFireComponent(this)) castTo CampFireComponent
+  return component
+
+// ============================================================================
+function onUnitConstructFinished()
+  let constructedUnit = GetConstructedStructure()
+  if (constructedUnit.getTypeId() != TlsUnitIds.campFire)
+    return
+
+  constructedUnit.addAbility(TlsAbilityIds.campFireRestoreHealth)
+  constructedUnit.addAbility(TlsAbilityIds.campFireRestoreStamina)
+
+// ============================================================================
+function onUnitPickupItem()
+  let itemUnit = GetManipulatingUnit()
+  let _item = GetManipulatedItem()
+
+  if (not itemUnit.isCampFire() or _item.getTypeId() != TlsItemIds.rawMeat)
+    return
+
+  let metadata = itemUnit.getMetadata()
+  if (metadata == null)
+    return
+
+  let comp = metadata.getCampFireComponent()
+  if (comp == null or not comp.getEnabled())
+    return
+
+  comp.onRawMeatAdded()
+
+// ============================================================================
+function onIgniteFire()
+  let castingUnit = GetSpellAbilityUnit()
+  let targetUnit = GetSpellTargetUnit()
+  let abilId = GetSpellAbilityId()
+
+  if (abilId != TlsAbilityIds.campFireIgniteTarget)
+    return
+
+  let castingPlayer = castingUnit.getOwner()
+
+  if (not targetUnit.isCampFire())
+    displayMessageToPlayer(castingPlayer, "You can only ignite Camp Fires.".colorize(Colors.red))
+    return
+
+  if (castingPlayer.getLumber() < CAMP_FIRE_IGNITE_LUMBER_COST)
+    displayMessageToPlayer(castingPlayer, "Not enough lumber.".colorize(Colors.red))
+    return
+
+  castingPlayer.subLumber(CAMP_FIRE_IGNITE_LUMBER_COST)
+  FX.createLostLumberTag(castingUnit.getPos(), CAMP_FIRE_IGNITE_LUMBER_COST, castingPlayer)
+
+  let comp = targetUnit.getMetadataRequired().getCampFireComponent()
+  comp.addLumber()
+
+// ============================================================================
+function onUnitIssuedOrder()
+  let orderedUnit = GetOrderedUnit()
+  let orderId = GetIssuedOrderId()
+
+  if (orderId != OrderIds.immolation or not orderedUnit.isCampFire())
+    return
+
+  let owningPlayer = orderedUnit.getOwner()
+  if (owningPlayer.getLumber() < CAMP_FIRE_IGNITE_LUMBER_COST)
+    displayMessageToPlayer(owningPlayer, "Not enough lumber".colorize(Colors.red))
+    orderedUnit.issueImmediateOrderById(OrderIds.unimmolation)
+    return
+
+// ============================================================================
+function onUnitConstructed()
+  let constructedUnit = GetConstructedStructure()
+  if (not constructedUnit.isCampFire())
+    return
+
+  // Make sure it has full mana after being constructed
+  constructedUnit.setMana(constructedUnit.getMaxMana())
+
+  // Now enable the Camp Fire component to start draining mana
+  constructedUnit.getMetadataRequired().getOrAddCampFireComponent().enable()
+
+// ============================================================================
+init
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_CONSTRUCT_FINISH, function onUnitConstructFinished)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_PICKUP_ITEM, function onUnitPickupItem)
+  registerSpellEffectEvent(TlsAbilityIds.campFireIgniteTarget, function onIgniteFire)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ISSUED_ORDER, function onUnitIssuedOrder)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_CONSTRUCT_FINISH, function onUnitConstructed)
