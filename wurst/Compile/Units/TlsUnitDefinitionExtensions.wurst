@@ -1,0 +1,113 @@
+package TlsUnitDefinitionExtensions
+import TlsUnitDefinition
+import TlsHeroDefinition
+import ErrorHandling
+import Range
+
+// Should match settings in war3mapMisc.txt
+@configurable public constant real ATTACK_BONUS_PER_PRIMARY_ATTR_BONUS = 1
+@configurable public constant real ATTACK_SPEED_BONUS_PER_AGILITY_POINT = 0.02
+@configurable public constant real DEFENSE_BASE_VALUE = -2
+@configurable public constant real DEFENSE_BONUS_PER_AGILITY = 0.3
+@configurable public constant real HP_REGEN_BONUS_PER_STRENGTH_POINT = 0.05
+@configurable public constant real HP_BONUS_PER_STRENGTH_POINT = 15
+@configurable public constant real MP_REGEN_BONUS_PER_INTELLIGENCE_POINT = 0.05
+@configurable public constant real MP_BONUS_PER_INTELLIGENCE_POINT = 15
+@configurable public constant real MOVEMENT_BONUS_PER_AGILITY_POINT = 0
+
+// ============================================================================
+function isHeroUnitId_Compiletime(int unitId) returns bool
+  return unitId.toRawCode().charAt(0) == "H"
+
+// ============================================================================
+public function ITlsUnitDefinition.calculateHealthMaximum(int level) returns int
+  if (isHeroUnitId_Compiletime(this.getNewId()))
+    let heroDef = this castTo TlsHeroDefinition
+    if (heroDef != null)
+      return heroDef.calculateHealthMaximum(level)
+  return this.getHitPointsMaximumBase()
+
+// ============================================================================
+public function TlsHeroDefinition.calculateHealthMaximum(int level) returns int
+  return (this.getHitPointsMaximumBase() + this.calculateTotalStrength(level) * HP_BONUS_PER_STRENGTH_POINT).floor()
+
+// ============================================================================
+public function ITlsUnitDefinition.calculateDamageRange(int weaponIndex, int level) returns rangeInt
+  if (isHeroUnitId_Compiletime(this.getNewId()))
+    let heroDef = this castTo TlsHeroDefinition
+    if (heroDef != null)
+      return heroDef.calculateDamageRange(weaponIndex, level)
+  var baseDamageRange = rangeInt(0, 0)
+  if (weaponIndex == 0)
+    baseDamageRange = this.getAttack1DamageRange()
+  else if (weaponIndex == 1)
+    baseDamageRange = this.getAttack2DamageRange()
+  else
+    error("Invalid weapon index : " + weaponIndex.toString())
+  return baseDamageRange
+
+// ============================================================================
+public function TlsHeroDefinition.calculateDamageRange(int weaponIndex, int level) returns rangeInt
+  var baseDamageRange = rangeInt(0, 0)
+  if (weaponIndex == 0)
+    baseDamageRange = this.getAttack1DamageRange()
+  else if (weaponIndex == 1)
+    baseDamageRange = this.getAttack2DamageRange()
+  else
+    error("Invalid weapon index : " + weaponIndex.toString())
+  return baseDamageRange + (this.calculatePrimaryAttribute(level) * ATTACK_BONUS_PER_PRIMARY_ATTR_BONUS).floor()
+
+// ============================================================================
+public function ITlsUnitDefinition.calculateAttackCooldown(int weaponIndex, int level) returns real
+  if (isHeroUnitId_Compiletime(this.getNewId()))
+    let heroDef = this castTo TlsHeroDefinition
+    if (heroDef != null)
+      return heroDef.calculateAttackCooldown(weaponIndex, level)
+  var cooldownTime = 0.0
+  if (weaponIndex == 0)
+    cooldownTime = this.getAttack1CooldownTime()
+  else if (weaponIndex == 1)
+    cooldownTime = this.getAttack2CooldownTime()
+  else
+    error("Invalid weapon index : " + weaponIndex.toString())
+  return cooldownTime
+
+// ============================================================================
+public function TlsHeroDefinition.calculateAttackCooldown(int weaponIndex, int level) returns real
+  var baseCooldownTime = 0.0
+  if (weaponIndex == 0)
+    baseCooldownTime = this.getAttack1CooldownTime()
+  else if (weaponIndex == 1)
+    baseCooldownTime = this.getAttack2CooldownTime()
+  else
+    error("Invalid weapon index : " + weaponIndex.toString())
+  return baseCooldownTime + this.calculateTotalAgility(level) * ATTACK_SPEED_BONUS_PER_AGILITY_POINT
+
+// ============================================================================
+public function TlsHeroDefinition.calculateTotalStrength(int level) returns real
+  return this.getStartingStrength() + this.getStrengthPerLevel() * (level - 1)
+
+// ============================================================================
+public function TlsHeroDefinition.calculateTotalAgility(int level) returns real
+  return this.getStartingAgility() + this.getAgilityPerLevel() * (level - 1)
+
+// ============================================================================
+public function TlsHeroDefinition.calculateTotalIntelligence(int level) returns real
+  return this.getStartingIntelligence() + this.getIntelligencePerLevel() * (level - 1)
+
+// ============================================================================
+public function TlsHeroDefinition.calculatePrimaryAttribute(int level) returns real
+  let primAttr = this.getPrimaryAttribute()
+  switch (primAttr)
+    case "STR" | "str"
+      return this.calculateTotalStrength(level)
+    case "AGI" | "agi"
+      return this.calculateTotalAgility(level)
+    case "INT" | "int"
+      return this.calculateTotalIntelligence(level)
+  error("Invalid primary attribute : " + primAttr)
+  return 0
+
+// ============================================================================
+public function ITlsUnitDefinition.calculateApproximateDPS(int weaponIndex, int level) returns rangeReal
+  return this.calculateDamageRange(weaponIndex, level).toReal() / this.calculateAttackCooldown(weaponIndex, level)
