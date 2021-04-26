@@ -4,14 +4,13 @@ import UnitMetadata
 import XpReceiverComponent
 import RangedTargetXpReceieverComponent
 import UnitPropertiesComponent
-import RegisterEvents
-import Orders
+import SurvivorJobData
+import TlsAbilityIds
 
 constant real BONUS_DAMAGE_TO_NORMALS_PERCENTAGE = 10.0
 constant real BONUS_DAMAGE_TO_ELITES_PERCENTAGE = -10.0
 constant real BONUS_DAMAGE_TO_BOSS_PERCENTAGE = 0.0
-constant int ATTACK_INDEX_MELEE = 0
-constant int ATTACK_INDEX_RANGED = 1
+constant real BONUS_EVADE_CHANCE_PERCENTAGE = 10.0
 
 // ============================================================================
 public class MilitiaJobComponent extends SurvivorJobComponent
@@ -35,6 +34,7 @@ public class MilitiaJobComponent extends SurvivorJobComponent
       unitPropsComp.setNormalDamagePercentage(unitPropsComp.getNormalDamagePercentage() + BONUS_DAMAGE_TO_NORMALS_PERCENTAGE)
       unitPropsComp.setEliteDamagePercentage(unitPropsComp.getEliteDamagePercentage() + BONUS_DAMAGE_TO_ELITES_PERCENTAGE)
       unitPropsComp.setBossDamagePercentage(unitPropsComp.getBossDamagePercentage() + BONUS_DAMAGE_TO_ELITES_PERCENTAGE)
+      unitPropsComp.setEvadeChancePercentage(unitPropsComp.getEvadeChancePercentage() + BONUS_EVADE_CHANCE_PERCENTAGE)
 
   // --------------------------------------------------------------------------
   protected override function onDisabled()
@@ -57,18 +57,38 @@ public class MilitiaJobComponent extends SurvivorJobComponent
       unitPropsComp.setNormalDamagePercentage(unitPropsComp.getNormalDamagePercentage() - BONUS_DAMAGE_TO_NORMALS_PERCENTAGE)
       unitPropsComp.setEliteDamagePercentage(unitPropsComp.getEliteDamagePercentage() - BONUS_DAMAGE_TO_ELITES_PERCENTAGE)
       unitPropsComp.setBossDamagePercentage(unitPropsComp.getBossDamagePercentage() - BONUS_DAMAGE_TO_ELITES_PERCENTAGE)
+      unitPropsComp.setEvadeChancePercentage(unitPropsComp.getEvadeChancePercentage() - BONUS_EVADE_CHANCE_PERCENTAGE)
 
   // --------------------------------------------------------------------------
-  function activateMeleeAttack()
+  override function saveJobData(SurvivorJobData jobData)
+    super.saveJobData(jobData)
+
     let ownerUnit = getOwnerUnit()
-    ownerUnit.setFieldWeapon(UNIT_WEAPON_BF_ATTACKS_ENABLED, ATTACK_INDEX_RANGED, false)
-    ownerUnit.setFieldWeapon(UNIT_WEAPON_BF_ATTACKS_ENABLED, ATTACK_INDEX_MELEE, true)
+
+    if (ownerUnit.hasAbility(TlsAbilityIds.militiaCleave))
+      jobData.addAbility(TlsAbilityIds.militiaCleave, ownerUnit.getAbilityLevel(TlsAbilityIds.militiaCleave))
+
+    if (ownerUnit.hasAbility(TlsAbilityIds.militiaTaunt))
+      jobData.addAbility(TlsAbilityIds.militiaTaunt, ownerUnit.getAbilityLevel(TlsAbilityIds.militiaTaunt))
+
+    if (ownerUnit.hasAbility(TlsAbilityIds.militiaDefend))
+      jobData.addAbility(TlsAbilityIds.militiaDefend, ownerUnit.getAbilityLevel(TlsAbilityIds.militiaDefend))
+
+    if (ownerUnit.hasAbility(TlsAbilityIds.militiaThorns))
+      jobData.addAbility(TlsAbilityIds.militiaThorns, ownerUnit.getAbilityLevel(TlsAbilityIds.militiaThorns))
 
   // --------------------------------------------------------------------------
-  function activateRangedAttack()
+  override function onLevelChanged()
+    super.onLevelChanged()
     let ownerUnit = getOwnerUnit()
-    ownerUnit.setFieldWeapon(UNIT_WEAPON_BF_ATTACKS_ENABLED, ATTACK_INDEX_MELEE, false)
-    ownerUnit.setFieldWeapon(UNIT_WEAPON_BF_ATTACKS_ENABLED, ATTACK_INDEX_RANGED, true)
+    let ownerUnitLevel = ownerUnit.getLevel()
+
+    // The unit's level will be 1 when it is upgraded, in that case ignore this
+    if (ownerUnitLevel > 1)
+
+      // Otherwise, increase the level of the ability
+      if (ownerUnit.hasAbility(TlsAbilityIds.militiaCleave))
+        ownerUnit.setAbilityLevel(TlsAbilityIds.militiaCleave, ownerUnit.getAbilityLevel(TlsAbilityIds.militiaCleave) + 1)
 
 // ============================================================================
 public function IUnitMetadata.getMilitiaJobComponent() returns MilitiaJobComponent
@@ -80,28 +100,3 @@ public function IUnitMetadata.getOrAddMilitiaJobComponent() returns MilitiaJobCo
   if (component == null)
     component = this.addComponent(new MilitiaJobComponent(this)) castTo MilitiaJobComponent
   return component
-
-// ============================================================================
-function onUnitIssuedOrder()
-  let orderedUnit = GetOrderedUnit()
-  let orderId = GetIssuedOrderId()
-
-  if (orderId != OrderIds.defend and orderId != OrderIds.undefend)
-    return
-
-  let metadata = orderedUnit.getMetadata()
-  if (metadata == null)
-    return
-
-  let comp = metadata.getMilitiaJobComponent()
-  if (comp == null or not comp.getEnabled())
-    return
-
-  if (orderId == OrderIds.defend)
-    comp.activateMeleeAttack()
-  else
-    comp.activateRangedAttack()
-
-// ============================================================================
-init
-  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ISSUED_ORDER, function onUnitIssuedOrder)
