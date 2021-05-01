@@ -5,47 +5,52 @@ import UnitAnimations
 import ColorUtility
 import StringBuilder
 
-constant real TREE_HARVEST_INCOME_INTERVAL = UnitAnimations.VillagerMan.attack.duration
-constant int LUMBER_CAPACITY_BASE = 10
-constant int LUMBER_PER_LEVEL = 2
-constant real LUMBER_PER_HIT_PER_LEVEL = 1.0 / 2.0
-public constant int HARVEST_LEVELS = 10
+public constant real TREE_HARVEST_INCOME_INTERVAL = UnitAnimations.VillagerMan.attack.duration
+public constant int HARVEST_LUMBER_CAPACITY_BASE = 10
+public constant int HARVEST_LUMBER_CAPACITY_PER_LEVEL = 2
+public constant int HARVEST_RESEARCH_LEVELS = 3
+public constant int HARVEST_UNIT_LEVELS = 10
+public constant int HARVEST_LEVELS = HARVEST_RESEARCH_LEVELS * HARVEST_UNIT_LEVELS
+
+// ============================================================================
+public function getHarvestAbility(int researchLevel, int survivorLevel) returns int
+  return TlsAbilityIds.harvest[researchLevel * HARVEST_UNIT_LEVELS + (survivorLevel - 1)]
 
 // ============================================================================
 @compiletime function createAbility()
-  for i = 1 to HARVEST_LEVELS
-    createHarvestAbility(i)
+  for r = 0 to HARVEST_RESEARCH_LEVELS - 1
+    for i = 1 to HARVEST_UNIT_LEVELS
+      createHarvestAbility(r, i)
 
 // ============================================================================
-function createHarvestAbility(int level)
+function createHarvestAbility(int researchLevel, int level)
+  let abilId = getHarvestAbility(researchLevel, level)
 
-  let lumberCapacity = LUMBER_CAPACITY_BASE + level * LUMBER_PER_LEVEL
-  let damageToTree = 1 + (level * LUMBER_PER_HIT_PER_LEVEL).floor()
+  let lumberPerHit = 1 + researchLevel
+  let lumberCapacity = HARVEST_LUMBER_CAPACITY_BASE + (level - 1) * HARVEST_LUMBER_CAPACITY_PER_LEVEL
 
   let sb = new StringBuilder()
-  sb.appendLine("Max lumber carried (before upgrades): {0}".format(lumberCapacity.toString().colorize(Colors.gold)))
-  sb.appendLine("Lumber per hit: {0}".format(damageToTree.toString().colorize(Colors.gold)))
+  sb.appendLine("Max lumber carried: {0}".format(lumberCapacity.toString().colorize(Colors.gold)))
   sb.appendLine()
-  sb.appendLine("Each level of the Survivor increases the amount of lumber carried by {0} and lumber per hit by {1}%".format(
-    LUMBER_PER_LEVEL.toString().colorize(Colors.gold),
-    (LUMBER_PER_HIT_PER_LEVEL * 100.0).floor().toString().colorize(Colors.gold)))
+  sb.appendLine("Each level of the Survivor increases the amount of lumber carried by {0}".format(
+    HARVEST_LUMBER_CAPACITY_PER_LEVEL.toString().colorize(Colors.gold)))
 
-  new AbilityDefinitionHarvestLumber(TlsAbilityIds.harvest[level - 1])
+  new AbilityDefinitionHarvestLumber(abilId)
   ..setLevels(1)
   ..setName("Harvest")
   ..setEditorSuffix("(Level {0})".format(level.toString()))
-  ..setTooltipNormal(1, "Gather [Level {0}]".format(level.toString()))
+  ..setTooltipNormal(1, researchLevel == 0 ? "Gather [Level {0}]".format(level.toString()) : "Gather [Level {0}] [Research {1}]".format(level.toString(), researchLevel.toString()))
   ..setTooltipNormalExtended(1, "Harvest lumber from trees without killing the tree. Somehow.|n|n" + sb.toString())
-  ..setTooltipTurnOff(1, "Return Resources [Level {0}]".format(level.toString()))
-  ..setTooltipTurnOffExtended(1, "Return the carried lumber to the nearest HQ Tent or Shelter.|n|n" + sb.toString())
+  ..setTooltipTurnOff(1, researchLevel == 0 ? "Return Resources [Level {0}]".format(level.toString()) : "Return Resources [Level {0}] [Research {1}]".format(level.toString(), researchLevel.toString()))
+  ..setTooltipTurnOffExtended(1, "Return the carried lumber to the nearest HQ Tent.|n|n" + sb.toString())
   ..setLumberCapacity(1, lumberCapacity)
-  ..setDamagetoTree(1, damageToTree)
+  ..setDamagetoTree(1, lumberPerHit)
   ..setButtonPositionNormalX(2)
   ..setButtonPositionNormalY(1)
   ..setButtonPositionTurnOffX(2)
   ..setButtonPositionTurnOffY(1)
   ..setTargetsAllowed(1, "tree,alive,dead")
-  ..setDurationNormal(1, 1.1)
+  ..setDurationNormal(1, 0.0)
   ..setCastRange(1, 116.0)
   ..setAreaofEffect(1, 900.0)
 
