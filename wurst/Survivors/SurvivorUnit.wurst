@@ -7,25 +7,27 @@ import Statistic
 import Icons
 import SurvivorComponent
 import HashMap
-
 import KillsStat
 import DaysSurvivedStat
 import NightsSurvivedStat
 import SurvivorData
 import SurvivorNames
 import SurvivorJobs
+import RangedTargetXpReceieverComponent
+import UnitMetadata
+import RegisterEvents
+import PersistActiveAbilityComponent
 
+import SurvivorJoblessComponent
 import BuilderJobComponent
 import MilitiaJobComponent
 import SpearmanJobComponent
 import MedicJobComponent
 import MarksmanJobComponent
 import SurvivorJobChangeComponent
-import RangedTargetXpReceieverComponent
-import UnitMetadata
-import SurvivorJoblessComponent
-import RegisterEvents
-import PersistActiveAbilityComponent
+import EngineerJobComponent
+import ClosureTimers
+import ErrorHandling
 
 // ============================================================================
 public class Survivor extends UnitMetadata
@@ -48,12 +50,15 @@ public class Survivor extends UnitMetadata
     m_survivorData = null
 
   // --------------------------------------------------------------------------
+  function getActiveJobComponent() returns SurvivorJobComponent
+    return m_activeJobComponent
+
+  // --------------------------------------------------------------------------
   protected override function onPreUnitChanged(unit oldUnit, unit newUnit)
     super.onPreUnitChanged(oldUnit, newUnit)
 
     if (oldUnit != null)
-      saveOldJobStats(oldUnit)
-      //Log.info("SurvivorUnit", "onPreUnitChanged", oldUnit.getName(), "oldUnit 1 xp " + oldUnit.getXp().toString())
+      saveJobData(oldUnit)
 
     if (m_activeJobComponent != null)
       m_activeJobComponent.setEnabled(false)
@@ -79,19 +84,20 @@ public class Survivor extends UnitMetadata
       m_activeJobComponent.setEnabled(true)
     
     //Log.info("SurvivorUnit", "onPostUnitChanged", newUnit.getName(), "newUnit 3 xp " + newUnit.getXp().toString())
-    
-    // Reset to level 1
-    newUnit.removeLevels(newUnit.getLevel())
-    newUnit.setXp(0, false)
-    
+
+    resetExperienceIfPromoting(newUnit)
+
+    // Load this data next frame to avoid some weird War 3 behavior.
+    // Learning skills seems to be broken if you try to learn the same skill
+    // multiple times the same frame that the unit is replaced. The game reports
+    // that the skill was successfully learned and multiple times but it is still
+    // level 1.
+    nullTimer(() -> loadJobData(newUnit))
+
     //Log.info("SurvivorUnit", "onPostUnitChanged", newUnit.getName(), "newUnit 4 xp " + newUnit.getXp().toString())
 
-    loadNewJobStats(newUnit)
-
-    //Log.info("SurvivorUnit", "onPostUnitChanged", newUnit.getName(), "newUnit 5 xp " + newUnit.getXp().toString())
-
   // --------------------------------------------------------------------------
-  private function saveOldJobStats(unit theUnit)
+  private function saveJobData(unit theUnit)
     let unitTypeId = theUnit.getTypeId()
     let jobId = getJobDefinitionForUnitType(unitTypeId)
     let survivorDataComp = this.getSurvivorComponent()
@@ -99,28 +105,48 @@ public class Survivor extends UnitMetadata
 
     let jobData = survivorData.getJobData(jobId)
     if (jobData != null)
-      jobData.setLevel(theUnit.getLevel())
-      jobData.setExperience(theUnit.getXp())
-      jobData.setUnitId(unitTypeId)
+      m_activeJobComponent.saveJobData(jobData)
     //   Log.info("SurvivorUnit", "saveOldJobStats", jobId.getTitle(), "xp " + theUnit.getXp().toString())
     // else
     //   Log.info("SurvivorUnit", "saveOldJobStats", jobId.getTitle(), "Could not find job data")
 
   // --------------------------------------------------------------------------
-  private function loadNewJobStats(unit theUnit)
+  private static function loadJobData(unit theUnit)
+    let survivor = theUnit.getMetadata() castTo Survivor
+    if (survivor == null)
+      error("Unit does not have Survivor metadata")
+      return
+
+    if (survivor.m_activeJobComponent == null)
+      error("active job component is null")
+      return
+
     let unitTypeId = theUnit.getTypeId()
     let jobId = getJobDefinitionForUnitType(unitTypeId)
-    let survivorDataComp = this.getSurvivorComponent()
+    let survivorDataComp = survivor.getSurvivorComponent()
     let survivorData = survivorDataComp.getSurvivorData()
 
     theUnit.setProperName(survivorData.getName())
 
     let jobData = survivorData.getJobData(jobId)
     if (jobData != null)
-      theUnit.setXp(jobData.getExperience(), false)
+      survivor.m_activeJobComponent.loadJobData(jobData)
     //   Log.info("SurvivorUnit", "loadNewJobStats", jobId.getTitle(), "xp " + theUnit.getXp().toString())
     // else
     //   Log.info("SurvivorUnit", "loadNewJobStats", jobId.getTitle(), "Could not find job data")
+
+  // --------------------------------------------------------------------------
+  private function resetExperienceIfPromoting(unit newUnit)
+    if (newUnit == null)
+      return
+    let job = getJobDefinitionForUnitType(newUnit.getTypeId())
+    let survivorDataComp = this.getSurvivorComponent()
+    let survivorData = survivorDataComp.getSurvivorData()
+    let jobData = survivorData.getJobData(job)
+    if (jobData == null or jobData.getUnitId() == newUnit.getTypeId())
+      return
+    jobData.setLevel(1)
+    jobData.setExperience(0)
 
   // --------------------------------------------------------------------------
   private function registerJobComponent(SurvivorJobDefinition job, SurvivorJobComponent comp)
@@ -162,6 +188,7 @@ public class Survivor extends UnitMetadata
 
     registerJobComponent(SurvivorJobs.none,     this.getOrAddSurvivorJoblessComponent() ..setEnabled(false))
     registerJobComponent(SurvivorJobs.builder,  this.getOrAddBuilderJobComponent()      ..setEnabled(false))
+    registerJobComponent(SurvivorJobs.engineer, this.getOrAddEngineerJobComponent()     ..setEnabled(false))
     registerJobComponent(SurvivorJobs.militia,  this.getOrAddMilitiaJobComponent()      ..setEnabled(false))
     registerJobComponent(SurvivorJobs.spearman, this.getOrAddSpearmanJobComponent()     ..setEnabled(false))
     registerJobComponent(SurvivorJobs.medic,    this.getOrAddMedicJobComponent()        ..setEnabled(false))

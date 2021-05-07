@@ -7,10 +7,16 @@ import TLSMenuBar
 import CameraButton
 import ClosureTimers
 import RegisterEvents
+import PlayerExtensions
+import MainItemLibrary
 
+constant string COMMAND_BASE = "base"
 constant string COMMAND_BASES = "bases"
 constant string COMMAND_CLEAR = "clear"
 constant string COMMAND_ZOOM = "zoom"
+constant string COMMAND_CAMERA = "camera"
+constant string COMMAND_CAM = "cam"
+constant string COMMAND_SPLIT = "split"
 
 public quest g_playerCommandsQuest
 ChatCommandHandler g_playerChatCommandHandler
@@ -61,6 +67,37 @@ function setCameraDistance()
   cameraButton.setCameraDistance(distance)
 
 // ============================================================================
+function splitItemStack()
+  let command = getChatCommand()
+  let commandPlayer = getChatCommandPlayer()
+
+  let index = command.getArgument(0).getInt()
+  commandPlayer.forEachSelectedUnit() (_unit) ->
+    if (_unit.getOwner() == commandPlayer) 
+      splitItemsInSlot(_unit, index)
+
+// ============================================================================
+function splitItemsInSlot(unit _unit, int index) returns bool
+  let _item = _unit.itemInSlot(index)
+  if (_item == null)
+    return false
+  let charges = _item.getCharges()
+  if (charges <= 1)
+    return false
+  let itemId = _item.getTypeId()
+  let itemSet = g_MainItemLibrary.getOwningSet(itemId)
+  if (itemSet == null)
+    return false
+  bool successfullySplit = false
+  for i = 0 to charges - 1
+    let splitItem = itemSet.createItem(itemId, _unit.getPos())
+    if (splitItem != null)
+      successfullySplit = true
+  if (successfullySplit)
+    _item.remove()
+  return successfullySplit 
+
+// ============================================================================
 function setupPlayerCommandsQuest()
   g_playerCommandsQuest = CreateQuest()
   QuestSetIconPath(g_playerCommandsQuest, "ReplaceableTextures\\WorldEditUI\\DoodadPlaceholder.blp")
@@ -71,6 +108,7 @@ function setupPlayerCommandsQuest()
 function registerDebugCommands()
 
   g_playerChatCommandHandler.registerCommandDefinition(COMMAND_BASES, function showPlayerBasesCommand)
+    ..addAlias(COMMAND_BASE)
     ..setDescription("Shows the player available bases and their difficulties.")
     ..addArgument(new ChatCommandArgument("DIFFICULTY", ChatCommandArgumentType.STRING, true)
       ..setStringOptions("easy", "medium", "hard")
@@ -80,8 +118,16 @@ function registerDebugCommands()
     ..setDescription("Clears the screen of all text. Pressing the 'Escape' key also clears the screen.")
 
   g_playerChatCommandHandler.registerCommandDefinition(COMMAND_ZOOM, function setCameraDistance)
+    ..addAlias(COMMAND_CAMERA)
+    ..addAlias(COMMAND_CAM)
     ..addRealArgument("DISTANCE", true)
     ..setDescription("Sets the camera zoom. Reset to default if no number is provided.")
+
+  g_playerChatCommandHandler.registerCommandDefinition(COMMAND_SPLIT, function splitItemStack)
+    ..setDescription("Splits an item stack in the inventory slot index provided")
+    ..addArgument(new ChatCommandArgument("INVENTORY_SLOT", ChatCommandArgumentType.INT, false)
+      ..setIntOptions(0, 1, 2, 3, 4, 5)
+      ..setDescription("The number of the inventory slot to split (0=TL, 5=BR)"))
 
   g_playerChatCommandHandler.addQuestItems()
 

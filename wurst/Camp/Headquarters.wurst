@@ -1,48 +1,61 @@
 package Headquarters
-import RegisterEvents
 import GroupUtils
 import TlsUnitIds
 import UnitIndexer
-
-// ============================================================================
-public function updateNoHeadquartersUpgrade(player _player)
-  let enabled = not playerHasCampHeadquarters(_player)
-  SetPlayerUnitAvailableBJ(TlsUnitIds.headquarters1, enabled, _player)
-
-// ============================================================================
-function playerHasCampHeadquarters(player _player) returns bool
-  var hasCampHeadquarters = false
-  let tempGroup = getGroup()
-  tempGroup.enumUnitsOfPlayer(_player, null)
-  for _unit in tempGroup
-    if (_unit.isCampHeadquarters() and _unit.isAlive())
-      hasCampHeadquarters = true
-      break
-  tempGroup.release()
-  return hasCampHeadquarters 
+import DisplayTextToPlayer
+import TlsItemIds
+import MainItemLibrary
+import ColorUtility
 
 // ============================================================================
 function onUnitIndexedDeindexed()
   let _unit = getIndexingUnit()
   if (_unit.isCampHeadquarters())
-    updateNoHeadquartersUpgrade(_unit.getOwner())
+    destroyHeadquartersIfPlayerAlreadyHasOne(_unit)
 
 // ============================================================================
-function onUnitChangedOwner()
-  let _unit = GetTriggerUnit()
-  if (_unit.isCampHeadquarters())
-    updateNoHeadquartersUpgrade(GetChangingUnitPrevOwner())
-    updateNoHeadquartersUpgrade(_unit.getOwner())
+function isEnumUnitHeadquarters() returns bool
+  return GetEnumUnit().isCampHeadquarters()
 
 // ============================================================================
-function onUnitDeath()
-  let _unit = GetDyingUnit()
-  if (_unit.isCampHeadquarters())
-    updateNoHeadquartersUpgrade(_unit.getOwner())
+function countNumberOfHeadquarters(player _player) returns int
+  var count = 0
+  let temp = getGroup()
+  temp.enumUnitsOfPlayer(_player, null)
+  for _unit in temp
+    if (_unit.isCampHeadquarters() and _unit.isAlive())
+      count++
+  temp.release()
+  return count
+
+// ============================================================================
+function destroyHeadquartersIfPlayerAlreadyHasOne(unit headquartersUnit) returns bool
+  if (not headquartersUnit.isCampHeadquarters())
+    return false
+
+  // This is the one and only alive headquarters unit
+  if (countNumberOfHeadquarters(headquartersUnit.getOwner()) <= 1)
+    return false
+
+  // This unit shouldn't have been created
+  headquartersUnit.remove()
+  
+  // Warn the player and create an item on the ground
+  displayMessageToPlayer(headquartersUnit.getOwner(), "You cannot build a second Headquarters Tent".colorize(Colors.red))
+
+  // Convert the unit to it's item form
+  var buildItemId = 0
+  switch (headquartersUnit.getTypeId())
+    case TlsUnitIds.headquarters1
+      buildItemId = TlsItemIds.headquarters1
+    case TlsUnitIds.headquarters2
+      buildItemId = TlsItemIds.headquarters2
+    case TlsUnitIds.headquarters3
+      buildItemId = TlsItemIds.headquarters3
+  g_MainItemLibrary.createItem(buildItemId, headquartersUnit.getPos())
+
+  return true
 
 // ============================================================================
 init
   onUnitIndex(function onUnitIndexedDeindexed)
-  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_CHANGE_OWNER, function onUnitChangedOwner)
-  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_DEATH, function onUnitDeath)
-

@@ -5,6 +5,10 @@ import TlsAbilityIds
 import Ability_Harvest
 import RegisterEvents
 import Orders
+import TlsUpgradeIds
+import TlsUnitIds
+import GroupUtils
+import Math
 
 // ============================================================================
 public class SurvivorJoblessComponent extends SurvivorJobComponent
@@ -20,6 +24,11 @@ public class SurvivorJoblessComponent extends SurvivorJobComponent
     return SurvivorJoblessComponent.typeId
 
   // --------------------------------------------------------------------------
+  override function onEnabled()
+    super.onEnabled()
+    updateAbility()
+
+  // --------------------------------------------------------------------------
   override function onDisabled()
     super.onDisabled()
     m_targetDestructable = null
@@ -27,21 +36,31 @@ public class SurvivorJoblessComponent extends SurvivorJobComponent
   // --------------------------------------------------------------------------
   override function onLevelChanged()
     super.onLevelChanged()
+    updateAbility()
+
+  // --------------------------------------------------------------------------
+  function updateAbility()
     let ownerUnit = getOwnerUnit()
     let ownerUnitLevel = ownerUnit.getLevel()
-    let abilityId = TlsAbilityIds.harvest[ownerUnitLevel - 1]
+    let researchLevel = GetPlayerTechCountSimple(TlsUpgradeIds.lumberHarvest, ownerUnit.getOwner())
+    let abilityId = getHarvestAbility(researchLevel, ownerUnitLevel)
 
     // Remove all versions of harvest
     for i = 0 to HARVEST_LEVELS - 1
       if (ownerUnit.hasAbility(TlsAbilityIds.harvest[i]))
         ownerUnit.removeAbility(TlsAbilityIds.harvest[i])
+        break
 
     // Add the version of harvest that matches the level of the survivor
     if (not ownerUnit.hasAbility(abilityId))
-      ownerUnit.addAbility(abilityId, ownerUnitLevel)
+      ownerUnit.addAbility(abilityId)
 
+    // Increase movement speed based on level
+    ownerUnit.setMoveSpeed(lerp(HARVEST_MOVESPEED_START, HARVEST_MOVESPEED_END, (ownerUnitLevel - 1) / 9.0))
+
+    // Need to reissue the harvest order when the harvest ability is removed and re-added
     if (m_targetDestructable != null)
-      ownerUnit.issueTargetOrderById(OrderIds.harvest, m_targetDestructable)
+      getOwnerUnit().issueTargetOrderById(OrderIds.harvest, m_targetDestructable)
 
 // ============================================================================
 public function IUnitMetadata.getSurvivorJoblessComponent() returns SurvivorJoblessComponent
@@ -73,7 +92,26 @@ function onUnitIssuedAnyOrder()
     comp.m_targetDestructable = null
 
 // ============================================================================
+function onResearchFinished()
+  let research = GetResearched()
+  let researchingUnit = GetResearchingUnit()
+  if (research != TlsUpgradeIds.lumberHarvest)
+    return
+  let owner = researchingUnit.getOwner()
+  let temp = getGroup()
+  temp.enumUnitsOfPlayer(owner, null)
+  for _unit in temp
+    if (_unit.getTypeId() == TlsUnitIds.Survivors.survivorMale and _unit.isAlive())
+      let metadata = _unit.getMetadata()
+      if (metadata != null)
+        let comp = metadata.getSurvivorJoblessComponent()
+        if (comp != null)
+          comp.updateAbility()
+  temp.release()
+
+// ============================================================================
 init
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ISSUED_ORDER, function onUnitIssuedAnyOrder)
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ISSUED_POINT_ORDER, function onUnitIssuedAnyOrder)
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ISSUED_TARGET_ORDER, function onUnitIssuedAnyOrder)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_RESEARCH_FINISH, function onResearchFinished)

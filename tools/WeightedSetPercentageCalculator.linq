@@ -2,24 +2,23 @@
 
 void Main()
 {
-	Console.WriteLine("Small:");
-	CalculateWeights(32, 24, 8, 1);
+	Console.WriteLine("Small");
+	CalculateWeights(0.2f, 5.0f, 2.0f);
 	
-	Console.WriteLine("");
-	Console.WriteLine("Medium:");
-	CalculateWeights(32, 32, 24, 2);
-
-	Console.WriteLine("");
-	Console.WriteLine("Large:");
-	CalculateWeights(12, 24, 32, 3);
+	Console.WriteLine("\nMedium");
+	CalculateWeights(0.3f, 5.0f, 2.0f, 0.4f, 0.5f);
+	
+	Console.WriteLine("\nLarge");
+	CalculateWeights(0.6f, 5.0f, 2.0f, 0.5f, 1.0f);
 }
 
 // You can define other methods, fields, classes and namespaces here
-public void CalculateWeights(float a, float b, float c, float d)
+public void CalculateWeights(params float[] weights)
 {
-	var total = a + b + c + d;
-	Console.WriteLine($"a: {(a/total * 100)}%");
-	Console.WriteLine($"b: {(b/total * 100)}%");
-	Console.WriteLine($"c: {(c/total * 100)}%");
-	Console.WriteLine($"d: {(d/total * 100)}%");
+	var total = weights.Sum();
+	int i = 0;
+	foreach (var w in weights)
+	{
+		Console.WriteLine($"{i++:00}: {(w/total * 100)}%");
+	}
 }
