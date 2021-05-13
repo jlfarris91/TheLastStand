@@ -1,38 +1,64 @@
 package WirtsLeg
 import TlsItemIds
 import UnitMetadata
-import ItemEvents
 import UnitPropertiesComponent
+import ItemEffectComponent
 
 constant real EVADE_CHANCE = 10.0
 
 // ============================================================================
-function onUnitAcquiredItem(unit _unit, item _item)
+public class WirtsLegItemEffectComponent extends ItemEffectComponent
 
-  let metadata = _unit.getMetadata()
-  if (metadata == null)
-    return
+  // --------------------------------------------------------------------------
+  construct (IUnitMetadata owner)
+    super(owner)
 
-  let comp = metadata.getOrAddUnitPropertiesComponent()
-  if (comp == null)
-    return
+    setMode(ItemEffectApplication.ACQUIRED)
+    setItemTypeId(TlsItemIds.wirtsLeg)
+    setDestroyOnDrop(true)
 
-  comp.setEvadeChancePercentage(comp.getEvadeChancePercentage() + EVADE_CHANCE)
+  // --------------------------------------------------------------------------
+  override function getTypeId() returns int
+    return WirtsLegItemEffectComponent.getTypeId()
+
+  // --------------------------------------------------------------------------
+  protected override function onApplied(int stacks)
+    super.onApplied(stacks)
+
+    if (stacks == 0)
+      return
+
+    let comp = getOwner().getOrAddUnitPropertiesComponent()
+    comp.setEvadeChancePercentage(comp.getEvadeChancePercentage() + stacks * EVADE_CHANCE)
+
+  // --------------------------------------------------------------------------
+  protected override function onReverted(int stacks)
+    super.onReverted(stacks)
+
+    if (stacks == 0)
+      return
+
+    let comp = getOwner().getOrAddUnitPropertiesComponent()
+    comp.setEvadeChancePercentage(comp.getEvadeChancePercentage() - stacks * EVADE_CHANCE)
 
 // ============================================================================
-function onUnitDroppedItem(unit _unit, item _item)
+function IUnitMetadata.getWirtsLegItemEffectComponent() returns WirtsLegItemEffectComponent
+  return this.getComponent(typeInfo(WirtsLegItemEffectComponent.typeId)) castTo WirtsLegItemEffectComponent
 
-  let metadata = _unit.getMetadata()
-  if (metadata == null)
-    return
-
-  let comp = metadata.getOrAddUnitPropertiesComponent()
-  if (comp == null)
-    return
-
-  comp.setEvadeChancePercentage(comp.getEvadeChancePercentage() - EVADE_CHANCE)
+// ============================================================================
+function IUnitMetadata.getOrAddWirtsLegItemEffectComponent() returns WirtsLegItemEffectComponent
+  var component = this.getWirtsLegItemEffectComponent()
+  if (component == null)
+    component = this.addComponent(new WirtsLegItemEffectComponent(this)) castTo WirtsLegItemEffectComponent
+  return component
 
 // ============================================================================
 init
-  registerItemAcquiredEvent(TlsItemIds.wirtsLeg, (unit u, item i) -> onUnitAcquiredItem(u, i))
-  registerItemDroppedEvent(TlsItemIds.wirtsLeg, (unit u, item i) -> onUnitDroppedItem(u, i))
+  g_itemIdToComponentFactoryMap.put(TlsItemIds.wirtsLeg) _unit ->
+  //{
+    let metadata = _unit.getMetadata()
+    ItemEffectComponent comp = null
+    if (metadata != null)
+      comp = metadata.getOrAddWirtsLegItemEffectComponent()
+    return comp
+  //}

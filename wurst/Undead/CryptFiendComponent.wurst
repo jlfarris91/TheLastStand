@@ -17,6 +17,7 @@ import RealtimeUpdate
 import ObjectIds
 import AbilityIds
 import Vector
+import Suspend
 
 constant real BURROW_SETTLE_DURATION = 2.0
 constant real BURROW_TRAVEL_DURATION = 3.0
@@ -73,12 +74,12 @@ public class CryptFiendComponent extends UnitComponent
     m_isBurrowing = true
     m_targetUnit = targetUnit
 
-    var ownerUnit = getOwnerUnit()
+    let ownerUnit = getOwnerUnit()
 
     m_facingAngle = ownerUnit.getFacingAngle()
 
     // Pause the unit so that it can't be given any more orders
-    ownerUnit.pause()
+    ownerUnit.suspend()
 
     // Make the crypt fiend invulnerable while burrowed
     ownerUnit.addAbility(AbilityIds.invulnerable)
@@ -86,39 +87,46 @@ public class CryptFiendComponent extends UnitComponent
     // Start the burrowing animation
     ownerUnit.setAnimation(UnitAnimations.CryptFiend.morph.idx)
 
-    doAfter(UnitAnimations.CryptFiend.morph.duration) () ->
-      ownerUnit = getOwnerUnit()
-      if (isBurrowStillValid())
-      //{
-        m_dummyUnit = createUnit(Player(PLAYER_NEUTRAL_PASSIVE), TlsUnitIds.Undead.cryptFiendBurrowDummy, ownerUnit.getPos(), m_facingAngle)
-        m_dummyUnit.issueTargetOrderById(OrderIds.attack, targetUnit)
-        m_dummyUnit.getMetadataRequired().getCryptFiendDummyComponent()
-          ..setCryptFiend(this)
-          ..setTargetUnit(m_targetUnit)
-      //}
-      else
-        unburrow()
-    
-    // Let the burrow animation finish
-    doAfter(UnitAnimations.CryptFiend.morph.duration + BURROW_SETTLE_DURATION) () ->
+    doAfter(UnitAnimations.CryptFiend.morph.duration, () -> burrow_animationFinished(ownerUnit))
+  
+  // --------------------------------------------------------------------------
+  static function burrow_animationFinished(unit ownerUnit)
+    let comp = ownerUnit.getCryptFiendComponent()
+    if (comp == null)
+      return
+
+    if (comp.isBurrowStillValid())
     //{
-      ownerUnit = getOwnerUnit()
-      if (isBurrowStillValid())
-        // Play the stand alternate animation
-        ownerUnit.setAnimation(UnitAnimations.CryptFiend.standAlternate.idx)
-      else
-        unburrow()
+      comp.m_dummyUnit = createUnit(Player(PLAYER_NEUTRAL_PASSIVE), TlsUnitIds.Undead.cryptFiendBurrowDummy, ownerUnit.getPos(), comp.m_facingAngle)
+      comp.m_dummyUnit.issueTargetOrderById(OrderIds.attack, comp.m_targetUnit)
+      comp.m_dummyUnit.getMetadataRequired().getCryptFiendDummyComponent()
+        ..setCryptFiend(comp)
+        ..setTargetUnit(comp.m_targetUnit)
     //}
+    else
+      comp.unburrow()
+  
+    // Let the burrow animation finish
+    doAfter(UnitAnimations.CryptFiend.morph.duration + BURROW_SETTLE_DURATION, () -> burrow_afterBurrowSettle(ownerUnit))
+  
+  // --------------------------------------------------------------------------
+  static function burrow_afterBurrowSettle(unit ownerUnit)
+    let comp = ownerUnit.getCryptFiendComponent()
+    if (comp == null)
+      return
+
+    if (comp.isBurrowStillValid())
+      // Play the stand alternate animation
+      ownerUnit.setAnimation(UnitAnimations.CryptFiend.standAlternate.idx)
+    else
+      comp.unburrow()
 
   // --------------------------------------------------------------------------
   function unburrow()
     if (not m_isBurrowing)
       return
 
-    var ownerUnit = getOwnerUnit()
-    
-    // Now that the unit is in the new location play the unborrow animation
-    ownerUnit.setAnimation(UnitAnimations.CryptFiend.morphAlternate.idx)
+    let ownerUnit = getOwnerUnit()
 
     if (m_dummyUnit != null)
       m_dummyUnit.remove()
@@ -137,31 +145,39 @@ public class CryptFiendComponent extends UnitComponent
 
     // Now course correct the dummy to the new final pos
     m_dummyUnit.issuePointOrderById(OrderIds.move, targetPos)
+    
+    // Now that the unit is in the new location play the unborrow animation
+    ownerUnit.setAnimation(UnitAnimations.CryptFiend.morphAlternate.idx)
 
     // Let the unburrow animation finish
-    doAfter(UnitAnimations.CryptFiend.morphAlternate.duration) () ->
-    //{
-      ownerUnit = getOwnerUnit()
+    doAfter(UnitAnimations.CryptFiend.morphAlternate.duration, () -> unborrow_animationFinished(ownerUnit))
 
-      // Unpause the unit so that it can continue on with its plans
-      ownerUnit.unpause()
-      
-      // Make the crypt fiend vulnerable again
-      if (ownerUnit.hasAbility(AbilityIds.invulnerable))
-        ownerUnit.removeAbility(AbilityIds.invulnerable)
+  // --------------------------------------------------------------------------
+  static function unborrow_animationFinished(unit ownerUnit)
 
-      if (ownerUnit.isAlive())
-        // Tell it to target a unit
-        ownerUnit.issueTargetOrderById(OrderIds.attack, ownerUnit)
-      else
-        // Tell it to target a unit
-        ownerUnit.issuePointOrderById(OrderIds.attack, ownerUnit.getPos())
+    // Unpause the unit so that it can continue on with its plans
+    ownerUnit.unsuspend()
+    
+    // Make the crypt fiend vulnerable again
+    if (ownerUnit.hasAbility(AbilityIds.invulnerable))
+      ownerUnit.removeAbility(AbilityIds.invulnerable)
 
-      // Delay cleanup
-      doAfter(BURROW_FINALIZE_DURATION) () ->
-        restartCastTimer()
-        cleanup()
-    //}
+    if (ownerUnit.isAlive())
+      ownerUnit.issueTargetOrderById(OrderIds.attack, ownerUnit)
+    else
+      ownerUnit.issuePointOrderById(OrderIds.attack, ownerUnit.getPos())
+
+    // Delay cleanup
+    doAfter(BURROW_FINALIZE_DURATION, () -> ownerUnit)
+
+  // --------------------------------------------------------------------------
+  static function unborrow_finilizeFinished(unit ownerUnit)
+    let comp = ownerUnit.getCryptFiendComponent()
+    if (comp == null)
+      return
+
+    comp.restartCastTimer()
+    comp.cleanup()
 
   // --------------------------------------------------------------------------
   function burrowToNearestTarget() returns bool
@@ -196,8 +212,8 @@ public class CryptFiendComponent extends UnitComponent
   // --------------------------------------------------------------------------
   private function cleanup()
     let ownerUnit = getOwnerUnit()
-    if (ownerUnit.isPaused())
-      ownerUnit.unpause()
+    if (ownerUnit.isSuspended())
+      ownerUnit.unsuspend()
       
     // Make sure the crypt fiend is not invulnerable
     if (ownerUnit.hasAbility(AbilityIds.invulnerable))
@@ -212,6 +228,15 @@ public class CryptFiendComponent extends UnitComponent
     if (m_dummyUnit != null)
       m_dummyUnit.remove()
       m_dummyUnit = null
+
+// ============================================================================
+public function unit.getCryptFiendComponent() returns CryptFiendComponent
+  if (this == null)
+    return null
+  let metadata = this.getMetadata()
+  if (metadata == null)
+    return null
+  return metadata.getComponent(typeInfo(CryptFiendComponent.typeId)) castTo CryptFiendComponent
 
 // ============================================================================
 public function IUnitMetadata.getCryptFiendComponent() returns CryptFiendComponent
