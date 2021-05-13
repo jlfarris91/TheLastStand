@@ -53,3 +53,5 @@ $env:WurstOutputMapFilePath = [System.IO.Path]::Combine($env:TempRoot, $env:Wurs
 $env:WurstOutputMapArtifactFilePath = [System.IO.Path]::Combine($env:ArtifactRoot, $env:WurstMapFileName)
 
 $env:DiscordLink = "discord.gg/VzjbPkGN3r"
+
+$env:BuildDate = (Get-Date -Format "MM/dd/yy")
