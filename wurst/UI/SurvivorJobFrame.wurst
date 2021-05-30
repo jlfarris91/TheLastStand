@@ -1,0 +1,382 @@
+package SurvivorJobFrame
+import TLSFrame
+import ClosureTimers
+import ClosureFrames
+import LinkedList
+import SurvivorJobs
+import HashMap
+import UnitMetadata
+import SurvivorComponent
+import SurvivorJobData
+import SurvivorUnit
+import TlsUnitDefinition
+import GroupUtils
+import TlsItemDefinition
+
+enum EnabledState
+  DISABLED
+  ENABLED
+  ACTIVE
+
+constant string UNKNOWN_JOB_ICON_PATH = "ui\\widgets\\escmenu\\human\\quest-unknown.dds"
+SurvivorJobPanel g_survivorJobPanel
+
+// ============================================================================
+public class SurvivorJobFrame extends TLSFrame
+  private framehandle m_iconFrame
+  private framehandle m_levelTextFrame
+  private framehandle m_backdropFrameActive
+  private framehandle m_itemIconFrame
+
+  private string m_iconPath
+  private int m_level
+  private EnabledState m_enabledState
+  private bool m_isHovered
+  private bool m_isIndeterminate
+  private string m_itemIconPath
+  private bool m_itemIconVisible
+
+  // --------------------------------------------------------------------------
+  construct()
+    super("SurvivorJobFrame", GAME_UI)
+
+    m_iconPath = UNKNOWN_JOB_ICON_PATH
+    m_level = 1
+    m_enabledState = EnabledState.DISABLED
+
+  // --------------------------------------------------------------------------
+  function getIconPath() returns string
+    return m_iconPath
+  
+  // --------------------------------------------------------------------------
+  function setIconPath(string value)
+    if (m_iconPath != value)
+      m_iconPath = value
+      updateIconFrame()
+
+  // --------------------------------------------------------------------------
+  function getItemIconPath() returns string
+    return m_itemIconPath
+  
+  // --------------------------------------------------------------------------
+  function setItemIconPath(string value)
+    if (m_itemIconPath != value)
+      m_itemIconPath = value
+      updateItemIconFrame()
+
+  // --------------------------------------------------------------------------
+  function getItemIconVisible() returns bool
+    return m_itemIconVisible
+  
+  // --------------------------------------------------------------------------
+  function setItemIconVisible(bool value)
+    if (m_itemIconVisible != value)
+      m_itemIconVisible = value
+      updateItemIconFrame()
+
+  // --------------------------------------------------------------------------
+  function getLevel() returns int
+    return m_level
+
+  // --------------------------------------------------------------------------
+  function setLevel(int value)
+    if (m_level != value)
+      m_level = value
+      updateLevelTextFrame()
+
+  // --------------------------------------------------------------------------
+  function getIsIndeterminate() returns bool
+    return m_isIndeterminate
+
+  // --------------------------------------------------------------------------
+  function setIsIndeterminate(bool value)
+    if (m_isIndeterminate != value)
+      m_isIndeterminate = value
+      updateLevelTextFrame()
+
+  // --------------------------------------------------------------------------
+  function setEnabledState(EnabledState value)
+    if (m_enabledState != value)
+      m_enabledState = value
+      updateActiveFrame()
+      updateIconFrame()
+  
+  // --------------------------------------------------------------------------
+  function getEnabledState() returns EnabledState
+    return m_enabledState
+
+  // --------------------------------------------------------------------------
+  override function initialize()
+    super.initialize()
+  
+    let frame = getFrameHandle()
+
+    m_iconFrame = getFrame("SurvivorJobIcon", 0)
+    m_levelTextFrame = getFrame("SurvivorJobLevelText", 0)
+    m_backdropFrameActive = getFrame("SurvivorJobActiveIcon", 0)
+    m_itemIconFrame = getFrame("JobItemIcon", 0)
+
+    m_iconFrame.setLevel(4)
+    m_backdropFrameActive.setLevel(5)
+    m_itemIconFrame.setLevel(6)
+    getFrame("SurvivorJobLevelBackdrop", 0).setLevel(6)
+    m_levelTextFrame.setLevel(7)
+
+    let iconTooltip = createFrame("TEXT", "IconTooltipFrame", frame,"", 0)
+    let iconHover = createFrame("FRAME", "IconHoverFrame", frame,"", 0)
+    
+    iconHover.setAllPoints(m_iconFrame)
+    iconHover.setTooltip(iconTooltip)
+    iconHover.setLevel(10)
+    
+    iconTooltip.setText("Click to activate job")
+    iconTooltip.setPoint(FRAMEPOINT_TOPLEFT, frame, FRAMEPOINT_BOTTOMLEFT, 0.0, -0.002)
+
+    iconHover.onMouseEnter() -> 
+      m_isHovered = true
+      updateActiveFrame()
+
+    iconHover.onMouseLeave() -> 
+      m_isHovered = false
+      updateActiveFrame()
+
+    iconHover.onClick() -> 
+      Log.info("Activated job")
+
+    let itemTooltip = createFrame("TEXT", "ItemTooltipFrame", m_itemIconFrame,"", 0)
+    let itemHover = createFrame("FRAME", "ItemHoverFrame", m_itemIconFrame,"", 0)
+
+    itemHover.setAllPoints(m_itemIconFrame)
+    itemHover.setTooltip(itemTooltip)
+    itemHover.setLevel(11)
+    
+    itemTooltip.setText("Click to drop item")
+    itemTooltip.setPoint(FRAMEPOINT_TOPLEFT, frame, FRAMEPOINT_BOTTOMLEFT, 0.0, -0.002)
+
+    itemHover.onMouseEnter() -> 
+      m_isHovered = true
+      updateActiveFrame()
+
+    itemHover.onMouseLeave() -> 
+      m_isHovered = false
+      updateActiveFrame()
+
+    itemHover.onClick() -> 
+      Log.info("Dropped item")
+
+    updateIconFrame()
+    updateLevelTextFrame()
+    updateActiveFrame()
+    updateItemIconFrame()
+
+    frame.hide()
+
+  // --------------------------------------------------------------------------
+  private function updateIconFrame()
+    if (m_iconFrame != null)
+      m_iconFrame.setTexture(m_iconPath, 0, true)
+
+  // --------------------------------------------------------------------------
+  private function updateItemIconFrame()
+    if (m_itemIconFrame != null)
+      m_itemIconFrame.setTexture(m_itemIconPath, 0, true)
+      m_itemIconFrame.setVisible(m_itemIconVisible)
+
+  // --------------------------------------------------------------------------
+  private function updateLevelTextFrame()
+    if (m_levelTextFrame != null)
+      m_levelTextFrame.setText(m_isIndeterminate ? "-" : m_level.toString())
+
+  // --------------------------------------------------------------------------
+  private function updateActiveFrame()
+    if (m_backdropFrameActive != null)
+      m_backdropFrameActive.setVisible(
+        m_enabledState == EnabledState.ACTIVE or 
+        (m_enabledState == EnabledState.ENABLED and m_isHovered))
+
+// ============================================================================
+public class SurvivorJobPanel extends TLSFrame
+  private IterableMap<SurvivorJobDefinition, SurvivorJobFrame> m_jobDefToFrameMap
+
+  // --------------------------------------------------------------------------
+  construct()
+    super("SurvivorJobPanel", GAME_UI)
+    m_jobDefToFrameMap = new IterableMap<SurvivorJobDefinition, SurvivorJobFrame>()
+
+  // --------------------------------------------------------------------------
+  override function initialize()
+    super.initialize()
+
+    let panel = getFrameHandle()
+    // panel.setAllPoints(infoUnitPanel)
+    // panel.setLevel(1)
+    panel.setPoint(FRAMEPOINT_CENTER, GAME_UI, FRAMEPOINT_CENTER)
+    // panel.setAllPoints(infoUnitPanel)
+    // panel.setPoint(FRAMEPOINT_TOPLEFT, infoUnitPanel, FRAMEPOINT_TOPLEFT, 0.42, -0.86)
+    // panel.setPoint(FRAMEPOINT_TOPLEFT, infoUnitPanel, FRAMEPOINT_TOPLEFT, 0.42, -0.86)
+
+    let layout = new WrapPanelLayout()
+    ..setSpacing(vec2(0.002, 0.002))
+    ..layoutBegin(getFrameHandle())
+
+    for jobDef in g_allJobDefinitions
+    //{
+      let jobFrame = new SurvivorJobFrame()
+        ..setParent(panel)
+        ..setPlayer(getPlayer())
+        ..show()
+        
+      let jobItemDef = getItemDefinition(jobDef.getItemType())
+      if (jobItemDef != null)
+        jobFrame.setItemIconPath(jobItemDef.getInterfaceIcon())
+
+      m_jobDefToFrameMap.put(jobDef, jobFrame)
+      layout.layoutNextFrame(jobFrame.getFrameHandle())
+    //}
+
+    layout.layoutEnd()
+    destroy layout
+
+  // --------------------------------------------------------------------------
+  override function setPlayer(player value)
+    super.setPlayer(value)
+
+    for key in m_jobDefToFrameMap
+      m_jobDefToFrameMap.get(key).setPlayer(value)
+
+  // --------------------------------------------------------------------------
+  function update()
+    let selectedUnits = getGroup()
+    selectedUnits.enumUnitsSelected(getPlayer(), null)
+    for jobDef in g_allJobDefinitions
+      updateJobFrame(jobDef, selectedUnits)
+    selectedUnits.release()
+
+  // --------------------------------------------------------------------------
+  private function updateJobFrame(SurvivorJobDefinition jobDef, group units)
+
+    let jobFrame = m_jobDefToFrameMap.get(jobDef)
+
+    var enabledState = EnabledState.DISABLED
+    var level = 1
+    var iconPath = UNKNOWN_JOB_ICON_PATH
+    var highestTier = -1
+    var indeterminate = false
+    var itemIconVisible = false
+
+    if (true or jobDef.getIsJobKnownToPlayer(getPlayer()))
+    //{
+
+      // Set the initial icon path
+      iconPath = getUnitDefinition(jobDef.getInitialUnitType()).getIconGameInterface()
+
+      for _unit in units
+      //{
+        let survivor = _unit.getMetadata() castTo Survivor
+        if (survivor != null)
+        //{
+          let survivorComp = survivor.getSurvivorComponent()
+          if (survivorComp != null)
+          //{
+            let survivorData = survivorComp.getSurvivorData()
+            let jobData = survivorData.getJobData(jobDef)
+
+            // If this is the active job then use the unit's current level
+            var jobLevel = jobData.getLevel()
+            if (survivor.getActiveJobDefinition() == jobDef)
+              jobLevel = _unit.getLevel()
+            
+            if (level != jobLevel)
+              if (level != 1)
+                indeterminate = true
+              level = jobLevel
+
+            if (jobData.getIsEnabled())
+              itemIconVisible = true
+
+            if (survivor.getActiveJobDefinition() == jobDef)
+              enabledState = EnabledState.ACTIVE
+
+            let tier = jobDef.getUpgradeTier(_unit.getTypeId())
+            if (tier > highestTier)
+              highestTier = tier
+              let unitDef = getUnitDefinition(_unit.getTypeId())
+              iconPath = unitDef.getIconGameInterface()
+          //}
+        //}
+      //}
+    //}
+
+    jobFrame.setLevel(level)
+    jobFrame.setIconPath(iconPath)
+    jobFrame.setIsIndeterminate(indeterminate)
+    jobFrame.setEnabledState(enabledState)
+    jobFrame.setItemIconVisible(itemIconVisible)
+
+// ============================================================================
+public class WrapPanelLayout
+  private framehandle m_panel
+  private vec2 m_spacing = ZERO2
+  private vec2 m_margin = ZERO2
+  private vec2 m_layoutPos = ZERO2
+
+  // --------------------------------------------------------------------------
+  function setSpacing(vec2 value)
+    m_spacing = value
+
+  // --------------------------------------------------------------------------
+  function getSpacing() returns vec2
+    return m_spacing
+
+  // --------------------------------------------------------------------------
+  function setMargin(vec2 value)
+    m_margin = value
+
+  // --------------------------------------------------------------------------
+  function getMargin() returns vec2
+    return m_margin
+
+  // --------------------------------------------------------------------------
+  function layoutBegin(framehandle panel)
+    m_panel = panel
+    m_layoutPos = m_margin
+    m_layoutPos.y *= -1
+
+  // --------------------------------------------------------------------------
+  function layoutNextFrame(framehandle frame)
+
+    frame.setPoint(FRAMEPOINT_TOPLEFT, m_panel, FRAMEPOINT_TOPLEFT, m_layoutPos)
+
+    m_layoutPos.x += frame.getWidth() + m_spacing.x
+    if (m_layoutPos.x + frame.getWidth() > m_panel.getWidth() - m_margin.x)
+      m_layoutPos.x = m_margin.x
+      m_layoutPos.y -= frame.getHeight() + m_spacing.y
+
+  // --------------------------------------------------------------------------
+  function layoutEnd()
+    m_panel = null
+    m_layoutPos = m_margin
+
+trigger g_selectionChangedEvent
+
+// ============================================================================
+function onSelectionChanged()
+  // let p = GetTriggerPlayer()
+  nullTimer(() -> g_survivorJobPanel.update())
+
+// ============================================================================
+init
+
+  doAfter(1.0) () ->
+    g_survivorJobPanel = new SurvivorJobPanel()
+      ..setPlayer(Player(0))
+      ..show()
+    
+    doPeriodically(0.1) (CallbackPeriodic cb) ->
+      g_survivorJobPanel.update()
+  
+  g_selectionChangedEvent = CreateTrigger()
+  g_selectionChangedEvent.addCondition(Condition(function onSelectionChanged))
+  TriggerRegisterPlayerUnitEvent(g_selectionChangedEvent, Player(0), EVENT_PLAYER_UNIT_SELECTED, null)
+  TriggerRegisterPlayerUnitEvent(g_selectionChangedEvent, Player(0), EVENT_PLAYER_UNIT_DESELECTED, null)
+    
