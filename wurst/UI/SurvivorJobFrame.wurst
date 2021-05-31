@@ -12,6 +12,10 @@ import SurvivorUnit
 import TlsUnitDefinition
 import GroupUtils
 import TlsItemDefinition
+import StandardTooltip
+import ColorUtility
+import StackPanelLayout
+import WrapPanelLayout
 
 enum EnabledState
   DISABLED
@@ -23,10 +27,11 @@ SurvivorJobPanel g_survivorJobPanel
 
 // ============================================================================
 public class SurvivorJobFrame extends TLSFrame
-  private framehandle m_iconFrame
-  private framehandle m_levelTextFrame
-  private framehandle m_backdropFrameActive
-  private framehandle m_itemIconFrame
+  private framehandle m_mainButtonIcon
+  private framehandle m_itemButton
+  private framehandle m_itemButtonIcon
+  private framehandle m_levelText
+  private framehandle m_activeIcon
 
   private string m_iconPath
   private int m_level
@@ -35,6 +40,9 @@ public class SurvivorJobFrame extends TLSFrame
   private bool m_isIndeterminate
   private string m_itemIconPath
   private bool m_itemIconVisible
+  private string m_jobTitle
+  private string m_jobTooltip
+  private string m_itemName
 
   // --------------------------------------------------------------------------
   construct()
@@ -106,63 +114,70 @@ public class SurvivorJobFrame extends TLSFrame
     return m_enabledState
 
   // --------------------------------------------------------------------------
+  function setJobTitle(string value)
+    m_jobTitle = value
+
+  // --------------------------------------------------------------------------
+  function getJobTitle() returns string
+    return m_jobTitle
+
+  // --------------------------------------------------------------------------
+  function setJobTooltip(string value)
+    m_jobTooltip = value
+
+  // --------------------------------------------------------------------------
+  function getJobTooltip() returns string
+    return m_jobTooltip
+
+  // --------------------------------------------------------------------------
+  function setItemName(string value)
+    m_itemName = value
+
+  // --------------------------------------------------------------------------
+  function getItemName() returns string
+    return m_itemName
+
+  // --------------------------------------------------------------------------
   override function initialize()
     super.initialize()
   
     let frame = getFrameHandle()
 
-    m_iconFrame = getFrame("SurvivorJobIcon", 0)
-    m_levelTextFrame = getFrame("SurvivorJobLevelText", 0)
-    m_backdropFrameActive = getFrame("SurvivorJobActiveIcon", 0)
-    m_itemIconFrame = getFrame("JobItemIcon", 0)
+    let mainButton = getFrame("MainButton", 0)..setLevel(3)
+    m_mainButtonIcon = getFrame("MainButtonIcon", 0)
+    m_activeIcon = getFrame("ActiveIcon", 0)..setLevel(4)
+    m_itemButton = getFrame("ItemButton", 0)..setLevel(5)
+    m_itemButtonIcon = getFrame("ItemButtonIcon", 0)
+    getFrame("LevelBackdrop", 0)..setLevel(5)
+    m_levelText = getFrame("LevelText", 0)..setLevel(6)
 
-    m_iconFrame.setLevel(4)
-    m_backdropFrameActive.setLevel(5)
-    m_itemIconFrame.setLevel(6)
-    getFrame("SurvivorJobLevelBackdrop", 0).setLevel(6)
-    m_levelTextFrame.setLevel(7)
-
-    let iconTooltip = createFrame("TEXT", "IconTooltipFrame", frame,"", 0)
-    let iconHover = createFrame("FRAME", "IconHoverFrame", frame,"", 0)
-    
-    iconHover.setAllPoints(m_iconFrame)
-    iconHover.setTooltip(iconTooltip)
-    iconHover.setLevel(10)
-    
-    iconTooltip.setText("Click to activate job")
-    iconTooltip.setPoint(FRAMEPOINT_TOPLEFT, frame, FRAMEPOINT_BOTTOMLEFT, 0.0, -0.002)
-
-    iconHover.onMouseEnter() -> 
+    mainButton.onMouseEnter() -> 
       m_isHovered = true
+      Log.info("Icon mouse enter")
+      showJobTooltip()
       updateActiveFrame()
 
-    iconHover.onMouseLeave() -> 
+    mainButton.onMouseLeave() -> 
       m_isHovered = false
+      Log.info("Icon mouse leave")
+      StandardTooltip.hide(getPlayer())
       updateActiveFrame()
 
-    iconHover.onClick() -> 
-      Log.info("Activated job")
+    mainButton.onClick() -> 
+      Log.info("Icon mouse click")
 
-    let itemTooltip = createFrame("TEXT", "ItemTooltipFrame", m_itemIconFrame,"", 0)
-    let itemHover = createFrame("FRAME", "ItemHoverFrame", m_itemIconFrame,"", 0)
-
-    itemHover.setAllPoints(m_itemIconFrame)
-    itemHover.setTooltip(itemTooltip)
-    itemHover.setLevel(11)
-    
-    itemTooltip.setText("Click to drop item")
-    itemTooltip.setPoint(FRAMEPOINT_TOPLEFT, frame, FRAMEPOINT_BOTTOMLEFT, 0.0, -0.002)
-
-    itemHover.onMouseEnter() -> 
-      m_isHovered = true
+    m_itemButton.onMouseEnter() -> 
+      Log.info("Item icon mouse enter")
+      showItemTooltip()
       updateActiveFrame()
 
-    itemHover.onMouseLeave() -> 
-      m_isHovered = false
+    m_itemButton.onMouseLeave() -> 
+      Log.info("Item icon mouse leave")
+      StandardTooltip.hide(getPlayer())
       updateActiveFrame()
 
-    itemHover.onClick() -> 
-      Log.info("Dropped item")
+    m_itemButton.onClick() -> 
+      Log.info("Item icon mouse click")
 
     updateIconFrame()
     updateLevelTextFrame()
@@ -172,25 +187,45 @@ public class SurvivorJobFrame extends TLSFrame
     frame.hide()
 
   // --------------------------------------------------------------------------
+  private function showJobTooltip()
+    var title = m_jobTitle
+    switch (m_enabledState)
+      case DISABLED
+        if (m_itemName != null)
+          title = "{0} - {1}".format(m_jobTitle, "Requires {0}".format(m_itemName).colorize(Colors.gold))
+      case ENABLED
+        title = "{0} - {1}".format(m_jobTitle, "Click to Assign Job".colorize(Colors.gold))
+      case ACTIVE
+        title = "{0} - {1}".format(m_jobTitle, "Click to Unassign Job".colorize(Colors.gold))
+    StandardTooltip.show(title, m_jobTooltip, getPlayer())
+
+  // --------------------------------------------------------------------------
+  private function showItemTooltip()
+    let title = "{0} - {1}".format(m_itemName, "Click to Unequip Item".colorize(Colors.gold))
+    let tooltip = "With the {0} item equipped a Survivor can be assigned the {1} job".format(m_itemName, m_jobTitle)
+    StandardTooltip.show(title, tooltip, getPlayer())
+
+  // --------------------------------------------------------------------------
   private function updateIconFrame()
-    if (m_iconFrame != null)
-      m_iconFrame.setTexture(m_iconPath, 0, true)
+    if (m_mainButtonIcon != null)
+      m_mainButtonIcon.setTexture(m_iconPath, 0, true)
 
   // --------------------------------------------------------------------------
   private function updateItemIconFrame()
-    if (m_itemIconFrame != null)
-      m_itemIconFrame.setTexture(m_itemIconPath, 0, true)
-      m_itemIconFrame.setVisible(m_itemIconVisible)
+    if (m_itemButtonIcon != null)
+      m_itemButtonIcon.setTexture(m_itemIconPath, 0, true)
+    if (m_itemButton != null)
+      m_itemButton.setVisible(m_itemIconVisible)
 
   // --------------------------------------------------------------------------
   private function updateLevelTextFrame()
-    if (m_levelTextFrame != null)
-      m_levelTextFrame.setText(m_isIndeterminate ? "-" : m_level.toString())
+    if (m_levelText != null)
+      m_levelText.setText(m_isIndeterminate ? "-" : m_level.toString())
 
   // --------------------------------------------------------------------------
   private function updateActiveFrame()
-    if (m_backdropFrameActive != null)
-      m_backdropFrameActive.setVisible(
+    if (m_activeIcon != null)
+      m_activeIcon.setVisible(
         m_enabledState == EnabledState.ACTIVE or 
         (m_enabledState == EnabledState.ENABLED and m_isHovered))
 
@@ -208,16 +243,13 @@ public class SurvivorJobPanel extends TLSFrame
     super.initialize()
 
     let panel = getFrameHandle()
-    // panel.setAllPoints(infoUnitPanel)
-    // panel.setLevel(1)
-    panel.setPoint(FRAMEPOINT_CENTER, GAME_UI, FRAMEPOINT_CENTER)
-    // panel.setAllPoints(infoUnitPanel)
-    // panel.setPoint(FRAMEPOINT_TOPLEFT, infoUnitPanel, FRAMEPOINT_TOPLEFT, 0.42, -0.86)
-    // panel.setPoint(FRAMEPOINT_TOPLEFT, infoUnitPanel, FRAMEPOINT_TOPLEFT, 0.42, -0.86)
+    panel.setAbsPoint(FRAMEPOINT_BOTTOMLEFT, 0.22, 0.14)
+    panel.setAbsPoint(FRAMEPOINT_BOTTOMRIGHT, 0.52, 0.14)
 
     let layout = new WrapPanelLayout()
+    ..setOrientation(LayoutOrientation.UP)
     ..setSpacing(vec2(0.002, 0.002))
-    ..layoutBegin(getFrameHandle())
+    ..layoutBegin()
 
     for jobDef in g_allJobDefinitions
     //{
@@ -229,9 +261,10 @@ public class SurvivorJobPanel extends TLSFrame
       let jobItemDef = getItemDefinition(jobDef.getItemType())
       if (jobItemDef != null)
         jobFrame.setItemIconPath(jobItemDef.getInterfaceIcon())
+        jobFrame.setItemName(jobItemDef.getName())
 
       m_jobDefToFrameMap.put(jobDef, jobFrame)
-      layout.layoutNextFrame(jobFrame.getFrameHandle())
+      layout.layoutNextFrame(jobFrame.getFrameHandle(), panel)
     //}
 
     layout.layoutEnd()
@@ -263,12 +296,17 @@ public class SurvivorJobPanel extends TLSFrame
     var highestTier = -1
     var indeterminate = false
     var itemIconVisible = false
+    var jobTitle = ""
+    var jobTooltip = ""
 
     if (true or jobDef.getIsJobKnownToPlayer(getPlayer()))
     //{
 
       // Set the initial icon path
-      iconPath = getUnitDefinition(jobDef.getInitialUnitType()).getIconGameInterface()
+      let initialUnitDef = getUnitDefinition(jobDef.getInitialUnitType())
+      iconPath = initialUnitDef.getIconGameInterface()
+      jobTitle = initialUnitDef.getName()
+      jobTooltip = initialUnitDef.getTooltipExtended()
 
       for _unit in units
       //{
@@ -302,6 +340,8 @@ public class SurvivorJobPanel extends TLSFrame
               highestTier = tier
               let unitDef = getUnitDefinition(_unit.getTypeId())
               iconPath = unitDef.getIconGameInterface()
+              jobTitle = unitDef.getName()
+              jobTooltip = unitDef.getTooltipExtended()
           //}
         //}
       //}
@@ -312,50 +352,8 @@ public class SurvivorJobPanel extends TLSFrame
     jobFrame.setIsIndeterminate(indeterminate)
     jobFrame.setEnabledState(enabledState)
     jobFrame.setItemIconVisible(itemIconVisible)
-
-// ============================================================================
-public class WrapPanelLayout
-  private framehandle m_panel
-  private vec2 m_spacing = ZERO2
-  private vec2 m_margin = ZERO2
-  private vec2 m_layoutPos = ZERO2
-
-  // --------------------------------------------------------------------------
-  function setSpacing(vec2 value)
-    m_spacing = value
-
-  // --------------------------------------------------------------------------
-  function getSpacing() returns vec2
-    return m_spacing
-
-  // --------------------------------------------------------------------------
-  function setMargin(vec2 value)
-    m_margin = value
-
-  // --------------------------------------------------------------------------
-  function getMargin() returns vec2
-    return m_margin
-
-  // --------------------------------------------------------------------------
-  function layoutBegin(framehandle panel)
-    m_panel = panel
-    m_layoutPos = m_margin
-    m_layoutPos.y *= -1
-
-  // --------------------------------------------------------------------------
-  function layoutNextFrame(framehandle frame)
-
-    frame.setPoint(FRAMEPOINT_TOPLEFT, m_panel, FRAMEPOINT_TOPLEFT, m_layoutPos)
-
-    m_layoutPos.x += frame.getWidth() + m_spacing.x
-    if (m_layoutPos.x + frame.getWidth() > m_panel.getWidth() - m_margin.x)
-      m_layoutPos.x = m_margin.x
-      m_layoutPos.y -= frame.getHeight() + m_spacing.y
-
-  // --------------------------------------------------------------------------
-  function layoutEnd()
-    m_panel = null
-    m_layoutPos = m_margin
+    jobFrame.setJobTitle(jobTitle)
+    jobFrame.setJobTooltip(jobTooltip)
 
 trigger g_selectionChangedEvent
 
