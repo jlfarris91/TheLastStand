@@ -1,29 +1,77 @@
 package SurvivorJobFrame
 import TLSFrame
-import ClosureTimers
 import ClosureFrames
-import LinkedList
 import SurvivorJobs
-import HashMap
 import UnitMetadata
 import SurvivorComponent
 import SurvivorJobData
 import SurvivorUnit
-import TlsUnitDefinition
 import GroupUtils
 import TlsItemDefinition
 import StandardTooltip
 import ColorUtility
-import StackPanelLayout
-import WrapPanelLayout
+import SurvivorJobChangeComponent
 
 enum EnabledState
   DISABLED
   ENABLED
   ACTIVE
 
-constant string UNKNOWN_JOB_ICON_PATH = "ui\\widgets\\escmenu\\human\\quest-unknown.dds"
-SurvivorJobPanel g_survivorJobPanel
+public constant string UNKNOWN_JOB_ICON_PATH = "ui\\widgets\\escmenu\\human\\quest-unknown.dds"
+
+// ============================================================================
+function getSurvivorJobData(unit u, SurvivorJobDefinition jobDef) returns SurvivorJobData
+  let survivor = u.getMetadata() castTo Survivor
+  if (survivor == null)
+    return null
+
+  let survivorComp = survivor.getSurvivorComponent()
+  if (survivorComp == null)
+    return null
+
+  let survivorData = survivorComp.getSurvivorData()
+  if (survivorData == null)
+    return null
+
+  return survivorData.getJobData(jobDef)
+
+// ============================================================================
+function orderSelectedUnitsToAssignJob(player owner, SurvivorJobDefinition jobDef)
+  let temp = getGroup()
+  temp.enumUnitsSelected(owner, null)
+  for u in temp
+  //{
+    let survivor = u.getMetadata() castTo Survivor
+    if (survivor != null and survivor.getActiveJobDefinition() != jobDef)
+    //{
+      let jobData = getSurvivorJobData(u, jobDef)
+      if (jobData != null and (jobDef == SurvivorJobs.none or jobData.getIsEnabled()))
+        survivor.getSurvivorJobChangeComponent().changeJobs(jobDef)
+    //}
+  //}
+  temp.release()
+
+// ============================================================================
+function orderSelectedUnitsToUnequipJobDefItem(player owner, SurvivorJobDefinition jobDef)
+  let temp = getGroup()
+  temp.enumUnitsSelected(owner, null)
+  for u in temp
+  //{
+    let survivor = u.getMetadata() castTo Survivor
+    if (survivor != null)
+    //{
+      let jobData = getSurvivorJobData(u, jobDef)
+      if (jobData != null)
+      //{
+        if (jobData.getIsEnabled())
+          jobData.setIsEnabled(false)
+          g_MainItemLibrary.createItemForUnit(u, jobDef.getItemType())
+      //}
+      if (survivor.getActiveJobDefinition() == jobDef)
+        survivor.getSurvivorJobChangeComponent().changeJobs(SurvivorJobs.none)
+    //}
+  //}
+  temp.release()
 
 // ============================================================================
 public class SurvivorJobFrame extends TLSFrame
@@ -33,7 +81,9 @@ public class SurvivorJobFrame extends TLSFrame
   private framehandle m_levelText
   private framehandle m_activeIcon
 
+  private SurvivorJobDefinition m_jobDef
   private string m_iconPath
+  private string m_iconPathDisabled
   private int m_level
   private EnabledState m_enabledState
   private bool m_isHovered
@@ -49,8 +99,17 @@ public class SurvivorJobFrame extends TLSFrame
     super("SurvivorJobFrame", GAME_UI)
 
     m_iconPath = UNKNOWN_JOB_ICON_PATH
+    m_iconPathDisabled = UNKNOWN_JOB_ICON_PATH
     m_level = 1
     m_enabledState = EnabledState.DISABLED
+
+  // --------------------------------------------------------------------------
+  function setJobDef(SurvivorJobDefinition value)
+    m_jobDef = value
+
+  // --------------------------------------------------------------------------
+  function getJobDef() returns SurvivorJobDefinition
+    return m_jobDef
 
   // --------------------------------------------------------------------------
   function getIconPath() returns string
@@ -60,6 +119,16 @@ public class SurvivorJobFrame extends TLSFrame
   function setIconPath(string value)
     if (m_iconPath != value)
       m_iconPath = value
+      updateIconFrame()
+
+  // --------------------------------------------------------------------------
+  function getIconPathDisabled() returns string
+    return m_iconPathDisabled
+  
+  // --------------------------------------------------------------------------
+  function setIconPathDisabled(string value)
+    if (m_iconPathDisabled != value)
+      m_iconPathDisabled = value
       updateIconFrame()
 
   // --------------------------------------------------------------------------
@@ -153,31 +222,27 @@ public class SurvivorJobFrame extends TLSFrame
 
     mainButton.onMouseEnter() -> 
       m_isHovered = true
-      Log.info("Icon mouse enter")
       showJobTooltip()
       updateActiveFrame()
 
     mainButton.onMouseLeave() -> 
       m_isHovered = false
-      Log.info("Icon mouse leave")
       StandardTooltip.hide(getPlayer())
       updateActiveFrame()
 
-    mainButton.onClick() -> 
-      Log.info("Icon mouse click")
+    mainButton.onClick() ->
+      orderSelectedUnitsToAssignJob(getPlayer(), m_jobDef)
 
     m_itemButton.onMouseEnter() -> 
-      Log.info("Item icon mouse enter")
       showItemTooltip()
       updateActiveFrame()
 
-    m_itemButton.onMouseLeave() -> 
-      Log.info("Item icon mouse leave")
+    m_itemButton.onMouseLeave() ->
       StandardTooltip.hide(getPlayer())
       updateActiveFrame()
 
-    m_itemButton.onClick() -> 
-      Log.info("Item icon mouse click")
+    m_itemButton.onClick() ->
+      orderSelectedUnitsToUnequipJobDefItem(getPlayer(), m_jobDef)
 
     updateIconFrame()
     updateLevelTextFrame()
@@ -189,14 +254,16 @@ public class SurvivorJobFrame extends TLSFrame
   // --------------------------------------------------------------------------
   private function showJobTooltip()
     var title = m_jobTitle
-    switch (m_enabledState)
-      case DISABLED
-        if (m_itemName != null)
-          title = "{0} - {1}".format(m_jobTitle, "Requires {0}".format(m_itemName).colorize(Colors.gold))
-      case ENABLED
+
+    if (m_enabledState == DISABLED and m_jobDef != SurvivorJobs.none)
+      title = "{0} - {1}".format(m_jobTitle, "Requires {0}".format(m_itemName).colorize(Colors.gold))
+        
+    if (m_enabledState == ENABLED)
+      if (m_jobDef != SurvivorJobs.none)
         title = "{0} - {1}".format(m_jobTitle, "Click to Assign Job".colorize(Colors.gold))
-      case ACTIVE
+      else
         title = "{0} - {1}".format(m_jobTitle, "Click to Unassign Job".colorize(Colors.gold))
+
     StandardTooltip.show(title, m_jobTooltip, getPlayer())
 
   // --------------------------------------------------------------------------
@@ -208,7 +275,7 @@ public class SurvivorJobFrame extends TLSFrame
   // --------------------------------------------------------------------------
   private function updateIconFrame()
     if (m_mainButtonIcon != null)
-      m_mainButtonIcon.setTexture(m_iconPath, 0, true)
+      m_mainButtonIcon.setTexture(m_enabledState == DISABLED ? m_iconPathDisabled : m_iconPath, 0, true)
 
   // --------------------------------------------------------------------------
   private function updateItemIconFrame()
@@ -228,153 +295,3 @@ public class SurvivorJobFrame extends TLSFrame
       m_activeIcon.setVisible(
         m_enabledState == EnabledState.ACTIVE or 
         (m_enabledState == EnabledState.ENABLED and m_isHovered))
-
-// ============================================================================
-public class SurvivorJobPanel extends TLSFrame
-  private IterableMap<SurvivorJobDefinition, SurvivorJobFrame> m_jobDefToFrameMap
-
-  // --------------------------------------------------------------------------
-  construct()
-    super("SurvivorJobPanel", GAME_UI)
-    m_jobDefToFrameMap = new IterableMap<SurvivorJobDefinition, SurvivorJobFrame>()
-
-  // --------------------------------------------------------------------------
-  override function initialize()
-    super.initialize()
-
-    let panel = getFrameHandle()
-    panel.setAbsPoint(FRAMEPOINT_BOTTOMLEFT, 0.22, 0.14)
-    panel.setAbsPoint(FRAMEPOINT_BOTTOMRIGHT, 0.52, 0.14)
-
-    let layout = new WrapPanelLayout()
-    ..setOrientation(LayoutOrientation.UP)
-    ..setSpacing(vec2(0.002, 0.002))
-    ..layoutBegin()
-
-    for jobDef in g_allJobDefinitions
-    //{
-      let jobFrame = new SurvivorJobFrame()
-        ..setParent(panel)
-        ..setPlayer(getPlayer())
-        ..show()
-        
-      let jobItemDef = getItemDefinition(jobDef.getItemType())
-      if (jobItemDef != null)
-        jobFrame.setItemIconPath(jobItemDef.getInterfaceIcon())
-        jobFrame.setItemName(jobItemDef.getName())
-
-      m_jobDefToFrameMap.put(jobDef, jobFrame)
-      layout.layoutNextFrame(jobFrame.getFrameHandle(), panel)
-    //}
-
-    layout.layoutEnd()
-    destroy layout
-
-  // --------------------------------------------------------------------------
-  override function setPlayer(player value)
-    super.setPlayer(value)
-
-    for key in m_jobDefToFrameMap
-      m_jobDefToFrameMap.get(key).setPlayer(value)
-
-  // --------------------------------------------------------------------------
-  function update()
-    let selectedUnits = getGroup()
-    selectedUnits.enumUnitsSelected(getPlayer(), null)
-    for jobDef in g_allJobDefinitions
-      updateJobFrame(jobDef, selectedUnits)
-    selectedUnits.release()
-
-  // --------------------------------------------------------------------------
-  private function updateJobFrame(SurvivorJobDefinition jobDef, group units)
-
-    let jobFrame = m_jobDefToFrameMap.get(jobDef)
-
-    var enabledState = EnabledState.DISABLED
-    var level = 1
-    var iconPath = UNKNOWN_JOB_ICON_PATH
-    var highestTier = -1
-    var indeterminate = false
-    var itemIconVisible = false
-    var jobTitle = ""
-    var jobTooltip = ""
-
-    if (true or jobDef.getIsJobKnownToPlayer(getPlayer()))
-    //{
-
-      // Set the initial icon path
-      let initialUnitDef = getUnitDefinition(jobDef.getInitialUnitType())
-      iconPath = initialUnitDef.getIconGameInterface()
-      jobTitle = initialUnitDef.getName()
-      jobTooltip = initialUnitDef.getTooltipExtended()
-
-      for _unit in units
-      //{
-        let survivor = _unit.getMetadata() castTo Survivor
-        if (survivor != null)
-        //{
-          let survivorComp = survivor.getSurvivorComponent()
-          if (survivorComp != null)
-          //{
-            let survivorData = survivorComp.getSurvivorData()
-            let jobData = survivorData.getJobData(jobDef)
-
-            // If this is the active job then use the unit's current level
-            var jobLevel = jobData.getLevel()
-            if (survivor.getActiveJobDefinition() == jobDef)
-              jobLevel = _unit.getLevel()
-            
-            if (level != jobLevel)
-              if (level != 1)
-                indeterminate = true
-              level = jobLevel
-
-            if (jobData.getIsEnabled())
-              itemIconVisible = true
-
-            if (survivor.getActiveJobDefinition() == jobDef)
-              enabledState = EnabledState.ACTIVE
-
-            let tier = jobDef.getUpgradeTier(_unit.getTypeId())
-            if (tier > highestTier)
-              highestTier = tier
-              let unitDef = getUnitDefinition(_unit.getTypeId())
-              iconPath = unitDef.getIconGameInterface()
-              jobTitle = unitDef.getName()
-              jobTooltip = unitDef.getTooltipExtended()
-          //}
-        //}
-      //}
-    //}
-
-    jobFrame.setLevel(level)
-    jobFrame.setIconPath(iconPath)
-    jobFrame.setIsIndeterminate(indeterminate)
-    jobFrame.setEnabledState(enabledState)
-    jobFrame.setItemIconVisible(itemIconVisible)
-    jobFrame.setJobTitle(jobTitle)
-    jobFrame.setJobTooltip(jobTooltip)
-
-trigger g_selectionChangedEvent
-
-// ============================================================================
-function onSelectionChanged()
-  // let p = GetTriggerPlayer()
-  nullTimer(() -> g_survivorJobPanel.update())
-
-// ============================================================================
-init
-
-  doAfter(1.0) () ->
-    g_survivorJobPanel = new SurvivorJobPanel()
-      ..setPlayer(Player(0))
-      ..show()
-    
-    doPeriodically(0.1) (CallbackPeriodic cb) ->
-      g_survivorJobPanel.update()
-  
-  g_selectionChangedEvent = CreateTrigger()
-  g_selectionChangedEvent.addCondition(Condition(function onSelectionChanged))
-  TriggerRegisterPlayerUnitEvent(g_selectionChangedEvent, Player(0), EVENT_PLAYER_UNIT_SELECTED, null)
-  TriggerRegisterPlayerUnitEvent(g_selectionChangedEvent, Player(0), EVENT_PLAYER_UNIT_DESELECTED, null)
-    
