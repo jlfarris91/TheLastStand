@@ -17,6 +17,7 @@ import SurvivorJobFrame
 import HumanPlayers
 import LoadToc
 import SurvivorJobChangeComponent
+import RegisterEvents
 
 HashMap<player, SurvivorJobPanel> g_playerSurvivorJobPanels = new HashMap<player, SurvivorJobPanel>()
 
@@ -69,6 +70,10 @@ public class SurvivorJobPanel extends TLSFrame
     super.setPlayer(value)
     for key in m_jobDefToFrameMap
       m_jobDefToFrameMap.get(key).setPlayer(value)
+
+  // --------------------------------------------------------------------------
+  function updateDelayed()
+    nullTimer(() -> update())
 
   // --------------------------------------------------------------------------
   function update()
@@ -158,14 +163,23 @@ public class SurvivorJobPanel extends TLSFrame
 // ============================================================================
 function onSelectionChanged()
   let p = GetTriggerPlayer()
-  g_playerSurvivorJobPanels.get(p).update()
+  let panel = g_playerSurvivorJobPanels.get(p)
+  if (panel != null)
+    panel.updateDelayed()
 
 // ============================================================================
 function _onSurvivorJobChanged()
   let survivor = getJobChangingSurvivor()
   let panel = g_playerSurvivorJobPanels.get(survivor.getOwner())
   if (panel != null)
-    panel.update()
+    panel.updateDelayed()
+
+// ============================================================================
+function onUnitLeveledUp()
+  let hero = GetLevelingUnit()
+  let panel = g_playerSurvivorJobPanels.get(hero.getOwner())
+  if (panel != null)
+    panel.updateDelayed()
 
 // ============================================================================
 init
@@ -177,10 +191,6 @@ init
       ..setPlayer(p)
       ..show()
       g_playerSurvivorJobPanels.put(p, survivorJobPanel)
-    
-    doPeriodically(1.0) (CallbackPeriodic cb) ->
-      for p in g_PlayingHumanPlayers
-        g_playerSurvivorJobPanels.get(p).update()
 
   for p in g_PlayingHumanPlayers
     let playerSelectionChangedTrigger = CreateTrigger()
@@ -189,3 +199,4 @@ init
     TriggerRegisterPlayerUnitEvent(playerSelectionChangedTrigger, p, EVENT_PLAYER_UNIT_DESELECTED, null)
 
   onSurvivorJobChanged(function _onSurvivorJobChanged)
+  registerPlayerUnitEvent(EVENT_PLAYER_HERO_LEVEL, function onUnitLeveledUp)
