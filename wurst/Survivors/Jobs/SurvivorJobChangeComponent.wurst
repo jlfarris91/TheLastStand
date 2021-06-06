@@ -13,22 +13,40 @@ import initlater SurvivorUnit
 
 group g_temp = CreateGroup()
 
-trigger g_onSurvivorJobChange = CreateTrigger()
-unit g_jobChangingSurvivor
+trigger g_onSurvivorJobPreChange = CreateTrigger()
+trigger g_onSurvivorJobPostChange = CreateTrigger()
+unit g_jobChangingSurvivorPre
+unit g_jobChangingSurvivorPost
 
 // ============================================================================
-public function onSurvivorJobChanged(code func)
-  g_onSurvivorJobChange.addCondition(Condition(func))
+public function onSurvivorJobPreChanged(code func)
+  g_onSurvivorJobPreChange.addCondition(Condition(func))
 
 // ============================================================================
-public function getJobChangingSurvivor() returns unit
-  return g_jobChangingSurvivor
+public function onSurvivorJobPostChanged(code func)
+  g_onSurvivorJobPostChange.addCondition(Condition(func))
 
 // ============================================================================
-function raiseSurvivorJobChangeEvent(unit _unit)
-  g_jobChangingSurvivor = _unit
-  g_onSurvivorJobChange.evaluate()
-  g_jobChangingSurvivor = null
+public function getJobChangingSurvivor_PreJobChange() returns unit
+  return g_jobChangingSurvivorPre
+
+// ============================================================================
+public function getJobChangingSurvivor_PostJobChange() returns unit
+  return g_jobChangingSurvivorPost
+
+// ============================================================================
+function raiseSurvivorJobPreChangeEvent(unit _unit)
+  g_jobChangingSurvivorPre = _unit
+  g_onSurvivorJobPreChange.evaluate()
+  g_jobChangingSurvivorPre = null
+
+// ============================================================================
+function raiseSurvivorJobPostChangeEvent(unit preUnit, unit postUnit)
+  g_jobChangingSurvivorPre = preUnit
+  g_jobChangingSurvivorPost = postUnit
+  g_onSurvivorJobPostChange.evaluate()
+  g_jobChangingSurvivorPre = null
+  g_jobChangingSurvivorPost = null
 
 // ============================================================================
 public class SurvivorJobChangeComponent extends UnitComponent
@@ -65,13 +83,15 @@ public class SurvivorJobChangeComponent extends UnitComponent
       Log.debug("SurvivorJobChangeComponent", "changeJobs", ownerUnit.getName(), "Failed to change to job " + job.getTitle() + " : survivor has no related job data")
       return false
 
+    raiseSurvivorJobPreChangeEvent(ownerUnit)
+
     // The player has learned about this job now that they have assigned the job
     job.setIsJobKnownToPlayer(ownerUnit.getOwner(), true)
 
     let replacementUnitId = jobData.getUnitId()
     let replacedUnit = replaceUnit(replacementUnitId)
 
-    raiseSurvivorJobChangeEvent(replacedUnit)
+    raiseSurvivorJobPostChangeEvent(ownerUnit, replacedUnit)
 
     return true
 
@@ -92,6 +112,8 @@ public class SurvivorJobChangeComponent extends UnitComponent
     if (jobData == null)
       return false
 
+    raiseSurvivorJobPreChangeEvent(ownerUnit)
+
     let replacedUnit = replaceUnit(nextUnitId)
 
     // There is a bug with upgrading non-building units where the player is not
@@ -104,7 +126,7 @@ public class SurvivorJobChangeComponent extends UnitComponent
     else
       Log.debug("SurvivorJobChangeComponent", "changeJobs", ownerUnit.getName(), "No definition registered for unit type {0}".format(nextUnitId.toString()))
 
-    raiseSurvivorJobChangeEvent(replacedUnit)
+    raiseSurvivorJobPostChangeEvent(ownerUnit, replacedUnit)
 
     return true
 

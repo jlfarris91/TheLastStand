@@ -6,12 +6,14 @@ import UnitMetadata
 import SurvivorComponent
 import SurvivorJobData
 import SurvivorUnit
-import GroupUtils
 import TlsItemDefinition
 import StandardTooltip
 import ColorUtility
 import SurvivorJobChangeComponent
 import FramehandleExtensions
+import initlater SurvivorJobPanel
+import LinkedList
+import PlayerExtensions
 
 enum EnabledState
   DISABLED
@@ -38,9 +40,14 @@ function getSurvivorJobData(unit u, SurvivorJobDefinition jobDef) returns Surviv
 
 // ============================================================================
 function orderSelectedUnitsToAssignJob(player owner, SurvivorJobDefinition jobDef)
-  let temp = getGroup()
-  temp.enumUnitsSelected(owner, null)
-  for u in temp
+  
+  let survivorJobPanel = getSurvivorJobPanel(owner)
+  if (survivorJobPanel != null)
+    survivorJobPanel.batchUpdates(true)
+
+  let selectedUnits = owner.getSelectedUnits()
+
+  for u in selectedUnits
   //{
     let survivor = u.getMetadata() castTo Survivor
     if (survivor != null and survivor.getActiveJobDefinition() != jobDef)
@@ -50,13 +57,22 @@ function orderSelectedUnitsToAssignJob(player owner, SurvivorJobDefinition jobDe
         survivor.getSurvivorJobChangeComponent().changeJobs(jobDef)
     //}
   //}
-  temp.release()
+
+  destroy selectedUnits
+
+  if (survivorJobPanel != null)
+    survivorJobPanel.batchUpdates(false)
 
 // ============================================================================
 function orderSelectedUnitsToUnequipJobDefItem(player owner, SurvivorJobDefinition jobDef)
-  let temp = getGroup()
-  temp.enumUnitsSelected(owner, null)
-  for u in temp
+  
+  let survivorJobPanel = getSurvivorJobPanel(owner)
+  if (survivorJobPanel != null)
+    survivorJobPanel.batchUpdates(true)
+
+  let selectedUnits = owner.getSelectedUnits()
+
+  for u in selectedUnits
   //{
     let survivor = u.getMetadata() castTo Survivor
     if (survivor != null)
@@ -72,7 +88,11 @@ function orderSelectedUnitsToUnequipJobDefItem(player owner, SurvivorJobDefiniti
         survivor.getSurvivorJobChangeComponent().changeJobs(SurvivorJobs.none)
     //}
   //}
-  temp.release()
+ 
+  destroy selectedUnits
+
+  if (survivorJobPanel != null)
+    survivorJobPanel.batchUpdates(false)
 
 // ============================================================================
 public class SurvivorJobFrame extends TLSFrame
@@ -86,6 +106,7 @@ public class SurvivorJobFrame extends TLSFrame
   private string m_iconPath
   private string m_iconPathDisabled
   private int m_level
+  private bool m_levelTextVisible
   private EnabledState m_enabledState
   private bool m_isHovered
   private bool m_isIndeterminate
@@ -178,6 +199,7 @@ public class SurvivorJobFrame extends TLSFrame
       m_enabledState = value
       updateActiveFrame()
       updateIconFrame()
+      updateVisibility()
   
   // --------------------------------------------------------------------------
   function getEnabledState() returns EnabledState
@@ -208,10 +230,14 @@ public class SurvivorJobFrame extends TLSFrame
     return m_itemName
 
   // --------------------------------------------------------------------------
+  function setLevelTextVisible(bool value)
+    if (m_levelTextVisible != value)
+      m_levelTextVisible = value
+      updateLevelTextFrame()
+
+  // --------------------------------------------------------------------------
   override function initialize()
     super.initialize()
-  
-    let frame = getFrameHandle()
 
     let mainButton = getFrame("MainButton", 0)..setLevel(3)
     m_mainButtonIcon = getFrame("MainButtonIcon", 0)
@@ -251,8 +277,7 @@ public class SurvivorJobFrame extends TLSFrame
     updateLevelTextFrame()
     updateActiveFrame()
     updateItemIconFrame()
-
-    frame.hide()
+    updateVisibility()
 
   // --------------------------------------------------------------------------
   private function showJobTooltip()
@@ -291,6 +316,7 @@ public class SurvivorJobFrame extends TLSFrame
   private function updateLevelTextFrame()
     if (m_levelText != null)
       m_levelText.setText(m_isIndeterminate ? "-" : m_level.toString())
+      m_levelText.setVisible(m_levelTextVisible)
 
   // --------------------------------------------------------------------------
   private function updateActiveFrame()
@@ -298,3 +324,10 @@ public class SurvivorJobFrame extends TLSFrame
       m_activeIcon.setVisible(
         m_enabledState == EnabledState.ACTIVE or 
         (m_enabledState == EnabledState.ENABLED and m_isHovered))
+  
+  // --------------------------------------------------------------------------
+  private function updateVisibility()
+    let frame = getFrameHandle()
+    let visible = m_enabledState != EnabledState.DISABLED
+    if (frame.isVisible() != visible)
+      getFrameHandle().setVisible(visible)
