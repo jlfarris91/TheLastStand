@@ -55,3 +55,9 @@ $env:WurstOutputMapArtifactFilePath = [System.IO.Path]::Combine($env:ArtifactRoo
 $env:DiscordLink = "discord.gg/VzjbPkGN3r"
 
 $env:BuildDate = (Get-Date -Format "MM/dd/yy")
+
+$env:DevEnvironment = "false"
+if ($VersionInfo.BranchName.StartsWith("develop") -or
+    $VersionInfo.BranchName.StartsWith("feature")) {
+  $env:DevEnvironment = "true"
+}
