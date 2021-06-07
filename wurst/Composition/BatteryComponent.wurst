@@ -1,0 +1,81 @@
+package BatteryComponent
+import UnitComponent
+import PowerConsumerComponent
+import Events
+
+constant POWER_CONSUMPTION_RATE = 2.0
+
+// ============================================================================
+public class BatteryComponent extends UnitComponent
+  private PowerConsumerComponent m_powerConsumer
+  private EventCallback m_powerReadyCallback
+
+  // --------------------------------------------------------------------------
+  construct (IUnitMetadata metadata)
+    super(metadata)
+    m_powerConsumer = null
+
+  // --------------------------------------------------------------------------
+  override function getTypeId() returns int
+    return BatteryComponent.getTypeId()
+
+  // --------------------------------------------------------------------------
+  override function onEnabled()
+    super.onEnabled()
+
+    let ownerUnit = getOwnerUnit()
+
+    m_powerConsumer = getOwner().getOrAddPowerConsumerComponent()
+    m_powerConsumer.setPowerRequired(POWER_CONSUMPTION_RATE)
+    m_powerConsumer.powerReadyCallback = () ->
+      return onPowerReady(ownerUnit)
+    m_powerConsumer.powerConsumedCallback = (real powerConsumed) ->
+      onPowerConsumed(ownerUnit, powerConsumed)
+
+  // --------------------------------------------------------------------------
+  override function onDisabled()
+    super.onDisabled()
+
+    if (m_powerReadyCallback != null)
+      destroy m_powerReadyCallback
+      m_powerReadyCallback = null
+
+  // --------------------------------------------------------------------------
+  private static function onPowerReady(unit batteryUnit) returns bool
+    let metadata = batteryUnit.getMetadata()
+    if (metadata == null)
+      return false
+    let comp = metadata.getBatteryComponent()
+    if (comp == null)
+      return false
+    return comp.onPowerReady()
+
+  // --------------------------------------------------------------------------
+  private function onPowerReady() returns bool
+    let ownerUnit = getOwnerUnit()
+    return ownerUnit.getMana() > ownerUnit.getMaxMana() - POWER_CONSUMPTION_RATE
+
+  // --------------------------------------------------------------------------
+  private static function onPowerConsumed(unit batteryUnit, real powerConsumed)
+    let metadata = batteryUnit.getMetadata()
+    if (metadata == null)
+      return
+    let comp = metadata.getBatteryComponent()
+    if (comp == null)
+      return
+    comp.onPowerConsumed(powerConsumed)
+
+  // --------------------------------------------------------------------------
+  private function onPowerConsumed(real powerConsumed)
+    Log.info("Battery consumed " + powerConsumed.toString() + " power")
+
+// ============================================================================
+public function IUnitMetadata.getBatteryComponent() returns BatteryComponent
+  return this.getComponent(typeInfo(BatteryComponent.typeId)) castTo BatteryComponent
+
+// ============================================================================
+public function IUnitMetadata.getOrAddBatteryComponent() returns BatteryComponent
+  var component = this.getBatteryComponent()
+  if (component == null)
+    component = this.addComponent(new BatteryComponent(this)) castTo BatteryComponent
+  return component

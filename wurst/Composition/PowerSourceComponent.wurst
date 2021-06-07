@@ -1,0 +1,67 @@
+package PowerSourceComponent
+import UnitComponent
+import initlater PowerConsumerComponent
+import LinkedList
+
+PowerConsumerComparator g_powerConsumerComparator = new PowerConsumerComparator()
+
+// ============================================================================
+class PowerConsumerComparator implements Comparator<PowerConsumerComponent>
+  override function compare(PowerConsumerComponent a, PowerConsumerComponent b) returns int
+    return a.getPowerRequired() < b.getPowerRequired() ? -1 : 1
+
+// ============================================================================
+public class PowerSourceComponent extends UnitComponent
+  private LinkedList<PowerConsumerComponent> m_receivers
+  private real m_remainingPower
+
+  // --------------------------------------------------------------------------
+  construct (IUnitMetadata metadata)
+    super(metadata)
+    m_receivers = new LinkedList<PowerConsumerComponent>()
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    destroy m_receivers
+
+  // --------------------------------------------------------------------------
+  override function getTypeId() returns int
+    return PowerSourceComponent.typeId
+
+  // --------------------------------------------------------------------------
+  function givePower(real power)
+    m_remainingPower += power
+    for receiver in m_receivers
+      if (m_remainingPower > 0)
+        receiver.powerReady(this)
+    m_remainingPower = 0
+
+  // --------------------------------------------------------------------------
+  function consumePower(real power) returns real
+    let powerConsumed = min(m_remainingPower, power)
+    m_remainingPower = max(m_remainingPower - powerConsumed, 0)
+    return powerConsumed
+
+  // --------------------------------------------------------------------------
+  function getRecievers() returns LinkedList<PowerConsumerComponent>
+    return m_receivers
+
+  // --------------------------------------------------------------------------
+  function link(PowerConsumerComponent powerReciever)
+    m_receivers.add(powerReciever)
+    m_receivers.sortWith(g_powerConsumerComparator)
+
+  // --------------------------------------------------------------------------
+  function unlink(PowerConsumerComponent powerReciever)
+    m_receivers.remove(powerReciever)
+
+// ============================================================================
+public function IUnitMetadata.getPowerSourceComponent() returns PowerSourceComponent
+  return this.getComponent(typeInfo(PowerSourceComponent.typeId)) castTo PowerSourceComponent
+
+// ============================================================================
+public function IUnitMetadata.getOrAddPowerSourceComponent() returns PowerSourceComponent
+  var component = this.getPowerSourceComponent()
+  if (component == null)
+    component = this.addComponent(new PowerSourceComponent(this)) castTo PowerSourceComponent
+  return component

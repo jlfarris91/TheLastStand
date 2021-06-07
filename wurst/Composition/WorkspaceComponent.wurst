@@ -1,0 +1,137 @@
+package WorkspaceComponent
+import UnitComponent
+import TlsAbilityIds
+import Events
+import RegisterEvents
+import Loaded
+import Orders
+
+// ============================================================================
+public class WorkspaceComponent extends UnitComponent
+  private unit m_loadedUnit
+
+  Event workerEntered
+  Event workerExited
+
+  // --------------------------------------------------------------------------
+  construct (IUnitMetadata metadata)
+    super(metadata)
+    workerEntered = new Event()
+    workerExited = new Event()
+    m_loadedUnit = null
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    destroy workerEntered
+    destroy workerExited
+
+  // --------------------------------------------------------------------------
+  override function getTypeId() returns int
+    return WorkspaceComponent.typeId
+
+  // --------------------------------------------------------------------------
+  function getWorkerUnit() returns unit
+    return m_loadedUnit
+
+  // --------------------------------------------------------------------------
+  function unloadWorker()
+    if (m_loadedUnit == null)
+      return
+    let ownerUnit = getOwnerUnit()
+    ownerUnit.issuePointOrderById(OrderIds.unload, ownerUnit.getPos())
+
+  // --------------------------------------------------------------------------
+  override function onEnabled()
+    super.onEnabled()
+
+    let ownerUnit = getOwnerUnit()
+
+    if (not ownerUnit.hasAbility(TlsAbilityIds.workspaceCargoHold))
+      ownerUnit.addAbility(TlsAbilityIds.workspaceCargoHold)
+
+    if (not ownerUnit.hasAbility(TlsAbilityIds.workspaceLoad))
+      ownerUnit.addAbility(TlsAbilityIds.workspaceLoad)
+
+    if (not ownerUnit.hasAbility(TlsAbilityIds.workspaceUnload))
+      ownerUnit.addAbility(TlsAbilityIds.workspaceUnload)
+
+  // --------------------------------------------------------------------------
+  override function onDisabled()
+    super.onDisabled()
+
+    unloadWorker()
+
+    let ownerUnit = getOwnerUnit()
+    ownerUnit.removeAbility(TlsAbilityIds.workspaceCargoHold)
+    ownerUnit.removeAbility(TlsAbilityIds.workspaceLoad)
+    ownerUnit.removeAbility(TlsAbilityIds.workspaceUnload)
+
+  // --------------------------------------------------------------------------
+  protected function onUnitLoaded(unit loadedUnit)
+    if (m_loadedUnit != null)
+      Log.error("WorkspaceComponent", "onUnitLoaded", "", "A unit is already loaded")
+      return
+
+    m_loadedUnit = loadedUnit
+    onWorkerEntered()
+    workerEntered.call()
+
+  // --------------------------------------------------------------------------
+  protected function onUnitUnloaded(unit loadedUnit)
+    if (m_loadedUnit != loadedUnit)
+      Log.error("WorkspaceComponent", "onUnitUnloaded", "", "A different unit was loaded")
+      return
+
+    onWorkerExited()
+    workerExited.call()
+    m_loadedUnit = null
+
+  // --------------------------------------------------------------------------
+  private function onWorkerEntered()
+    getOwnerUnit().addAnimationProperties("work")
+
+  // --------------------------------------------------------------------------
+  private function onWorkerExited()
+    getOwnerUnit().removeAnimationProperties("work")
+
+// ============================================================================
+public function IUnitMetadata.getWorkspaceComponent() returns WorkspaceComponent
+  return this.getComponent(typeInfo(WorkspaceComponent.typeId)) castTo WorkspaceComponent
+
+// ============================================================================
+public function IUnitMetadata.getOrAddWorkspaceComponent() returns WorkspaceComponent
+  var component = this.getWorkspaceComponent()
+  if (component == null)
+    component = this.addComponent(new WorkspaceComponent(this)) castTo WorkspaceComponent
+  return component
+
+// ============================================================================
+function onUnitLoaded()
+  let loadedUnit = GetLoadedUnit()
+  let loadingUnit = GetTriggerUnit()
+
+  let metadata = loadingUnit.getMetadata()
+  if (metadata == null)
+    return
+
+  let comp = metadata.getWorkspaceComponent()
+  if (comp != null)
+    comp.onUnitLoaded(loadedUnit)
+
+// ============================================================================
+function onUnitUnloaded()
+  let unloadedUnit = getUnloadedUnit()
+  let holdingUnit = getHoldingUnit(unloadedUnit)
+
+  let metadata = holdingUnit.getMetadata()
+  if (metadata == null)
+    return
+
+  let comp = metadata.getWorkspaceComponent()
+  if (comp != null)
+    comp.onUnitUnloaded(unloadedUnit)
+
+// ============================================================================
+init
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_LOADED, function onUnitLoaded)
+  registerUnitUnloadedEvent(function onUnitUnloaded)
