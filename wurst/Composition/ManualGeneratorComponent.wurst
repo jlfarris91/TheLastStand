@@ -1,0 +1,103 @@
+package ManualGeneratorComponent
+import UnitComponent
+import PowerSourceComponent
+import WorkspaceComponent
+import ClosureTimers
+
+constant real GENERATE_POWER_INTERVAL = 1.0
+constant real GENERATE_POWER_RATE = 10.0
+
+// ============================================================================
+public class ManualGeneratorComponent extends UnitComponent
+  private CallbackPeriodic m_generatePowerCallback
+  private PowerSourceComponent m_powerSource
+
+  // --------------------------------------------------------------------------
+  construct (IUnitMetadata metadata)
+    super(metadata)
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    if (m_generatePowerCallback != null)
+      destroy m_generatePowerCallback
+      m_generatePowerCallback = null
+
+  // --------------------------------------------------------------------------
+  override function getTypeId() returns int
+    return ManualGeneratorComponent.typeId
+  
+  // --------------------------------------------------------------------------
+  override function initialize()
+    super.initialize()
+
+    let owner = getOwner()
+    let ownerUnit = getOwnerUnit()
+
+    let workspace = owner.getOrAddWorkspaceComponent()
+    workspace.workerEntered.register(() -> onWorkerEntered(ownerUnit))
+    workspace.workerExited.register(() -> onWorkerExited(ownerUnit))
+    
+    m_powerSource = owner.getOrAddPowerSourceComponent()
+
+  // --------------------------------------------------------------------------
+  override function onEnabled()
+    super.onEnabled()
+
+    let workspace = getOwner().getOrAddWorkspaceComponent()
+    if (workspace.getWorkerUnit() != null)
+      onWorkerEntered()
+
+  // --------------------------------------------------------------------------
+  override function onDisabled()
+    super.onDisabled()
+
+    let workspace = getOwner().getOrAddWorkspaceComponent()
+    if (workspace.getWorkerUnit() != null)
+      onWorkerExited()
+
+  // --------------------------------------------------------------------------
+  private function generatePower()
+    m_powerSource.givePower(GENERATE_POWER_RATE)
+
+  // --------------------------------------------------------------------------
+  private static function onWorkerEntered(unit generatorUnit)
+    let metadata = generatorUnit.getMetadata()
+    if (metadata == null)
+      return
+    let comp = metadata.getManualGeneratorComponent()
+    if (comp == null)
+      return
+    comp.onWorkerEntered()
+
+  // --------------------------------------------------------------------------
+  private function onWorkerEntered()
+    if (m_generatePowerCallback == null)
+      m_generatePowerCallback = doPeriodically(GENERATE_POWER_INTERVAL) (CallbackPeriodic cb) ->
+        generatePower()
+
+  // --------------------------------------------------------------------------
+  private static function onWorkerExited(unit generatorUnit)
+    let metadata = generatorUnit.getMetadata()
+    if (metadata == null)
+      return
+    let comp = metadata.getManualGeneratorComponent()
+    if (comp == null)
+      return
+    comp.onWorkerExited()
+
+  // --------------------------------------------------------------------------
+  private function onWorkerExited()
+    if (m_generatePowerCallback != null)
+      destroy m_generatePowerCallback
+      m_generatePowerCallback = null
+
+// ============================================================================
+public function IUnitMetadata.getManualGeneratorComponent() returns ManualGeneratorComponent
+  return this.getComponent(typeInfo(ManualGeneratorComponent.typeId)) castTo ManualGeneratorComponent
+
+// ============================================================================
+public function IUnitMetadata.getOrAddManualGeneratorComponent() returns ManualGeneratorComponent
+  var component = this.getManualGeneratorComponent()
+  if (component == null)
+    component = this.addComponent(new ManualGeneratorComponent(this)) castTo ManualGeneratorComponent
+  return component

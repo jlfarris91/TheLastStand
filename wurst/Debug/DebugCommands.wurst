@@ -23,6 +23,8 @@ import ObjectIds
 import HumanPlayers
 import UnitExtensions
 import ProjectConstants
+import PowerSourceComponent
+import PowerConsumerComponent
 
 constant string COMMAND_MEMORYTRACKER = "mem"
 constant string COMMAND_GODLIKE = "godlike"
@@ -62,6 +64,8 @@ constant string COMMAND_PAUSE = "pause"
 constant string COMMAND_RESUME = "resume"
 constant string COMMAND_RECYCLERSTATS = "recycler"
 constant string COMMAND_ATTACKSENABLED = "setAttacksEnabled"
+constant string COMMAND_LINK = "link"
+constant string COMMAND_UNLINK = "unlink"
 
 DebugChatCommandHandler g_commandHandler
 MemoryTrackingMultiboard g_memoryTrackingMultiboard
@@ -710,6 +714,72 @@ function setAttacksEnabled()
     _unit.setFieldWeapon(UNIT_WEAPON_BF_ATTACKS_ENABLED, 1, attacksEnabled == 2 or attacksEnabled == 3)
 
 // ============================================================================
+function linkSelectedUnits()
+  let commandPlayer = getChatCommandPlayer()
+
+  PowerSourceComponent source = null
+
+  let selectedUnits = commandPlayer.getSelectedUnits()
+
+  for u in selectedUnits
+    let metadata = u.getMetadata()
+    if (metadata != null)
+      let comp = metadata.getPowerSourceComponent()
+      if (comp != null)
+        source = comp
+
+  if (source == null)
+    displayMessageToPlayer(commandPlayer, "No power source selected")
+    destroy selectedUnits
+    return
+
+  var consumerCount = 0
+
+  for u in selectedUnits
+    let metadata = u.getMetadata()
+    if (metadata != null)
+      let comp = metadata.getPowerConsumerComponent()
+      if (comp != null)
+        comp.link(source)
+        source.link(comp)
+        consumerCount++
+
+  if (consumerCount == 0)
+    displayMessageToPlayer(commandPlayer, "No power consumers selected")
+    destroy selectedUnits
+    return
+
+  displayMessageToPlayer(commandPlayer, "Linked " + consumerCount.toString() + " consumer(s) to source " + source.getOwnerUnit().getName())
+  destroy selectedUnits
+
+// ============================================================================
+function unlinkSelectedUnits()
+  let commandPlayer = getChatCommandPlayer()
+
+  let selectedUnits = commandPlayer.getSelectedUnits()
+
+  var consumerCount = 0
+
+  for u in selectedUnits
+    let metadata = u.getMetadata()
+    if (metadata != null)
+      let comp = metadata.getPowerConsumerComponent()
+      if (comp != null)
+        let source = comp.getPowerSource()
+        if (source != null)
+          source.unlink(comp)
+          comp.unlink()
+        consumerCount++
+
+  if (consumerCount == 0)
+    displayMessageToPlayer(commandPlayer, "No power consumers selected")
+    destroy selectedUnits
+    return
+
+  displayMessageToPlayer(commandPlayer, "Unlinked " + consumerCount.toString() + " consumer(s)")
+  destroy selectedUnits
+
+// ============================================================================
 function registerDebugCommands()
 
   g_commandHandler.registerCommandDefinition(COMMAND_MEMORYTRACKER, function showMemoryTrackerMultiboard)
@@ -836,6 +906,12 @@ function registerDebugCommands()
   g_commandHandler.registerCommandDefinition(COMMAND_ATTACKSENABLED, function setAttacksEnabled)
     ..setDescription("Sets which attacks are enabled for the selected units.")
     ..addArgument(new ChatCommandArgument("WEAPON_INDEX", ChatCommandArgumentType.INT, false)..setIntOptions(0, 1, 2, 3)..setDescription("0 - None, 1 - Attack 1, 2 - Attack 2, 3 - Both"))
+
+  g_commandHandler.registerCommandDefinition(COMMAND_LINK, function linkSelectedUnits)
+    ..setDescription("Shows information about active unit recyclers")
+
+  g_commandHandler.registerCommandDefinition(COMMAND_UNLINK, function unlinkSelectedUnits)
+    ..setDescription("Shows information about active unit recyclers")
 
 // ============================================================================
 init
