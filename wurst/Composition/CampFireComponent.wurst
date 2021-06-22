@@ -12,7 +12,6 @@ import ColorUtility
 import PersistActiveAbilityComponent
 import Orders
 import FX
-import ClosureTimers
 import Unit_CampFire
 import Ability_CampFireRestore
 
@@ -52,7 +51,7 @@ public class CampFireComponent extends RealtimeUnitComponent
     let ownerUnitId = ownerUnit.getTypeId()
 
     switch (ownerUnitId)
-      case TlsUnitIds.campFire
+      case TlsUnitIds.campFire | TlsUnitIds.campFireBuild
         updateCampFire()
       case TlsUnitIds.campFire2
         updateCampFire2()
@@ -104,8 +103,7 @@ public class CampFireComponent extends RealtimeUnitComponent
     let ownerUnitId = ownerUnit.getTypeId()
     if (ownerUnitId == TlsUnitIds.campFire)
       return
-    nullTimer() () ->
-      replaceUnitTLS(ownerUnit, TlsUnitIds.campFire, bj_UNIT_STATE_METHOD_ABSOLUTE)
+    ownerUnit.issueImmediateOrderById(TlsUnitIds.campFire)
 
   // --------------------------------------------------------------------------
   private function convertToCampFireOff()
@@ -113,8 +111,7 @@ public class CampFireComponent extends RealtimeUnitComponent
     let ownerUnitId = ownerUnit.getTypeId()
     if (ownerUnitId == TlsUnitIds.campFireOff)
       return
-    nullTimer() () ->
-      replaceUnitTLS(ownerUnit, TlsUnitIds.campFireOff, bj_UNIT_STATE_METHOD_ABSOLUTE)
+    ownerUnit.issueImmediateOrderById(TlsUnitIds.campFireOff)
 
   // --------------------------------------------------------------------------
   private function convertToCampFire2()
@@ -122,9 +119,8 @@ public class CampFireComponent extends RealtimeUnitComponent
     let ownerUnitId = ownerUnit.getTypeId()
     if (ownerUnitId == TlsUnitIds.campFire2)
       return
-    nullTimer() () ->
-      let replacedUnit = replaceUnitTLS(ownerUnit, TlsUnitIds.campFire2, bj_UNIT_STATE_METHOD_ABSOLUTE)
-      replacedUnit.setMana(replacedUnit.getMaxMana())
+    ownerUnit.issueImmediateOrderById(TlsUnitIds.campFire2)
+    ownerUnit.setMana(ownerUnit.getMaxMana())
 
   // --------------------------------------------------------------------------
   private function automaticallyAddLumber()
@@ -167,7 +163,7 @@ public class CampFireComponent extends RealtimeUnitComponent
     let ownerUnit = getOwnerUnit()
     let ownerUnitId = ownerUnit.getTypeId()
 
-    if (ownerUnitId == TlsUnitIds.campFire)
+    if (ownerUnitId == TlsUnitIds.campFire or ownerUnitId == TlsUnitIds.campFireBuild)
       ownerUnit.addAbility(TlsAbilityIds.campFireRestoreHealth)
       ownerUnit.addAbility(TlsAbilityIds.campFireRestoreStamina)
     else
@@ -223,7 +219,8 @@ public function IUnitMetadata.getOrAddCampFireComponent() returns CampFireCompon
 // ============================================================================
 function onUnitConstructFinished()
   let constructedUnit = GetConstructedStructure()
-  if (constructedUnit.getTypeId() != TlsUnitIds.campFire)
+  if (constructedUnit.getTypeId() != TlsUnitIds.campFire and
+      constructedUnit.getTypeId() != TlsUnitIds.campFireBuild)
     return
 
   constructedUnit.addAbility(TlsAbilityIds.campFireRestoreHealth)
@@ -299,9 +296,19 @@ function onUnitConstructed()
   constructedUnit.getMetadataRequired().getOrAddCampFireComponent().enable()
 
 // ============================================================================
+function onUnitUpgraded()
+  let upgradedUnit = GetTriggerUnit()
+  if (not upgradedUnit.isCampFire())
+    return
+  upgradedUnit.getMetadataRequired().getOrAddCampFireComponent()
+  ..enable()
+  ..updateState()
+
+// ============================================================================
 init
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_CONSTRUCT_FINISH, function onUnitConstructFinished)
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_PICKUP_ITEM, function onUnitPickupItem)
   registerSpellEffectEvent(TlsAbilityIds.campFireIgniteTarget, function onIgniteFire)
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ISSUED_ORDER, function onUnitIssuedOrder)
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_CONSTRUCT_FINISH, function onUnitConstructed)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_UPGRADE_FINISH, function onUnitUpgraded)
