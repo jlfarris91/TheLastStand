@@ -1,0 +1,310 @@
+package SurvivorJobPanel
+import TLSFrame
+import ClosureTimers
+import LinkedList
+import SurvivorJobs
+import HashMap
+import UnitMetadata
+import SurvivorComponent
+import SurvivorJobData
+import SurvivorUnit
+import TlsUnitDefinition
+import GroupUtils
+import TlsItemDefinition
+import StackPanelLayout
+import WrapPanelLayout
+import SurvivorJobFrame
+import HumanPlayers
+import LoadToc
+import SurvivorJobChangeComponent
+import RegisterEvents
+import UnitExtensions
+import HashList
+
+HashMap<player, SurvivorJobPanel> g_playerSurvivorJobPanels = new HashMap<player, SurvivorJobPanel>()
+HashList<unit> g_wasSelected = new HashList<unit>()
+HashList<unit> g_waitingToBeSelected = new HashList<unit>()
+
+// ============================================================================
+public function getSurvivorJobPanel(player _player) returns SurvivorJobPanel
+  return g_playerSurvivorJobPanels.get(_player)
+
+// ============================================================================
+public class SurvivorJobPanel extends TLSFrame
+  private IterableMap<SurvivorJobDefinition, SurvivorJobFrame> m_jobDefToFrameMap
+  private int m_ignoreUpdates
+  private int m_awaitingUpdate
+
+  // --------------------------------------------------------------------------
+  construct()
+    super(createFrame("FRAME", "SurvivorJobPanel", GAME_UI, "", 0))
+    m_jobDefToFrameMap = new IterableMap<SurvivorJobDefinition, SurvivorJobFrame>()
+
+  // --------------------------------------------------------------------------
+  function batchUpdates(bool value)
+    m_ignoreUpdates += value ? 1 : -1
+    if (m_ignoreUpdates == 0)
+      update()
+
+  // --------------------------------------------------------------------------
+  function getIsBatchingUpdates() returns bool
+    return m_ignoreUpdates > 0
+
+  // --------------------------------------------------------------------------
+  override function initialize()
+    super.initialize()
+
+    let panel = getFrameHandle()
+    panel.setAbsPoint(FRAMEPOINT_BOTTOMLEFT, 0.21, 0.14)
+    panel.setSize(0.3, 0.35)
+
+    for jobDef in g_allJobDefinitions
+    //{
+      let jobFrame = new SurvivorJobFrame()
+        ..setParent(panel)
+        ..setPlayer(getPlayer())
+        ..setJobDef(jobDef)
+        ..initialize()
+        ..hide()
+        
+      let jobItemDef = getItemDefinition(jobDef.getItemType())
+      if (jobItemDef != null)
+        jobFrame.setItemIconPath(jobItemDef.getInterfaceIcon())
+        jobFrame.setItemName(jobItemDef.getName())
+
+      m_jobDefToFrameMap.put(jobDef, jobFrame)
+    //}
+
+    invalidateLayout()
+
+  // --------------------------------------------------------------------------
+  override function setPlayer(player value)
+    super.setPlayer(value)
+    for key in m_jobDefToFrameMap
+      m_jobDefToFrameMap.get(key).setPlayer(value)
+
+  // --------------------------------------------------------------------------
+  function getJobFrame(SurvivorJobDefinition jobDef) returns SurvivorJobFrame
+    return m_jobDefToFrameMap.get(jobDef)
+
+  // --------------------------------------------------------------------------
+  function update()
+    if (getIsBatchingUpdates())
+      return
+    m_awaitingUpdate++
+    nullTimer() () ->
+      m_awaitingUpdate--
+      if (m_awaitingUpdate == 0)
+        update_impl()
+
+  // --------------------------------------------------------------------------
+  private function update_impl()
+
+    if (getIsBatchingUpdates())
+      return
+
+    let owningPlayer = getPlayer()
+    var survivorCount = 0
+    
+    let selectedUnits = getGroup()
+    selectedUnits.enumUnitsSelected(owningPlayer, null)
+    
+    for jobDef in g_allJobDefinitions
+      updateJobFrame(jobDef, selectedUnits)
+    
+    for u in selectedUnits
+    //{
+      let unitOwner = u.getOwner()
+      if ((unitOwner == owningPlayer or unitOwner.isAllyOf(owningPlayer)) and u.isSurvivor())
+        survivorCount++
+    //}
+
+    selectedUnits.release()
+
+    invalidateLayout()
+    
+    if (survivorCount == 0)
+      hide()
+    else
+      show()
+
+  // --------------------------------------------------------------------------
+  function invalidateLayout()
+    
+    let panel = getFrameHandle()
+
+    let layout = new WrapPanelLayout()
+    ..setOrientation(LayoutOrientation.UP)
+    ..setSpacing(vec2(0.002, 0.002))
+    ..layoutBegin()
+
+    for jobDef in g_allJobDefinitions
+    //{
+      let jobFrame = getJobFrame(jobDef)
+      if (jobFrame != null and jobFrame.getEnabledState() != EnabledState.DISABLED)
+        layout.layoutNextFrame(jobFrame.getFrameHandle(), panel)
+    //}
+
+    panel.setHeight(layout.getHeight())
+
+    layout.layoutEnd()
+    destroy layout
+
+  // --------------------------------------------------------------------------
+  private function updateJobFrame(SurvivorJobDefinition jobDef, group units)
+
+    let jobFrame = m_jobDefToFrameMap.get(jobDef)
+    if (jobFrame == null)
+      return
+
+    let owningPlayer = getPlayer()
+    var enabledState = EnabledState.DISABLED
+    var level = 1
+    var levelTextVisible = false
+    var iconPath = UNKNOWN_JOB_ICON_PATH
+    var iconPathDisabled = UNKNOWN_JOB_ICON_PATH
+    var highestTier = -1
+    var indeterminate = false
+    var itemIconVisible = false
+    var jobTitle = ""
+    var jobTooltip = ""
+
+    if (true or jobDef.getIsJobKnownToPlayer(getPlayer()))
+    //{
+
+      // Set the initial icon path
+      let initialUnitDef = getUnitDefinition(jobDef.getInitialUnitType())
+      iconPath = initialUnitDef.getIconGameInterface()
+      iconPathDisabled = initialUnitDef.getIconGameInterfaceDisabled()
+      jobTitle = initialUnitDef.getName()
+      jobTooltip = initialUnitDef.getTooltipExtended()
+
+      for _unit in units
+      //{
+        let unitOwner = _unit.getOwner()
+        if (unitOwner == owningPlayer or unitOwner.isAllyOf(owningPlayer))
+        //{
+          let survivor = _unit.getMetadata() castTo Survivor
+          if (survivor != null)
+          //{
+            let survivorComp = survivor.getSurvivorComponent()
+            if (survivorComp != null)
+            //{
+              let survivorData = survivorComp.getSurvivorData()
+              let jobData = survivorData.getJobData(jobDef)
+
+              // If this is the active job then use the unit's current level
+              var jobLevel = jobData.getLevel()
+              if (survivor.getActiveJobDefinition() == jobDef)
+                jobLevel = _unit.getLevel()
+              
+              levelTextVisible = levelTextVisible or jobData.getWasEverEnabled()
+              
+              if (level != jobLevel)
+                if (level != 1)
+                  indeterminate = true
+                level = jobLevel
+
+              if (jobData.getIsEnabled() and jobDef != SurvivorJobs.none)
+                itemIconVisible = true
+
+              if (enabledState == EnabledState.DISABLED)
+                if (survivor.getActiveJobDefinition() == jobDef)
+                  enabledState = EnabledState.ACTIVE
+                else
+                  enabledState = jobData.getIsEnabled() ? EnabledState.ENABLED : EnabledState.DISABLED
+
+              let tier = jobDef.getUpgradeTier(_unit.getTypeId())
+              if (tier > highestTier)
+                highestTier = tier
+                let unitDef = getUnitDefinition(_unit.getTypeId())
+                iconPath = unitDef.getIconGameInterface()
+                iconPathDisabled = unitDef.getIconGameInterfaceDisabled()
+                jobTitle = unitDef.getName()
+                jobTooltip = unitDef.getTooltipExtended()
+            //}
+          //}
+        //}
+      //}
+    //}
+
+    jobFrame.setLevel(level)
+    jobFrame.setLevelTextVisible(levelTextVisible)
+    jobFrame.setIconPath(iconPath)
+    jobFrame.setIconPathDisabled(iconPathDisabled)
+    jobFrame.setIsIndeterminate(indeterminate)
+    jobFrame.setEnabledState(enabledState)
+    jobFrame.setItemIconVisible(itemIconVisible)
+    jobFrame.setJobTitle(jobTitle)
+    jobFrame.setJobTooltip(jobTooltip)
+
+// ============================================================================
+function onSelectionChanged()
+  let p = GetTriggerPlayer()
+  let selectedUnit = GetTriggerUnit()
+
+  let panel = g_playerSurvivorJobPanels.get(p)
+  if (panel == null)
+    return
+
+  if (GetTriggerEventId() == EVENT_PLAYER_UNIT_SELECTED and g_waitingToBeSelected.has(selectedUnit))
+    g_waitingToBeSelected.remove(selectedUnit)
+    panel.batchUpdates(false)
+    return
+  
+  panel.update()
+
+// ============================================================================
+function _onSurvivorJobPreChanged()
+  let survivor = getJobChangingSurvivor_PreJobChange()
+  let panel = g_playerSurvivorJobPanels.get(survivor.getOwner())
+  if (panel == null)
+    return
+  panel.batchUpdates(true)
+
+  if (survivor.isSelectedByOwner())
+    g_wasSelected.add(survivor)
+
+// ============================================================================
+function _onSurvivorJobPostChanged()
+  let survivorPre = getJobChangingSurvivor_PreJobChange()
+  let survivorPost = getJobChangingSurvivor_PostJobChange()
+
+  let panel = g_playerSurvivorJobPanels.get(survivorPre.getOwner())
+  if (panel == null)
+    return
+  
+  if (g_wasSelected.has(survivorPre))
+    g_wasSelected.remove(survivorPre)
+    g_waitingToBeSelected.add(survivorPost)
+  else
+    panel.batchUpdates(false)
+
+// ============================================================================
+function onUnitLeveledUp()
+  let hero = GetLevelingUnit()
+  let panel = g_playerSurvivorJobPanels.get(hero.getOwner())
+  if (panel != null)
+    panel.update()
+
+// ============================================================================
+init
+  ensureTocIsLoaded()
+
+  nullTimer() () ->
+    for p in g_PlayingHumanPlayers
+      let survivorJobPanel = new SurvivorJobPanel()
+      ..setPlayer(p)
+      ..initialize()
+      ..hide()
+      g_playerSurvivorJobPanels.put(p, survivorJobPanel)
+
+  for p in g_PlayingHumanPlayers
+    let playerSelectionChangedTrigger = CreateTrigger()
+    playerSelectionChangedTrigger.addCondition(Condition(function onSelectionChanged))
+    TriggerRegisterPlayerUnitEvent(playerSelectionChangedTrigger, p, EVENT_PLAYER_UNIT_SELECTED, null)
+    TriggerRegisterPlayerUnitEvent(playerSelectionChangedTrigger, p, EVENT_PLAYER_UNIT_DESELECTED, null)
+
+  onSurvivorJobPreChanged(function _onSurvivorJobPreChanged)
+  onSurvivorJobPostChanged(function _onSurvivorJobPostChanged)
+  registerPlayerUnitEvent(EVENT_PLAYER_HERO_LEVEL, function onUnitLeveledUp)

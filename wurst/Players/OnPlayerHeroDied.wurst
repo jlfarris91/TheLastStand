@@ -17,22 +17,31 @@ import Unit_StoneWall
 import Unit_MetalWall
 import Unit_GateCommon
 import Unit_BrickWall
+import HeroHeart
 
 // ============================================================================
 function disableFogOfWarForPlayer(player p)
   createVision(p, GetPlayableMapRect(), false).start()
 
 // ============================================================================
-function onPlayerHeroDied(HumanPlayerMetadata playerMetadata)
-  playerMetadata.setDisplayName("<Deceased>")
+function onPlayerHeroDiedDuringGracePeriod(player _player)
+  displayMessageToPlayer(_player, "Grace Period".colorize(Colors.gold) + " Your hero will be respawned at the start of the next day")
 
-  let _player = playerMetadata.getPlayer()
+// ============================================================================
+function onPlayerHeroDiedAfterGracePeriod(player _player, unit hero)
+  displayMessageToPlayer(_player, "Heart of a Hero".colorize(Colors.gold) + " Bring your hero's heart item back to your camp to revive them for a price.")
+  createHeartItemForHero(hero)
 
+// ============================================================================
+function onPlayerHeroDied(player _player, unit hero)
   if (GameSettings.allowRespawn and g_GameInstance.isGracePeriodActive())
-    displayMessageToPlayer(_player, "Grace Period".colorize(Colors.gold) + " Your hero will be respawned at the start of the next day")
+    onPlayerHeroDiedDuringGracePeriod(_player)
   else
-    onPlayerLostGame(_player)
+    onPlayerHeroDiedAfterGracePeriod(_player, hero)
 
+// ============================================================================
+function onPlayerCampDied(player _player)
+  onPlayerLostGame(_player)
   processRemainingPlayerUnits(_player)
 
 // ============================================================================
@@ -41,28 +50,39 @@ function onPlayerUnitDied()
   let owner = dyingUnit.getOwner()
   let playerMetadata = owner.getMetadata() castTo HumanPlayerMetadata
 
+  // If the killing unit is null then I must have destroyed the unit through the magic of programming
+  let killingUnit = GetKillingUnit()
+  if (killingUnit == null)
+    return
+
   if (playerMetadata == null)
     return
 
+  let _player = playerMetadata.getPlayer()
+
   let hero = playerMetadata.getHero()
-  if (hero == null)
-    return
+  if (hero != null)
+    let heroUnit = hero.getUnit()
+    if (heroUnit != null and dyingUnit == heroUnit)
+      onPlayerHeroDied(_player, heroUnit)
 
-  let heroUnit = hero.getUnit()
-  if (heroUnit == null)
-    return
-
-  if (dyingUnit == heroUnit)
-    onPlayerHeroDied(playerMetadata)
+  if (dyingUnit.isCampHeadquarters())
+    onPlayerCampDied(_player)
 
 // ============================================================================
 function onPlayerLostGame(player _player)
   
-  disableFogOfWarForPlayer(_player)
+  let metadata = _player.getHumanMetadata()
+  if (metadata != null)
+    metadata.setHasLostGame(true)
+    metadata.setDisplayName(metadata.getName() + " <Lost>")
 
-  displayMessageToPlayer(_player, "Your hero has died. The game is over for you.".colorize(Colors.red))
+  disableFogOfWarForPlayer(_player)
+  displayMessageToPlayer(_player, "Your camp tent has been destroyed. The game is over for you.".colorize(Colors.red))
   displayMessageToPlayer(_player, "If you have any feedback or would like to be alerted when new versions are released please join the Last Stand Discord server!")
   displayMessageToPlayer(_player, DISCORD_LINK.colorize(Colors.gold))
+
+  displayMessageToAllExceptPlayer(_player, "{0} has lost the game".format(_player.getNameColored()))
 
 // ============================================================================
 function onPlayerLeftGame()
@@ -70,9 +90,8 @@ function onPlayerLeftGame()
   
   let metadata = leavingPlayer.getHumanMetadata()
   if (metadata != null)
-  
     metadata.setHasLeftGame(true)
-    metadata.setDisplayName("<Left>")
+    metadata.setDisplayName(metadata.getName() + " <Left>")
 
     // Remove their hero
     let hero = metadata.getHero()
@@ -84,6 +103,8 @@ function onPlayerLeftGame()
   g_PlayingHumanPlayers.removePlayer(leavingPlayer)
   
   processRemainingPlayerUnits(leavingPlayer)
+
+  displayMessageToAllExceptPlayer(leavingPlayer, "{0} has left the game".format(leavingPlayer.getNameColored()))
 
 // ============================================================================
 function shouldBeDestroyed(unit _unit) returns bool
@@ -110,13 +131,6 @@ function shouldBanishUnit(unit _unit) returns bool
 
 // ============================================================================
 function processRemainingPlayerUnits(player _player)
-  
-  unit playerHeroUnit = null
-  let playerMetadata = _player.getHumanMetadata()
-  if (playerMetadata != null)
-    let playerHero = playerMetadata.getHero()
-    if (playerHero != null)
-      playerHeroUnit = playerHero.getUnit()
 
   let tempGroup = getGroup()
   tempGroup.enumUnitsOfPlayer(_player, null)
@@ -132,10 +146,14 @@ function processRemainingPlayerUnits(player _player)
       else if (shouldBanishUnit(u))
         banishSurvivor(u)
       // Finally, just remove the unit from the game
-      else if (u != playerHeroUnit)
+      else
         u.remove()
 
   tempGroup.release()
+
+  let heroItem = getHeartItem(_player)
+  if (heroItem != null)
+    destroyHeroHeartItem(heroItem)
 
 // ============================================================================
 init

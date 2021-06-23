@@ -4,7 +4,9 @@ import HashMap
 import HashList
 import TlsJobItemIds
 import Vector
+import LinkedList
 
+public LinkedList<SurvivorJobDefinition> g_allJobDefinitions = new LinkedList<SurvivorJobDefinition>()
 HashMap<int, SurvivorJobDefinition> g_unitTypeToJobMap = new HashMap<int, SurvivorJobDefinition>()
 HashMap<int, SurvivorJobDefinition> g_itemTypeToJobMap = new HashMap<int, SurvivorJobDefinition>()
 
@@ -16,6 +18,7 @@ public class SurvivorJobDefinition
   private Vector<int> m_unitTypes
   private HashList<int> m_equivalentUnitTypes
   private HashMap<int, int> m_upgradeMap
+  private HashMap<player, bool> m_jobIsKnownToPlayer
 
   // --------------------------------------------------------------------------
   construct(string id, string title, int itemType)
@@ -26,6 +29,8 @@ public class SurvivorJobDefinition
     m_unitTypes = new Vector<int>(8)
     m_equivalentUnitTypes = new HashList<int>()
     m_upgradeMap = new HashMap<int, int>()
+    m_jobIsKnownToPlayer = new HashMap<player, bool>()
+    g_allJobDefinitions.add(this)
 
   // --------------------------------------------------------------------------
   ondestroy
@@ -37,6 +42,9 @@ public class SurvivorJobDefinition
 
     destroy m_upgradeMap
     m_upgradeMap = null
+
+    destroy m_jobIsKnownToPlayer
+    m_jobIsKnownToPlayer = null
 
   // --------------------------------------------------------------------------
   function getId() returns string
@@ -82,6 +90,33 @@ public class SurvivorJobDefinition
   function hasUnitType(int unitType) returns bool
     return m_equivalentUnitTypes.has(unitType)
 
+  // --------------------------------------------------------------------------
+  function getIsJobKnownToPlayer(player p) returns bool
+    return m_jobIsKnownToPlayer.get(p)
+  
+  // --------------------------------------------------------------------------
+  function setIsJobKnownToPlayer(player p, bool value)
+    m_jobIsKnownToPlayer.put(p, value)
+
+  // --------------------------------------------------------------------------
+  function getUpgradeTier(int unitType) returns int
+    if (getInitialUnitType() == unitType)
+      return 0
+    for ut in m_unitTypes
+      let tier = getUpgradeTierRecursive(ut, unitType, 1)
+      if (tier != -1)
+        return tier
+    return -1
+  
+  // --------------------------------------------------------------------------
+  private function getUpgradeTierRecursive(int currUnitType, int unitType, int tier) returns int
+    if (not m_upgradeMap.has(currUnitType))
+      return -1
+    let upgradeUnitType = m_upgradeMap.get(currUnitType)
+    if (upgradeUnitType == unitType)
+      return tier
+    return getUpgradeTierRecursive(upgradeUnitType, unitType, tier + 1)
+
 // ============================================================================
 public class SurvivorJobs
   static constant SurvivorJobDefinition none = new SurvivorJobDefinition("none", "Survivor", -1)
@@ -91,6 +126,7 @@ public class SurvivorJobs
   static constant SurvivorJobDefinition medic = new SurvivorJobDefinition("medic", "Medic", TlsJobItemIds.medic1)
   static constant SurvivorJobDefinition marksman = new SurvivorJobDefinition("marksman", "Marksman", TlsJobItemIds.marksman1)
   static constant SurvivorJobDefinition engineer = new SurvivorJobDefinition("engineer", "Engineer", TlsJobItemIds.engineer1)
+  static constant SurvivorJobDefinition acolyte = new SurvivorJobDefinition("acolyte", "Acolyte", TlsJobItemIds.acolyte1)
 
 // ============================================================================
 public function getJobDefinitionForUnitType(int unitType) returns SurvivorJobDefinition
@@ -127,6 +163,10 @@ init
   // Medic
   SurvivorJobs.medic
   ..registerUnitType(TlsUnitIds.Survivors.survivorMedic)
+
+  // Acolyte
+  SurvivorJobs.acolyte
+  ..registerUnitType(TlsUnitIds.Survivors.survivorAcolyte1)
 
   // Marksman
   SurvivorJobs.marksman

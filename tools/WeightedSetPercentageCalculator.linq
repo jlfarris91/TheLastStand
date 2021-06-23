@@ -3,17 +3,18 @@
 void Main()
 {
 	Console.WriteLine("Small");
-	CalculateWeights(0.2f, 5.0f, 2.0f);
+	CalcualtePercentages(0.2f, 5.0f, 2.0f);
 	
 	Console.WriteLine("\nMedium");
-	CalculateWeights(0.3f, 5.0f, 2.0f, 0.4f, 0.5f);
+	CalcualtePercentages(0.3f, 5.0f, 2.0f, 0.4f, 0.5f);
 	
 	Console.WriteLine("\nLarge");
-	CalculateWeights(0.6f, 5.0f, 2.0f, 0.5f, 1.0f);
+	//CalcualtePercentages(0.6f, 5.0f, 2.0f, 0.5f, 1.0f);
+	CalcualtePercentages(7f, 50f, 24f, 6f, 13f);
 }
 
 // You can define other methods, fields, classes and namespaces here
-public void CalculateWeights(params float[] weights)
+public void CalcualtePercentages(params float[] weights)
 {
 	var total = weights.Sum();
 	int i = 0;

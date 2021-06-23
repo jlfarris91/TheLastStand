@@ -13,18 +13,40 @@ import initlater SurvivorUnit
 
 group g_temp = CreateGroup()
 
-// ============================================================================
-function filterUnitIsSurvivorMale() returns bool
-  return GetFilterUnit().getTypeId() == TlsUnitIds.Survivors.survivorMale
+trigger g_onSurvivorJobPreChange = CreateTrigger()
+trigger g_onSurvivorJobPostChange = CreateTrigger()
+unit g_jobChangingSurvivorPre
+unit g_jobChangingSurvivorPost
 
 // ============================================================================
-function countNumberOfJoblessSurvivors(player p) returns int
-  let filter = Condition(function filterUnitIsSurvivorMale)
-  g_temp.clear()
-  g_temp.enumUnitsOfPlayer(p, filter)
-  let count = g_temp.size()
-  filter.destr()
-  return count
+public function onSurvivorJobPreChanged(code func)
+  g_onSurvivorJobPreChange.addCondition(Condition(func))
+
+// ============================================================================
+public function onSurvivorJobPostChanged(code func)
+  g_onSurvivorJobPostChange.addCondition(Condition(func))
+
+// ============================================================================
+public function getJobChangingSurvivor_PreJobChange() returns unit
+  return g_jobChangingSurvivorPre
+
+// ============================================================================
+public function getJobChangingSurvivor_PostJobChange() returns unit
+  return g_jobChangingSurvivorPost
+
+// ============================================================================
+function raiseSurvivorJobPreChangeEvent(unit _unit)
+  g_jobChangingSurvivorPre = _unit
+  g_onSurvivorJobPreChange.evaluate()
+  g_jobChangingSurvivorPre = null
+
+// ============================================================================
+function raiseSurvivorJobPostChangeEvent(unit preUnit, unit postUnit)
+  g_jobChangingSurvivorPre = preUnit
+  g_jobChangingSurvivorPost = postUnit
+  g_onSurvivorJobPostChange.evaluate()
+  g_jobChangingSurvivorPre = null
+  g_jobChangingSurvivorPost = null
 
 // ============================================================================
 public class SurvivorJobChangeComponent extends UnitComponent
@@ -61,14 +83,15 @@ public class SurvivorJobChangeComponent extends UnitComponent
       Log.debug("SurvivorJobChangeComponent", "changeJobs", ownerUnit.getName(), "Failed to change to job " + job.getTitle() + " : survivor has no related job data")
       return false
 
+    raiseSurvivorJobPreChangeEvent(ownerUnit)
+
+    // The player has learned about this job now that they have assigned the job
+    job.setIsJobKnownToPlayer(ownerUnit.getOwner(), true)
+
     let replacementUnitId = jobData.getUnitId()
     let replacedUnit = replaceUnit(replacementUnitId)
-  
-    let oldJob = getJobDefinitionForUnitType(unitType)
-    if (oldJob != SurvivorJobs.none)
-      let jobItemType = oldJob.getItemType()
-      let jobItem = g_MainItemLibrary.createItem(jobItemType, replacedUnit.getPos())
-      UnitAddItemSwapped(jobItem, replacedUnit)
+
+    raiseSurvivorJobPostChangeEvent(ownerUnit, replacedUnit)
 
     return true
 
@@ -89,7 +112,9 @@ public class SurvivorJobChangeComponent extends UnitComponent
     if (jobData == null)
       return false
 
-    replaceUnit(nextUnitId)
+    raiseSurvivorJobPreChangeEvent(ownerUnit)
+
+    let replacedUnit = replaceUnit(nextUnitId)
 
     // There is a bug with upgrading non-building units where the player is not
     // charged for the upgrade - so do that now.
@@ -100,6 +125,8 @@ public class SurvivorJobChangeComponent extends UnitComponent
       p.subLumber(nextUnitDef.getLumberCost())
     else
       Log.debug("SurvivorJobChangeComponent", "changeJobs", ownerUnit.getName(), "No definition registered for unit type {0}".format(nextUnitId.toString()))
+
+    raiseSurvivorJobPostChangeEvent(ownerUnit, replacedUnit)
 
     return true
 
@@ -133,26 +160,36 @@ function onUnitUsedItem()
   if (not manipulatedItem.isJobItem())
     return
 
-  let metadata = manipulatingUnit.getMetadata()
-  if (metadata == null)
+  let survivor = manipulatingUnit.getMetadata() castTo Survivor
+  if (survivor == null)
     return
 
-  let comp = metadata.getSurvivorJobChangeComponent()
+  let comp = survivor.getSurvivorJobChangeComponent()
   if (comp == null or not comp.getEnabled())
     displayMessageToPlayer(manipulatingUnit.getOwner(), "This item can only be used by a survivor")
     return
 
-  let jobId = getJobDefinitionForItemType(manipulatedItem.getTypeId())
-  if (jobId == null)
+  let jobDef = getJobDefinitionForItemType(manipulatedItem.getTypeId())
+  if (jobDef == null)
     Log.debug("[onUnitUsedItem] jobId is null for item type " + manipulatedItem.getName())
     return
 
-  if (jobId == SurvivorJobs.none)
+  if (jobDef == SurvivorJobs.none)
     Log.debug("[onUnitUsedItem] Somehow the jobid equals SurvivorJobs.none for item type " + manipulatedItem.getName())
     return
 
-  if (comp.changeJobs(jobId))
-    manipulatedItem.remove()
+  let jobData = survivor.getSurvivorComponent().getSurvivorData().getJobData(jobDef)
+  if (jobData.getIsEnabled())
+    displayMessageToPlayer(manipulatingUnit.getOwner(), "This survivor has already been assigned this job")
+    return
+
+  if (not comp.changeJobs(jobDef))
+    return
+  
+  manipulatedItem.remove()
+
+  // Enable the job
+  jobData.setIsEnabled(true)
 
 // ============================================================================
 function onOrderIssued()
@@ -184,12 +221,19 @@ function onUnitKilled()
   if (not dyingUnit.isSurvivor())
     return
 
-  let job = getJobDefinitionForUnitType(dyingUnit.getTypeId())
-  if (job == SurvivorJobs.none)
+  let survivor = dyingUnit.getMetadata() castTo Survivor
+  if (survivor == null)
     return
 
-  let jobItemType = job.getItemType()
-  g_MainItemLibrary.createItem(jobItemType, dyingUnit.getPos())
+  let survivorData = survivor.getSurvivorComponent().getSurvivorData()
+
+  // Create an item for each enabled job
+  for jobDef in g_allJobDefinitions
+    let jobData = survivorData.getJobData(jobDef)
+    if (jobData.getIsEnabled())
+      let jobItemType = jobDef.getItemType()
+      g_MainItemLibrary.createItem(jobItemType, dyingUnit.getPos())
+      jobData.setIsEnabled(false)
 
 // ============================================================================
 init

@@ -1,0 +1,64 @@
+package HeroHeart
+import MainItemLibrary
+import TlsItemIds
+import HashMap
+import ItemEvents
+import TlsUnitIds
+import ClosureTimers
+import DisplayTextToPlayer
+
+HashMap<player, item> g_playerHearts = new HashMap<player, item>()
+
+// ============================================================================
+public function createHeartItemForHero(unit hero) returns item
+
+  let heroOwner = hero.getOwner()
+
+  var heartItem = getHeartItem(heroOwner)
+  if (heartItem == null)
+    heartItem = g_MainItemLibrary.createItem(TlsItemIds.heart, hero.getPos())
+    if (heartItem == null)
+      Log.debug("Could not create heart item for hero")
+      return null
+
+  heartItem.setPos(hero.getPos())
+  heartItem.setUserData(hero.getHandleId())
+
+  g_playerHearts.put(heroOwner, heartItem)
+
+  return heartItem
+
+// ============================================================================
+public function getHeartItem(player _player) returns item
+  return g_playerHearts.get(_player)
+
+// ============================================================================
+public function getHeartHero(item heartItem) returns unit
+  let unitIndex = heartItem.getUserData()
+  let heartUnit = unitFromIndex(unitIndex)
+  if (heartUnit == null)
+    Log.error("Could not find owner of heart item " + unitIndex.toString())
+  return heartUnit
+
+// ============================================================================
+public function destroyHeroHeartItem(item heartItem)
+  let heartUnit = getHeartHero(heartItem)
+  g_playerHearts.remove(heartUnit.getOwner())
+  heartItem.remove()
+
+// ============================================================================
+function onHeartAcquired(unit manipulatingUnit, item manipulatedItem)
+  let heroUnit = getHeartHero(manipulatedItem)
+  let heroOwner = heroUnit.getOwner()
+  let manOwner = manipulatingUnit.getOwner()
+  let manipulatingUnitIsAcoltye = manipulatingUnit.isAcolyte()
+  let manipulatingUnitIsAltar = manipulatingUnit.getTypeId() == TlsUnitIds.altar
+
+  if (not (manipulatingUnitIsAcoltye or manipulatingUnitIsAltar) or not manOwner.isAllyOf(heroOwner))
+    displayMessageToPlayer(manOwner, "Only friendly Acolytes can pick up a hero's heart")
+    nullTimer(() -> manipulatingUnit.dropItemPoint(manipulatedItem, manipulatingUnit.getPos()))
+    return
+
+// ============================================================================
+init
+  registerItemAcquiredEvent(TlsItemIds.heart, (u, i) -> onHeartAcquired(u, i))
