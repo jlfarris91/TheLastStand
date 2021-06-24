@@ -1,12 +1,14 @@
 package GhostComponent
 import UnitComponent
-import Time
 import HashList
 import AbilityObjEditing
 import ObjectIdGenerator
+import ClosureTimers
 
+constant real ETHEREAL_TOGGLE_INTERVAL = 10.0
 constant int DOT_ABILITY_ID = compiletime(ABIL_ID_GEN.next())
 HashList<unit> g_ghosts = new HashList<unit>()
+CallbackPeriodic g_toggleEtherealTimer
 
 // ============================================================================
 public class GhostComponent extends UnitComponent
@@ -22,12 +24,16 @@ public class GhostComponent extends UnitComponent
   // --------------------------------------------------------------------------
   override function onEnabled()
     super.onEnabled()
-    g_ghosts.add(getOwnerUnit())
+    let ownerUnit = getOwnerUnit()
+    registerGhost(ownerUnit)
+    ownerUnit.addAbility(AbilityIds.ethereal)
 
   // --------------------------------------------------------------------------
   override function onDisabled()
     super.onDisabled()
-    g_ghosts.remove(getOwnerUnit())
+    let ownerUnit = getOwnerUnit()
+    unregisterGhost(ownerUnit)
+    ownerUnit.removeAbility(AbilityIds.ethereal)
 
 // ============================================================================
 public function IUnitMetadata.getGhostComponent() returns GhostComponent
@@ -41,13 +47,24 @@ public function IUnitMetadata.getOrAddGhostComponent() returns GhostComponent
   return component
 
 // ============================================================================
-init
+function registerGhost(unit ghost)
+  g_ghosts.add(ghost)
+  
+  if (g_ghosts.size() == 1 and g_toggleEtherealTimer == null)
+    g_toggleEtherealTimer = doPeriodically(ETHEREAL_TOGGLE_INTERVAL, (CallbackPeriodic cb) -> toggleGhostEthereal())
 
-  new AbilityDefinitionUnholyAuracreep(DOT_ABILITY_ID)
-    ..setTargetsAllowed(1, "self")
-    ..setLifeRegenerationIncrease(1, -0.1)
-    ..setMovementSpeedIncrease(1, -0.6)
+// ============================================================================
+function toggleGhostEthereal()
+  for g in g_ghosts
+    if (g.hasAbility(AbilityIds.ethereal))
+      g.removeAbility(AbilityIds.ethereal)
+    else
+      g.addAbility(AbilityIds.ethereal)
 
-  registerDayEvent() () ->
-    for ghost in g_ghosts
-      ghost.addAbility(DOT_ABILITY_ID)
+// ============================================================================
+function unregisterGhost(unit ghost)
+  g_ghosts.remove(ghost)
+  
+  if (g_ghosts.size() == 0 and g_toggleEtherealTimer != null)
+    destroy g_toggleEtherealTimer
+    g_toggleEtherealTimer = null
