@@ -76,6 +76,7 @@ public class UndeadTargetingComponent extends UnitComponent
   protected int m_attackTime
   protected bool m_awaitingOrder
   protected bool m_dealingDOT
+  protected bool m_preferOrganicTargets
 
   // --------------------------------------------------------------------------
   construct(IUnitMetadata owner)
@@ -84,6 +85,7 @@ public class UndeadTargetingComponent extends UnitComponent
     m_targetUnit = null
     m_awaitingOrder = false
     m_dealingDOT = false
+    m_preferOrganicTargets = false
 
   // --------------------------------------------------------------------------
   ondestroy
@@ -136,6 +138,13 @@ public class UndeadTargetingComponent extends UnitComponent
   // --------------------------------------------------------------------------
   function getTargetPlayer() returns player
     return m_targetPlayer
+
+  // --------------------------------------------------------------------------
+  function getPreferOrganicTargets() returns bool
+    let ownerUnit = getOwnerUnit()
+    // prefer organic targets if the undead unit is ranged
+    return ownerUnit.getFieldWeapon(UNIT_WEAPON_RF_ATTACK_RANGE, 0) > 100.0 or
+           ownerUnit.getFieldWeapon(UNIT_WEAPON_RF_ATTACK_RANGE, 1) > 100.0
 
   // --------------------------------------------------------------------------
   function setTargetPlayer(player targetPlayer) returns bool
@@ -279,15 +288,30 @@ public class UndeadTargetingComponent extends UnitComponent
     let ownerUnit = getOwnerUnit()
     unit targetUnit
 
-    // Try to attack the nearest structure
-    targetUnit = getClosestValidHumanStructureTarget(targetPlayer, ownerUnit.getPos())
-    if (targetUnit != null)
-      m_targetUnit = targetUnit
-      return ownerUnit.issueTargetOrderById(OrderIds.attack, m_targetUnit)
-
-    // There are no structures to attack? Try attacking a non-structure unit then
-    if (targetUnit == null)
+    if (getPreferOrganicTargets())
+    //{
+      // Try to attack the nearest organic unit
       targetUnit = getNearestUnitOfPlayer(targetPlayer, ownerUnit.getPos(), g_filterUnitIsValidTargetNonStructure)
+      if (targetUnit != null)
+        m_targetUnit = targetUnit
+        return ownerUnit.issueTargetOrderById(OrderIds.attack, m_targetUnit)
+
+      // There are no organic units to attack? Try attacking a non-structure unit then
+      if (targetUnit == null)
+        targetUnit = getClosestValidHumanStructureTarget(targetPlayer, ownerUnit.getPos())
+    //}
+    else
+    //{
+      // Try to attack the nearest structure
+      targetUnit = getClosestValidHumanStructureTarget(targetPlayer, ownerUnit.getPos())
+      if (targetUnit != null)
+        m_targetUnit = targetUnit
+        return ownerUnit.issueTargetOrderById(OrderIds.attack, m_targetUnit)
+
+      // There are no structures to attack? Try attacking a non-structure unit then
+      if (targetUnit == null)
+        targetUnit = getNearestUnitOfPlayer(targetPlayer, ownerUnit.getPos(), g_filterUnitIsValidTargetNonStructure)
+    //}
 
     if (targetUnit != null)
       setTargetUnit_impl(targetUnit)
