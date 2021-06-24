@@ -4,29 +4,43 @@ import HashList
 import AbilityObjEditing
 import ObjectIdGenerator
 import ClosureTimers
+import RegisterEvents
+import TlsUnitIds
+import Orders
 
 constant real ETHEREAL_TOGGLE_INTERVAL = 10.0
+constant real ETHEREAL_MOVE_RANGE = 256.0
 constant int DOT_ABILITY_ID = compiletime(ABIL_ID_GEN.next())
 HashList<unit> g_ghosts = new HashList<unit>()
 CallbackPeriodic g_toggleEtherealTimer
 
 // ============================================================================
 public class GhostComponent extends UnitComponent
+  private unit m_lastAttackedUnit
 
   // --------------------------------------------------------------------------
   construct (IUnitMetadata owner)
     super(owner)
+    m_lastAttackedUnit = null
 
   // --------------------------------------------------------------------------
   override function getTypeId() returns int
     return GhostComponent.typeId
 
   // --------------------------------------------------------------------------
+  function setLastAttackedUnit(unit attackedUnit)
+    m_lastAttackedUnit = attackedUnit
+
+  // --------------------------------------------------------------------------
+  function getLastAttackedUnit() returns unit
+    return m_lastAttackedUnit
+
+  // --------------------------------------------------------------------------
   override function onEnabled()
     super.onEnabled()
     let ownerUnit = getOwnerUnit()
     registerGhost(ownerUnit)
-    ownerUnit.addAbility(AbilityIds.ethereal)
+    m_lastAttackedUnit = null
 
   // --------------------------------------------------------------------------
   override function onDisabled()
@@ -34,6 +48,7 @@ public class GhostComponent extends UnitComponent
     let ownerUnit = getOwnerUnit()
     unregisterGhost(ownerUnit)
     ownerUnit.removeAbility(AbilityIds.ethereal)
+    m_lastAttackedUnit = null
 
 // ============================================================================
 public function IUnitMetadata.getGhostComponent() returns GhostComponent
@@ -56,10 +71,31 @@ function registerGhost(unit ghost)
 // ============================================================================
 function toggleGhostEthereal()
   for g in g_ghosts
+  //{
     if (g.hasAbility(AbilityIds.ethereal))
       g.removeAbility(AbilityIds.ethereal)
     else
       g.addAbility(AbilityIds.ethereal)
+
+    if (g.getCurrentOrder() != OrderIds.move)
+    //{
+      let metadata = g.getMetadata()
+      if (metadata != null)
+        let comp = metadata.getGhostComponent()
+        if (comp != null)
+        //{
+          let lastAttackedUnit = comp.getLastAttackedUnit()
+          vec2 targetPos
+          // If there was no previously attacked unit just move to a random point in the area
+          if (lastAttackedUnit == null)
+            targetPos = g.getPos().polarOffset(GetRandomDirectionDeg().asAngleDegrees(), ETHEREAL_MOVE_RANGE)
+          // else move across the unit
+          else
+            targetPos = lastAttackedUnit.getPos() + (lastAttackedUnit.getPos() - g.getPos()).norm() * ETHEREAL_MOVE_RANGE
+          g.issuePointOrderById(OrderIds.move, targetPos)
+        //}
+    //}
+  //}
 
 // ============================================================================
 function unregisterGhost(unit ghost)
@@ -68,3 +104,25 @@ function unregisterGhost(unit ghost)
   if (g_ghosts.size() == 0 and g_toggleEtherealTimer != null)
     destroy g_toggleEtherealTimer
     g_toggleEtherealTimer = null
+
+// ============================================================================
+function onUnitAttacked()
+  let attackedUnit = GetAttackedUnitBJ()
+  let attackingUnit = GetAttacker()
+
+  if (attackingUnit.getTypeId() != TlsUnitIds.Undead.ghost)
+    return
+
+  let metadata = attackingUnit.getMetadata()
+  if (metadata == null)
+    return
+
+  let comp = metadata.getGhostComponent()
+  if (comp == null)
+    return
+
+  comp.setLastAttackedUnit(attackedUnit)
+
+// ============================================================================
+init
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ATTACKED, function onUnitAttacked)
