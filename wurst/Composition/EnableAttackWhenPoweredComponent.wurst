@@ -3,11 +3,11 @@ import UnitComponent
 import Events
 import PoweredComponent
 
-constant POWER_CONSUMPTION_RATE = 2.0
-
 // ============================================================================
 public class EnableAttackWhenPoweredComponent extends UnitComponent
   private PoweredComponent m_poweredComp
+  private EventCallback m_poweredCallback
+  private EventCallback m_unpoweredCallback
 
   // --------------------------------------------------------------------------
   construct (IUnitMetadata metadata)
@@ -21,18 +21,38 @@ public class EnableAttackWhenPoweredComponent extends UnitComponent
   override function onEnabled()
     super.onEnabled()
 
+    let ownerUnit = getOwnerUnit()
     m_poweredComp = getOwner().getOrAddPoweredComponent()
-    m_poweredComp.setPowerConsumptionRate(POWER_CONSUMPTION_RATE)
-    m_poweredComp.poweredCallback = () -> onPowered()
-    m_poweredComp.unpoweredCallback = () -> onUnpowered()
+    m_poweredCallback = m_poweredComp.powered.register(() -> onPowered(ownerUnit))
+    m_unpoweredCallback = m_poweredComp.unpowered.register(() -> onUnpowered(ownerUnit))
 
   // --------------------------------------------------------------------------
   override function onDisabled()
     super.onDisabled()
+
+    if (m_poweredCallback != null)
+      destroy m_poweredCallback
+      m_poweredCallback = null
+
+    if (m_unpoweredCallback != null)
+      destroy m_unpoweredCallback
+      m_unpoweredCallback = null
+
+  // --------------------------------------------------------------------------
+  private static function onPowered(unit ownerUnit)
+    let comp = ownerUnit.getEnableAttackWhenPoweredComponent()
+    if (comp != null)
+      comp.onPowered()
     
   // --------------------------------------------------------------------------
   private function onPowered()
     getOwnerUnit().setFieldWeapon(UNIT_WEAPON_BF_ATTACKS_ENABLED, 0, true)
+
+  // --------------------------------------------------------------------------
+  private static function onUnpowered(unit ownerUnit)
+    let comp = ownerUnit.getEnableAttackWhenPoweredComponent()
+    if (comp != null)
+      comp.onUnpowered()
 
   // --------------------------------------------------------------------------
   private function onUnpowered()
@@ -48,3 +68,17 @@ public function IUnitMetadata.getOrAddEnableAttackWhenPoweredComponent() returns
   if (component == null)
     component = this.addComponent(new EnableAttackWhenPoweredComponent(this)) castTo EnableAttackWhenPoweredComponent
   return component
+
+// ============================================================================
+public function unit.getEnableAttackWhenPoweredComponent() returns EnableAttackWhenPoweredComponent
+  let metadata = this.getMetadata()
+  if (metadata == null)
+    return null
+  return metadata.getEnableAttackWhenPoweredComponent()
+
+// ============================================================================
+public function unit.getOrAddEnableAttackWhenPoweredComponent() returns EnableAttackWhenPoweredComponent
+  let metadata = this.getMetadata()
+  if (metadata == null)
+    return null
+  return metadata.getOrAddEnableAttackWhenPoweredComponent()

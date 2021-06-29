@@ -5,10 +5,18 @@ import Events
 import RegisterEvents
 import Loaded
 import Orders
+import HashList
+import HashMap
+import TlsUnitIds
+
+IterableMap<int, int> g_workerCountToCargoHoldAbilityId = new IterableMap<int, int>()
+IterableMap<int, int> g_workerCountToLoadAbilityId = new IterableMap<int, int>()
 
 // ============================================================================
 public class WorkspaceComponent extends UnitComponent
-  private unit m_loadedUnit
+  private HashList<unit> m_loadedUnits
+  private int m_maxWorkers
+  private int m_workerUnitType
 
   Event workerEntered
   Event workerExited
@@ -16,29 +24,70 @@ public class WorkspaceComponent extends UnitComponent
   // --------------------------------------------------------------------------
   construct (IUnitMetadata metadata)
     super(metadata)
+    m_maxWorkers = 1
+    m_workerUnitType = TlsUnitIds.Survivors.survivorMale
     workerEntered = new Event()
     workerExited = new Event()
-    m_loadedUnit = null
+    m_loadedUnits = new HashList<unit>()
 
   // --------------------------------------------------------------------------
   ondestroy
     destroy workerEntered
     destroy workerExited
+    destroy m_loadedUnits
 
   // --------------------------------------------------------------------------
   override function getTypeId() returns int
     return WorkspaceComponent.typeId
 
   // --------------------------------------------------------------------------
-  function getWorkerUnit() returns unit
-    return m_loadedUnit
+  function getWorkerUnits() returns HashList<unit>
+    return m_loadedUnits
 
   // --------------------------------------------------------------------------
-  function unloadWorker()
-    if (m_loadedUnit == null)
+  function getWorkerUnitCount() returns int
+    return m_loadedUnits.size()
+
+  // --------------------------------------------------------------------------
+  function unloadWorkers()
+    if (m_loadedUnits.isEmpty())
       return
     let ownerUnit = getOwnerUnit()
     ownerUnit.issuePointOrderById(OrderIds.unload, ownerUnit.getPos())
+
+  // --------------------------------------------------------------------------
+  function getMaxWorkers() returns int
+    return m_maxWorkers
+
+  // --------------------------------------------------------------------------
+  function setMaxWorkers(int value)
+    if (m_maxWorkers == value)
+      return
+    m_maxWorkers = value
+    let ownerUnit = getOwnerUnit()
+    for key in g_workerCountToCargoHoldAbilityId
+      let abilId = g_workerCountToCargoHoldAbilityId.get(key)
+      if (key == value)
+        ownerUnit.addAbility(abilId)
+      else
+        ownerUnit.removeAbility(abilId)
+
+  // --------------------------------------------------------------------------
+  function getWorkerUnitType() returns int
+    return m_workerUnitType
+
+  // --------------------------------------------------------------------------
+  function setWorkerUnitType(int workerUnitType)
+    if (m_workerUnitType == workerUnitType)
+      return
+    m_workerUnitType = workerUnitType
+    let ownerUnit = getOwnerUnit()
+    for key in g_workerCountToLoadAbilityId
+      let abilId = g_workerCountToLoadAbilityId.get(key)
+      if (key == workerUnitType)
+        ownerUnit.addAbility(abilId)
+      else
+        ownerUnit.removeAbility(abilId)
 
   // --------------------------------------------------------------------------
   override function onEnabled()
@@ -46,11 +95,11 @@ public class WorkspaceComponent extends UnitComponent
 
     let ownerUnit = getOwnerUnit()
 
-    if (not ownerUnit.hasAbility(TlsAbilityIds.workspaceCargoHold))
-      ownerUnit.addAbility(TlsAbilityIds.workspaceCargoHold)
+    if (not ownerUnit.hasAbility(TlsAbilityIds.workspaceCargoHold1))
+      ownerUnit.addAbility(TlsAbilityIds.workspaceCargoHold1)
 
-    if (not ownerUnit.hasAbility(TlsAbilityIds.workspaceLoad))
-      ownerUnit.addAbility(TlsAbilityIds.workspaceLoad)
+    if (not ownerUnit.hasAbility(TlsAbilityIds.workspaceLoadSurvivor))
+      ownerUnit.addAbility(TlsAbilityIds.workspaceLoadSurvivor)
 
     if (not ownerUnit.hasAbility(TlsAbilityIds.workspaceUnload))
       ownerUnit.addAbility(TlsAbilityIds.workspaceUnload)
@@ -59,40 +108,37 @@ public class WorkspaceComponent extends UnitComponent
   override function onDisabled()
     super.onDisabled()
 
-    unloadWorker()
+    unloadWorkers()
 
-    let ownerUnit = getOwnerUnit()
-    ownerUnit.removeAbility(TlsAbilityIds.workspaceCargoHold)
-    ownerUnit.removeAbility(TlsAbilityIds.workspaceLoad)
-    ownerUnit.removeAbility(TlsAbilityIds.workspaceUnload)
+    // Clears cargo hold and load abilities
+    setMaxWorkers(0)
+    setWorkerUnitType(0)
+
+    getOwnerUnit().removeAbility(TlsAbilityIds.workspaceUnload)
 
   // --------------------------------------------------------------------------
   protected function onUnitLoaded(unit loadedUnit)
-    if (m_loadedUnit != null)
-      Log.error("WorkspaceComponent", "onUnitLoaded", "", "A unit is already loaded")
+    if (m_loadedUnits.has(loadedUnit))
       return
-
-    m_loadedUnit = loadedUnit
+    m_loadedUnits.add(loadedUnit)
     onWorkerEntered()
     workerEntered.call()
 
   // --------------------------------------------------------------------------
   protected function onUnitUnloaded(unit loadedUnit)
-    if (m_loadedUnit != loadedUnit)
-      Log.error("WorkspaceComponent", "onUnitUnloaded", "", "A different unit was loaded")
-      return
-
-    onWorkerExited()
-    workerExited.call()
-    m_loadedUnit = null
+    if (m_loadedUnits.remove(loadedUnit))
+      onWorkerExited()
+      workerExited.call()
 
   // --------------------------------------------------------------------------
   private function onWorkerEntered()
-    getOwnerUnit().addAnimationProperties("work")
+    if (getWorkerUnitCount() == 1)
+      getOwnerUnit().addAnimationProperties("work")
 
   // --------------------------------------------------------------------------
   private function onWorkerExited()
-    getOwnerUnit().removeAnimationProperties("work")
+    if (getWorkerUnitCount() == 0)
+      getOwnerUnit().removeAnimationProperties("work")
 
 // ============================================================================
 public function IUnitMetadata.getWorkspaceComponent() returns WorkspaceComponent
@@ -135,3 +181,9 @@ function onUnitUnloaded()
 init
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_LOADED, function onUnitLoaded)
   registerUnitUnloadedEvent(function onUnitUnloaded)
+
+  g_workerCountToLoadAbilityId.put(1, TlsAbilityIds.workspaceCargoHold1)
+  g_workerCountToLoadAbilityId.put(2, TlsAbilityIds.workspaceCargoHold2)
+
+  g_workerCountToLoadAbilityId.put(TlsUnitIds.Survivors.survivorMale, TlsAbilityIds.workspaceLoadSurvivor)
+  g_workerCountToLoadAbilityId.put(TlsUnitIds.Survivors.survivorEngineer, TlsAbilityIds.workspaceLoadEngineer)

@@ -1,23 +1,27 @@
 package PoweredComponent
 import UnitComponent
-import PowerConsumerComponent
 import Events
+import PowerSourceComponent
 
 // ============================================================================
 public class PoweredComponent extends UnitComponent
-  private PowerConsumerComponent m_powerConsumer
-  private real m_powerConsumptionRate
+  private PowerSourceComponent m_powerSource
   private bool m_isPowered
 
-  Action poweredCallback
-  Action unpoweredCallback
+  Event powered
+  Event unpowered
 
   // --------------------------------------------------------------------------
   construct (IUnitMetadata metadata)
     super(metadata)
-    m_powerConsumer = null
-    poweredCallback = null
-    unpoweredCallback = null
+    m_powerSource = null
+    powered = new Event()
+    unpowered = new Event()
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    destroy powered
+    destroy unpowered
 
   // --------------------------------------------------------------------------
   override function getTypeId() returns int
@@ -28,36 +32,59 @@ public class PoweredComponent extends UnitComponent
     return m_isPowered
 
   // --------------------------------------------------------------------------
-  function setPowerConsumptionRate(real value)
-    m_powerConsumptionRate = value
-    if (m_powerConsumer != null)
-      m_powerConsumer.setPowerRequired(m_powerConsumptionRate)
-
-  // --------------------------------------------------------------------------
-  function getPowerConsumptionRate() returns real
-    return m_powerConsumptionRate
+  function getPowerSource() returns PowerSourceComponent
+    return m_powerSource
 
   // --------------------------------------------------------------------------
   override function onEnabled()
     super.onEnabled()
+    updatePoweredState()
 
   // --------------------------------------------------------------------------
-  override function onDisabled()
-    super.onDisabled()
+  function link(PowerSourceComponent powerSource) returns bool
+    if (m_powerSource != null)
+      unlink()
+    m_powerSource = powerSource
+    let poweredUnit = getOwnerUnit()
+    powerSource.powerChanged.register(() -> onPowerChanged(poweredUnit)) 
+    return true
 
   // --------------------------------------------------------------------------
-  function powered()
+  private static function onPowerChanged(unit poweredUnit)
+    let comp = poweredUnit.getPoweredComponent()
+    if (comp != null)
+      comp.onPowerSourcePowerChanged()
+
+  // --------------------------------------------------------------------------
+  private function onPowerSourcePowerChanged()
+    updatePoweredState()
+
+  // --------------------------------------------------------------------------
+  function unlink()
+    if (m_powerSource != null)
+      m_powerSource.unlink(this)
+      m_powerSource = null
+
+  // --------------------------------------------------------------------------
+  private function updatePoweredState()
+    if (m_powerSource != null and m_powerSource.getPower() > 0)
+      onPowered()
+    else
+      onUnpowered()
+
+  // --------------------------------------------------------------------------
+  function onPowered()
     if (m_isPowered)
       return
-    if (poweredCallback != null)
-      poweredCallback.call()
+    m_isPowered = true
+    powered.call()
 
   // --------------------------------------------------------------------------
-  function unpowered()
+  function onUnpowered()
     if (not m_isPowered)
       return
-    if (unpoweredCallback != null)
-      unpoweredCallback.call()
+    m_isPowered = false
+    unpowered.call()
 
 // ============================================================================
 public function IUnitMetadata.getPoweredComponent() returns PoweredComponent
@@ -69,3 +96,17 @@ public function IUnitMetadata.getOrAddPoweredComponent() returns PoweredComponen
   if (component == null)
     component = this.addComponent(new PoweredComponent(this)) castTo PoweredComponent
   return component
+
+// ============================================================================
+public function unit.getPoweredComponent() returns PoweredComponent
+  let metadata = this.getMetadata()
+  if (metadata == null)
+    return null
+  return metadata.getPoweredComponent()
+
+// ============================================================================
+public function unit.getOrAddPoweredComponent() returns PoweredComponent
+  let metadata = this.getMetadata()
+  if (metadata == null)
+    return null
+  return metadata.getOrAddPoweredComponent()

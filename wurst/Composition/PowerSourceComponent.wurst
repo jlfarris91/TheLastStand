@@ -1,65 +1,100 @@
 package PowerSourceComponent
 import UnitComponent
-import initlater PowerConsumerComponent
-import LinkedList
+import initlater PoweredComponent
+import Events
+import HashList
+import ClosureTimers
 
-// ============================================================================
-class PowerConsumerComparator implements Comparator<PowerConsumerComponent>
-  override function compare(PowerConsumerComponent a, PowerConsumerComponent b) returns int
-    return a.getPowerRequired() < b.getPowerRequired() ? -1 : 1
+constant real SUB_POWER_INTERVAL = 1.0
+HashList<unit> g_powerSources = new HashList<unit>()
+CallbackPeriodic g_powerSourceTimer
 
 // ============================================================================
 public class PowerSourceComponent extends UnitComponent
-  private LinkedList<PowerConsumerComponent> m_receivers
-  private real m_powerRate
-  private real m_powerRateRemaining
+  private HashList<PoweredComponent> m_consumers
+  private int m_maxConsumers
+  private real m_powerDepletionRatePerConsumer
+
+  Event powerChanged
 
   // --------------------------------------------------------------------------
   construct (IUnitMetadata metadata)
     super(metadata)
-    m_receivers = new LinkedList<PowerConsumerComponent>()
-    m_powerRate = 0
+    m_consumers = new HashList<PoweredComponent>()
+    m_powerDepletionRatePerConsumer = 1.0
+    powerChanged = new Event()
 
   // --------------------------------------------------------------------------
   ondestroy
-    destroy m_receivers
+    destroy m_consumers
+    destroy powerChanged
 
   // --------------------------------------------------------------------------
   override function getTypeId() returns int
     return PowerSourceComponent.typeId
 
   // --------------------------------------------------------------------------
-  function setPowerRate(real powerRate)
-    m_powerRate = powerRate
+  function getPower() returns real
+    return getOwnerUnit().getMana()
 
   // --------------------------------------------------------------------------
-  function getPowerRate() returns real
-    return m_powerRate
+  function setMaxConsumers(int value)
+    m_maxConsumers = value
 
   // --------------------------------------------------------------------------
-  function getPowerRateRemaining() returns real
-    return m_powerRateRemaining
+  function getMaxConsumers() returns int
+    return m_maxConsumers
 
   // --------------------------------------------------------------------------
-  function getRecievers() returns LinkedList<PowerConsumerComponent>
-    return m_receivers
+  function getConsumers() returns HashList<PoweredComponent>
+    return m_consumers
 
   // --------------------------------------------------------------------------
-  function tryLink(PowerConsumerComponent powerConsumer) returns bool
-    if (m_powerRateRemaining < powerConsumer.getPowerRequired())
+  function getPowerDepletionRatePerConsumer() returns real
+    return m_powerDepletionRatePerConsumer
+
+  // --------------------------------------------------------------------------
+  function setPowerDepletionRatePerConsumer(real value)
+    m_powerDepletionRatePerConsumer = value
+
+  // --------------------------------------------------------------------------
+  function generatePower(real value)
+    let ownerUnit = getOwnerUnit()
+    let prevMana = ownerUnit.getMana()
+    if (prevMana == ownerUnit.getMaxMana())
+      return
+    ownerUnit.addMana(value)
+    powerChanged.call()
+
+  // --------------------------------------------------------------------------
+  function tryGetPower(real power) returns real
+    let ownerUnit = getOwnerUnit()
+    let mana = ownerUnit.getMana()
+    let maxMana = ownerUnit.getMaxMana()
+    let powerToGive = min(power, maxMana - mana)
+    if (powerToGive > 0)
+      ownerUnit.subMana(powerToGive)
+    return powerToGive
+
+  // --------------------------------------------------------------------------
+  function tryLink(PoweredComponent powerConsumer) returns bool
+    if (m_consumers.size() == m_maxConsumers)
       return false
     link(powerConsumer)
     return true
 
   // --------------------------------------------------------------------------
-  private function link(PowerConsumerComponent consumer)
-    m_receivers.add(consumer)
-    m_powerRateRemaining -= consumer.getPowerRequired()
+  private function link(PoweredComponent consumer)
+    m_consumers.add(consumer)
 
   // --------------------------------------------------------------------------
-  function unlink(PowerConsumerComponent consumer)
-    if (m_receivers.remove(consumer))
-      m_powerRateRemaining += consumer.getPowerRequired()
+  function unlink(PoweredComponent consumer)
+    m_consumers.remove(consumer)
+
+  // --------------------------------------------------------------------------
+  protected function subPower()
+    let mana = m_powerDepletionRatePerConsumer * m_consumers.size()
+    getOwnerUnit().subMana(mana)
 
 // ============================================================================
 public function IUnitMetadata.getPowerSourceComponent() returns PowerSourceComponent
@@ -71,3 +106,39 @@ public function IUnitMetadata.getOrAddPowerSourceComponent() returns PowerSource
   if (component == null)
     component = this.addComponent(new PowerSourceComponent(this)) castTo PowerSourceComponent
   return component
+
+// ============================================================================
+public function unit.getPowerSourceComponent() returns PowerSourceComponent
+  let metadata = this.getMetadata()
+  if (metadata == null)
+    return null
+  return metadata.getPowerSourceComponent()
+
+// ============================================================================
+public function unit.getOrAddPowerSourceComponent() returns PowerSourceComponent
+  let metadata = this.getMetadata()
+  if (metadata == null)
+    return null
+  return metadata.getOrAddPowerSourceComponent()
+
+// ============================================================================
+function subPower()
+  for powerSource in g_powerSources
+    let comp = powerSource.getPowerSourceComponent()
+    if (comp != null)
+      comp.subPower()
+
+// ============================================================================
+function registerActiveGenerator(unit generator)
+  g_powerSources.add(generator)
+  
+  if (g_powerSources.size() == 1 and g_powerSourceTimer == null)
+    g_powerSourceTimer = doPeriodically(SUB_POWER_INTERVAL, (CallbackPeriodic cb) -> subPower())
+
+// ============================================================================
+function unregisterActiveGenerator(unit generator)
+  g_powerSources.remove(generator)
+  
+  if (g_powerSources.size() == 0 and g_powerSourceTimer != null)
+    destroy g_powerSourceTimer
+    g_powerSourceTimer = null
