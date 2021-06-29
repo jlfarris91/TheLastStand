@@ -4,48 +4,83 @@ import ItemSetLibrary
 import RegisterEvents
 import ItemSet
 import HumanPlayers
+import ErrorHandling
+
+constant int MAX_NUM_ITEMS = 3
 
 // ============================================================================
 public class DropItemOnDeathComponent extends UnitComponent
-  private int m_itemType = -1
-  private ItemSetLibrary m_itemSetLibrary
-  private ItemSet m_itemSet
+  private int array[MAX_NUM_ITEMS] m_itemType
+  private ItemSetLibrary array[MAX_NUM_ITEMS] m_itemSetLibrary
+  private ItemSet array[MAX_NUM_ITEMS] m_itemSet
+  private int m_itemCount
 
   // --------------------------------------------------------------------------
   construct (IUnitMetadata owner)
     super(owner)
     setDisableOnDeath(false)
-    m_itemType = -1
-    m_itemSetLibrary = null
-    m_itemSet = null
+
+    m_itemCount = 0
+    for i = 0 to MAX_NUM_ITEMS -1
+      m_itemType[i] = -1
+      m_itemSetLibrary[i] = null
+      m_itemSet[i] = null
 
   // --------------------------------------------------------------------------
   override function getTypeId() returns int
     return DropItemOnDeathComponent.typeId
 
   // --------------------------------------------------------------------------
-  function setItemType(int itemType)
-    m_itemType = itemType
+  function addRandomItemFromSet(ItemSet itemSet)
+    addInternal(-1, itemSet, null)
 
   // --------------------------------------------------------------------------
-  function getItemType() returns int
-    return m_itemType
+  function addItem(int itemType, ItemSet itemSet)
+    addInternal(itemType, itemSet, null)
 
   // --------------------------------------------------------------------------
-  function setItemSetLibrary(ItemSetLibrary itemSetLibrary)
-    m_itemSetLibrary = itemSetLibrary
+  function hasItem(int itemType) returns bool
+    for i = 0 to m_itemCount - 1
+      if (m_itemType[i] == itemType)
+        return true
+    return false
 
   // --------------------------------------------------------------------------
-  function getItemSetLibrary() returns ItemSetLibrary
-    return m_itemSetLibrary
+  private function addInternal(int itemType, ItemSet itemSet, ItemSetLibrary itemSetLibrary)
+    if (m_itemCount == MAX_NUM_ITEMS)
+      error("Too many items!")
+    m_itemType[m_itemCount] = itemType
+    m_itemSetLibrary[m_itemCount] = itemSetLibrary
+    m_itemSet[m_itemCount] = itemSet
+    m_itemCount++
 
   // --------------------------------------------------------------------------
-  function setItemSet(ItemSet itemSet)
-    m_itemSet = itemSet
+  protected function onUnitKilled()
+    for i = 0 to m_itemCount - 1
+      createItem(m_itemType[i], m_itemSet[i], m_itemSetLibrary[i])
 
   // --------------------------------------------------------------------------
-  function getItemSet() returns ItemSet
-    return m_itemSet
+  private function createItem(int itemTypeId, ItemSet itemSet, ItemSetLibrary itemSetLibrary)
+
+    if (itemSetLibrary == null and itemSet == null)
+      Log.warn("DropItemOnDeathComponent has no item set or item set library assigned!")
+      return
+
+    var mutableItemTypeId = itemTypeId
+    if (mutableItemTypeId == -1)
+      if (itemSetLibrary != null)
+        let itemType = itemSetLibrary.getRandomItemType()
+        if (itemType == null)
+          Log.warn("ItemSetLibrary contains no items!")
+          return
+        mutableItemTypeId = itemType.id
+      else
+        mutableItemTypeId = itemSet.getRandomItemTypeId()
+
+    if (itemSetLibrary != null)
+      itemSetLibrary.createItem(mutableItemTypeId, getOwnerUnit().getPos())      
+    else
+      itemSet.createItem(mutableItemTypeId, getOwnerUnit().getPos())
 
 // ============================================================================
 public function IUnitMetadata.getDropItemOnDeathComponent() returns DropItemOnDeathComponent
@@ -75,27 +110,7 @@ function onUnitKilled()
   if (comp == null or not comp.getEnabled())
     return
 
-  let itemSetLibrary = comp.getItemSetLibrary()
-  let itemSet = comp.getItemSet()
-  if (itemSetLibrary == null and itemSet == null)
-    Log.warn("DropItemOnDeathComponent has no item set or item set library assigned!")
-    return
-
-  var itemTypeId = comp.getItemType()
-  if (itemTypeId == -1)
-    if (itemSetLibrary != null)
-      let itemType = itemSetLibrary.getRandomItemType()
-      if (itemType == null)
-        Log.warn("ItemSetLibrary contains no items!")
-        return
-      itemTypeId = itemType.id
-    else
-      itemTypeId = itemSet.getRandomItemTypeId()
-
-  if (itemSetLibrary != null)
-    itemSetLibrary.createItem(itemTypeId, dyingUnit.getPos())      
-  else
-    itemSet.createItem(itemTypeId, dyingUnit.getPos())
+  comp.onUnitKilled()
 
 // ============================================================================
 init

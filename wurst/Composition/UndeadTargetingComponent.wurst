@@ -76,6 +76,7 @@ public class UndeadTargetingComponent extends UnitComponent
   protected int m_attackTime
   protected bool m_awaitingOrder
   protected bool m_dealingDOT
+  protected bool m_preferOrganicTargets
 
   // --------------------------------------------------------------------------
   construct(IUnitMetadata owner)
@@ -84,6 +85,7 @@ public class UndeadTargetingComponent extends UnitComponent
     m_targetUnit = null
     m_awaitingOrder = false
     m_dealingDOT = false
+    m_preferOrganicTargets = false
 
   // --------------------------------------------------------------------------
   ondestroy
@@ -136,6 +138,14 @@ public class UndeadTargetingComponent extends UnitComponent
   // --------------------------------------------------------------------------
   function getTargetPlayer() returns player
     return m_targetPlayer
+
+  // --------------------------------------------------------------------------
+  function setPreferOrganicTargets(bool value)
+    m_preferOrganicTargets = value
+
+  // --------------------------------------------------------------------------
+  function getPreferOrganicTargets() returns bool
+    return m_preferOrganicTargets
 
   // --------------------------------------------------------------------------
   function setTargetPlayer(player targetPlayer) returns bool
@@ -221,6 +231,7 @@ public class UndeadTargetingComponent extends UnitComponent
     // 1. Try attacking the nearest structure
     // 2. Try attacking the nearest non-structure
     if (tryTargetClosestUnit())
+      getOwnerUnit().issueTargetOrderById(OrderIds.attack, m_targetUnit)
       //Log.debug("[UndeadTargetingComponent] Found target to attack")
       return
 
@@ -259,6 +270,25 @@ public class UndeadTargetingComponent extends UnitComponent
     return getOwnerUnit().issueTargetOrderById(OrderIds.attack, m_targetUnit)
 
   // --------------------------------------------------------------------------
+  function getNearestTargettableUnit() returns unit
+    let targetPlayer = getTargetPlayer()
+    if (targetPlayer == null)
+      return null
+    let ownerUnit = getOwnerUnit()
+    unit targetUnit
+    if (getPreferOrganicTargets())
+      targetUnit = getNearestUnitOfPlayer(targetPlayer, ownerUnit.getPos(), g_filterUnitIsValidTargetNonStructure)
+      if (targetUnit != null)
+        return targetUnit
+      targetUnit = getClosestValidHumanStructureTarget(targetPlayer, ownerUnit.getPos())
+    else
+      targetUnit = getClosestValidHumanStructureTarget(targetPlayer, ownerUnit.getPos())
+      if (targetUnit != null)
+        return targetUnit
+      targetUnit = getNearestUnitOfPlayer(targetPlayer, ownerUnit.getPos(), g_filterUnitIsValidTargetNonStructure)
+    return targetUnit
+
+  // --------------------------------------------------------------------------
   private function setTargetUnit_impl(unit targetUnit) returns bool
     if (m_targetUnit == targetUnit)
       return false
@@ -271,29 +301,17 @@ public class UndeadTargetingComponent extends UnitComponent
     return true
 
   // --------------------------------------------------------------------------
-  protected function tryTargetClosestUnit() returns bool
+  // Returns true if a closest unit target was found
+  function tryTargetClosestUnit() returns bool
     let targetPlayer = getTargetPlayer()
     if (targetPlayer == null)
       return false
 
-    let ownerUnit = getOwnerUnit()
-    unit targetUnit
-
-    // Try to attack the nearest structure
-    targetUnit = getClosestValidHumanStructureTarget(targetPlayer, ownerUnit.getPos())
-    if (targetUnit != null)
-      m_targetUnit = targetUnit
-      return ownerUnit.issueTargetOrderById(OrderIds.attack, m_targetUnit)
-
-    // There are no structures to attack? Try attacking a non-structure unit then
+    let targetUnit = getNearestTargettableUnit()
     if (targetUnit == null)
-      targetUnit = getNearestUnitOfPlayer(targetPlayer, ownerUnit.getPos(), g_filterUnitIsValidTargetNonStructure)
+      return false
 
-    if (targetUnit != null)
-      setTargetUnit_impl(targetUnit)
-      return ownerUnit.issueTargetOrderById(OrderIds.attack, m_targetUnit)
-
-    return false
+    return setTargetUnit_impl(targetUnit)
 
   // --------------------------------------------------------------------------
   protected function tryTargetCampCenter() returns bool    
