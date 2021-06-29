@@ -7,12 +7,20 @@ import ClosureTimers
 import RegisterEvents
 import TlsUnitIds
 import Orders
+import UnitExtensions
+import UndeadTargetingComponent
+import Suspend
 
-constant real ETHEREAL_TOGGLE_INTERVAL = 10.0
+constant real STATE_TOGGLE_INTERVAL = 10.0
 constant real ETHEREAL_MOVE_RANGE = 256.0
+constant real FADE_IN_DURATION = 1.0
+constant real FADE_OUT_DURATION = 3.0
+constant real TARGET_OFFSET = 128.0
+constant colorA COLOR_VISIBLE = colorA(255, 255, 255, 255)
+constant colorA COLOR_INVISIBLE = colorA(255, 255, 255, 0)
 constant int DOT_ABILITY_ID = compiletime(ABIL_ID_GEN.next())
 HashList<unit> g_ghosts = new HashList<unit>()
-CallbackPeriodic g_toggleEtherealTimer
+CallbackPeriodic g_toggleStateTimer
 
 // ============================================================================
 public class GhostComponent extends UnitComponent
@@ -41,14 +49,92 @@ public class GhostComponent extends UnitComponent
     let ownerUnit = getOwnerUnit()
     registerGhost(ownerUnit)
     m_lastAttackedUnit = null
+    makeInvisible()
 
   // --------------------------------------------------------------------------
   override function onDisabled()
     super.onDisabled()
     let ownerUnit = getOwnerUnit()
     unregisterGhost(ownerUnit)
-    ownerUnit.removeAbility(AbilityIds.ethereal)
     m_lastAttackedUnit = null
+    makeVisible()
+    ownerUnit.unsuspend()
+
+  // --------------------------------------------------------------------------
+  function fade(colorA startColor, colorA endColor, real duration)
+    getOwnerUnit().fade(0.1, duration, startColor, endColor)
+
+  // --------------------------------------------------------------------------
+  function fadeIn()
+    let ownerUnit = getOwnerUnit()
+    makeVisible()
+    ownerUnit.setVertexColor(COLOR_INVISIBLE)
+    fade(COLOR_INVISIBLE, COLOR_VISIBLE, FADE_IN_DURATION)
+
+  // --------------------------------------------------------------------------
+  function fadeOut()
+    let ownerUnit = getOwnerUnit()
+    fade(COLOR_VISIBLE, COLOR_INVISIBLE, FADE_OUT_DURATION)
+    doAfter(FADE_OUT_DURATION) ->
+    //{
+      let metadata = ownerUnit.getMetadata()
+      if (metadata != null)
+        let comp = metadata.getGhostComponent()
+        if (comp != null and comp.getEnabled())
+          makeInvisible()
+    //}
+
+  // --------------------------------------------------------------------------
+  function makeInvisible()
+    let ownerUnit = getOwnerUnit()
+    ownerUnit.hide()
+    ownerUnit.addAbility(AbilityIds.invulnerable)
+    ownerUnit.setVertexColor(COLOR_INVISIBLE)
+    ownerUnit.suspend()
+
+  // --------------------------------------------------------------------------
+  function makeVisible()
+    let ownerUnit = getOwnerUnit()
+    ownerUnit.show()
+    ownerUnit.removeAbility(AbilityIds.invulnerable)
+    ownerUnit.setVertexColor(COLOR_VISIBLE)
+    ownerUnit.unsuspend()
+
+  // --------------------------------------------------------------------------
+  function toggleState()
+    let ownerUnit = getOwnerUnit()
+    if (ownerUnit.isHidden())
+      unsuspendAndFadeIn()
+    else
+      fadeOutAndSuspend()
+    
+  // --------------------------------------------------------------------------
+  function unsuspendAndFadeIn()
+    let ownerUnit = getOwnerUnit()
+    let targetingComponent = getOwner().getUndeadTargetingComponent()
+    targetingComponent.tryTargetClosestUnit()
+    let spawnDistance = ownerUnit.getFieldWeapon(UNIT_WEAPON_RF_ATTACK_RANGE, 0) + TARGET_OFFSET
+    vec2 spawnPos
+    let targetUnit = targetingComponent.getTargetUnit()
+    if (targetUnit != null)
+      spawnPos = targetUnit.getPos().polarOffset(GetRandomDirectionDeg().asAngleDegrees(), spawnDistance)
+    else
+      spawnPos = ownerUnit.getPos() + ownerUnit.getFacingAngle().toVec(spawnDistance)
+    ownerUnit.setXY(spawnPos)
+    fadeIn()
+
+  // --------------------------------------------------------------------------
+  function fadeOutAndSuspend()
+    let ownerUnit = getOwnerUnit()
+    let moveDistance = ownerUnit.getFieldWeapon(UNIT_WEAPON_RF_ATTACK_RANGE, 0) + TARGET_OFFSET
+    vec2 movePos
+    if (m_lastAttackedUnit != null)
+      movePos = m_lastAttackedUnit.getPos()
+      movePos += (movePos - ownerUnit.getPos()).norm() * moveDistance
+    else
+      movePos = ownerUnit.getPos() + ownerUnit.getFacingAngle().toVec(moveDistance)
+    ownerUnit.issuePointOrderById(OrderIds.move, movePos)
+    fadeOut()
 
 // ============================================================================
 public function IUnitMetadata.getGhostComponent() returns GhostComponent
@@ -65,18 +151,13 @@ public function IUnitMetadata.getOrAddGhostComponent() returns GhostComponent
 function registerGhost(unit ghost)
   g_ghosts.add(ghost)
   
-  if (g_ghosts.size() == 1 and g_toggleEtherealTimer == null)
-    g_toggleEtherealTimer = doPeriodically(ETHEREAL_TOGGLE_INTERVAL, (CallbackPeriodic cb) -> toggleGhostEthereal())
+  if (g_ghosts.size() == 1 and g_toggleStateTimer == null)
+    g_toggleStateTimer = doPeriodically(STATE_TOGGLE_INTERVAL, (CallbackPeriodic cb) -> toggleGhostStates())
 
 // ============================================================================
-function toggleGhostEthereal()
+function toggleGhostStates()
   for g in g_ghosts
   //{
-    if (g.hasAbility(AbilityIds.ethereal))
-      g.removeAbility(AbilityIds.ethereal)
-    else
-      g.addAbility(AbilityIds.ethereal)
-
     if (g.getCurrentOrder() != OrderIds.move)
     //{
       let metadata = g.getMetadata()
@@ -84,15 +165,7 @@ function toggleGhostEthereal()
         let comp = metadata.getGhostComponent()
         if (comp != null)
         //{
-          let lastAttackedUnit = comp.getLastAttackedUnit()
-          vec2 targetPos
-          // If there was no previously attacked unit just move to a random point in the area
-          if (lastAttackedUnit == null)
-            targetPos = g.getPos().polarOffset(GetRandomDirectionDeg().asAngleDegrees(), ETHEREAL_MOVE_RANGE)
-          // else move across the unit
-          else
-            targetPos = lastAttackedUnit.getPos() + (lastAttackedUnit.getPos() - g.getPos()).norm() * ETHEREAL_MOVE_RANGE
-          g.issuePointOrderById(OrderIds.move, targetPos)
+          comp.toggleState()
         //}
     //}
   //}
@@ -101,9 +174,9 @@ function toggleGhostEthereal()
 function unregisterGhost(unit ghost)
   g_ghosts.remove(ghost)
   
-  if (g_ghosts.size() == 0 and g_toggleEtherealTimer != null)
-    destroy g_toggleEtherealTimer
-    g_toggleEtherealTimer = null
+  if (g_ghosts.size() == 0 and g_toggleStateTimer != null)
+    destroy g_toggleStateTimer
+    g_toggleStateTimer = null
 
 // ============================================================================
 function onUnitAttacked()
