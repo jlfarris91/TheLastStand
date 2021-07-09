@@ -148,6 +148,17 @@ public class UndeadTargetingComponent extends UnitComponent
     return m_preferOrganicTargets
 
   // --------------------------------------------------------------------------
+  function shouldTargetOrganicUnits() returns bool
+    if (m_preferOrganicTargets)
+      return true
+    if (m_targetPlayer == null)
+      return false
+    let metadata = m_targetPlayer.getHumanMetadata()
+    if (metadata == null)
+      return false
+    return metadata.getCanPathToHeadquartersOrHero()
+
+  // --------------------------------------------------------------------------
   function setTargetPlayer(player targetPlayer) returns bool
     let setPlayer = setTargetPlayer_impl(targetPlayer)
     if (setPlayer)
@@ -219,10 +230,12 @@ public class UndeadTargetingComponent extends UnitComponent
   // --------------------------------------------------------------------------
   private function issueOrderTargetingPlayer_impl()
 
+    let ownerUnit = getOwnerUnit()
+
     m_awaitingOrder = false
     restartAttackTimer()
 
-    if (not getOwnerUnit().isAlive())
+    if (not ownerUnit.isAlive())
       return
 
     if (tryReissueOrder())
@@ -231,7 +244,10 @@ public class UndeadTargetingComponent extends UnitComponent
     // 1. Try attacking the nearest structure
     // 2. Try attacking the nearest non-structure
     if (tryTargetClosestUnit())
-      getOwnerUnit().issueTargetOrderById(OrderIds.attack, m_targetUnit)
+      if (m_targetUnit.isStructure())
+        ownerUnit.issueTargetOrderById(OrderIds.attack, m_targetUnit)
+      else
+        ownerUnit.issuePointOrderById(OrderIds.attack, m_targetUnit.getPos())
       //Log.debug("[UndeadTargetingComponent] Found target to attack")
       return
 
@@ -276,7 +292,7 @@ public class UndeadTargetingComponent extends UnitComponent
       return null
     let ownerUnit = getOwnerUnit()
     unit targetUnit
-    if (getPreferOrganicTargets())
+    if (shouldTargetOrganicUnits())
       targetUnit = getNearestUnitOfPlayer(targetPlayer, ownerUnit.getPos(), g_filterUnitIsValidTargetNonStructure)
       if (targetUnit != null)
         return targetUnit
