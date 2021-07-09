@@ -6,11 +6,14 @@ $OutputWurstSourceMapFilePath = $env:WurstSourceMapFilePath
 $IntermediateDirPath = [System.IO.Path]::Combine($env:TempRoot, "maps")
 $OutputSpawnRegionScriptFile = [System.IO.Path]::Combine($env:WurstRoot, "Spawning\SpawnRegionInit.wurst")
 
+# This path points to a dump of the entire war3.mod file typically exported from an MPQ editor
+$War3ModDumpPath = "D:\Projects\WarcraftIII\MPQ\Dump\war3.w3mod"
+
 # When building locally (specifically on Jame's machine, for now) we can reference the
 # dumped casc data directly
-if ($env:IsLocalBuild -eq 1)
+if (($env:IsLocalBuild -eq 1) -and (Test-Path $War3ModDumpPath))
 {
-  $War3ArchiveDirPath = "D:\Projects\WarcraftIII\MPQ\Dump\war3.w3mod"
+  $War3ArchiveDirPath = $War3ModDumpPath
   $OutputListFilePath = [System.IO.Path]::Combine($env:BuildRoot, "listfile")
 }
 # On the build machine we want to use only the slimmest data we can to improve build times
