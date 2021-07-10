@@ -8,8 +8,6 @@ import SpawnManager
 import PlayerSpawnPointProviders
 import AbilityIds
 import ObjectIds
-import GroupUtils
-import TlsUnitIds
 import Orders
 import UnitComponent
 import HashList
@@ -21,7 +19,7 @@ import UnitIndexer
 import UnitExtensions
 import HumanPlayerMetadata
 
-constant int UNIT_ID = compiletime(UNIT_ID_GEN.next())
+constant int PATH_CHECKER_UNIT_ID = compiletime(UNIT_ID_GEN.next())
 constant player PATH_CHECKER_OWNER = Player(GetPlayerNeutralPassive())
 constant vec2 SPAWN_POS = mapBounds.max
 constant real DISTANCE_THRESHOLD = 32.0
@@ -33,7 +31,7 @@ CallbackPeriodic g_updatePathCheckerTimer
 
 // ============================================================================
 @compiletime function createUnitDef()
-  new UnitDefinition(UNIT_ID, UnitIds.shade)
+  new UnitDefinition(PATH_CHECKER_UNIT_ID, UnitIds.shade)
     ..setCollisionSize(0)
     ..setSpeedBase(512)
     ..setNormalAbilities(commaList(AbilityIds.invulnerable))
@@ -100,12 +98,14 @@ class PathCheckerComponent extends UnitComponent
     let metadata = m_targetPlayer.getHumanMetadata()
     if (metadata != null)
       metadata.setCanPathToHeadquartersOrHero(true)
+      Log.debug("Path found for player " + m_targetPlayer.getName())
 
   // --------------------------------------------------------------------------
   function onPathNotFound()
     let metadata = m_targetPlayer.getHumanMetadata()
     if (metadata != null)
       metadata.setCanPathToHeadquartersOrHero(false)
+      Log.debug("No path found for player " + m_targetPlayer.getName())
 
   // --------------------------------------------------------------------------
   function startPathCheck() returns bool
@@ -119,23 +119,20 @@ class PathCheckerComponent extends UnitComponent
     let spawnPos = spawnPosResult.spawnPoint
     activate(spawnPos)
 
-    m_targetUnit = null
+    let targetPlayerMetadata = m_targetPlayer.getHumanMetadata()
+    if (targetPlayerMetadata == null)
+      return false
 
-    let temp = getGroup()
-    temp.enumUnitsOfPlayer(m_targetPlayer, null)
-    for u in temp
-      if (u.isCampHeadquarters())
-        m_targetUnit = u
-        break
-      else if (u.getTypeId() == TlsUnitIds.hero)
-        m_targetUnit = u
-    temp.release()
-
-    if (m_targetUnit == null)
+    m_targetUnit = targetPlayerMetadata.getHQOrHero()
+    if (m_targetUnit == null or not m_targetUnit.isAlive())
       return false
 
     let targetPos = m_targetUnit.getPos()
-    return ownerUnit.issuePointOrderById(OrderIds.move, targetPos)
+    if (ownerUnit.issuePointOrderById(OrderIds.move, targetPos))
+      Log.debug("Started path check for player " + m_targetPlayer.getName())
+      return true
+    
+    return false
 
   // --------------------------------------------------------------------------
   function activate(vec2 pos)
@@ -210,7 +207,7 @@ function updatePathCheckers()
 
 // ============================================================================
 function createPathCheckerForPlayer(player p) returns unit
-  let pathChecker = createUnit(PATH_CHECKER_OWNER, UNIT_ID, SPAWN_POS, GetRandomDirectionDeg().asAngleDegrees())
+  let pathChecker = createUnit(PATH_CHECKER_OWNER, PATH_CHECKER_UNIT_ID, SPAWN_POS, GetRandomDirectionDeg().asAngleDegrees())
   let comp = pathChecker.getMetadata().getOrAddPathCheckerComponent()
   comp.setTargetPlayer(p)
   comp.deactivate()

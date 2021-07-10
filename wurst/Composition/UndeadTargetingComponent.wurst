@@ -26,7 +26,7 @@ import UnitRecycler
 import Unit_BrickWall
 
 constant real ATTACK_TIMER_INTERVAL = 1.0
-constant real ATTACK_TIMER_DURATION = 10.0
+constant real ATTACK_TIMER_DURATION = 5.0
 constant real DOT_INTERVAL = 1.0
 constant real DOT_PERCENT01 = 0.1
 
@@ -241,20 +241,19 @@ public class UndeadTargetingComponent extends UnitComponent
     if (tryReissueOrder())
       return
 
-    // 1. Try attacking the nearest structure
-    // 2. Try attacking the nearest non-structure
+    // 1. Try targetting the nearest structure
+    // 2. Try targetting the nearest non-structure
     if (tryTargetClosestUnit())
-      if (m_targetUnit.isStructure())
-        ownerUnit.issueTargetOrderById(OrderIds.attack, m_targetUnit)
-      else
-        ownerUnit.issuePointOrderById(OrderIds.attack, m_targetUnit.getPos())
       //Log.debug("[UndeadTargetingComponent] Found target to attack")
+      return
+
+    if (tryReissueOrder())
       return
 
     // At this point the target unit must not have been valid
     setTargetUnit_impl(null)
 
-    // 3. Try attack-moving to the target player's camp center (the OT or the hero)
+    // 3. Try attack-moving to the target player's camp center (the HQ tent or the hero)
     if (tryTargetCampCenter())
       //Log.debug("[UndeadTargetingComponent] Could not find target unit, attack-moving to camp center")
       return
@@ -278,12 +277,11 @@ public class UndeadTargetingComponent extends UnitComponent
   function tryReissueOrder() returns bool
     if (m_targetUnit == null)
       return false
-    
-    if (not unitIsValidTargetStructure(m_targetUnit) or
-        not unitIsValidTargetNonStructure(m_targetUnit))
-      return false
-      
-    return getOwnerUnit().issueTargetOrderById(OrderIds.attack, m_targetUnit)
+    if (unitIsValidTargetStructure(m_targetUnit))
+      return getOwnerUnit().issueTargetOrderById(OrderIds.attack, m_targetUnit)
+    else if (unitIsValidTargetNonStructure(m_targetUnit))
+      return getOwnerUnit().issuePointOrderById(OrderIds.attack, m_targetUnit.getPos())
+    return false
 
   // --------------------------------------------------------------------------
   function getNearestTargettableUnit() returns unit
@@ -327,7 +325,8 @@ public class UndeadTargetingComponent extends UnitComponent
     if (targetUnit == null)
       return false
 
-    return setTargetUnit_impl(targetUnit)
+    setTargetUnit_impl(targetUnit)
+    return true
 
   // --------------------------------------------------------------------------
   protected function tryTargetCampCenter() returns bool    
@@ -339,9 +338,12 @@ public class UndeadTargetingComponent extends UnitComponent
     if (playerMetadata == null)
       return false
 
-    let campCenter = playerMetadata.getCampCenter()
+    let campCenter = playerMetadata.getHQOrHero()
+    if (campCenter == null or not campCenter.isAlive())
+      return false
+
     let undeadUnit = getOwnerUnit()
-    undeadUnit.issuePointOrder("attack", campCenter)
+    undeadUnit.issuePointOrderById(OrderIds.attack, campCenter.getPos())
     return true
 
   // --------------------------------------------------------------------------
