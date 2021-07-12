@@ -17,6 +17,8 @@ if ($LASTEXITCODE -ne 0)
   return
 }
 
+$env:DevEnvironment = "true"
+
 # 2. Generate the wurst build file
 .\GenerateProjectFiles.ps1
 
