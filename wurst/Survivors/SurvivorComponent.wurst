@@ -16,9 +16,7 @@ import FX
 import ColorUtility
 import TlsJobItemIds
 import StatisticsCollection
-import ChannelAbilityPreset
 import ClosureEvents
-import initlater Survivors
 
 import initlater SurvivorJoblessComponent
 import initlater BuilderJobComponent
@@ -28,10 +26,6 @@ import initlater MedicJobComponent
 import initlater MarksmanJobComponent
 import initlater EngineerJobComponent
 import initlater AcolyteComponent
-import GroupUtils
-import Icons
-
-constant int UNASSIGN_JOB_ABIL_ID = compiletime(ABIL_ID_GEN.next()) 
 
 group g_temp = CreateGroup()
 trigger g_onSurvivorJobPreChange = CreateTrigger()
@@ -73,7 +67,6 @@ function raiseSurvivorJobPostChangeEvent(unit preUnit, unit postUnit)
 public class SurvivorComponent extends UnitComponent
   private IterableMap<SurvivorJobDefinition, SurvivorJobComponent> m_jobComponents
   private SurvivorJobDefinition m_activeJob
-  private SurvivorJobDefinition m_lastActiveJob
   private SurvivorJobComponent m_activeJobComponent
   private bool m_changingJobs
   private string m_name
@@ -124,10 +117,6 @@ public class SurvivorComponent extends UnitComponent
   // --------------------------------------------------------------------------
   function getActiveJob() returns SurvivorJobDefinition
     return m_activeJob
-
-  // --------------------------------------------------------------------------
-  function getLastActiveJob() returns SurvivorJobDefinition
-    return m_lastActiveJob
 
   // --------------------------------------------------------------------------
   function getJobData(SurvivorJobDefinition job) returns SurvivorJobData
@@ -193,9 +182,6 @@ public class SurvivorComponent extends UnitComponent
       
       // Pick a random survivor name
       updateUnitProperName()
-      
-      if (not ownerUnit.hasAbility(UNASSIGN_JOB_ABIL_ID))
-        ownerUnit.addAbility(UNASSIGN_JOB_ABIL_ID)
     //}
 
   // --------------------------------------------------------------------------
@@ -216,7 +202,6 @@ public class SurvivorComponent extends UnitComponent
     if (m_activeJobComponent != null)
       m_activeJobComponent.setEnabled(false)
 
-    m_lastActiveJob = m_activeJob != null ? m_activeJob : SurvivorJobs.none
     m_activeJob = job
     m_activeJobComponent = getJobComponent(job)
 
@@ -335,7 +320,6 @@ public class SurvivorComponent extends UnitComponent
     if (m_activeJobComponent != null)
       m_activeJobComponent.setEnabled(false)
 
-    m_lastActiveJob = m_activeJob != null ? m_activeJob : SurvivorJobs.none
     m_activeJobComponent = null
     m_activeJob = null
 
@@ -555,49 +539,8 @@ function onHeroLeveledUp()
   survivor.onLevelChanged()
 
 // ============================================================================
-@compiletime function createAbility()
-  new ChannelAbilityPreset(UNASSIGN_JOB_ABIL_ID, 1, true)
-    ..setHeroAbility(false)
-    ..setItemAbility(false)
-    ..setButtonPositionNormalX(0)
-    ..setButtonPositionNormalY(-11)
-    ..presetTargetTypes(Targettype.NONE)
-    ..removeChannelProperties(true, true)
-    ..setIconNormal(Icons.bTNPackBeast)
-    ..setTargetsAllowed(1, "self")
-    ..setManaCost(1, 0)
-    ..setName("UnassignJobAssignPrimaryJob")
-    ..setTooltipNormal(1, "Unassign Job / Assign Primary Job")
-    ..setHotkeyNormal("Z")
-    ..setButtonPositionNormalX(3)
-    ..setButtonPositionNormalY(2)
-
-// ============================================================================
-function onUnassignJobCast()
-  let caster = GetSpellAbilityUnit()
-  let owningPlayer = caster.getOwner()
-
-  var allAreJobless = true
-
-  let temp = getGroup()
-  temp.enumUnitsSelected(owningPlayer, null)
-  for u in temp
-  //{
-    let survivor = u.getSurvivorComponent()
-    if (survivor != null)
-      if (survivor.getActiveJob() != SurvivorJobs.none)
-        allAreJobless = false
-  //}
-
-  if (allAreJobless)
-    SurvivorUtility.orderSelectedUnitsToAssignLastActiveJob(owningPlayer)
-  else
-    SurvivorUtility.orderSelectedUnitsToAssignJob(owningPlayer, SurvivorJobs.none)
-
-// ============================================================================
 init
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_USE_ITEM, function onUnitUsedItem)
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ISSUED_ORDER, function onOrderIssued)
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_DEATH, function onUnitKilled)
   registerPlayerUnitEvent(EVENT_PLAYER_HERO_LEVEL, function onHeroLeveledUp)
-  registerSpellEffectEvent(UNASSIGN_JOB_ABIL_ID, function onUnassignJobCast)
