@@ -1,5 +1,7 @@
 .\SetupBuildEnvironment.ps1
 
+Copy-Item ".\wurst_run_release.args" "..\wurst_run.args" -Force
+
 # The build machines don't have the data needed to run this
 if ($env:IsLocalBuild -eq 0)
 {
@@ -14,6 +16,8 @@ if ($LASTEXITCODE -ne 0)
 {
   return
 }
+
+$env:DevEnvironment = "false"
 
 # 2. Generate the wurst build file
 .\GenerateProjectFiles.ps1

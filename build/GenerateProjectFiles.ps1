@@ -1,5 +1,3 @@
-.\SetupBuildEnvironment.ps1
-
 $WurstBuildTemplate = [System.IO.Path]::Combine($env:BuildRoot, 'wurst.buildtemplate')
 $WurstBuildOutput = [System.IO.Path]::Combine($env:ProjectRoot, 'wurst.build')
 

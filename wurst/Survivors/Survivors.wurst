@@ -18,117 +18,172 @@ import HumanPlayers
 import FriendlyCircularCachedSpawnManager
 import RandomSpawnPointProvider
 import UnitExtensions
-import SurvivorUnit
 import SurvivorJobs
+import SurvivorComponent
+import initlater SurvivorJobPanel
+import PlayerExtensions
 
 group g_tempGroup = CreateGroup()
 
 // ============================================================================
-public function spawnSurvivorUnitForPlayer(player _player) returns unit
+public class SurvivorUtility
+    
+  // --------------------------------------------------------------------------
+  static function orderSelectedUnitsToAssignJob(player owner, SurvivorJobDefinition job)
+    
+    let survivorJobPanel = getSurvivorJobPanel(owner)
+    if (survivorJobPanel != null)
+      survivorJobPanel.batchUpdates(true)
 
-  if (_player == null)
-    argumentNullError("_player")
-    return null
+    let selectedUnits = owner.getSelectedUnits()
 
-  let playerMetadata = _player.getHumanMetadataRequired()
-  if (playerMetadata.getIsHeroDead())
-    Log.debug("[spawnSurvivorUnitForPlayer] Player {0} is dead".format(_player.getName()))
-    return null
+    for u in selectedUnits
+    //{
+      if (owner.controlsUnit(u))
+      //{
+        let survivor = u.getSurvivorComponent()
+        if (survivor != null and survivor.canChangeJob(job))
+        //{
+          survivor.changeJobs(job)
+        //}
+      //}
+    //}
 
-  let weightedSet = new WeightedSet<int>()
-  ..add(TlsUnitIds.Survivors.survivorMale, 50)
-  ..add(TlsUnitIds.Survivors.survivorMilitia1, 1)
-  ..add(TlsUnitIds.Survivors.survivorSpearman1, 1)
-  ..add(TlsUnitIds.Survivors.survivorMedic, 1)
-  ..add(TlsUnitIds.Survivors.survivorAcolyte1, 1)
-  ..add(TlsUnitIds.Survivors.survivorMarksman, 1)
-  // ..add(TlsUnitIds.Survivors.survivorEngineer, 1)
+    destroy selectedUnits
 
-  let unitId = weightedSet.getRandom()
+    if (survivorJobPanel != null)
+      survivorJobPanel.batchUpdates(false)
 
-  let spawnPointResult = getSpawnPoint(_player)
-  if (not spawnPointResult.succeeded)
-    Log.debug("[spawnSurvivorUnitForPlayer] Failed to find spawn point for survivor, trying again")
-    // try again
-    doAfter(1.0, () -> spawnSurvivorUnitForPlayer(_player))
-    return null
+  // --------------------------------------------------------------------------
+  static function orderSelectedUnitsToUnequipJobDefItem(player owner, SurvivorJobDefinition job)
+    
+    let survivorJobPanel = getSurvivorJobPanel(owner)
+    if (survivorJobPanel != null)
+      survivorJobPanel.batchUpdates(true)
 
-  let survivor = createUnitTLS(_player, unitId, spawnPointResult.spawnPoint, GetRandomDirectionDeg())
-  let survivorMetadata = survivor.getMetadataRequired() castTo Survivor
+    let selectedUnits = owner.getSelectedUnits()
 
-  let jobDef = getJobDefinitionForUnitType(survivor.getTypeId())
-  let survivorJobData = survivor.getSurvivorJobData(jobDef)
-  if (survivorJobData != null)
-    survivorJobData.setIsEnabled(true)
-
-  let survivorUnit = survivorMetadata.getUnit()
-  survivorUnit.issuePointOrderById(OrderIds.move, playerMetadata.getCampCenter())
+    for u in selectedUnits
+    //{
+      if (owner.controlsUnit(u))
+      //{
+        let survivor = u.getSurvivorComponent()
+        if (survivor != null)
+          survivor.tryUnequipJob(job)
+      //}
+    //}
   
-  let message = "{0} {1} has joined your camp!".format(
-    survivorUnit.getName().colorize(Colors.gold),
-    survivorUnit.getProperName())
-  displayMessageToPlayer(_player, message)
+    destroy selectedUnits
 
-  AddIndicator(survivorUnit, 0, 255, 0, 255)
+    if (survivorJobPanel != null)
+      survivorJobPanel.batchUpdates(false)
 
-  // Fade the survivor in over time
-  survivorUnit.fadeIn(color(150, 150, 150))
+  // ============================================================================
+  static function spawnSurvivorUnitForPlayer(player _player) returns unit
 
-  return survivorUnit
+    if (_player == null)
+      argumentNullError("_player")
+      return null
 
-// ============================================================================
-public function trySpawnSurvivorForPlayer(player _player)
-  if (not _player.isPlayingHumanPlayer())
-    return
-  let availableSurvivors = _player.getCurrentSupply()
-  let currentSurvivors = countNumberOfSurvivorsOwnedByPlayer(_player)
-  Log.debug("[trySpawnSurvivorForPlayer] Player {0} has room for {1} Survivor(s) and has {2} Survivor(s)".format(_player.getName(), availableSurvivors.toString(), currentSurvivors.toString()))
-  if (availableSurvivors > currentSurvivors)
-    spawnSurvivorUnitForPlayer(_player)
+    let playerMetadata = _player.getHumanMetadataRequired()
+    if (playerMetadata.getIsHeroDead())
+      Log.debug("[spawnSurvivorUnitForPlayer] Player {0} is dead".format(_player.getName()))
+      return null
 
-// ============================================================================
-public function countNumberOfSurvivorsOwnedByPlayer(player _player) returns int
-  g_tempGroup.clear()
-  g_tempGroup.enumUnitsOfPlayer(_player, null)
-  var count = 0
-  for _unit from g_tempGroup
-    if (_unit.isAlive() and _unit.isSurvivor())
-      count++
-  return count
+    let spawnPointResult = getSpawnPoint(_player)
+    if (not spawnPointResult.succeeded)
+      Log.debug("[spawnSurvivorUnitForPlayer] Failed to find spawn point for survivor, trying again")
+      // try again
+      doAfter(1.0, () -> spawnSurvivorUnitForPlayer(_player))
+      return null
 
-// ============================================================================
-public function owningPlayerBanishSurvivor(unit targetUnit)
-  let owningPlayer = targetUnit.getOwner()
+    var survivor = createUnitTLS(_player, TlsUnitIds.Survivors.survivorMale, spawnPointResult.spawnPoint, GetRandomDirectionDeg())
 
-  FX.createJobChangeTag("Banished!", targetUnit.getPos(), owningPlayer)
+    let weightedSet = new WeightedSet<SurvivorJobDefinition>()
+    ..add(SurvivorJobs.none, 50)
+    ..add(SurvivorJobs.militia, 1)
+    ..add(SurvivorJobs.spearman, 1)
+    ..add(SurvivorJobs.medic, 1)
+    ..add(SurvivorJobs.acolyte, 1)
+    ..add(SurvivorJobs.marksman, 1)
+    // ..add(SurvivorJobs.engineer, 1)
 
-  displayMessageToPlayer(
-    owningPlayer,
-    "You have banished {0} {1} from your camp.".format(
-      targetUnit.getName().colorize(Colors.gold),
-      targetUnit.getProperName()))
+    let job = weightedSet.getRandom()
 
-  AddIndicator(targetUnit, 0, 255, 0, 255)
+    let survivorComp = survivor.getOrAddSurvivorComponent()
+    survivorComp.getJobData(job).setIsEquipped(true)
 
-  // Try to spawn another survivor for the player later
-  doAfter(SURVIVORS_RESPAWN_BANISHED_INTERVAL_RANGE.getRandom(), () -> trySpawnSurvivorForPlayer(owningPlayer))
+    if (survivorComp.canChangeJob(job))
+      survivorComp.changeJobs(job)
+      survivor = survivorComp.getOwnerUnit()
 
-  banishSurvivor(targetUnit)
+    survivor.issuePointOrderById(OrderIds.move, playerMetadata.getCampCenter())
+    
+    let message = "{0} {1} has joined your camp!".format(
+      survivor.getName().colorize(Colors.gold),
+      survivor.getProperName())
+    displayMessageToPlayer(_player, message)
 
-// ============================================================================
-public function banishSurvivor(unit targetUnit)
+    AddIndicator(survivor, 0, 255, 0, 255)
 
-  // Give to the villagers player so the human player can't control it anymore
-  targetUnit.setOwner(PLAYER_VILLAGERS, false)
+    // Fade the survivor in over time
+    survivor.fadeIn(color(150, 150, 150))
 
-  // Make the target move to a random point in the map while it is being banished
-  targetUnit.issuePointOrder("move", playableBounds.getRandomPoint())
+    return survivor
 
-  // Fade out the survivor over time
-  targetUnit.fadeOut(UNIT_FADE_DURATION, color(150, 150, 150))
-  
-  // Remove the survivor once it is invisible
-  doAfter(UNIT_FADE_DURATION, () -> targetUnit.remove())
+  // ============================================================================
+  static function trySpawnSurvivorForPlayer(player _player)
+    if (not _player.isPlayingHumanPlayer())
+      return
+    let availableSurvivors = _player.getCurrentSupply()
+    let currentSurvivors = countNumberOfSurvivorsOwnedByPlayer(_player)
+    Log.debug("[trySpawnSurvivorForPlayer] Player {0} has room for {1} Survivor(s) and has {2} Survivor(s)".format(_player.getName(), availableSurvivors.toString(), currentSurvivors.toString()))
+    if (availableSurvivors > currentSurvivors)
+      spawnSurvivorUnitForPlayer(_player)
+
+  // ============================================================================
+  static function countNumberOfSurvivorsOwnedByPlayer(player _player) returns int
+    g_tempGroup.clear()
+    g_tempGroup.enumUnitsOfPlayer(_player, null)
+    var count = 0
+    for _unit from g_tempGroup
+      if (_unit.isAlive() and _unit.isSurvivor())
+        count++
+    return count
+
+  // ============================================================================
+  static function owningPlayerBanishSurvivor(unit targetUnit)
+    let owningPlayer = targetUnit.getOwner()
+
+    FX.createJobChangeTag("Banished!", targetUnit.getPos(), owningPlayer)
+
+    displayMessageToPlayer(
+      owningPlayer,
+      "You have banished {0} {1} from your camp.".format(
+        targetUnit.getName().colorize(Colors.gold),
+        targetUnit.getProperName()))
+
+    AddIndicator(targetUnit, 0, 255, 0, 255)
+
+    // Try to spawn another survivor for the player later
+    doAfter(SURVIVORS_RESPAWN_BANISHED_INTERVAL_RANGE.getRandom(), () -> trySpawnSurvivorForPlayer(owningPlayer))
+
+    banishSurvivor(targetUnit)
+
+  // ============================================================================
+  static function banishSurvivor(unit targetUnit)
+
+    // Give to the villagers player so the human player can't control it anymore
+    targetUnit.setOwner(PLAYER_VILLAGERS, false)
+
+    // Make the target move to a random point in the map while it is being banished
+    targetUnit.issuePointOrder("move", playableBounds.getRandomPoint())
+
+    // Fade out the survivor over time
+    targetUnit.fadeOut(UNIT_FADE_DURATION, color(150, 150, 150))
+    
+    // Remove the survivor once it is invisible
+    doAfter(UNIT_FADE_DURATION, () -> targetUnit.remove())
 
 // ============================================================================
 function getSpawnPoint(player p) returns spawnPointResult
@@ -138,3 +193,15 @@ function getSpawnPoint(player p) returns spawnPointResult
   let result = spawnPointProvider.getSpawnPoint()
   destroy spawnPointProvider
   return result
+
+// ============================================================================
+public function unit.isRescuedSurvivor() returns bool
+  return this.isSurvivor() and this.getOwner() != PLAYER_VILLAGERS
+
+// ============================================================================
+public function unit.isUnrescuedSurvivor() returns bool
+  return this.isSurvivor() and this.getOwner() == PLAYER_VILLAGERS
+
+// ============================================================================
+public function unit.isRescuableSurvivor() returns bool
+  return this.isUnrescuedSurvivor()

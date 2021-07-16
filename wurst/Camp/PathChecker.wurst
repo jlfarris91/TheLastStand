@@ -1,0 +1,256 @@
+package PathChecker
+import ObjectIdGenerator
+import UnitObjEditing
+import UnitIds
+import Bounds
+import HumanPlayers
+import SpawnManager
+import PlayerSpawnPointProviders
+import AbilityIds
+import ObjectIds
+import Orders
+import UnitComponent
+import HashList
+import HashMap
+import ClosureTimers
+import GameConstants
+import RegisterEvents
+import UnitIndexer
+import UnitExtensions
+import HumanPlayerMetadata
+
+constant int PATH_CHECKER_UNIT_ID = compiletime(UNIT_ID_GEN.next())
+constant player PATH_CHECKER_OWNER = Player(GetPlayerNeutralPassive())
+constant vec2 SPAWN_POS = mapBounds.max
+constant real DISTANCE_THRESHOLD = 32.0
+constant real UPDATE_INTERVAL = 1.0
+
+HashMap<player, unit> g_pathCheckers = new HashMap<player, unit>()
+HashList<unit> g_activePathCheckers = new HashList<unit>()
+CallbackPeriodic g_updatePathCheckerTimer
+
+// ============================================================================
+@compiletime function createUnitDef()
+  new UnitDefinition(PATH_CHECKER_UNIT_ID, UnitIds.shade)
+    ..setCollisionSize(0)
+    ..setSpeedBase(512)
+    ..setNormalAbilities(commaList(AbilityIds.invulnerable))
+    ..setShadowImageWidth(0)
+    ..setShadowImageHeight(0)
+    ..setShadowImageUnit("")
+    ..setAttacksEnabled(0)
+    ..setSelectionScale(-1)
+    ..setTurnRate(999.0)
+    ..setSightRadiusDay(99999)
+    ..setSightRadiusNight(99999)
+    ..setModelFile("")
+    ..setScalingValue(0.01)
+
+// ============================================================================
+class PathCheckerComponent extends UnitComponent
+  private player m_targetPlayer
+  private unit m_targetUnit
+  private vec2 m_lastPos
+
+  // --------------------------------------------------------------------------
+  construct(IUnitMetadata owner)
+    super(owner)
+
+  // --------------------------------------------------------------------------
+  override function getTypeId() returns int
+    return PathCheckerComponent.getTypeId()
+
+  // --------------------------------------------------------------------------
+  function setTargetPlayer(player p)
+    m_targetPlayer = p
+
+  // --------------------------------------------------------------------------
+  function update()
+    if (m_targetUnit == null or m_targetUnit.isAlive() == false)
+      deactivate()
+      return
+    let ownerUnit = getOwnerUnit()
+    let currentPos = ownerUnit.getPos()
+    let dist = currentPos.distanceTo(m_lastPos)
+    if (dist < DISTANCE_THRESHOLD)
+      onPathCheckerStuck()
+    else
+      let targetPos = m_targetUnit.getPos()
+      ownerUnit.issuePointOrderById(OrderIds.move, targetPos)
+    m_lastPos = currentPos
+
+  // --------------------------------------------------------------------------
+  function onPathCheckerStuck()
+    let ownerUnit = getOwnerUnit()
+    let dist = ownerUnit.getPos().distanceTo(m_targetUnit.getPos())
+    let collisionSize = ownerUnit.getCollisionSize() + m_targetUnit.getCollisionSize()
+    
+    // Standing within attack range of the target, it's pathable
+    if (dist < collisionSize + DISTANCE_THRESHOLD + MELEE_UNIT_ATTACK_RANGE)
+      onPathFound()
+    else
+      onPathNotFound()
+
+    deactivate()
+
+  // --------------------------------------------------------------------------
+  function onPathFound()
+    let metadata = m_targetPlayer.getHumanMetadata()
+    if (metadata != null)
+      metadata.setCanPathToHeadquartersOrHero(true)
+      Log.debug("Path found for player " + m_targetPlayer.getName())
+
+  // --------------------------------------------------------------------------
+  function onPathNotFound()
+    let metadata = m_targetPlayer.getHumanMetadata()
+    if (metadata != null)
+      metadata.setCanPathToHeadquartersOrHero(false)
+      Log.debug("No path found for player " + m_targetPlayer.getName())
+
+  // --------------------------------------------------------------------------
+  function startPathCheck() returns bool
+    let ownerUnit = getOwnerUnit()
+
+    let spawnPointProvider = getSpawnPointProviderForPlayer(m_targetPlayer, SpawnRange.MID)
+    let spawnPosResult = spawnPointProvider.getSpawnPoint()
+    if (spawnPosResult.succeeded == false)
+      return false
+    
+    let spawnPos = spawnPosResult.spawnPoint
+    activate(spawnPos)
+
+    let targetPlayerMetadata = m_targetPlayer.getHumanMetadata()
+    if (targetPlayerMetadata == null)
+      return false
+
+    m_targetUnit = targetPlayerMetadata.getHQOrHero()
+    if (m_targetUnit == null or not m_targetUnit.isAlive())
+      return false
+
+    let targetPos = m_targetUnit.getPos()
+    if (ownerUnit.issuePointOrderById(OrderIds.move, targetPos))
+      Log.debug("Started path check for player " + m_targetPlayer.getName())
+      return true
+    
+    return false
+
+  // --------------------------------------------------------------------------
+  function activate(vec2 pos)
+    let ownerUnit = getOwnerUnit()
+    ownerUnit.show()
+    ownerUnit.setPos(pos)
+    m_lastPos = ownerUnit.getPos()
+    registerActivePathChecker(ownerUnit)
+
+  // --------------------------------------------------------------------------
+  function deactivate()
+    let ownerUnit = getOwnerUnit()
+    ownerUnit.hide()
+    ownerUnit.setPos(SPAWN_POS)
+    unregisterActivePathChecker(ownerUnit)
+
+// ============================================================================
+public function IUnitMetadata.getPathCheckerComponent() returns PathCheckerComponent
+  return this.getComponent(typeInfo(PathCheckerComponent.typeId)) castTo PathCheckerComponent
+
+// ============================================================================
+public function IUnitMetadata.getOrAddPathCheckerComponent() returns PathCheckerComponent
+  var component = this.getPathCheckerComponent()
+  if (component == null)
+    component = this.addComponent(new PathCheckerComponent(this)) castTo PathCheckerComponent
+  return component
+
+// ============================================================================
+public function unit.getPathCheckerComponent() returns PathCheckerComponent
+  let metadata = this.getMetadata()
+  if (metadata == null)
+    return null
+  return metadata.getPathCheckerComponent()
+
+// ============================================================================
+public function unit.getOrAddPathCheckerComponent() returns PathCheckerComponent
+  let metadata = this.getMetadata()
+  if (metadata == null)
+    return null
+  return metadata.getOrAddPathCheckerComponent()
+
+// ============================================================================
+function getPathChecker(player p) returns unit
+  var pathChecker = g_pathCheckers.get(p)
+  if (pathChecker == null)
+    pathChecker = createPathCheckerForPlayer(p)
+  return pathChecker
+
+// ============================================================================
+function registerActivePathChecker(unit pathChecker)
+  if (g_activePathCheckers.has(pathChecker))
+    return
+  g_activePathCheckers.add(pathChecker)
+  if (g_activePathCheckers.size() == 1)
+    g_updatePathCheckerTimer = doPeriodically(UPDATE_INTERVAL, (CallbackPeriodic cb) -> updatePathCheckers())
+
+// ============================================================================
+function unregisterActivePathChecker(unit pathChecker)
+  if (g_activePathCheckers.has(pathChecker) == false)
+    return
+  g_activePathCheckers.remove(pathChecker)
+  if (g_activePathCheckers.size() == 0)
+    destroy g_updatePathCheckerTimer
+    g_updatePathCheckerTimer = null
+
+// ============================================================================
+function updatePathCheckers()
+  for u in g_activePathCheckers
+    let comp = u.getOrAddPathCheckerComponent()
+    if (comp != null)
+      comp.update()
+
+// ============================================================================
+function createPathCheckerForPlayer(player p) returns unit
+  let pathChecker = createUnit(PATH_CHECKER_OWNER, PATH_CHECKER_UNIT_ID, SPAWN_POS, GetRandomDirectionDeg().asAngleDegrees())
+  let comp = pathChecker.getMetadata().getOrAddPathCheckerComponent()
+  comp.setTargetPlayer(p)
+  comp.deactivate()
+  g_pathCheckers.put(p, pathChecker)
+  return pathChecker
+
+// ============================================================================
+public function startPathCheck(player p)
+  let pathChecker = getPathChecker(p)
+  pathChecker.getOrAddPathCheckerComponent().startPathCheck()
+
+// ============================================================================
+function startPathCheckForEventTriggeringUnit(unit triggerUnit)
+  if (not triggerUnit.isStructure() or
+      not triggerUnit.getOwner().isPlayingHumanPlayer())
+    return
+  startPathCheck(triggerUnit.getOwner())
+
+// ============================================================================
+function onUnitConstructStartCancel()
+  startPathCheckForEventTriggeringUnit(GetConstructingStructure())
+
+// ============================================================================
+function onUnitDeath()
+  startPathCheckForEventTriggeringUnit(GetDyingUnit())
+
+// ============================================================================
+function onUnitIndexed()
+  startPathCheckForEventTriggeringUnit(getIndexingUnit())
+
+// ============================================================================
+function onUnitUpgradeFinished()
+  startPathCheckForEventTriggeringUnit(GetTriggerUnit())
+
+// ============================================================================
+init
+
+  // If any of these events occur it could mean that the player has either built
+  // or destroyed a structure that would have otherwise blocked a path for the
+  // path checker to reach. We need to check the path again.
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_CONSTRUCT_CANCEL, function onUnitConstructStartCancel)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_CONSTRUCT_START, function onUnitConstructStartCancel)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_UPGRADE_FINISH, function onUnitUpgradeFinished)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_DEATH, function onUnitDeath)
+  onUnitIndex(function onUnitIndexed)
+  onUnitDeindex(function onUnitIndexed)

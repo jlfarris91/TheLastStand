@@ -1,48 +1,445 @@
 package SurvivorComponent
 import UnitComponent
 import Statistic
-import SurvivorData
+import HashMap
+import SurvivorJobs
+import SurvivorJobComponent
+import DisplayTextToPlayer
+import ClosureTimers
+import SurvivorJobData
+import MainItemLibrary
+import RangedTargetXpReceieverComponent
+import PersistActiveAbilityComponent
+import SurvivorNames
+import TlsUnitDefinition
+import FX
+import ColorUtility
+import TlsJobItemIds
+import StatisticsCollection
+import ClosureEvents
+
+import initlater SurvivorJoblessComponent
+import initlater BuilderJobComponent
+import initlater MilitiaJobComponent
+import initlater SpearmanJobComponent
+import initlater MedicJobComponent
+import initlater MarksmanJobComponent
+import initlater EngineerJobComponent
+import initlater AcolyteComponent
+
+group g_temp = CreateGroup()
+trigger g_onSurvivorJobPreChange = CreateTrigger()
+trigger g_onSurvivorJobPostChange = CreateTrigger()
+unit g_jobChangingSurvivorPre
+unit g_jobChangingSurvivorPost
+
+// ============================================================================
+public function onSurvivorJobPreChanged(code func)
+  g_onSurvivorJobPreChange.addCondition(Condition(func))
+
+// ============================================================================
+public function onSurvivorJobPostChanged(code func)
+  g_onSurvivorJobPostChange.addCondition(Condition(func))
+
+// ============================================================================
+public function getJobChangingSurvivor_PreJobChange() returns unit
+  return g_jobChangingSurvivorPre
+
+// ============================================================================
+public function getJobChangingSurvivor_PostJobChange() returns unit
+  return g_jobChangingSurvivorPost
+
+// ============================================================================
+function raiseSurvivorJobPreChangeEvent(unit _unit)
+  g_jobChangingSurvivorPre = _unit
+  g_onSurvivorJobPreChange.evaluate()
+  g_jobChangingSurvivorPre = null
+
+// ============================================================================
+function raiseSurvivorJobPostChangeEvent(unit preUnit, unit postUnit)
+  g_jobChangingSurvivorPre = preUnit
+  g_jobChangingSurvivorPost = postUnit
+  g_onSurvivorJobPostChange.evaluate()
+  g_jobChangingSurvivorPre = null
+  g_jobChangingSurvivorPost = null
 
 // ============================================================================
 public class SurvivorComponent extends UnitComponent
-  private SurvivorData m_survivorData
+  private IterableMap<SurvivorJobDefinition, SurvivorJobComponent> m_jobComponents
+  private SurvivorJobDefinition m_activeJob
+  private SurvivorJobComponent m_activeJobComponent
+  private bool m_changingJobs
+  private string m_name
+  private IterableMap<SurvivorJobDefinition, SurvivorJobData> m_jobData
+  private StatisticsCollection m_stats
 
   // --------------------------------------------------------------------------
   construct(IUnitMetadata owner)
     super(owner)
+    m_jobComponents = new IterableMap<SurvivorJobDefinition, SurvivorJobComponent>()
+    m_jobData = new IterableMap<SurvivorJobDefinition, SurvivorJobData>()
+    m_stats = new StatisticsCollection()
+    m_changingJobs = false
+    m_name = null
+    m_activeJobComponent = null
+    m_activeJob = null
 
   // --------------------------------------------------------------------------
   ondestroy
-    m_survivorData = null
+    destroy m_jobComponents
+    m_jobComponents = null
+
+    for jobDataId in m_jobData
+      destroy m_jobData.get(jobDataId)
+    destroy m_jobData
+    m_jobData = null
+
+    destroy m_stats
+    m_stats = null
 
   // --------------------------------------------------------------------------
   override function getTypeId() returns int
     return SurvivorComponent.typeId
 
   // --------------------------------------------------------------------------
-  override function initialize()
-    super.initialize()
+  function getName() returns string
+    return m_name
+
+  // --------------------------------------------------------------------------
+  function setName(string value)
+    m_name = value
+    updateUnitProperName()
+
+  // --------------------------------------------------------------------------
+  function getActiveJobComponent() returns SurvivorJobComponent
+    return m_activeJobComponent
+
+  // --------------------------------------------------------------------------
+  function getActiveJob() returns SurvivorJobDefinition
+    return m_activeJob
+
+  // --------------------------------------------------------------------------
+  function getJobData(SurvivorJobDefinition job) returns SurvivorJobData
+    var jobData = m_jobData.get(job)
+    if (jobData == null)
+      jobData = new SurvivorJobData()..setUnitId(job.getInitialUnitType())
+      if (job == SurvivorJobs.none)
+        jobData.setIsEquipped(true)
+      m_jobData.put(job, jobData)
+    return jobData
+
+  // --------------------------------------------------------------------------
+  function getStats() returns StatisticsCollection
+    return m_stats
+
+  // --------------------------------------------------------------------------
+  function setStats(StatisticsCollection stats)
+    m_stats = stats
+
+  // --------------------------------------------------------------------------
+  function getStatistic(string key) returns IStatistic
+    return m_stats.getStatistic(key)
+
+  // --------------------------------------------------------------------------
+  function addStatistic(string key, IStatistic statistic)
+    m_stats.addStatistic(key, statistic)
+
+  // --------------------------------------------------------------------------
+  function getChangingJobs() returns bool
+    return m_changingJobs
+
+  // --------------------------------------------------------------------------
+  function getJobComponent(SurvivorJobDefinition job) returns SurvivorJobComponent
+    return m_jobComponents.get(job)
 
   // --------------------------------------------------------------------------
   override function onEnabled()
     super.onEnabled()
 
-  // --------------------------------------------------------------------------
-  function getSurvivorData() returns SurvivorData
-    return m_survivorData
+    let owner = getOwner()
+
+    owner.getOrAddPersistActiveAbilityComponent()
+    owner.getOrAddRangedTargetXpRecieverComponent()
+
+    registerJobComponent(SurvivorJobs.none,     owner.getOrAddSurvivorJoblessComponent() ..setEnabled(true))
+    registerJobComponent(SurvivorJobs.builder,  owner.getOrAddBuilderJobComponent()      ..setEnabled(false))
+    registerJobComponent(SurvivorJobs.engineer, owner.getOrAddEngineerJobComponent()     ..setEnabled(false))
+    registerJobComponent(SurvivorJobs.militia,  owner.getOrAddMilitiaJobComponent()      ..setEnabled(false))
+    registerJobComponent(SurvivorJobs.spearman, owner.getOrAddSpearmanJobComponent()     ..setEnabled(false))
+    registerJobComponent(SurvivorJobs.medic,    owner.getOrAddMedicJobComponent()        ..setEnabled(false))
+    registerJobComponent(SurvivorJobs.marksman, owner.getOrAddMarksmanJobComponent()     ..setEnabled(false))
+    registerJobComponent(SurvivorJobs.acolyte,  owner.getOrAddAcolyteJobComponent()      ..setEnabled(false))
+    
+    let ownerUnit = getOwnerUnit()
+    if (ownerUnit != null)
+    //{
+      let owningPlayer = ownerUnit.getOwner()
+      
+      if (getName() == null)
+        setName(getRandomSurvivorNameForPlayer(owningPlayer))
+
+      setJobDirectly(SurvivorJobs.none)
+      
+      // Pick a random survivor name
+      updateUnitProperName()
+    //}
 
   // --------------------------------------------------------------------------
-  function setSurvivorData(SurvivorData stats)
-    m_survivorData = stats
+  function canChangeJob(SurvivorJobDefinition job) returns bool
+    if (m_changingJobs or m_activeJob == job)
+      return false
+    if (job == SurvivorJobs.none)
+      return true
+    let jobData = getJobData(job)
+    if (jobData == null)
+      Log.error("SurvivorComponent", "canChangeJob", "", "Job data is null")
+      return false
+    return jobData.getIsEquipped()
 
   // --------------------------------------------------------------------------
-  function getStatistic(string key) returns IStatistic
-    return m_survivorData != null ? m_survivorData.getStatistic(key) : null
+  function setJobDirectly(SurvivorJobDefinition job)
+
+    if (m_activeJobComponent != null)
+      m_activeJobComponent.setEnabled(false)
+
+    m_activeJob = job
+    m_activeJobComponent = getJobComponent(job)
+
+    if (m_activeJobComponent != null)
+      m_activeJobComponent.setEnabled(true)
 
   // --------------------------------------------------------------------------
-  function addStatistic(string key, IStatistic statistic)
-    if (m_survivorData != null)
-      m_survivorData.addStatistic(key, statistic)
+  function changeJobs(SurvivorJobDefinition job) returns bool
+    let ownerUnit = getOwnerUnit()
+    let unitType = ownerUnit.getTypeId()
+
+    if (job.hasUnitType(unitType))
+      displayMessageToPlayer(ownerUnit.getOwner(), "{0} is already a {1}!".format(ownerUnit.getProperName().colorize(COLOR_GOLD), job.getTitle().colorize(COLOR_GOLD)))
+      return false
+
+    let jobData = getJobData(job)
+    if (jobData == null)
+      Log.debug("SurvivorJobChangeComponent", "changeJobs", ownerUnit.getName(), "Failed to change to job " + job.getTitle() + " : survivor has no related job data")
+      return false
+
+    preJobChange(ownerUnit)
+
+    // The player has learned about this job now that they have assigned the job
+    job.setIsJobKnownToPlayer(ownerUnit.getOwner(), true)
+
+    let replacementUnitId = jobData.getUnitId()
+    let replacedUnit = replaceUnit(replacementUnitId)
+
+    // Let the replaced unit settle before saying the job has been succesfully changed
+    nullTimer(() -> postJobChange_static(ownerUnit, replacedUnit))
+
+    return true
+
+  // --------------------------------------------------------------------------
+  function upgradeJob() returns bool
+    let ownerUnit = getOwnerUnit()
+    let currentUnitId = ownerUnit.getTypeId()
+    let job = getJobDefinitionForUnitType(currentUnitId)
+    
+    let nextUnitId = job.getNextUpgrade(currentUnitId)
+    if (nextUnitId == -1)
+      return false
+
+    let jobData = getJobData(job)
+    if (jobData == null)
+      return false
+
+    preJobChange(ownerUnit)
+
+    let replacedUnit = replaceUnit(nextUnitId)
+
+    // There is a bug with upgrading non-building units where the player is not
+    // charged for the upgrade - so do that now.
+    let nextUnitDef = getUnitDefinition(nextUnitId)
+    if (nextUnitDef != null)
+      let p = getOwnerUnit().getOwner()
+      p.subGold(nextUnitDef.getGoldCost())
+      p.subLumber(nextUnitDef.getLumberCost())
+    else
+      Log.debug("SurvivorJobChangeComponent", "changeJobs", ownerUnit.getName(), "No definition registered for unit type {0}".format(nextUnitId.toString()))
+
+    // Let the replaced unit settle before saying the job has been succesfully changed
+    nullTimer(() -> postJobChange_static(ownerUnit, replacedUnit))
+
+    return true
+
+  // --------------------------------------------------------------------------
+  function tryEquipJobItem(item jobItem) returns bool
+    if (not jobItem.isJobItem())
+      return false
+
+    let jobDef = getJobDefinitionForItemType(jobItem.getTypeId())
+    if (jobDef == null)
+      Log.debug("[onUnitUsedItem] jobId is null for item type " + jobItem.getName())
+      return false
+
+    if (jobDef == SurvivorJobs.none)
+      Log.debug("[onUnitUsedItem] Somehow the jobid equals SurvivorJobs.none for item type " + jobItem.getName())
+      return false
+
+    let jobData = getJobData(jobDef)
+    if (jobData.getIsEquipped())
+      displayMessageToPlayer(getOwnerUnit().getOwner(), "This survivor has already been assigned this job")
+      return false
+    
+    jobItem.remove()
+
+    jobData.setIsEquipped(true)
+
+    changeJobs(jobDef)
+    return true
+
+  // --------------------------------------------------------------------------
+  function tryUnequipJob(SurvivorJobDefinition job) returns bool
+    let ownerUnit = getOwnerUnit()
+    let jobData = ownerUnit.getSurvivorJobData(job)
+    if (jobData == null or not jobData.getIsEquipped())
+      return false
+
+    jobData.setIsEquipped(false)
+    g_MainItemLibrary.createItemForUnit(ownerUnit, job.getItemType())
+    
+    if (canChangeJob(SurvivorJobs.none))
+      changeJobs(SurvivorJobs.none)
+
+    return true
+
+  // --------------------------------------------------------------------------
+  private function preJobChange(unit oldUnit)
+
+    m_changingJobs = true
+
+    if (oldUnit != null)
+      saveJobData(oldUnit)
+
+    if (m_activeJobComponent != null)
+      m_activeJobComponent.setEnabled(false)
+
+    m_activeJobComponent = null
+    m_activeJob = null
+
+    raiseSurvivorJobPreChangeEvent(oldUnit)
+
+  // --------------------------------------------------------------------------
+  private static function postJobChange_static(unit oldUnit, unit newUnit)
+
+    let metadata = newUnit.getMetadata()
+    if (metadata != null)
+    //{
+      let survivorComp = metadata.getSurvivorComponent()
+      if (survivorComp != null)
+        survivorComp.postJobChange(newUnit)
+      else
+        Log.warn("SurvivorUnit", "postJobChange_static", newUnit.getHandleId().toString(), "Unit does not have a Survivor component!")
+    //}
+    else
+    //{
+      Log.warn("SurvivorUnit", "postJobChange_static", newUnit.getHandleId().toString(), "Unit does not have metadata!")
+    //}
+
+    // We need to raise this no matter what, even if there is an error above, otherwise the job panel will get stuck
+    // waiting for the job change to end
+    raiseSurvivorJobPostChangeEvent(oldUnit, newUnit)
+
+  // --------------------------------------------------------------------------
+  private function postJobChange(unit newUnit)
+
+    if (newUnit == null)
+      return
+    
+    //Log.info("SurvivorUnit", "onPostUnitChanged", newUnit.getName(), "newUnit 1 xp " + newUnit.getXp().toString())
+
+    let newUnitId = newUnit.getTypeId()
+    let job = getJobDefinitionForUnitType(newUnitId)
+    
+    m_activeJob = job
+    m_activeJobComponent = getJobComponent(job)
+    
+    //Log.info("SurvivorUnit", "onPostUnitChanged", newUnit.getName(), "newUnit 2 xp " + newUnit.getXp().toString())
+
+    if (m_activeJobComponent != null)
+      m_activeJobComponent.setEnabled(true)
+    
+    //Log.info("SurvivorUnit", "onPostUnitChanged", newUnit.getName(), "newUnit 3 xp " + newUnit.getXp().toString())
+
+    resetExperienceIfPromoting(newUnit)
+
+    updateUnitProperName()
+
+    loadJobData(newUnit)
+    
+    m_changingJobs = false
+
+  // --------------------------------------------------------------------------
+  private function replaceUnit(int replacementUnitId) returns unit
+    let ownerUnit = getOwnerUnit()
+
+    let replacedUnit = replaceUnitTLS(ownerUnit, replacementUnitId, bj_UNIT_STATE_METHOD_RELATIVE, /* persist xp */ false)
+
+    FX.createJobChangeEffect(replacedUnit.getPos())
+    FX.createJobChangeTag(replacedUnit.getName(), replacedUnit.getPos(), replacedUnit.getOwner())
+
+    return replacedUnit
+  
+  // --------------------------------------------------------------------------
+  private function saveJobData(unit theUnit)
+    if (m_activeJobComponent == null)
+      return
+
+    let unitTypeId = theUnit.getTypeId()
+    let jobId = getJobDefinitionForUnitType(unitTypeId)
+
+    let jobData = getJobData(jobId)
+    if (jobData != null)
+      m_activeJobComponent.saveJobData(jobData)
+    //   Log.info("SurvivorUnit", "saveOldJobStats", jobId.getTitle(), "xp " + theUnit.getXp().toString())
+    // else
+    //   Log.info("SurvivorUnit", "saveOldJobStats", jobId.getTitle(), "Could not find job data")
+
+  // --------------------------------------------------------------------------
+  private function loadJobData(unit theUnit)
+    let unitTypeId = theUnit.getTypeId()
+    let jobId = getJobDefinitionForUnitType(unitTypeId)
+
+    let jobData = getJobData(jobId)
+    if (jobData != null)
+      m_activeJobComponent.loadJobData(jobData)
+    //   Log.info("SurvivorUnit", "loadNewJobStats", jobId.getTitle(), "xp " + theUnit.getXp().toString())
+    // else
+    //   Log.info("SurvivorUnit", "loadNewJobStats", jobId.getTitle(), "Could not find job data")
+
+  // --------------------------------------------------------------------------
+  private function updateUnitProperName()
+    getOwnerUnit().setProperName(getName())
+
+  // --------------------------------------------------------------------------
+  private function resetExperienceIfPromoting(unit newUnit)
+    if (newUnit == null)
+      return
+    let job = getJobDefinitionForUnitType(newUnit.getTypeId())
+    let jobData = getJobData(job)
+    if (jobData == null or jobData.getUnitId() == newUnit.getTypeId())
+      return
+    jobData.setLevel(1)
+    jobData.setExperience(0)
+
+  // --------------------------------------------------------------------------
+  private function registerJobComponent(SurvivorJobDefinition job, SurvivorJobComponent comp)
+    m_jobComponents.put(job, comp)
+
+  // --------------------------------------------------------------------------
+  protected function onLevelChanged()
+    if (m_jobComponents == null)
+      return
+    for key in m_jobComponents
+      let comp = m_jobComponents.get(key)
+      if (comp != null and comp.getEnabled())
+        comp.onLevelChanged()
 
 // ============================================================================
 public function IUnitMetadata.getSurvivorComponent() returns SurvivorComponent
@@ -54,3 +451,96 @@ public function IUnitMetadata.getOrAddSurvivorComponent() returns SurvivorCompon
   if (component == null)
     component = this.addComponent(new SurvivorComponent(this)) castTo SurvivorComponent
   return component
+
+// ============================================================================
+public function unit.getSurvivorComponent() returns SurvivorComponent
+  let metadata = this.getMetadata()
+  return metadata != null ? metadata.getSurvivorComponent() : null
+
+// ============================================================================
+public function unit.getOrAddSurvivorComponent() returns SurvivorComponent
+  let metadata = this.getMetadata()
+  return metadata != null ? metadata.getOrAddSurvivorComponent() : null
+
+// ============================================================================
+public function unit.getSurvivorJobData(SurvivorJobDefinition jobDef) returns SurvivorJobData
+  let survivor = this.getSurvivorComponent()
+  return survivor != null ? survivor.getJobData(jobDef) : null
+
+// ============================================================================
+function onUnitUsedItem()
+  let manipulatingUnit = GetManipulatingUnit()
+  let manipulatedItem = GetManipulatedItem()
+
+  if (not manipulatedItem.isJobItem())
+    return
+
+  let comp = manipulatingUnit.getSurvivorComponent()
+  if (comp == null or not comp.getEnabled())
+    displayMessageToPlayer(manipulatingUnit.getOwner(), "This item can only be used by a survivor")
+    return
+
+  comp.tryEquipJobItem(manipulatedItem)
+
+// ============================================================================
+function onOrderIssued()
+
+  let issuedOrderId = GetIssuedOrderId()
+  let orderedUnit = GetOrderedUnit()
+
+  let metadata = orderedUnit.getMetadata()
+  if (metadata == null)
+    return
+  
+  let comp = metadata.getSurvivorComponent()
+  if (comp == null)
+    return
+
+  let currentUnitId = orderedUnit.getTypeId()
+  let job = getJobDefinitionForUnitType(currentUnitId)
+  if (job == null)
+    return
+
+  let nextUnitId = job.getNextUpgrade(currentUnitId)
+  if (nextUnitId == issuedOrderId)
+    comp.upgradeJob()
+
+// ============================================================================
+function onUnitKilled()
+  let dyingUnit = GetDyingUnit()
+
+  if (not dyingUnit.isSurvivor())
+    return
+
+  let metadata = dyingUnit.getMetadata()
+  if (metadata == null)
+    return
+
+  let survivor = metadata.getSurvivorComponent()
+  if (survivor == null)
+    return
+
+  // Create an item for each enabled job
+  for jobDef in g_allJobDefinitions
+  //{
+    let jobData = survivor.getJobData(jobDef)
+    if (jobData.getIsEquipped())
+      let jobItemType = jobDef.getItemType()
+      g_MainItemLibrary.createItem(jobItemType, dyingUnit.getPos())
+      jobData.setIsEquipped(false)
+  //}
+
+// ============================================================================
+function onHeroLeveledUp()
+  let leveledUnit = GetLevelingUnit()
+  let survivor = leveledUnit.getSurvivorComponent()
+  if (survivor == null)
+    return
+  survivor.onLevelChanged()
+
+// ============================================================================
+init
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_USE_ITEM, function onUnitUsedItem)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ISSUED_ORDER, function onOrderIssued)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_DEATH, function onUnitKilled)
+  registerPlayerUnitEvent(EVENT_PLAYER_HERO_LEVEL, function onHeroLeveledUp)

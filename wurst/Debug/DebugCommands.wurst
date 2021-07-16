@@ -25,6 +25,8 @@ import UnitExtensions
 import ProjectConstants
 import PowerSourceComponent
 import PoweredComponent
+import PathChecker
+import Survivors
 
 constant string COMMAND_MEMORYTRACKER = "mem"
 constant string COMMAND_GODLIKE = "godlike"
@@ -67,6 +69,8 @@ constant string COMMAND_ATTACKSENABLED = "setAttacksEnabled"
 constant string COMMAND_LINK = "link"
 constant string COMMAND_UNLINK = "unlink"
 constant string COMMAND_GAMESPEED = "gameSpeed"
+constant string COMMAND_CHECKPATH = "checkpath"
+constant string COMMAND_SPAWNSURVIVOR = "spawnSurvivor"
 
 DebugChatCommandHandler g_commandHandler
 MemoryTrackingMultiboard g_memoryTrackingMultiboard
@@ -797,6 +801,40 @@ function setGameSpeed()
   g_GameInstance.setGameSpeed(value)
 
   displayMessageToPlayer(commandPlayer, "Set the game speed to " + value.toString() + "x")
+function checkPath()
+  let commandPlayer = getChatCommandPlayer()
+  let targetPlayerId = getChatCommand().getArgument(0).getInt()
+
+  let targetPlayer = Player(targetPlayerId)
+  if (targetPlayer == null or not targetPlayer.isPlayingHumanPlayer())
+    displayMessageToPlayer(commandPlayer, "PLAYER must be the id of a playing human player")
+    return
+
+  startPathCheck(targetPlayer)
+  displayMessageToPlayer(commandPlayer, "Starting path check for player " + targetPlayer.getName())
+
+// ============================================================================
+function spawnSurvivor()
+  let commandPlayer = getChatCommandPlayer()
+  let targetPlayerId = getChatCommand().getArgument(0).getInt()
+  let count = getChatCommand().getArgument(1).getInt()
+  let forceArg = getChatCommand().getArgument(2)
+
+  let targetPlayer = Player(targetPlayerId)
+  if (targetPlayer == null or not targetPlayer.isPlayingHumanPlayer())
+    displayMessageToPlayer(commandPlayer, "PLAYER must be the id of a playing human player")
+    return
+
+  var forceOp = false
+  if (forceArg != null)
+    forceOp = forceArg.getBool()
+
+  if (forceOp)
+    for i = 0 to count - 1
+      SurvivorUtility.spawnSurvivorUnitForPlayer(targetPlayer)
+  else
+    for i = 0 to count - 1
+      SurvivorUtility.trySpawnSurvivorForPlayer(targetPlayer)
 
 // ============================================================================
 function registerDebugCommands()
@@ -935,6 +973,15 @@ function registerDebugCommands()
   g_commandHandler.registerCommandDefinition(COMMAND_GAMESPEED, function setGameSpeed)
     ..setDescription("Sets the game speed")
     ..addRealArgument("Speed", false)
+  g_commandHandler.registerCommandDefinition(COMMAND_CHECKPATH, function checkPath)
+    ..setDescription("Starts a path checker for a given player")
+    ..addIntegerArgument("PLAYER", false)
+
+  g_commandHandler.registerCommandDefinition(COMMAND_SPAWNSURVIVOR, function spawnSurvivor)
+    ..setDescription("Tries to spawn one or more random survivors for a player")
+    ..addIntegerArgument("PLAYER", false)
+    ..addIntegerArgument("COUNT", false)
+    ..addBoolArgument("FORCE", true)
 
 // ============================================================================
 init
