@@ -1,0 +1,119 @@
+package GameSetup
+import TimerUtils
+import ClosureTimers
+import GameInstance
+import HumanPlayers
+import HumanPlayerMetadata
+import TlsUnitIds
+import DialogBox
+import HashMap
+
+GameSetup g_GameSetup = new GameSetup()
+trigger g_buttonPressedTrigger
+
+dialog g_heroSelectionDialog
+button g_heroButtonDefault
+button g_heroButtonScout
+button g_heroButtonSoldier
+button g_heroButtonPaladin
+button g_heroButtonEngineer
+
+// ============================================================================
+public class GameSetup
+  private timer m_timer
+  private timerdialog m_timerDialog
+  private int m_numPlayersReady
+  private IterableMap<player, DialogBox> m_dialogBoxes = new IterableMap<player, DialogBox>()
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    if (m_timer != null)
+      m_timer.release()
+      m_timer = null
+
+    if (m_timerDialog != null)
+      m_timerDialog.destr()
+      m_timerDialog = null
+
+    if (m_dialogBoxes != null)
+      for key in m_dialogBoxes
+        destroy m_dialogBoxes.get(key)
+      destroy m_dialogBoxes
+      m_dialogBoxes = null
+
+  // --------------------------------------------------------------------------
+  function start()
+
+    m_timer = getTimer()
+    m_timer.doAfter(30, () -> onTimerExpired())
+
+    m_timerDialog = CreateTimerDialogBJ(m_timer, "Game starts in... ")
+    m_timerDialog.display(true)
+
+    for _player in g_PlayingHumanPlayers
+      showDialogToPlayer(_player)
+
+  // --------------------------------------------------------------------------
+  private function showDialogToPlayer(player _player)
+    let dialogBox = new DialogBox("Choose Your Hero")
+    ..addButton("Leader", () -> onPlayerHeroChosen(_player, TlsUnitIds.heroLeader))
+    ..addButton("Scout", () -> onPlayerHeroChosen(_player, TlsUnitIds.heroScout))
+    ..addButton("Soldier", () -> onPlayerHeroChosen(_player, TlsUnitIds.heroSoldier))
+    ..addButton("Paladin", () -> onPlayerHeroChosen(_player, TlsUnitIds.heroPaladin))
+    ..addButton("Engineer", () -> onPlayerHeroChosen(_player, TlsUnitIds.heroEngineer))
+    ..display(_player, true)
+    m_dialogBoxes.put(_player, dialogBox)
+
+  // --------------------------------------------------------------------------
+  function getHasTimerExpired() returns bool
+    return m_timer != null and m_timer.getElapsed() >= 30.0
+
+  // --------------------------------------------------------------------------
+  private function onTimerExpired()
+    done()
+
+  // --------------------------------------------------------------------------
+  private function onPlayerHeroChosen(player _player, int heroTypeId)
+    if (getHasTimerExpired())
+      return
+
+    let metadata = _player.getHumanMetadataRequired()
+    metadata.setHeroTypeId(heroTypeId)
+
+    destroy m_dialogBoxes.get(_player)
+    m_dialogBoxes.remove(_player)
+
+    m_numPlayersReady++
+    if (m_numPlayersReady >= g_PlayingHumanPlayers.count())
+      done()
+
+  // --------------------------------------------------------------------------
+  private function done()
+
+    m_timerDialog.display(false)
+    m_timerDialog.destr()
+    m_timerDialog = null
+
+    m_timer.release()
+    m_timer = null
+
+    // Assign the default hero to any players who still haven't decided
+    for _player in g_PlayingHumanPlayers
+    //{
+      let metadata = _player.getHumanMetadataRequired()
+      if (metadata.getHeroTypeId() == 0)
+        metadata.setHeroTypeId(TlsUnitIds.heroLeader)
+
+      // Close the dialog for any players still looking at it
+      if (m_dialogBoxes.has(_player))
+        destroy m_dialogBoxes.get(_player)
+        m_dialogBoxes.remove(_player)
+    //}
+
+    // start the game!
+    g_GameInstance.start()
+
+// ============================================================================
+init
+
+  doAfter(1.0, () -> g_GameSetup.start())
