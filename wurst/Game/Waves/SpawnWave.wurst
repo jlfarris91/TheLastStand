@@ -2,7 +2,6 @@ package SpawnWave
 import SpawnWaveDefinition
 import Events
 import LinkedList
-import WaveActivator
 import HumanPlayerMetadata
 import GameConstants
 import ErrorHandling
@@ -23,6 +22,8 @@ import ItemSet
 import UnitModifiers
 import Coins
 import DropItemOnDeathComponent
+import SpawnWaveContext
+import ISpawnWave
 
 constant real PROCESS_SPAWN_REQUEST_INTERVAL = 0.3
 constant int MAX_SPAWNS_PER_PROCESS = 1
@@ -46,9 +47,10 @@ public class SpawnWave extends Runnable
   private string m_id
   private player m_targetPlayer
   private int m_totalGoldAwarded
+  private SpawnWaveContext m_context
 
   // --------------------------------------------------------------------------
-  construct(player targetPlayer, SpawnWaveDefinition def)
+  construct(player targetPlayer, int index, SpawnWaveDefinition def)
     if (targetPlayer == null)
       argumentNullError("targetPlayer")
     if (def == null)
@@ -61,6 +63,10 @@ public class SpawnWave extends Runnable
     m_totalGoldAwarded = 0
     m_id = def.getName()
 
+    m_context = new SpawnWaveContext()
+    m_context.definition = m_definition
+    m_context.waveNumber = index
+
   // --------------------------------------------------------------------------
   ondestroy
     unlistenToActivatedEvent()
@@ -70,6 +76,10 @@ public class SpawnWave extends Runnable
     destroy m_aliveSpawnedUnits
     
     m_definition = null
+
+    if (m_context != null)
+      destroy m_context
+      m_context = null
 
   // --------------------------------------------------------------------------
   function getDefinition() returns SpawnWaveDefinition
@@ -88,6 +98,12 @@ public class SpawnWave extends Runnable
 
     m_aliveSpawnedUnits.clear()
     m_numSpawned = 0
+
+    // Update context
+    let playerMetadata = m_targetPlayer.getHumanMetadataRequired()
+    m_context.playerDifficulty = playerMetadata.getDifficulty()
+    for i = 0 to MAX_ELITE_TIER-1
+      m_context.tierChances[i] = playerMetadata.getTierChance(i)
 
     // Do this one frame later so that all player spawn waves that share these
     // spawn def services get started
@@ -123,6 +139,10 @@ public class SpawnWave extends Runnable
     return clamp01(m_definition.getProgress().getProgress())
 
   // --------------------------------------------------------------------------
+  function getContext() returns ISpawnWaveContext
+    return m_context
+
+  // --------------------------------------------------------------------------
   function activate() returns bool
 
     g_lastNumberOfUnitsSpawned = 0
@@ -140,11 +160,12 @@ public class SpawnWave extends Runnable
       // log("activateForPlayer", m_targetPlayer.getName() + " : Player is dead")
       return false
 
-    let waveProgress = getProgress()
-    let aliveCountMax = m_definition.getMaxAliveCount(waveProgress)
-    let spawnCountMax = m_definition.getMaxSpawnCount(waveProgress)
-    let spawnsPerActivation = m_definition.getSpawnsPerActivation(waveProgress)
-    let spawnGroupingFactor = m_definition.getSpawnGroupingFactor(waveProgress)
+    m_context.waveProgress = getProgress()
+
+    let aliveCountMax = m_definition.getMaxAliveCount(m_context)
+    let spawnCountMax = m_definition.getMaxSpawnCount(m_context)
+    let spawnsPerActivation = m_definition.getSpawnsPerActivation(m_context)
+    let spawnGroupingFactor = m_definition.getSpawnGroupingFactor(m_context)
     let waitForFullSpawnGroup = m_definition.getWaitForFullSpawnGroup()
 
     let numSpawnGroups = max(R2I(I2R(spawnsPerActivation) * (1.0 - spawnGroupingFactor)), 1)
@@ -162,7 +183,7 @@ public class SpawnWave extends Runnable
 
     // For each spawn point
     for sp in spawnPointsResult.spawnPoints
-      
+    //{
       // Until we reach max alive or max spawned
       if (numSpawnsAvailable == 0)
         break
@@ -173,7 +194,7 @@ public class SpawnWave extends Runnable
 
       // Spawn N units to form a group
       for i = 0 to spawnGroupSize - 1
-
+      //{
         // Until we reach max alive or max spawned
         if (numSpawnsAvailable == 0)
           break
@@ -181,9 +202,9 @@ public class SpawnWave extends Runnable
         let spawnCount = min(numSpawnsAvailable, spawnGroupSize)
 
         // Sample unit types, one type for each unit in the group
-        let unitTypes = m_definition.getUnitTypeProvider().getUnitTypes(spawnCount)
+        let unitTypes = m_definition.getUnitTypeProvider().getUnitTypes(m_context, spawnCount)
         for unitType in unitTypes
-        
+        //{
           // Until we reach max alive or max spawned
           if (numSpawnsAvailable == 0)
             break
@@ -192,9 +213,12 @@ public class SpawnWave extends Runnable
             numberOfUnitsSpawned++
 
           numSpawnsAvailable = getNumSpawnsAvailable(aliveCountMax, spawnCountMax)
+        //}
 
         // Clean up the unitTypes list
         destroy unitTypes
+      //}
+    //}
 
     // Clean up the spawnPoints list
     destroy spawnPointsResult.spawnPoints
@@ -249,16 +273,14 @@ public class SpawnWave extends Runnable
     if (goldReward != 0)
       let coinTypeId = getCoinItemTypeFromGoldReward(goldReward)
       spawnedUnit.awardItemOnDeath(g_coinItemSet, coinTypeId, 1.0)
-  
-    let progress = getProgress()
 
     let commonUnitModifier = m_definition.getCommonUnitModifier()
     if (commonUnitModifier != null)
-      commonUnitModifier.call(spawnedUnit, progress)
+      commonUnitModifier.call(spawnedUnit, m_context)
 
     let unitModifier = m_definition.getUnitModifier(unitTypeId)
     if (unitModifier != null)
-      unitModifier.call(spawnedUnit, progress)
+      unitModifier.call(spawnedUnit, m_context)
 
     let unitMetadata = spawnedUnit.getMetadata()
     if (unitMetadata == null)
@@ -290,7 +312,7 @@ public class SpawnWave extends Runnable
   // --------------------------------------------------------------------------
   function shouldGrantGoldReward() returns int
     let def = getDefinition()
-    let goldReward = def.getGoldReward()
+    let goldReward = def.getGoldReward(m_context)
     if (m_totalGoldAwarded == goldReward)
       return 0
     let waveProgress = clamp01(def.getProgress().getProgress() * 1.1)

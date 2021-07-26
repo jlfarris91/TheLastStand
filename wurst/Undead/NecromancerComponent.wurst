@@ -2,46 +2,49 @@ package NecromancerComponent
 import UnitComponent
 import TlsAbilityIds
 import ClosureTimers
-import HashMap
 import Action
 import TlsUnitIds
 import ObjectIds
 import RegisterEvents
 import UndeadTargetingComponent
+import ErrorHandling
+import ISpawnWave
 
 constant string RAISEDEAD_IMMEDIATEORDERSTR = "instant" // don't ask me why
 
 // ============================================================================
 public class NecromancerComponent extends UnitComponent
   private CallbackPeriodic castTimer
-  private IterableMap<int, Action2<unit, real>> m_summonedUnitModifiers
+  private ISpawnWaveContext m_spawnedContext
 
   // --------------------------------------------------------------------------
   construct (IUnitMetadata owner)
     super(owner)
-    m_summonedUnitModifiers = new IterableMap<int, Action2<unit, real>>()
-
-  // --------------------------------------------------------------------------
-  override function getTypeId() returns int
-    return NecromancerComponent.typeId
 
   // --------------------------------------------------------------------------
   ondestroy
     if (castTimer != null)
       destroy castTimer
       castTimer = null
-    for key in m_summonedUnitModifiers
-      destroy m_summonedUnitModifiers.get(key)
-    destroy m_summonedUnitModifiers
-    m_summonedUnitModifiers = null
+
+    if (m_spawnedContext != null)
+      destroy m_spawnedContext
+      m_spawnedContext = null
 
   // --------------------------------------------------------------------------
-  function addSummonedUnitModifier(int unitTypeId, Action2<unit, real> modifier)
-    m_summonedUnitModifiers.put(unitTypeId, modifier)
+  override function getTypeId() returns int
+    return NecromancerComponent.typeId
 
   // --------------------------------------------------------------------------
-  function getModifierForSummonedUnit(int unitTypeId) returns Action2<unit, real>
-    return m_summonedUnitModifiers.get(unitTypeId)
+  function getSpawnedContext() returns ISpawnWaveContext
+    return m_spawnedContext
+
+  // --------------------------------------------------------------------------
+  function setSpawnedContext(ISpawnWaveContext contextToClone)
+    if (m_spawnedContext != null)
+      destroy m_spawnedContext
+      m_spawnedContext = null
+    m_spawnedContext = contextToClone.clone()
 
   // --------------------------------------------------------------------------
   override function onUnitChanged(unit oldUnit, unit newUnit)
@@ -49,10 +52,12 @@ public class NecromancerComponent extends UnitComponent
 
     if (newUnit != null)
       switch (newUnit.getTypeId())
-        case TlsUnitIds.Undead.necromancer
+        case TlsUnitIds.Undead.necromancers[0]
           newUnit.setAbilityLevel(TlsAbilityIds.necromancerRaiseDead, 1)
-        case TlsUnitIds.Undead.greaterNecromancer
+        case TlsUnitIds.Undead.necromancers[1]
           newUnit.setAbilityLevel(TlsAbilityIds.necromancerRaiseDead, 2)
+        case TlsUnitIds.Undead.necromancers[2]
+          newUnit.setAbilityLevel(TlsAbilityIds.necromancerRaiseDead, 3)
 
   // --------------------------------------------------------------------------
   override function onEnabled()
@@ -101,14 +106,19 @@ function onUnitSummoned()
   if (comp == null)
     return
 
-  let summonedTypeId = summoned.getTypeId()
-
-  let modifier = comp.getModifierForSummonedUnit(summoned.getTypeId())
-  if (modifier == null)
-    Log.error("No modifier for unit summoned by necromancer of type " + summonedTypeId.toRawCode())
+  let spawnedContext = comp.getSpawnedContext()
+  if (spawnedContext == null)
+    error("Necromancer was spawned with no spawn context!")
     return
 
-  modifier.call(summoned, 1.0)
+  let summonedTypeId = summoned.getTypeId()
+
+  let modifier = spawnedContext.getSpawnWaveDefinition().getUnitModifier(summoned.getTypeId())
+  if (modifier == null)
+    Log.error("No modifier for unit summoned by Necromancer of type " + summonedTypeId.toRawCode())
+    return
+
+  modifier.call(summoned, spawnedContext)
 
   let summonerUTC = metadata.getUndeadTargetingComponent()
   if (summonerUTC == null)
