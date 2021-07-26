@@ -6,22 +6,24 @@ import HumanPlayerMetadata
 import Heroes
 import ClosureTimers
 import TlsSounds
-import initlater PlayerWaves
-import IWaveGenerator
-import initlater DayWave
-import initlater NightWave
-import initlater NormalNightWaveGenerator
-import initlater NormalDayWaveGenerator
-import WaveMultiboard
 import BaseUnitsRectProvider
 import Time
 import RandomWeatherPlayer
 import DisplayTextToPlayer
-import initlater GameStatsMultiboard
 import ColorUtility
 import Bases
 import Execute
 import ErrorHandling
+
+import initlater PlayerWaves
+import initlater IWaveGenerator
+import initlater DayWave
+import initlater NightWave
+import initlater NormalDayWaveGenerator
+import initlater WaveMultiboard
+import initlater GameStatsMultiboard
+import initlater NightWaveGenerator
+import Range
 
 public GameInstance g_GameInstance = new GameInstance()
 
@@ -34,6 +36,7 @@ public class GameInstance
   private bool m_updateGracePeriod
   private int m_day
   private int m_night
+  private real m_gameDifficulty = 1.0
   private real m_gameSpeedScale = 1.0
   private real m_unscaledTimeOfDaySpeedScale = 1.0
   private PlayerWavesMap m_playerWaves
@@ -94,6 +97,54 @@ public class GameInstance
     setTimeOfDayScale(percent / 100.0)
 
   // --------------------------------------------------------------------------
+  function getGameDifficulty01() returns real
+    return m_gameDifficulty
+
+  // --------------------------------------------------------------------------
+  function updateGameDifficulty()
+    int alivePlayerCount = 0
+    real totalDifficulty = 0.0
+    for _player in g_PlayingHumanPlayers
+      let metadata = _player.getHumanMetadata()
+      if (metadata != null and not metadata.getHasLeftGame() and not metadata.getHasLostGame())
+        alivePlayerCount++    
+        totalDifficulty += metadata.getDifficulty()  
+    if (alivePlayerCount == 0)
+      m_gameDifficulty = 1.0
+      return
+    m_gameDifficulty = totalDifficulty / alivePlayerCount
+
+    updatePlayerTierChances()
+
+  // --------------------------------------------------------------------------
+  private function updatePlayerTierChances()
+    for _player in g_PlayingHumanPlayers
+    //{
+      let metadata = _player.getHumanMetadata()
+      if (metadata != null and not metadata.getHasLeftGame() and not metadata.getHasLostGame())
+      //{
+        // let waveDifficulty = metadata.getDifficulty() * 0.7 + m_gameDifficulty * 0.3
+        let waveDifficulty = metadata.getDifficulty()
+
+        // TODO : oh boy this sucks!
+        if (waveDifficulty < 1.0)
+          metadata.setTierChance(0, 1)
+          metadata.setTierChance(1, 0)
+          metadata.setTierChance(2, 0)
+        else if (waveDifficulty >= 1.0 and waveDifficulty < 3.0)
+          let t = rangeReal(1.0, 3.0).parameterize01(waveDifficulty)
+          metadata.setTierChance(0, rangeReal(1.0, 0.0).lerp(t))
+          metadata.setTierChance(1, rangeReal(0.0, 1.0).lerp(t))
+          metadata.setTierChance(2, 0)
+        else if (waveDifficulty > 3.0)
+          let t = rangeReal(3.0, 5.0).parameterize01(waveDifficulty)
+          metadata.setTierChance(0, 0)
+          metadata.setTierChance(1, rangeReal(1.0, 0.0).lerp(t))
+          metadata.setTierChance(2, rangeReal(0.0, 1.0).lerp(t))
+        //}
+    //}
+
+  // --------------------------------------------------------------------------
   function getWaves() returns PlayerWavesMap
     return m_playerWaves
 
@@ -141,11 +192,13 @@ public class GameInstance
 
     // These should move to a place that sets up the GameInstance
     m_dayWaveGenerator = new NormalDayWaveGenerator()
-    m_nightWaveGenerator = new NormalNightWaveGenerator()
+    m_nightWaveGenerator = new NightWaveGenerator()
     m_waveMultiboard = new WaveMultiboard()
     m_weatherPlayer = new RandomWeatherPlayer()
 
     m_weatherPlayer.start()
+
+    updateGameDifficulty()
 
     initializeGeneral()
     initializeAlliances()

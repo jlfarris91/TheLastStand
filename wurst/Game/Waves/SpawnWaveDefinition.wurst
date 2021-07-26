@@ -1,7 +1,6 @@
 package SpawnWaveDefinition
+import ISpawnWave
 import IProgress
-import WaveActivator
-import IUnitTypeProvider
 import Math
 import HashMap
 import SpawnManager
@@ -10,22 +9,22 @@ import Func
 import Events
 
 // ============================================================================
-public class SpawnWaveDefinition
+public class SpawnWaveDefinition implements ISpawnWaveDefinition
   private string m_name
   private IProgress m_progress
-  private WaveActivator m_activator
+  private ISpawnWaveActivator m_activator
   private SpawnRange m_spawnRange
-  private IUnitTypeProvider m_unitTypeProvider
-  private Func1<real, int> m_maxSpawnCount
-  private Func1<real, int> m_maxAliveCount
-  private Func1<real, int> m_spawnsPerActivation
-  private Func1<real, real> m_spawnGroupingFactor
-  private Action2<unit, real> m_commonUnitModifier
-  private IterableMap<int, Action2<unit, real>> m_unitModifiers
+  private ISpawnWaveUnitTypeProvider m_unitTypeProvider
+  private Func1<ISpawnWaveContext, int> m_maxSpawnCount
+  private Func1<ISpawnWaveContext, int> m_maxAliveCount
+  private Func1<ISpawnWaveContext, int> m_spawnsPerActivation
+  private Func1<ISpawnWaveContext, real> m_spawnGroupingFactor
+  private Func1<ISpawnWaveContext, int> m_goldReward
+  private Action2<unit, ISpawnWaveContext> m_commonUnitModifier
+  private IterableMap<int, Action2<unit, ISpawnWaveContext>> m_unitModifiers
   private Vector<string> m_tags
   private bool m_waitForFullSpawnGroup = false
   private bool m_useUnitRecycler = false
-  private int m_goldReward
 
   // --------------------------------------------------------------------------
   construct(string name)
@@ -72,134 +71,139 @@ public class SpawnWaveDefinition
       destroy m_unitModifiers
       m_unitModifiers = null
 
+    if (m_goldReward != null)
+      destroy m_goldReward
+      m_goldReward = null
+
     destroy m_tags
+    m_tags = null
 
   // --------------------------------------------------------------------------
-  function getName() returns string
+  override function getName() returns string
     return m_name
 
   // --------------------------------------------------------------------------
-  function setProgress(IProgress progress)
+  override function setProgress(IProgress progress)
     m_progress = progress
 
   // --------------------------------------------------------------------------
-  function getProgress() returns IProgress
+  override function getProgress() returns IProgress
     return m_progress
 
   // --------------------------------------------------------------------------
-  function setActivator(WaveActivator activator)
+  override function setActivator(ISpawnWaveActivator activator)
     m_activator = activator
 
   // --------------------------------------------------------------------------
-  function getActivator() returns WaveActivator
+  override function getActivator() returns ISpawnWaveActivator
     return m_activator
 
   // --------------------------------------------------------------------------
-  function setSpawnRange(SpawnRange spawnRange)
+  override function setSpawnRange(SpawnRange spawnRange)
     m_spawnRange = spawnRange
 
   // --------------------------------------------------------------------------
-  function getSpawnRange() returns SpawnRange
+  override function getSpawnRange() returns SpawnRange
     return m_spawnRange
 
   // --------------------------------------------------------------------------
-  function setUnitTypeProvider(IUnitTypeProvider unitTypeProvider)
+  override function setUnitTypeProvider(ISpawnWaveUnitTypeProvider unitTypeProvider)
     m_unitTypeProvider = unitTypeProvider
 
   // --------------------------------------------------------------------------
-  function getUnitTypeProvider() returns IUnitTypeProvider
+  override function getUnitTypeProvider() returns ISpawnWaveUnitTypeProvider
     return m_unitTypeProvider
 
   // --------------------------------------------------------------------------
-  function setMaxAliveCount(Func1<real, int> value)
+  override function setMaxAliveCount(Func1<ISpawnWaveContext, int> value)
     m_maxAliveCount = value
 
   // --------------------------------------------------------------------------
-  function getMaxAliveCount(real t) returns int
+  override function getMaxAliveCount(ISpawnWaveContext context) returns int
     if (m_maxAliveCount == null)
       return UNLIMITED
-    return clamp(m_maxAliveCount.call(t), 0, UNLIMITED)
+    return clamp(m_maxAliveCount.call(context), 0, UNLIMITED)
 
   // --------------------------------------------------------------------------
-  function setMaxSpawnCount(Func1<real, int> value)
+  override function setMaxSpawnCount(Func1<ISpawnWaveContext, int> value)
     m_maxSpawnCount = value
 
   // --------------------------------------------------------------------------
-  function getMaxSpawnCount(real t) returns int
+  override function getMaxSpawnCount(ISpawnWaveContext context) returns int
     if (m_maxSpawnCount == null)
       return UNLIMITED
-    return clamp(m_maxSpawnCount.call(t), 0, UNLIMITED)
+    return clamp(m_maxSpawnCount.call(context), 0, UNLIMITED)
 
   // --------------------------------------------------------------------------
-  function getSpawnsPerActivation(real t) returns int
+  override function getSpawnsPerActivation(ISpawnWaveContext context) returns int
     if (m_spawnsPerActivation == null)
       return 1
-    return clamp(m_spawnsPerActivation.call(t), 0, 1000)
+    return clamp(m_spawnsPerActivation.call(context), 0, 1000)
 
   // --------------------------------------------------------------------------
-  function setSpawnsPerActivation(Func1<real, int> value)
+  override function setSpawnsPerActivation(Func1<ISpawnWaveContext, int> value)
     m_spawnsPerActivation = value
 
   // --------------------------------------------------------------------------
-  function getSpawnGroupingFactor(real t) returns real
+  override function getSpawnGroupingFactor(ISpawnWaveContext context) returns real
     if (m_spawnGroupingFactor == null)
       return 0.0
-    return clamp01(m_spawnGroupingFactor.call(t))
+    return clamp01(m_spawnGroupingFactor.call(context))
 
   // --------------------------------------------------------------------------
-  function setSpawnGroupingFactor(Func1<real, real> value)
+  override function setSpawnGroupingFactor(Func1<ISpawnWaveContext, real> value)
     m_spawnGroupingFactor = value
 
   // --------------------------------------------------------------------------
-  function setCommonUnitModifier(Action2<unit, real> action)
+  override function setCommonUnitModifier(Action2<unit, ISpawnWaveContext> action)
     m_commonUnitModifier = action
 
   // --------------------------------------------------------------------------
-  function getCommonUnitModifier() returns Action2<unit, real>
+  override function getCommonUnitModifier() returns Action2<unit, ISpawnWaveContext>
     return m_commonUnitModifier
 
   // --------------------------------------------------------------------------
-  function setUnitModifier(int unitTypeId, Action2<unit, real> action)
+  override function setUnitModifier(int unitTypeId, Action2<unit, ISpawnWaveContext> action)
     if (m_unitModifiers == null)
-      m_unitModifiers = new IterableMap<int, Action2<unit, real>>()
+      m_unitModifiers = new IterableMap<int, Action2<unit, ISpawnWaveContext>>()
     m_unitModifiers.put(unitTypeId, action)
 
   // --------------------------------------------------------------------------
-  function getUnitModifier(int unitTypeId) returns Action2<unit, real>
+  override function getUnitModifier(int unitTypeId) returns Action2<unit, ISpawnWaveContext>
     if (m_unitModifiers == null)
       return null
     return m_unitModifiers.get(unitTypeId)
 
   // --------------------------------------------------------------------------
-  function setTags(vararg string tags)
+  override function setTags(vararg string tags)
     m_tags.clear()
     for tag in tags
       m_tags.add(tag)
 
   // --------------------------------------------------------------------------
-  function getTags() returns Vector<string>
+  override function getTags() returns Vector<string>
     return m_tags
 
   // --------------------------------------------------------------------------
-  function getWaitForFullSpawnGroup() returns bool
+  override function getWaitForFullSpawnGroup() returns bool
     return m_waitForFullSpawnGroup
 
   // --------------------------------------------------------------------------
-  function setWaitForFullSpawnGroup(bool value)
+  override function setWaitForFullSpawnGroup(bool value)
     m_waitForFullSpawnGroup = value
 
   // --------------------------------------------------------------------------
-  function getUseUnitRecycler() returns bool
+  override function getUseUnitRecycler() returns bool
     return m_useUnitRecycler
 
   // --------------------------------------------------------------------------
-  function setUseUnitRecycler(bool value)
+  override function setUseUnitRecycler(bool value)
     m_useUnitRecycler = value
 
   // --------------------------------------------------------------------------
-  function getGoldReward() returns int
-    return m_goldReward
+  override function getGoldReward(ISpawnWaveContext context) returns int
+    return m_goldReward != null ? m_goldReward.call(context) : 0
 
   // --------------------------------------------------------------------------
-  function setGoldReward(int value)
+  override function setGoldReward(Func1<ISpawnWaveContext, int> value)
     m_goldReward = value

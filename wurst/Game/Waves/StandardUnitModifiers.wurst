@@ -1,0 +1,121 @@
+package StandardUnitModifiers
+import UnitModifiers
+import Math
+import Range
+import UnitExtensions
+import GameConstants
+import ItemLibrary
+import Func
+import ISpawnWave
+import TlsItemIds
+
+Func1<real, real> g_coinSmallWeightTFunc
+Func1<real, real> g_coinMediumWeightTFunc
+Func1<real, real> g_coinLargeWeightTFunc
+Func1<real, real> g_coinEpicWeightTFunc
+
+ItemSet array[TOTAL_NIGHTS] g_coinItemSets
+rangeInt array[TOTAL_NIGHTS] g_goldRange
+
+// ============================================================================
+public class StandardUnitModifiers
+  rangeInt healthRange
+  rangeReal armorRange
+  rangeInt attack1MinDamageRange
+  rangeInt attack1MaxDamageRange
+  rangeReal attack1Cooldown
+  real attack1Range
+  rangeReal coinDropChanceRange
+  real sightRange
+  bool preferOrganicTargets
+
+  // --------------------------------------------------------------------------
+  function apply(ISpawnWaveContext context, unit _unit)
+    apply(context, _unit, 1.0)
+
+  // --------------------------------------------------------------------------
+  function apply(ISpawnWaveContext context, unit _unit, real scale)
+    applyHealth(context, _unit, scale)
+    applyArmor(context, _unit, scale)
+    applyAttack1DamageRange(context, _unit, scale)
+    applyAttack1Cooldown(context, _unit, scale)
+    applyGoldCoinDropChance(context, _unit, scale)
+    applyMisc(_unit)
+
+  // --------------------------------------------------------------------------
+  function applyHealth(ISpawnWaveContext context, unit _unit, real scale)
+    let gameT = context.getUnitModifierGameProgress01()
+    let finalDifficultyScale = context.getUnitModifierDifficultyScalar01() * scale
+    let maxHp = R2I(healthRange.lerp(gameT) * finalDifficultyScale)
+    _unit.setMaxHPandHP(maxHp)
+
+  // --------------------------------------------------------------------------
+  function applyArmor(ISpawnWaveContext context, unit _unit, real scale)
+    let gameT = context.getUnitModifierGameProgress01()
+    let finalDifficultyScale = context.getUnitModifierDifficultyScalar01() * scale
+    _unit.setArmor(armorRange.lerp(gameT) * finalDifficultyScale)
+
+  // --------------------------------------------------------------------------
+  function applyAttack1DamageRange(ISpawnWaveContext context, unit _unit, real scale)
+    let gameT = context.getUnitModifierGameProgress01()
+    let finalDifficultyScale = context.getUnitModifierDifficultyScalar01() * scale
+    var range = lerp(attack1MinDamageRange, attack1MaxDamageRange, gameT)
+    range.min = R2I(I2R(range.min) * finalDifficultyScale)
+    range.max = R2I(I2R(range.max) * finalDifficultyScale)
+    _unit.setDamageRange(0, range)
+
+  // --------------------------------------------------------------------------
+  function applyAttack1Cooldown(ISpawnWaveContext context, unit _unit, real scale)
+    let gameT = context.getUnitModifierGameProgress01()
+    let finalDifficultyScale = context.getUnitModifierDifficultyScalar01() * scale
+    _unit.setAttackCooldown(attack1Cooldown.lerp(gameT) * finalDifficultyScale, 0)
+
+  // --------------------------------------------------------------------------
+  function applyGoldCoinDropChance(ISpawnWaveContext context, unit _unit, real scale)
+    let gameT = context.getUnitModifierGameProgress01()
+    let finalDifficultyScale = context.getUnitModifierDifficultyScalar01() * scale
+    let waveNumber = (TOTAL_NIGHTS * gameT).floor()
+    let coinItemSet = getCoinItemSetForWave(waveNumber)
+    let chance = coinDropChanceRange.lerp(gameT) * finalDifficultyScale
+    if (passesChanceCheck(chance))
+      let itemType = coinItemSet.getRandomItemTypeId()
+      _unit.awardItemOnDeath(coinItemSet, itemType)
+  
+  // --------------------------------------------------------------------------
+  function applyMisc(unit _unit)
+    _unit.setAttackRange(0, attack1Range)
+    _unit.setAcquisitionRange(sightRange)
+    _unit.setSightRadius(sightRange)
+
+    if (preferOrganicTargets)
+      _unit.preferOrganicTargets()
+
+// ============================================================================
+public function unit.guaranteeGrantCoinsOnDeath(int coinItemTypeId, int waveNumber)
+  let coinItemSet = getCoinItemSetForWave(waveNumber)
+  this.awardItemOnDeath(coinItemSet, coinItemTypeId)
+
+// ============================================================================
+function getCoinItemSetForWave(int waveIndex) returns ItemSet
+  return g_coinItemSets[waveIndex]
+
+// ============================================================================
+init
+  g_coinSmallWeightTFunc = (real t) -> clamp01(Pow(1 - t, 8))
+  g_coinMediumWeightTFunc = (real t) -> clamp01((Sin(clamp(t, 0.0, 0.666) * 3 * PI - PIHALF)) / 2.0 + 0.5)
+  g_coinLargeWeightTFunc = (real t) -> clamp((Sin(clamp(t, 0.333, 1.0) * 3 * PI + PIHALF)) / 2.0 + 0.5, 0.001, 1.0)
+  g_coinEpicWeightTFunc = (real t) -> clamp(Pow(t, 8), 0.001, 1.0)
+  
+  // Generate coin item sets for each wave
+  for i = 1 to TOTAL_NIGHTS
+    let gameT = clamp01(i.toReal() / TOTAL_NIGHTS)
+    let coinItemSet = new ItemSet("Coins", COLOR_GOLD.withoutAlpha())
+    let weightSmall = g_coinSmallWeightTFunc.call(gameT)
+    let weightMedium = g_coinMediumWeightTFunc.call(gameT)
+    let weightLarge = g_coinLargeWeightTFunc.call(gameT)
+    let weightEpic = g_coinEpicWeightTFunc.call(gameT)
+    coinItemSet.add(TlsItemIds.coinSmall, weightSmall)
+    coinItemSet.add(TlsItemIds.coinMedium, weightMedium)
+    coinItemSet.add(TlsItemIds.coinLarge, weightLarge)
+    coinItemSet.add(TlsItemIds.coinEpic, weightEpic)
+    g_coinItemSets[i] = coinItemSet

@@ -23,7 +23,8 @@ public class GameSetup
   private timer m_timer
   private timerdialog m_timerDialog
   private int m_numPlayersReady
-  private IterableMap<player, DialogBox> m_dialogBoxes = new IterableMap<player, DialogBox>()
+  private IterableMap<player, DialogBox> m_heroSelectionDialogBoxes = new IterableMap<player, DialogBox>()
+  private IterableMap<player, DialogBox> m_heroDifficultyDialogBoxes = new IterableMap<player, DialogBox>()
 
   // --------------------------------------------------------------------------
   ondestroy
@@ -35,11 +36,17 @@ public class GameSetup
       m_timerDialog.destr()
       m_timerDialog = null
 
-    if (m_dialogBoxes != null)
-      for key in m_dialogBoxes
-        destroy m_dialogBoxes.get(key)
-      destroy m_dialogBoxes
-      m_dialogBoxes = null
+    if (m_heroSelectionDialogBoxes != null)
+      for key in m_heroSelectionDialogBoxes
+        destroy m_heroSelectionDialogBoxes.get(key)
+      destroy m_heroSelectionDialogBoxes
+      m_heroSelectionDialogBoxes = null
+
+    if (m_heroDifficultyDialogBoxes != null)
+      for key in m_heroDifficultyDialogBoxes
+        destroy m_heroDifficultyDialogBoxes.get(key)
+      destroy m_heroDifficultyDialogBoxes
+      m_heroDifficultyDialogBoxes = null
 
   // --------------------------------------------------------------------------
   function start()
@@ -51,10 +58,10 @@ public class GameSetup
     m_timerDialog.display(true)
 
     for _player in g_PlayingHumanPlayers
-      showDialogToPlayer(_player)
+      showHeroSelectionDialogToPlayer(_player)
 
   // --------------------------------------------------------------------------
-  private function showDialogToPlayer(player _player)
+  private function showHeroSelectionDialogToPlayer(player _player)
     let dialogBox = new DialogBox("Choose Your Hero")
     ..addButton("Leader", () -> onPlayerHeroChosen(_player, TlsUnitIds.heroLeader))
     ..addButton("Scout", () -> onPlayerHeroChosen(_player, TlsUnitIds.heroScout))
@@ -62,7 +69,18 @@ public class GameSetup
     ..addButton("Paladin", () -> onPlayerHeroChosen(_player, TlsUnitIds.heroPaladin))
     ..addButton("Engineer", () -> onPlayerHeroChosen(_player, TlsUnitIds.heroEngineer))
     ..display(_player, true)
-    m_dialogBoxes.put(_player, dialogBox)
+    m_heroSelectionDialogBoxes.put(_player, dialogBox)
+
+  // --------------------------------------------------------------------------
+  private function showDifficultySelectionDialogToPlayer(player _player)
+    let dialogBox = new DialogBox("Difficulty")
+    ..addButton("Normal", () -> onPlayerDifficultyChosen(_player, 1.0))
+    ..addButton("Hard", () -> onPlayerDifficultyChosen(_player, 2.0))
+    ..addButton("Insane", () -> onPlayerDifficultyChosen(_player, 3.0))
+    ..addButton("Apocalypse I", () -> onPlayerDifficultyChosen(_player, 4.0))
+    ..addButton("Apocalypse II", () -> onPlayerDifficultyChosen(_player, 5.0))
+    ..display(_player, true)
+    m_heroDifficultyDialogBoxes.put(_player, dialogBox)
 
   // --------------------------------------------------------------------------
   function getHasTimerExpired() returns bool
@@ -80,8 +98,21 @@ public class GameSetup
     let metadata = _player.getHumanMetadataRequired()
     metadata.setHeroTypeId(heroTypeId)
 
-    destroy m_dialogBoxes.get(_player)
-    m_dialogBoxes.remove(_player)
+    destroy m_heroSelectionDialogBoxes.get(_player)
+    m_heroSelectionDialogBoxes.remove(_player)
+
+    showDifficultySelectionDialogToPlayer(_player)
+
+  // --------------------------------------------------------------------------
+  private function onPlayerDifficultyChosen(player _player, real difficulty)
+    if (getHasTimerExpired())
+      return
+      
+    let metadata = _player.getHumanMetadataRequired()
+    metadata.setDifficulty(difficulty)
+
+    destroy m_heroDifficultyDialogBoxes.get(_player)
+    m_heroDifficultyDialogBoxes.remove(_player)
 
     m_numPlayersReady++
     if (m_numPlayersReady >= g_PlayingHumanPlayers.count())
@@ -104,10 +135,18 @@ public class GameSetup
       if (metadata.getHeroTypeId() == 0)
         metadata.setHeroTypeId(TlsUnitIds.heroLeader)
 
+      if (metadata.getDifficulty() == 0)
+        metadata.setDifficulty(1)
+
       // Close the dialog for any players still looking at it
-      if (m_dialogBoxes.has(_player))
-        destroy m_dialogBoxes.get(_player)
-        m_dialogBoxes.remove(_player)
+      if (m_heroSelectionDialogBoxes.has(_player))
+        destroy m_heroSelectionDialogBoxes.get(_player)
+        m_heroSelectionDialogBoxes.remove(_player)
+
+      // Close the dialog for any players still looking at it
+      if (m_heroDifficultyDialogBoxes.has(_player))
+        destroy m_heroDifficultyDialogBoxes.get(_player)
+        m_heroDifficultyDialogBoxes.remove(_player)
     //}
 
     // start the game!
