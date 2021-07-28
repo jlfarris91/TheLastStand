@@ -24,6 +24,7 @@ import Coins
 import DropItemOnDeathComponent
 import SpawnWaveContext
 import ISpawnWave
+import Range
 
 constant real PROCESS_SPAWN_REQUEST_INTERVAL = 0.3
 constant int MAX_SPAWNS_PER_PROCESS = 1
@@ -167,11 +168,14 @@ public class SpawnWave extends Runnable
     let spawnsPerActivation = m_definition.getSpawnsPerActivation(m_context)
     let spawnGroupingFactor = m_definition.getSpawnGroupingFactor(m_context)
     let waitForFullSpawnGroup = m_definition.getWaitForFullSpawnGroup()
+    let facingAngleRange = m_definition.getFacingAngleRange()
 
     let numSpawnGroups = max(R2I(I2R(spawnsPerActivation) * (1.0 - spawnGroupingFactor)), 1)
     let spawnGroupSize = max(R2I(I2R(spawnsPerActivation) * spawnGroupingFactor), 1)
 
-    let spawnPointProvider = getSpawnPointProviderForPlayer(m_targetPlayer, m_definition.getSpawnRange())
+    let spawnPointProvider = m_definition.getUseFriendlySpawnPointProvider()
+      ? getFriendlySpawnPointProviderForPlayer(m_targetPlayer, m_definition.getSpawnRange())
+      : getHostileSpawnPointProviderForPlayer(m_targetPlayer, m_definition.getSpawnRange())
 
     let spawnPointsResult = spawnPointProvider.getSpawnPoints(numSpawnGroups)
     if (not spawnPointsResult.succeeded)
@@ -209,7 +213,7 @@ public class SpawnWave extends Runnable
           if (numSpawnsAvailable == 0)
             break
 
-          if (spawnSingleUnit(unitType, sp))
+          if (spawnSingleUnit(unitType, sp, facingAngleRange.getRandom()))
             numberOfUnitsSpawned++
 
           numSpawnsAvailable = getNumSpawnsAvailable(aliveCountMax, spawnCountMax)
@@ -246,7 +250,7 @@ public class SpawnWave extends Runnable
     return numSpawnsAvailable
 
   // --------------------------------------------------------------------------
-  private function spawnSingleUnit(int unitTypeId, vec2 pos) returns bool
+  private function spawnSingleUnit(int unitTypeId, vec2 pos, real angleDeg) returns bool
     
     unit spawnedUnit
     
@@ -255,13 +259,13 @@ public class SpawnWave extends Runnable
         PLAYER_UNDEAD,
         unitTypeId,
         pos,
-        GetRandomDirectionDeg().asAngleDegrees())
+        angleDeg.asAngleDegrees())
     else
       spawnedUnit = createUnitTLS(
         PLAYER_UNDEAD,
         unitTypeId,
         pos,
-        GetRandomDirectionDeg())
+        angleDeg)
 
     if (spawnedUnit == null)
       // Log.debug("SpawnWave", "spawnSingleUnit", getId(), "Unable to spawn unit " + UnitId2String(unitTypeId))
