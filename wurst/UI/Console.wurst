@@ -1,0 +1,230 @@
+package Console
+import TLSFrame
+import ClosureFrames
+import ClosureTimers
+import ClosureKeyPresses
+import ChatCommands
+import LinkedList
+import Vector
+import Host
+import DisplayTextToPlayer
+
+ConsoleFrame g_consoleFrame
+ChatCommandHandler g_consoleChatCommandHandler
+
+constant string COMMAND_CLEAR = "clear"
+constant string COMMAND_CLS = "cls"
+
+// ============================================================================
+public class Console
+
+  // --------------------------------------------------------------------------
+  static function getIsReady() returns bool
+    return g_consoleFrame != null
+
+  // --------------------------------------------------------------------------
+  static function show()
+    g_consoleFrame.show()
+
+  // --------------------------------------------------------------------------
+  static function hide()
+    g_consoleFrame.hide()
+
+  // --------------------------------------------------------------------------
+  static function getIsVisible() returns bool
+    return g_consoleFrame.getIsVisible()
+
+  // --------------------------------------------------------------------------
+  static function clear()
+    g_consoleFrame.clear()
+
+  // --------------------------------------------------------------------------
+  static function setText(string text)
+    g_consoleFrame.setText(text)
+
+  // --------------------------------------------------------------------------
+  static function getText() returns string
+    return g_consoleFrame.getText()
+
+  // --------------------------------------------------------------------------
+  static function addText(string text)
+    g_consoleFrame.addText(text)
+
+  // --------------------------------------------------------------------------
+  static function focusEditBox()
+    g_consoleFrame.focusEditBox()
+
+  // --------------------------------------------------------------------------
+  protected static function initialize(player _player)
+    if (g_consoleFrame != null)
+      return
+
+    g_consoleFrame = new ConsoleFrame()
+    ..setPlayer(_player)
+    ..initialize()
+    ..hide()
+
+    onKeyRelease(_player, OSKEY_APPS) () ->
+      if (Console.getIsVisible())
+        Console.hide()
+      else
+        Console.show()
+
+    onKeyRelease(_player, OSKEY_ESCAPE) () ->
+      if (Console.getIsVisible())
+        Console.hide()
+
+    onKeyRelease(_player, OSKEY_UP) () ->
+      if (Console.getIsVisible())
+        g_consoleFrame.restorePreviousCommandString()
+      displayMessageToPlayer(_player, "UP KEY RELEASED")
+
+    onKeyRelease(_player, OSKEY_DOWN) () ->
+      if (Console.getIsVisible())
+        g_consoleFrame.restoreNextCommandString()
+      displayMessageToPlayer(_player, "DOWN KEY RELEASED")
+
+    onKeyRelease(_player, OSKEY_TAB) () ->
+      if (Console.getIsVisible())
+        g_consoleFrame.restoreNextCommandString()
+      displayMessageToPlayer(_player, "TAB KEY RELEASED")
+
+// ============================================================================
+class ConsoleFrame extends TLSFrame
+  private framehandle m_textArea
+  private framehandle m_scrollBar
+  private framehandle m_editBox
+  private Vector<string> m_commandHistory = new Vector<string>(8)
+  private int m_commandIndex = -1
+  private framehandle m_suggestionsFrame
+  private framehandle m_suggestionsScrollBar
+
+  // --------------------------------------------------------------------------
+  construct()
+    super("ConsoleTemplate", GAME_UI)
+
+  // --------------------------------------------------------------------------
+  override function initialize()
+    super.initialize()
+
+    let panel = getFrameHandle()
+    panel.setAbsPoint(FRAMEPOINT_TOPLEFT, 0.0, 0.54)
+    panel.setSize(0.4, 0.2)
+
+    m_textArea = getFrame("ConsoleTextArea")
+    m_scrollBar = getFrame("ConsoleTextAreaScrollBar")
+    m_editBox = getFrame("ConsoleEditBox")
+
+    m_editBox.onEditboxChange() -> 
+      updateSuggestions()
+
+    m_editBox.onEditboxEnter() () -> 
+      tryExecuteCommand()
+      m_editBox.setText("")
+
+    m_suggestionsFrame = getFrame("SuggestionsTextArea")..hide()
+    m_suggestionsScrollBar = getFrame("SuggestionsTextAreaScrollBar")
+
+  // --------------------------------------------------------------------------
+  function focusEditBox()
+    m_editBox.setFocus(true)
+
+  // --------------------------------------------------------------------------
+  override function show()
+    updateSuggestions()
+    super.show()
+
+  // --------------------------------------------------------------------------
+  function clear()
+    m_textArea.setText("")
+
+  // --------------------------------------------------------------------------
+  function setText(string text)
+    m_textArea.setText(text)
+
+  // --------------------------------------------------------------------------
+  function getText() returns string
+    return m_textArea.getText()
+
+  // --------------------------------------------------------------------------
+  function addText(string text)
+    BlzFrameAddText(m_textArea, text)
+
+  // --------------------------------------------------------------------------
+  function restorePreviousCommandString()
+    if (m_commandIndex > 0)
+      m_commandIndex--
+      m_editBox.setText(m_commandHistory.getItem(m_commandIndex))
+
+  // --------------------------------------------------------------------------
+  function restoreNextCommandString()
+    if (m_commandIndex < m_commandHistory.getCount() - 1)
+      m_commandIndex++
+      m_editBox.setText(m_commandHistory.getItem(m_commandIndex))
+
+  // --------------------------------------------------------------------------
+  private function tryExecuteCommand()
+    let cmdString = m_editBox.getText()
+
+    let cmd = parseChatCommand(cmdString)
+    if (cmd.command == null)
+      chatCommandPrintToPlayer(getPlayer(), "Unknown command: '{0}'".format(cmdString))
+      return
+
+    if (not executeChatCommand(getPlayer(), cmd))
+      printPartialMatchingCommands(cmd.command, getPlayer())
+    else
+      m_commandIndex = m_commandHistory.getCount()
+      m_commandHistory.push(cmdString)
+
+    destroy cmd.args
+
+  // --------------------------------------------------------------------------
+  private function updateSuggestions()
+
+    var showSuggestions = false
+
+    m_suggestionsFrame.setText("")
+
+    let partialCommandStr = m_editBox.getText()
+    if (partialCommandStr.length() > 0)
+    //{
+      let matchingCommandDefs = getPartialMatchingCommands(partialCommandStr)
+      
+      let comparator = new ChatCommandDefinitionComparator()
+      matchingCommandDefs.sortWith(comparator)
+      destroy comparator
+      
+      for commandDef in matchingCommandDefs
+        BlzFrameAddText(m_suggestionsFrame, commandDef.getHelpString())
+        showSuggestions = true
+
+      destroy matchingCommandDefs
+    //}
+
+    m_suggestionsFrame.setVisible(showSuggestions)
+
+    if (m_suggestionsScrollBar.isVisible())
+      m_suggestionsScrollBar.setValue(0)
+
+// ============================================================================
+function clearConsoleCommand()
+  if (not Console.getIsReady())
+    return
+  Console.clear()
+
+// ============================================================================
+function registerConsoleCommands()
+
+  g_consoleChatCommandHandler.registerCommandDefinition(COMMAND_CLEAR, function clearConsoleCommand)
+    ..addAlias(COMMAND_CLS)
+    ..setDescription("Clears the console window.")
+
+// ============================================================================
+init
+  nullTimer(() -> Console.initialize(g_HostPlayer))
+
+  g_consoleChatCommandHandler = new ChatCommandHandler("Console", null)
+  registerChatCommandHandler(g_consoleChatCommandHandler, -2)
+  
+  nullTimer(() -> registerConsoleCommands())

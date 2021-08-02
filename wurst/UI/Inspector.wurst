@@ -1,0 +1,372 @@
+package Inspector
+import TLSFrame
+import Inspection
+import LinkedList
+import ClosureFrames
+import Union
+import Host
+import ClosureTimers
+import PlayerExtensions
+import ClosureKeyPresses
+
+InspectorFrame g_inspectorFrame
+
+// ============================================================================
+public abstract class PropertyEditor extends TLSFrame
+  private LinkedList<int> m_contexts
+  private IPropertyDescriptor m_propertyDescriptor
+  private bool m_isIndeterminate
+
+  // --------------------------------------------------------------------------
+  construct(string name, framehandle owner)
+    super(name, owner)
+
+  // --------------------------------------------------------------------------
+  construct(framehandle frame)
+    super(frame)
+
+  // --------------------------------------------------------------------------
+  function getPropertyDescriptor() returns IPropertyDescriptor
+    return m_propertyDescriptor
+
+  // --------------------------------------------------------------------------
+  function setPropertyDescriptor(IPropertyDescriptor propertyDescriptor)
+    m_propertyDescriptor = propertyDescriptor
+
+  // --------------------------------------------------------------------------
+  function setContexts(LinkedList<int> contexts)
+    m_contexts = contexts
+
+  // --------------------------------------------------------------------------
+  function getContexts() returns LinkedList<int>
+    return m_contexts
+
+  // --------------------------------------------------------------------------
+  function refresh()
+    skip
+
+  // --------------------------------------------------------------------------
+  function canGetValue(int context, Union value) returns bool
+    return m_propertyDescriptor.canGetValue(context, value)
+
+  // --------------------------------------------------------------------------
+  function getValue(int context, Union value) returns bool
+    return m_propertyDescriptor.getValue(context, value)
+
+  // --------------------------------------------------------------------------
+  function canSetValue(int context, Union value) returns bool
+    return m_propertyDescriptor.canSetValue(context, value)
+
+  // --------------------------------------------------------------------------
+  function setValue(int context, Union value) returns bool
+    return m_propertyDescriptor.setValue(context, value)
+
+  // --------------------------------------------------------------------------
+  function getIsIndeterminate() returns bool
+    return m_isIndeterminate
+
+  // --------------------------------------------------------------------------
+  protected function setIsIndeterminate(bool value)
+    m_isIndeterminate = value
+
+// ============================================================================
+public class IntEditor extends PropertyEditor
+  private framehandle m_editBox
+
+  // --------------------------------------------------------------------------
+  construct()
+    super("IntEditorTemplate", GAME_UI)
+
+  // --------------------------------------------------------------------------
+  override function initialize()
+    super.initialize()
+    
+    m_editBox = getFrame("IntEditorEditBox")
+    m_editBox.onEditboxEnter(() -> onEditboxEnter())
+
+  // --------------------------------------------------------------------------
+  override function refresh()
+    let union = new Union()
+
+    var firstValue = 0
+    var firstValueReceived = false
+    var allValuesMatch = true
+
+    let contexts = getContexts()    
+    if (contexts != null)
+      for context in contexts
+        if (canGetValue(context, union) and getValue(context, union))
+          if (not firstValueReceived)
+            firstValue = union.getInt()
+            firstValueReceived = true
+          else
+            if (firstValue != union.getInt())
+              allValuesMatch = false
+              break
+
+    setIsIndeterminate(not allValuesMatch)
+
+    if (getIsIndeterminate())
+      m_editBox.setText("<Multiple>")
+    else
+      m_editBox.setText(union.getInt().toString())
+      
+    destroy union
+
+  // --------------------------------------------------------------------------
+  function onEditboxEnter()
+
+    let contexts = getContexts()
+    if (contexts != null)
+      return
+
+    let intVal = m_editBox.getText().toInt()
+    let union = Union.fromInt(intVal)
+    
+    for context in contexts
+      if (canGetValue(context, union))
+        setValue(context, union)
+
+    destroy union
+
+    refresh()
+
+// ============================================================================
+public abstract class InspectorRow extends TLSFrame
+
+  // --------------------------------------------------------------------------
+  construct (string framename, framehandle owner)
+    super(framename, owner)
+
+// ============================================================================
+public class InspectorEditorRow extends InspectorRow
+  private IPropertyDescriptor m_descriptor
+  private PropertyEditor m_editor
+  private framehandle m_rowText
+  private framehandle m_propertyEditorFrame
+
+  // --------------------------------------------------------------------------
+  construct(IPropertyDescriptor descriptor, PropertyEditor editor)
+    super("InspectorRowTemplate", GAME_UI)
+    m_descriptor = descriptor
+    m_editor = editor
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    if (m_editor != null)
+      destroy m_editor
+      m_editor = null
+
+  // --------------------------------------------------------------------------
+  function getDescriptor() returns IPropertyDescriptor
+    return m_descriptor
+
+  // --------------------------------------------------------------------------
+  function getEditor() returns PropertyEditor
+    return m_editor
+
+  // --------------------------------------------------------------------------
+  override function initialize()
+    super.initialize()
+
+    m_rowText = getFrame("InspectorRowText")
+    m_rowText.setText(m_descriptor.getName())
+
+    m_propertyEditorFrame = getFrame("InspectorEditorFrame")
+
+    if (m_editor != null)
+      m_editor.getFrameHandle()
+      ..setAllPoints(m_propertyEditorFrame)
+      ..setParent(getFrameHandle())
+
+// ============================================================================
+public class InspectorCategoryRow extends InspectorRow
+  private string m_category
+  private framehandle m_rowText
+
+  // --------------------------------------------------------------------------
+  construct(string category)
+    super("InspectorCategoryRowTemplate", GAME_UI)
+    m_category = category
+
+  // --------------------------------------------------------------------------
+  override function initialize()
+    super.initialize()
+
+    m_rowText = getFrame("InspectorCategoryRowText")
+    m_rowText.setText(m_category)
+
+// ============================================================================
+public class InspectorFrame extends TLSFrame
+  private LinkedList<int> m_contexts
+  private LinkedList<InspectorRow> m_rows = new LinkedList<InspectorRow>()
+
+  // --------------------------------------------------------------------------
+  construct()
+    super("InspectorTemplate", GAME_UI)
+
+  // --------------------------------------------------------------------------
+  function setContexts(LinkedList<unit> contexts)
+    if (m_contexts != null)
+      destroy m_contexts
+    m_contexts = new LinkedList<int>()
+    for contextUnit in contexts
+      m_contexts.add(unitToIndex(contextUnit))
+    rebuild()
+
+  // --------------------------------------------------------------------------
+  function rebuild()
+    destroyInspectorRows()
+    buildInspectorRows()
+
+  // --------------------------------------------------------------------------
+  function refresh()
+    for row in m_rows
+      let editorRow = row castTo InspectorEditorRow
+      if (editorRow != null)
+        let editor = editorRow.getEditor()
+        if (editor != null)
+          editor.refresh()
+  
+  // --------------------------------------------------------------------------
+  private function destroyInspectorRows()
+    if (m_rows == null)
+      return
+    for row in m_rows
+      row.getFrameHandle().setParent(null)
+      destroy row
+    m_rows.clear()
+
+  // --------------------------------------------------------------------------
+  private function buildInspectorRows()
+
+    if (m_contexts == null)
+      return
+
+    // TODO: should not be hardcoded to units
+    let descriptor = new UnitObjectDescriptor()
+    let propertyDescriptors = new PropertyDescriptorCollection()
+    for context in m_contexts
+      descriptor.getPropertyDescriptors(context, propertyDescriptors)
+    destroy descriptor
+
+    for desc in propertyDescriptors
+      addEditorRow(desc)
+
+    refresh()
+
+  // --------------------------------------------------------------------------
+  private function addEditorRow(IPropertyDescriptor propertyDescriptor) returns InspectorEditorRow
+    let editor = buildEditor(propertyDescriptor)
+    ..initialize()
+    ..setContexts(m_contexts)
+    let row = new InspectorEditorRow(propertyDescriptor, editor)
+    ..initialize()
+    ..setParent(getFrameHandle())
+    m_rows.add(row)
+    return row
+
+  // --------------------------------------------------------------------------
+  // private function addCategoryRow(string category) returns InspectorCategoryRow
+  //   let row = new InspectorCategoryRow(category)
+  //   ..initialize()
+  //   ..setParent(getFrameHandle())
+  //   m_rows.add(row)
+  //   return row
+
+  // --------------------------------------------------------------------------
+  private function buildEditor(IPropertyDescriptor propertyDescriptor) returns PropertyEditor
+    switch (propertyDescriptor.getEditorType())
+      case "int"
+        return new IntEditor()
+    return null
+
+// ============================================================================
+public class Inspector
+
+  // --------------------------------------------------------------------------
+  static function getIsReady() returns bool
+    return g_inspectorFrame != null
+
+  // --------------------------------------------------------------------------
+  static function setContext(unit context)
+    if (not getIsReady())
+      return
+    let temp = new LinkedList<unit>()
+    temp.add(context)
+    g_inspectorFrame.setContexts(temp)
+    destroy temp
+
+  // --------------------------------------------------------------------------
+  static function setContexts(LinkedList<unit> contexts)
+    if (not getIsReady())
+      return
+    g_inspectorFrame.setContexts(contexts)
+
+  // --------------------------------------------------------------------------
+  static function rebuild()
+    if (not getIsReady())
+      return
+    g_inspectorFrame.rebuild()
+
+  // --------------------------------------------------------------------------
+  static function refresh()
+    if (not getIsReady())
+      return
+    g_inspectorFrame.refresh()
+
+  // --------------------------------------------------------------------------
+  static function getIsVisible() returns bool
+    return g_inspectorFrame != null ? g_inspectorFrame.getIsVisible() : false
+
+  // --------------------------------------------------------------------------
+  static function show()
+    if (not getIsReady())
+      return
+    g_inspectorFrame.show()
+
+  // --------------------------------------------------------------------------
+  static function hide()
+    if (not getIsReady())
+      return
+    g_inspectorFrame.hide()
+
+  // --------------------------------------------------------------------------
+  protected static function initialize(player _player)
+    if (g_inspectorFrame != null)
+      return
+    
+    g_inspectorFrame = new InspectorFrame()
+    ..setPlayer(_player)
+    ..initialize()
+    ..hide()
+
+    let frame = g_inspectorFrame.getFrameHandle()
+    frame.setAbsPoint(FRAMEPOINT_TOPRIGHT, 0.8, 0.54)
+    frame.setSize(0.2, 0.34)
+
+    doPeriodically(1.0) (CallbackPeriodic cb) ->
+      Inspector.rebuild()
+
+    doPeriodically(0.1) (CallbackPeriodic cb) ->
+      Inspector.refresh()
+
+    onKeyRelease(_player, OSKEY_APPS) () ->
+      if (Inspector.getIsVisible())
+        Inspector.hide()
+      else
+        Inspector.show()
+
+// ============================================================================
+function onSelectionChanged()
+  if (GetTriggerPlayer() == g_HostPlayer)
+    Inspector.setContexts(g_HostPlayer.getSelectedUnits())
+
+// ============================================================================
+init
+  nullTimer(() -> Inspector.initialize(g_HostPlayer))
+  
+  let playerSelectionChangedTrigger = CreateTrigger()
+  playerSelectionChangedTrigger.addCondition(Condition(function onSelectionChanged))
+  TriggerRegisterPlayerUnitEvent(playerSelectionChangedTrigger, g_HostPlayer, EVENT_PLAYER_UNIT_SELECTED, null)
+  TriggerRegisterPlayerUnitEvent(playerSelectionChangedTrigger, g_HostPlayer, EVENT_PLAYER_UNIT_DESELECTED, null)
