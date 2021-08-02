@@ -75,7 +75,6 @@ public class UndeadTargetingComponent extends UnitComponent
   protected unit m_targetUnit
   protected int m_attackTime
   protected bool m_awaitingOrder
-  protected bool m_dealingDOT
   protected bool m_preferOrganicTargets
 
   // --------------------------------------------------------------------------
@@ -84,7 +83,6 @@ public class UndeadTargetingComponent extends UnitComponent
     m_targetPlayer = null
     m_targetUnit = null
     m_awaitingOrder = false
-    m_dealingDOT = false
     m_preferOrganicTargets = false
 
   // --------------------------------------------------------------------------
@@ -123,7 +121,10 @@ public class UndeadTargetingComponent extends UnitComponent
 
     if (oldUnit != null)
       g_dealDOTGroup.removeUnit(oldUnit)
-      m_dealingDOT = false
+
+  // --------------------------------------------------------------------------
+  function getIsInDOTGroup() returns bool
+    return g_dealDOTGroup.contains(getOwnerUnit())
 
   // --------------------------------------------------------------------------
   function getTargetPlayerChangedEvent() returns Event
@@ -206,7 +207,7 @@ public class UndeadTargetingComponent extends UnitComponent
       return
 
     // We're already awaiting a call to issueOrderTargetingPlayer_impl so early out
-    if (m_awaitingOrder or m_dealingDOT)
+    if (m_awaitingOrder or getIsInDOTGroup())
       return
 
     m_awaitingOrder = true
@@ -230,48 +231,35 @@ public class UndeadTargetingComponent extends UnitComponent
   // --------------------------------------------------------------------------
   private function issueOrderTargetingPlayer_impl()
 
-    let ownerUnit = getOwnerUnit()
-
     m_awaitingOrder = false
+
+    if (m_targetUnit == null)
+
+      // 1. Try targetting the nearest structure
+      // 2. Try targetting the nearest non-structure
+      tryTargetClosestUnit()
+
+      // Unable to find a target unit
+      if (m_targetUnit == null)
+
+        // 3. Try attack-moving to the target player's camp center (the HQ tent or the hero)
+        if (tryTargetCampCenter())
+          Log.debug("UTC", "issueOrderTargetingPlayer", "", "Could not find target unit, attack-moving to camp center")
+        
+        // 4. The target player is either null or considered dead, so start damaging the unit over time
+        if (m_targetUnit == null)
+          startDOT()
+          return
+
     restartAttackTimer()
 
-    if (not ownerUnit.isAlive())
-      return
-
-    if (tryReissueOrder())
-      return
-
-    // 1. Try targetting the nearest structure
-    // 2. Try targetting the nearest non-structure
-    if (tryTargetClosestUnit() and tryReissueOrder())
-      //Log.debug("[UndeadTargetingComponent] Found target to attack")
-      return
-
-    // At this point the target unit must not have been valid
-    setTargetUnit_impl(null)
-
-    // 3. Try attack-moving to the target player's camp center (the HQ tent or the hero)
-    if (tryTargetCampCenter())
-      //Log.debug("[UndeadTargetingComponent] Could not find target unit, attack-moving to camp center")
-      return
-
-    // 4. The target player is either null or considered dead, so start the DOT
-    startDOT()
+    if (not tryIssueOrder())
+      // Unable to issue the order so clear the target unit and try again later
+      setTargetUnit_impl(null)
+      issueOrderTargetingPlayer()
 
   // --------------------------------------------------------------------------
-  function startDOT()
-    if (not m_dealingDOT)
-      g_dealDOTGroup.addUnit(getOwnerUnit())
-      m_dealingDOT = true
-
-  // --------------------------------------------------------------------------
-  function stopDOT()
-    if (m_dealingDOT)
-      g_dealDOTGroup.removeUnit(getOwnerUnit())
-      m_dealingDOT = false
-
-  // --------------------------------------------------------------------------
-  function tryReissueOrder() returns bool
+  function tryIssueOrder() returns bool
     if (m_targetUnit == null)
       return false
     if (unitIsValidTargetStructure(m_targetUnit))
@@ -339,9 +327,7 @@ public class UndeadTargetingComponent extends UnitComponent
     if (campCenter == null or not campCenter.isAlive())
       return false
 
-    let undeadUnit = getOwnerUnit()
-    undeadUnit.issuePointOrderById(OrderIds.attack, campCenter.getPos())
-    return true
+    return setTargetUnit_impl(campCenter)
 
   // --------------------------------------------------------------------------
   protected function onTargetUnitDied()
@@ -370,6 +356,16 @@ public class UndeadTargetingComponent extends UnitComponent
   // --------------------------------------------------------------------------
   protected function restartAttackTimer()
     m_attackTime = getRealTimeSeconds()
+
+  // --------------------------------------------------------------------------
+  private function startDOT()
+    if (not getIsInDOTGroup())
+      g_dealDOTGroup.addUnit(getOwnerUnit())
+
+  // --------------------------------------------------------------------------
+  private function stopDOT()
+    if (getIsInDOTGroup())
+      g_dealDOTGroup.removeUnit(getOwnerUnit())
 
 // ============================================================================
 public function IUnitMetadata.getUndeadTargetingComponent() returns UndeadTargetingComponent
@@ -617,7 +613,7 @@ init
             else
               Log.debug("UTC target player is " + c1.getTargetPlayer().getName())
             
-            if (c1.m_dealingDOT)
+            if (c1.getIsInDOTGroup())
               Log.debug("UTC is dealing dot")
             
             if (c1.m_targetUnit == null)
@@ -632,3 +628,8 @@ init
           Log.debug("Unit is active in recycler \"{0}\": {1}".format(UnitId2String(recycler.getUnitId()), recycler.isUnitActive(u).toString()))
     //}
     g.release()
+
+// ============================================================================
+public class UndeadTargetingComponentDescriptor
+
+  
