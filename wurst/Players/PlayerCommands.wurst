@@ -9,6 +9,8 @@ import ClosureTimers
 import RegisterEvents
 import PlayerExtensions
 import MainItemLibrary
+import HumanPlayers
+import ColorUtility
 
 constant string COMMAND_BASE = "base"
 constant string COMMAND_BASES = "bases"
@@ -17,6 +19,10 @@ constant string COMMAND_ZOOM = "zoom"
 constant string COMMAND_CAMERA = "camera"
 constant string COMMAND_CAM = "cam"
 constant string COMMAND_SPLIT = "split"
+constant string COMMAND_GIVEGOLD = "givegold"
+constant string COMMAND_GIVEGOLD_ALIAS = "giveg"
+constant string COMMAND_GIVELUMB = "givelumber"
+constant string COMMAND_GIVELUMB_ALIAS = "givel"
 
 public quest g_playerCommandsQuest
 ChatCommandHandler g_playerChatCommandHandler
@@ -95,7 +101,72 @@ function splitItemsInSlot(unit _unit, int index) returns bool
       successfullySplit = true
   if (successfullySplit)
     _item.remove()
-  return successfullySplit 
+  return successfullySplit
+
+// ============================================================================
+function getPlayerFromPartialNameColorOrId(string playerPartialNameColorOrId, player ignore) returns player  
+  // Check for an ID match first since toInt() will return -1 when parsing an int fails
+  let playerId = playerPartialNameColorOrId.toInt()
+  if (playerId != -1)
+    let p = Player(playerId)
+    if (p != ignore and p != null)
+      return p
+  // Then check for exact player name match
+  for p in g_PlayingHumanPlayers
+    if (p != ignore and p.getName() == playerPartialNameColorOrId)
+      return p
+  // Then, partial player name match
+  for p in g_PlayingHumanPlayers
+    if (p != ignore and p.getName().startsWith(playerPartialNameColorOrId))
+      return p
+  // Then player color
+  let playerColor  = playerPartialNameColorOrId.toPlayerColor()
+  for p in g_PlayingHumanPlayers
+    if (p != ignore and p.getColor() == playerColor)
+      return p
+  return null
+
+// ============================================================================
+function giveGold()
+  let command = getChatCommand()
+  let commandPlayer = getChatCommandPlayer()
+
+  let playerPartialNameColorOrId = command.getArgument(0).getString()
+  var goldToGive = command.getArgument(1).getInt()
+
+  let targetPlayer = getPlayerFromPartialNameColorOrId(playerPartialNameColorOrId, commandPlayer)
+  if (targetPlayer == null)
+    displayMessageToPlayer(commandPlayer, "Could not find player with the given name or id")
+    return
+
+  goldToGive = min(commandPlayer.getGold(), goldToGive)
+
+  commandPlayer.subGold(goldToGive)
+  targetPlayer.addGold(goldToGive)
+
+  displayMessageToPlayer(commandPlayer, "Gave {0} gold to {1}".format(goldToGive.toString(), targetPlayer.getName()).colorize(Colors.gold))
+  displayMessageToPlayer(targetPlayer, "{0} gave you {1} gold".format(commandPlayer.getName(), goldToGive.toString()).colorize(Colors.gold))
+
+// ============================================================================
+function giveLumber()
+  let command = getChatCommand()
+  let commandPlayer = getChatCommandPlayer()
+
+  let playerPartialNameColorOrId = command.getArgument(0).getString()
+  var lumberToGive = command.getArgument(1).getInt()
+
+  let targetPlayer = getPlayerFromPartialNameColorOrId(playerPartialNameColorOrId, commandPlayer)
+  if (targetPlayer == null)
+    displayMessageToPlayer(commandPlayer, "Could not find player with the given name or id")
+    return
+
+  lumberToGive = min(commandPlayer.getGold(), lumberToGive)
+
+  commandPlayer.subLumber(lumberToGive)
+  targetPlayer.addLumber(lumberToGive)
+
+  displayMessageToPlayer(commandPlayer, "Gave {0} lumber to {1}".format(lumberToGive.toString(), targetPlayer.getName()).colorize(Colors.gold))
+  displayMessageToPlayer(targetPlayer, "{0} gave you {1} lumber".format(commandPlayer.getName(), lumberToGive.toString()).colorize(Colors.gold))
 
 // ============================================================================
 function setupPlayerCommandsQuest()
@@ -128,6 +199,18 @@ function registerDebugCommands()
     ..addArgument(new ChatCommandArgument("INVENTORY_SLOT", ChatCommandArgumentType.INT, false)
       ..setIntOptions(0, 1, 2, 3, 4, 5)
       ..setDescription("The number of the inventory slot to split (0=TL, 5=BR)"))
+
+  g_playerChatCommandHandler.registerCommandDefinition(COMMAND_GIVEGOLD, function giveGold)
+    ..setDescription("Gives the target player a specific amount of gold.")
+    ..addStringArgument("PLAYER_NAME_PARTIAL_OR_ID", false)
+    ..addIntegerArgument("GOLD_AMOUNT", false)
+    ..addAlias(COMMAND_GIVEGOLD_ALIAS)
+
+  g_playerChatCommandHandler.registerCommandDefinition(COMMAND_GIVELUMB, function giveLumber)
+    ..setDescription("Gives the target player a specific amount of lumber.")
+    ..addStringArgument("PLAYER_NAME_PARTIAL_OR_ID", false)
+    ..addIntegerArgument("LUMBER_AMOUNT", false)
+    ..addAlias(COMMAND_GIVELUMB_ALIAS)
 
   g_playerChatCommandHandler.addQuestItems()
 
