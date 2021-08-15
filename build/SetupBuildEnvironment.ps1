@@ -18,6 +18,9 @@ $env:ToolsRoot = [System.IO.Path]::Combine($env:ProjectRoot, $env:ToolsDirName)
 $env:WurstDirName = "wurst"
 $env:WurstRoot = [System.IO.Path]::Combine($env:ProjectRoot, $env:WurstDirName)
 
+$env:ImportsDirName = "imports"
+$env:ImportsRoot = [System.IO.Path]::Combine($env:ProjectRoot, $env:ImportsDirName)
+
 $env:TempDirName = "_build"
 $env:TempRoot = [System.IO.Path]::Combine($env:ProjectRoot, $env:TempDirName)
 

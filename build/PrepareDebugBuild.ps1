@@ -1,4 +1,5 @@
 .\SetupBuildEnvironment.ps1
+.\CreateMapJunctions.ps1
 
 Copy-Item ".\wurst_run_debug.args" "..\wurst_run.args" -Force
 
