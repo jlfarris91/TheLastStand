@@ -20,9 +20,5 @@ foreach ($file in (Get-ChildItem -Path $env:ImportsRoot)) {
     {
       cmd /c mklink /J /d $linkFile $sourceFile
     }
-    else
-    {
-      cmd /c mklink /J $linkFile $sourceFile
-    }
   }
 }
