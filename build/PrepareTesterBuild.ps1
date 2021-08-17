@@ -1,4 +1,4 @@
-$env:Build = "Debug"
+$env:Build = "Tester"
 .\SetupBuildEnvironment.ps1
 .\CreateMapJunctions.ps1
 

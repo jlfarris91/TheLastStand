@@ -1,10 +1,22 @@
 # =============================================================================
 #
-# This script is inteded to be run from the build directory
+# This script is intended to be run from the build directory
 #
 # =============================================================================
 
 $env:ProjectRoot = Split-Path (Get-Location)
+
+$env:DevEnvironment = "false"
+if ($VersionInfo.BranchName.StartsWith("develop") -or
+    $VersionInfo.BranchName.StartsWith("feature") -or
+    $env:Build -eq "Debug") {
+  $env:DevEnvironment = "true"
+}
+
+$env:TestEnvironment = "false"
+if ($env:Build -eq "Tester") {
+  $env:TestEnvironment = "true"
+}
 
 $env:SourceMapsDirName = "maps"
 $env:SourceMapsRoot = [System.IO.Path]::Combine($env:ProjectRoot, $env:SourceMapsDirName)
@@ -49,6 +61,11 @@ $env:MapNameVersioned = "{0} {1}" -f $env:MapName, $env:MapVersion
 $env:MapNameNoSpaces = "TheLastStand"
 $env:MapNameNoSpacesVersioned = "{0}{1}" -f $env:MapNameNoSpaces, $env:MapVersion
 
+if ($env:TestEnvironment -eq "true") {
+  $env:MapNameVersioned = "{0} [TEST]" -f $env:MapNameVersioned
+  $env:MapNameNoSpacesVersioned = "{0}T" -f $env:MapNameNoSpacesVersioned
+}
+
 $env:WurstMapName = $env:MapNameNoSpacesVersioned
 $env:WurstMapFileName = "{0}.w3x" -f $env:WurstMapName
 $env:WurstSourceMapFilePath = [System.IO.Path]::Combine($env:ProjectRoot, $env:WurstMapFileName)
@@ -58,9 +75,3 @@ $env:WurstOutputMapArtifactFilePath = [System.IO.Path]::Combine($env:ArtifactRoo
 $env:DiscordLink = "discord.gg/VzjbPkGN3r"
 
 $env:BuildDate = (Get-Date -Format "MM/dd/yy")
-
-$env:DevEnvironment = "false"
-if ($VersionInfo.BranchName.StartsWith("develop") -or
-    $VersionInfo.BranchName.StartsWith("feature")) {
-  $env:DevEnvironment = "true"
-}

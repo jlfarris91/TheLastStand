@@ -1,3 +1,4 @@
+$env:Build = "Release"
 .\SetupBuildEnvironment.ps1
 .\CreateMapJunctions.ps1
 
