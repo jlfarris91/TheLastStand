@@ -4,7 +4,8 @@
 #
 # =============================================================================
 
-$env:ProjectRoot = Split-Path (Get-Location)
+$VersionInfo = [PSCustomObject](GitVersion | ConvertFrom-Json)
+$env:MapVersion = "v{0}" -f $VersionInfo.MajorMinorPatch
 
 $env:DevEnvironment = "false"
 if ($VersionInfo.BranchName.StartsWith("develop") -or
@@ -17,6 +18,8 @@ $env:TestEnvironment = "false"
 if ($env:Build -eq "Tester") {
   $env:TestEnvironment = "true"
 }
+
+$env:ProjectRoot = Split-Path (Get-Location)
 
 $env:SourceMapsDirName = "maps"
 $env:SourceMapsRoot = [System.IO.Path]::Combine($env:ProjectRoot, $env:SourceMapsDirName)
@@ -45,9 +48,6 @@ if ($env:CI -eq "true") { $env:IsLocalBuild = 0 }
 # Write-Host ("Is Local Build: {0}" -f $env:IsLocalBuild)
 
 $env:MapAuthor = "Ozymandias"
-
-$VersionInfo = [PSCustomObject](GitVersion | ConvertFrom-Json)
-$env:MapVersion = "v{0}" -f $VersionInfo.MajorMinorPatch
 
 if ($VersionInfo.BranchName -eq "develop") {
   $env:MapVersion = "{0}.{1}" -f $env:MapVersion, $VersionInfo.PreReleaseTag
