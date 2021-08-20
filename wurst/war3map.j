@@ -247,9 +247,9 @@ function CreateUnitsForPlayer0 takes nothing returns nothing
     call SetUnitColor(u, ConvertPlayerColor(4))
     set u=BlzCreateUnitWithSkin(p, 'h00J', - 7769.6, - 3439.0, 94.134, 'h00J')
     call SetUnitColor(u, ConvertPlayerColor(4))
-    set u=BlzCreateUnitWithSkin(p, 'h01V', 8297.2, - 10465.7, - 24.967, 'h01V')
+    set u=BlzCreateUnitWithSkin(p, 'h01V', 8297.2, - 10465.7, 335.033, 'h01V')
     set u=BlzCreateUnitWithSkin(p, 'h006', 8475.7, - 10535.5, 231.445, 'h006')
-    set u=BlzCreateUnitWithSkin(p, 'h00B', 4840.2, - 10624.8, - 1.766, 'h00B')
+    set u=BlzCreateUnitWithSkin(p, 'h00B', 4840.2, - 10624.8, 358.234, 'h00B')
 endfunction
 
 //===========================================================================
