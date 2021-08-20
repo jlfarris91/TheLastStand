@@ -3,9 +3,8 @@ import SurvivorJobComponent
 import UnitMetadata
 import XpReceiverComponent
 import RangedTargetXpReceieverComponent
-import SurvivorJobData
 import TlsAbilityIds
-
+import SurvivorJobs
 
 // ============================================================================
 public class MedicJobComponent extends SurvivorJobComponent
@@ -19,51 +18,47 @@ public class MedicJobComponent extends SurvivorJobComponent
     return MedicJobComponent.typeId
 
   // --------------------------------------------------------------------------
+  override function getJob() returns SurvivorJobDefinition
+    return SurvivorJobs.medic
+
+  // --------------------------------------------------------------------------
   protected override function onEnabled()
     super.onEnabled()
     
     getOwner().getOrAddRangedTargetXpRecieverComponent().setEnabled(true)
     getOwner().getOrAddXpReceiverComponent().setEnabled(true)
 
+    updateAbilities()
+
   // --------------------------------------------------------------------------
   protected override function onDisabled()
     super.onDisabled()
 
-    let ownerUnit = getOwner()
-    if (ownerUnit == null)
+    let owner = getOwner()
+    if (owner == null)
       return
     
-    let rangedTargetXpReceieverComponent = ownerUnit.getRangedTargetXpRecieverComponent()
+    let rangedTargetXpReceieverComponent = owner.getRangedTargetXpRecieverComponent()
     if (rangedTargetXpReceieverComponent != null)
       rangedTargetXpReceieverComponent.setEnabled(false)
 
-    let gainXpPerKillComponent = ownerUnit.getOrAddXpReceiverComponent()
+    let gainXpPerKillComponent = owner.getOrAddXpReceiverComponent()
     if (gainXpPerKillComponent != null)
       gainXpPerKillComponent.setEnabled(false)
 
- // --------------------------------------------------------------------------
-  override function saveJobData(SurvivorJobData jobData)
-    super.saveJobData(jobData)
-
-    let ownerUnit = getOwnerUnit()
-
-    if (ownerUnit.hasAbility(TlsAbilityIds.heal))
-      jobData.addAbility(TlsAbilityIds.heal, ownerUnit.getAbilityLevel(TlsAbilityIds.heal))
-
-
-// --------------------------------------------------------------------------
+  // --------------------------------------------------------------------------
   override function onLevelChanged()
     super.onLevelChanged()
+    updateAbilities()
+
+  // --------------------------------------------------------------------------
+  private function updateAbilities()
     let ownerUnit = getOwnerUnit()
-    let ownerUnitLevel = ownerUnit.getLevel()
-
-  // The unit's level will be 1 when it is upgraded, in that case ignore this
-    if (ownerUnitLevel > 1)
-
-     // Otherwise, increase the level of the ability
-    if (ownerUnit.hasAbility(TlsAbilityIds.heal))
-      ownerUnit.setAbilityLevel(TlsAbilityIds.heal, ownerUnit.getAbilityLevel(TlsAbilityIds.heal) + 1)
-
+    
+    if (not ownerUnit.hasAbility(TlsAbilityIds.heal))
+      ownerUnit.addAbility(TlsAbilityIds.heal)
+    
+    ownerUnit.setAbilityLevel(TlsAbilityIds.heal, ownerUnit.getLevel())
 
 // ============================================================================
 public function IUnitMetadata.getMedicJobComponent() returns MedicJobComponent
@@ -75,3 +70,8 @@ public function IUnitMetadata.getOrAddMedicJobComponent() returns MedicJobCompon
   if (component == null)
     component = this.addComponent(new MedicJobComponent(this), false) castTo MedicJobComponent
   return component
+
+// ============================================================================
+init
+  SurvivorJobComponent.registerSurvivorJobComponentGetter(SurvivorJobs.medic, metadata -> metadata.getMedicJobComponent())
+  SurvivorJobComponent.registerSurvivorJobComponentFactory(SurvivorJobs.medic, metadata -> metadata.getOrAddMedicJobComponent())

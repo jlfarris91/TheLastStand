@@ -4,8 +4,8 @@ import UnitMetadata
 import XpReceiverComponent
 import RangedTargetXpReceieverComponent
 import UnitPropertiesComponent
-import SurvivorJobData
 import TlsAbilityIds
+import SurvivorJobs
 
 constant real BONUS_DAMAGE_TO_NORMALS_PERCENTAGE = 10.0
 constant real BONUS_DAMAGE_TO_ELITES_PERCENTAGE = -10.0
@@ -14,6 +14,10 @@ constant real BONUS_EVADE_CHANCE_PERCENTAGE = 10.0
 
 // ============================================================================
 public class MilitiaJobComponent extends SurvivorJobComponent
+  private int m_cleaveLevel = 0
+  private int m_tauntLevel = 0
+  private int m_defendLevel = 0
+  private int m_thornsLevel = 0
   
   // --------------------------------------------------------------------------
   construct(IUnitMetadata owner)
@@ -22,6 +26,10 @@ public class MilitiaJobComponent extends SurvivorJobComponent
   // --------------------------------------------------------------------------
   override function getTypeId() returns int
     return MilitiaJobComponent.typeId
+
+  // --------------------------------------------------------------------------
+  override function getJob() returns SurvivorJobDefinition
+    return SurvivorJobs.militia
 
   // --------------------------------------------------------------------------
   protected override function onEnabled()
@@ -36,19 +44,21 @@ public class MilitiaJobComponent extends SurvivorJobComponent
       unitPropsComp.setBossDamagePercentage(unitPropsComp.getBossDamagePercentage() + BONUS_DAMAGE_TO_ELITES_PERCENTAGE)
       unitPropsComp.setEvadeChancePercentage(unitPropsComp.getEvadeChancePercentage() + BONUS_EVADE_CHANCE_PERCENTAGE)
 
+    updateAbilities()
+
   // --------------------------------------------------------------------------
   protected override function onDisabled()
     super.onDisabled()
 
-    let ownerUnit = getOwner()
-    if (ownerUnit == null)
+    let owner = getOwner()
+    if (owner == null)
       return
     
-    let rangedTargetXpReceieverComponent = ownerUnit.getRangedTargetXpRecieverComponent()
+    let rangedTargetXpReceieverComponent = owner.getRangedTargetXpRecieverComponent()
     if (rangedTargetXpReceieverComponent != null)
       rangedTargetXpReceieverComponent.setEnabled(false)
 
-    let gainXpPerKillComponent = ownerUnit.getOrAddXpReceiverComponent()
+    let gainXpPerKillComponent = owner.getOrAddXpReceiverComponent()
     if (gainXpPerKillComponent != null)
       gainXpPerKillComponent.setEnabled(false)
 
@@ -59,36 +69,44 @@ public class MilitiaJobComponent extends SurvivorJobComponent
       unitPropsComp.setBossDamagePercentage(unitPropsComp.getBossDamagePercentage() - BONUS_DAMAGE_TO_ELITES_PERCENTAGE)
       unitPropsComp.setEvadeChancePercentage(unitPropsComp.getEvadeChancePercentage() - BONUS_EVADE_CHANCE_PERCENTAGE)
 
-  // --------------------------------------------------------------------------
-  override function saveJobData(SurvivorJobData jobData)
-    super.saveJobData(jobData)
-
     let ownerUnit = getOwnerUnit()
+    ownerUnit.removeAbility(TlsAbilityIds.militiaCleave)
+    ownerUnit.removeAbility(TlsAbilityIds.militiaTaunt)
+    ownerUnit.removeAbility(TlsAbilityIds.militiaDefend)
+    ownerUnit.removeAbility(TlsAbilityIds.militiaThorns)
 
-    if (ownerUnit.hasAbility(TlsAbilityIds.militiaCleave))
-      jobData.addAbility(TlsAbilityIds.militiaCleave, ownerUnit.getAbilityLevel(TlsAbilityIds.militiaCleave))
-
-    if (ownerUnit.hasAbility(TlsAbilityIds.militiaTaunt))
-      jobData.addAbility(TlsAbilityIds.militiaTaunt, ownerUnit.getAbilityLevel(TlsAbilityIds.militiaTaunt))
-
-    if (ownerUnit.hasAbility(TlsAbilityIds.militiaDefend))
-      jobData.addAbility(TlsAbilityIds.militiaDefend, ownerUnit.getAbilityLevel(TlsAbilityIds.militiaDefend))
-
-    if (ownerUnit.hasAbility(TlsAbilityIds.militiaThorns))
-      jobData.addAbility(TlsAbilityIds.militiaThorns, ownerUnit.getAbilityLevel(TlsAbilityIds.militiaThorns))
+  // --------------------------------------------------------------------------
+  override function saveJobData()
+    super.saveJobData()
+    let ownerUnit = getOwnerUnit()
+    m_cleaveLevel = ownerUnit.getAbilityLevel(TlsAbilityIds.militiaCleave)
+    m_tauntLevel = ownerUnit.getAbilityLevel(TlsAbilityIds.militiaTaunt)
+    m_defendLevel = ownerUnit.getAbilityLevel(TlsAbilityIds.militiaDefend)
+    m_thornsLevel = ownerUnit.getAbilityLevel(TlsAbilityIds.militiaThorns)
 
   // --------------------------------------------------------------------------
   override function onLevelChanged()
     super.onLevelChanged()
+    updateAbilities()
+
+  // --------------------------------------------------------------------------
+  private function updateAbilities()
     let ownerUnit = getOwnerUnit()
-    let ownerUnitLevel = ownerUnit.getLevel()
+    let ownerUnitLevel = ownerUnit.getLevel()    
+    
+    if (not ownerUnit.hasAbility(TlsAbilityIds.militiaCleave))
+      ownerUnit.addAbility(TlsAbilityIds.militiaCleave)
 
-    // The unit's level will be 1 when it is upgraded, in that case ignore this
-    if (ownerUnitLevel > 1)
+    if (not ownerUnit.hasAbility(TlsAbilityIds.militiaTaunt))
+      ownerUnit.addAbility(TlsAbilityIds.militiaTaunt)
 
-      // Otherwise, increase the level of the ability
-      if (ownerUnit.hasAbility(TlsAbilityIds.militiaCleave))
-        ownerUnit.setAbilityLevel(TlsAbilityIds.militiaCleave, ownerUnit.getAbilityLevel(TlsAbilityIds.militiaCleave) + 1)
+    if (not ownerUnit.hasAbility(TlsAbilityIds.militiaDefend))
+      ownerUnit.addAbility(TlsAbilityIds.militiaDefend)
+
+    if (not ownerUnit.hasAbility(TlsAbilityIds.militiaThorns))
+      ownerUnit.addAbility(TlsAbilityIds.militiaThorns)
+
+    ownerUnit.setAbilityLevel(TlsAbilityIds.militiaCleave, ownerUnitLevel)
 
 // ============================================================================
 public function IUnitMetadata.getMilitiaJobComponent() returns MilitiaJobComponent
@@ -100,3 +118,8 @@ public function IUnitMetadata.getOrAddMilitiaJobComponent() returns MilitiaJobCo
   if (component == null)
     component = this.addComponent(new MilitiaJobComponent(this), false) castTo MilitiaJobComponent
   return component
+
+// ============================================================================
+init
+  SurvivorJobComponent.registerSurvivorJobComponentGetter(SurvivorJobs.militia, metadata -> metadata.getMilitiaJobComponent())
+  SurvivorJobComponent.registerSurvivorJobComponentFactory(SurvivorJobs.militia, metadata -> metadata.getOrAddMilitiaJobComponent())

@@ -1,0 +1,129 @@
+package LumberHarvestComponent
+import UnitComponent
+import TlsAbilityIds
+import Ability_Harvest
+import RegisterEvents
+import Orders
+import TlsUpgradeIds
+import GroupUtils
+import Math
+import ClosureTimers
+
+// ============================================================================
+public class LumberHarvestComponent extends UnitComponent
+  protected destructable m_targetDestructable
+  
+  // --------------------------------------------------------------------------
+  construct(IUnitMetadata owner)
+    super(owner)
+    m_targetDestructable = null
+
+  // --------------------------------------------------------------------------
+  override function getTypeId() returns int
+    return LumberHarvestComponent.typeId
+
+  // --------------------------------------------------------------------------
+  override function onEnabled()
+    super.onEnabled()
+    updateAbility()
+
+  // --------------------------------------------------------------------------
+  override function onDisabled()
+    super.onDisabled()
+    m_targetDestructable = null
+    removeAllHarvestAbilities()
+
+  // --------------------------------------------------------------------------
+  protected function updateAbility()
+    let ownerUnit = getOwnerUnit()
+    let ownerUnitLevel = ownerUnit.getLevel()
+    let researchLevel = GetPlayerTechCountSimple(TlsUpgradeIds.lumberHarvest, ownerUnit.getOwner())
+    let abilityId = getHarvestAbility(researchLevel, ownerUnitLevel)
+
+    removeAllHarvestAbilities()
+
+    // Add the version of harvest that matches the level of the survivor
+    if (not ownerUnit.hasAbility(abilityId))
+      ownerUnit.addAbility(abilityId)
+
+    // Increase movement speed based on level
+    ownerUnit.setMoveSpeed(lerp(HARVEST_MOVESPEED_START, HARVEST_MOVESPEED_END, (ownerUnitLevel - 1) / 9.0))
+
+    // Need to reissue the harvest order when the harvest ability is removed and re-added
+    if (m_targetDestructable != null)
+      let cachedTargetDestructable = m_targetDestructable
+      nullTimer(() -> ownerUnit.issueTargetOrderById(OrderIds.harvest, cachedTargetDestructable))
+
+  // --------------------------------------------------------------------------
+  private function removeAllHarvestAbilities()
+    let ownerUnit = getOwnerUnit()
+    // Remove all versions of harvest
+    for i = 0 to HARVEST_LEVELS - 1
+      if (ownerUnit.hasAbility(TlsAbilityIds.harvest[i]))
+        ownerUnit.removeAbility(TlsAbilityIds.harvest[i])
+        break
+
+// ============================================================================
+public function IUnitMetadata.getLumberHarvestComponent() returns LumberHarvestComponent
+  return this.getComponent(typeInfo(LumberHarvestComponent.typeId)) castTo LumberHarvestComponent
+
+// ============================================================================
+public function IUnitMetadata.getOrAddLumberHarvestComponent() returns LumberHarvestComponent
+  var component = this.getLumberHarvestComponent()
+  if (component == null)
+    component = this.addComponent(new LumberHarvestComponent(this), false) castTo LumberHarvestComponent
+  return component
+
+// ============================================================================
+function onUnitIssuedAnyOrder()
+  let orderedUnit = GetOrderedUnit()
+  let orderId = GetIssuedOrderId()
+
+  let metadata = orderedUnit.getMetadata()
+  if (metadata == null)
+    return
+
+  let comp = metadata.getLumberHarvestComponent()
+  if (comp == null or not comp.getEnabled())
+    return
+
+  if (orderId == OrderIds.harvest)
+    comp.m_targetDestructable = GetOrderTargetDestructable()
+  else
+    comp.m_targetDestructable = null
+
+// ============================================================================
+function onResearchFinished()
+  let research = GetResearched()
+  let researchingUnit = GetResearchingUnit()
+  if (research != TlsUpgradeIds.lumberHarvest)
+    return
+  let owner = researchingUnit.getOwner()
+  let temp = getGroup()
+  temp.enumUnitsOfPlayer(owner, null)
+  for _unit in temp
+    if (_unit.isAlive())
+      let metadata = _unit.getMetadata()
+      if (metadata != null)
+        let comp = metadata.getLumberHarvestComponent()
+        if (comp != null and comp.getEnabled())
+          comp.updateAbility()
+  temp.release()
+
+// ============================================================================
+function onHeroLeveledUp()
+  let hero = GetTriggerUnit()
+  let metadata = hero.getMetadata()
+  if (metadata == null)
+    return
+  let comp = metadata.getLumberHarvestComponent()
+  if (comp != null)
+    comp.updateAbility()
+
+// ============================================================================
+init
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ISSUED_ORDER, function onUnitIssuedAnyOrder)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ISSUED_POINT_ORDER, function onUnitIssuedAnyOrder)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ISSUED_TARGET_ORDER, function onUnitIssuedAnyOrder)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_RESEARCH_FINISH, function onResearchFinished)
+  registerPlayerUnitEvent(EVENT_PLAYER_HERO_LEVEL, function onHeroLeveledUp)

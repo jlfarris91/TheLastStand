@@ -31,7 +31,7 @@ group g_tempGroup = CreateGroup()
 public class SurvivorUtility
     
   // --------------------------------------------------------------------------
-  static function orderSelectedUnitsToAssignJob(player owner, SurvivorJobDefinition job)
+  static function orderSelectedUnitsToActivateJob(player owner, SurvivorJobDefinition job)
     
     let survivorJobPanel = getSurvivorJobPanel(owner)
     if (survivorJobPanel != null)
@@ -44,9 +44,9 @@ public class SurvivorUtility
       if (owner.controlsUnit(u))
       //{
         let survivor = u.getSurvivorComponent()
-        if (survivor != null and survivor.canChangeJob(job))
+        if (survivor != null and survivor.canActivateJob(job))
         //{
-          survivor.changeJobs(job)
+          survivor.activateJob(job)
         //}
       //}
     //}
@@ -57,7 +57,7 @@ public class SurvivorUtility
       survivorJobPanel.batchUpdates(false)
 
   // --------------------------------------------------------------------------
-  static function orderSelectedUnitsToUnequipJobDefItem(player owner, SurvivorJobDefinition job)
+  static function orderSelectedUnitsToUnlearnJob(player owner, SurvivorJobDefinition job)
     
     let survivorJobPanel = getSurvivorJobPanel(owner)
     if (survivorJobPanel != null)
@@ -71,7 +71,7 @@ public class SurvivorUtility
       //{
         let survivor = u.getSurvivorComponent()
         if (survivor != null)
-          survivor.tryUnequipJob(job)
+          survivor.unassignJob(job)
       //}
     //}
   
@@ -79,8 +79,55 @@ public class SurvivorUtility
 
     if (survivorJobPanel != null)
       survivorJobPanel.batchUpdates(false)
+    
+  // --------------------------------------------------------------------------
+  static function orderSelectedUnitsToToggleActivateJob(player owner)
+    
+    let survivorJobPanel = getSurvivorJobPanel(owner)
+    if (survivorJobPanel != null)
+      survivorJobPanel.batchUpdates(true)
 
-  // ============================================================================
+    let selectedUnits = owner.getSelectedUnits()
+
+    // Only switch to the last active job if everyone is already jobless
+    var switchToLastActiveJob = true
+
+    for u in selectedUnits
+    //{
+      if (owner.controlsUnit(u))
+      //{
+        let survivor = u.getSurvivorComponent()
+        if (survivor != null and survivor.getActiveJob() != SurvivorJobs.none)
+          switchToLastActiveJob = false
+      //}
+    //}
+
+    for u in selectedUnits
+    //{
+      if (owner.controlsUnit(u))
+      //{
+        let survivor = u.getSurvivorComponent()
+        if (survivor != null)
+        //{
+          SurvivorJobDefinition job = SurvivorJobs.none 
+
+          if (switchToLastActiveJob)
+            let lastActiveJob = survivor.getLastActiveJob()
+            if (lastActiveJob != null and survivor.canActivateJob(lastActiveJob))
+              job = lastActiveJob
+
+          if (survivor.canActivateJob(job))
+            survivor.activateJob(job)
+        //}
+      //}
+    //}
+
+    destroy selectedUnits
+
+    if (survivorJobPanel != null)
+      survivorJobPanel.batchUpdates(false)
+
+  // --------------------------------------------------------------------------
   static function spawnSurvivorUnitForPlayer(player _player) returns unit
 
     if (_player == null)
@@ -99,25 +146,16 @@ public class SurvivorUtility
       doAfter(1.0, () -> spawnSurvivorUnitForPlayer(_player))
       return null
 
-    var survivor = createUnitTLS(_player, TlsUnitIds.Survivors.survivorMale, spawnPointResult.spawnPoint, GetRandomDirectionDeg())
+    let weightedSet = new WeightedSet<int>()
+    ..add(TlsUnitIds.Survivors.survivorMale, 1)//50)
+    ..add(TlsUnitIds.Survivors.survivorMilitia1, 1)
+    ..add(TlsUnitIds.Survivors.survivorSpearman1, 1)
+    ..add(TlsUnitIds.Survivors.survivorMedic1, 1)
+    ..add(TlsUnitIds.Survivors.survivorAcolyte1, 1)
+    ..add(TlsUnitIds.Survivors.survivorMarksman1, 1)
+    ..add(TlsUnitIds.Survivors.survivorEngineer1, 1)
 
-    let weightedSet = new WeightedSet<SurvivorJobDefinition>()
-    ..add(SurvivorJobs.none, 50)
-    ..add(SurvivorJobs.militia, 1)
-    ..add(SurvivorJobs.spearman, 1)
-    ..add(SurvivorJobs.medic, 1)
-    ..add(SurvivorJobs.acolyte, 1)
-    ..add(SurvivorJobs.marksman, 1)
-    // ..add(SurvivorJobs.engineer, 1)
-
-    let job = weightedSet.getRandom()
-
-    let survivorComp = survivor.getOrAddSurvivorComponent()
-    survivorComp.getJobData(job).setIsEquipped(true)
-
-    if (survivorComp.canChangeJob(job))
-      survivorComp.changeJobs(job)
-      survivor = survivorComp.getOwnerUnit()
+    let survivor = createUnitTLS(_player, weightedSet.getRandom(), spawnPointResult.spawnPoint, GetRandomDirectionDeg())
 
     // Scale survivor level with game progress
     let gameProgress01 = clamp01(g_GameInstance.getGameProgress01())
@@ -139,7 +177,7 @@ public class SurvivorUtility
 
     return survivor
 
-  // ============================================================================
+  // --------------------------------------------------------------------------
   static function trySpawnSurvivorForPlayer(player _player)
     if (not _player.isPlayingHumanPlayer())
       return
@@ -149,7 +187,7 @@ public class SurvivorUtility
     if (availableSurvivors > currentSurvivors)
       spawnSurvivorUnitForPlayer(_player)
 
-  // ============================================================================
+  // --------------------------------------------------------------------------
   static function countNumberOfSurvivorsOwnedByPlayer(player _player) returns int
     g_tempGroup.clear()
     g_tempGroup.enumUnitsOfPlayer(_player, null)
@@ -159,7 +197,7 @@ public class SurvivorUtility
         count++
     return count
 
-  // ============================================================================
+  // --------------------------------------------------------------------------
   static function owningPlayerBanishSurvivor(unit targetUnit)
     let owningPlayer = targetUnit.getOwner()
 
@@ -178,7 +216,7 @@ public class SurvivorUtility
 
     banishSurvivor(targetUnit)
 
-  // ============================================================================
+  // --------------------------------------------------------------------------
   static function banishSurvivor(unit targetUnit)
 
     // Give to the villagers player so the human player can't control it anymore

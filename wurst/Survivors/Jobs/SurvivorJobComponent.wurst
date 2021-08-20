@@ -1,43 +1,126 @@
 package SurvivorJobComponent
 import UnitComponent
-import SurvivorJobData
+import SurvivorJobs
+import Func
+import HashMap
+
+HashMap<SurvivorJobDefinition, Func1<IUnitMetadata, SurvivorJobComponent>> g_survivorJobComponentGetterMap = new HashMap<SurvivorJobDefinition, Func1<IUnitMetadata, SurvivorJobComponent>>()
+HashMap<SurvivorJobDefinition, Func1<IUnitMetadata, SurvivorJobComponent>> g_survivorJobComponentFactoryMap = new HashMap<SurvivorJobDefinition, Func1<IUnitMetadata, SurvivorJobComponent>>()
 
 // ============================================================================
-public class SurvivorJobComponent extends UnitComponent
+public abstract class SurvivorJobComponent extends UnitComponent
+  private int m_level
+  private int m_experience
+  private int m_unitId
+  private int m_skillPoints
+  private bool m_isAssigned
 
   // --------------------------------------------------------------------------
   construct(IUnitMetadata owner)
     super(owner)
+    m_level = 1
+    m_experience = 0
+    m_skillPoints = 1
+    m_isAssigned = false
+    m_unitId = getJob().getInitialUnitType()
 
   // --------------------------------------------------------------------------
-  override function getTypeId() returns int
-    return SurvivorJobComponent.typeId
+  abstract function getJob() returns SurvivorJobDefinition
+
+  // --------------------------------------------------------------------------
+  function getUnitId() returns int
+    return m_unitId
+
+  // --------------------------------------------------------------------------
+  function setUnitId(int unitId)
+    m_unitId = unitId
+
+  // --------------------------------------------------------------------------
+  function getIsAssigned() returns bool
+    return m_isAssigned
+
+  // --------------------------------------------------------------------------
+  function setIsAssigned(bool value)
+    m_isAssigned = value
+
+  // --------------------------------------------------------------------------
+  function getLevel() returns int
+    return m_level
+
+  // --------------------------------------------------------------------------
+  function setLevel(int level)
+    m_level = level
+
+  // --------------------------------------------------------------------------
+  function getExperience() returns int
+    return m_experience
+
+  // --------------------------------------------------------------------------
+  function setExperience(int experience)
+    m_experience = experience
+
+  // --------------------------------------------------------------------------
+  function getSkillPoints() returns int
+    return m_skillPoints
+
+  // --------------------------------------------------------------------------
+  function setSkillPoints(int value)
+    m_skillPoints = value
 
   // --------------------------------------------------------------------------
   function onLevelChanged()
-    skip
+    saveJobData()
 
   // --------------------------------------------------------------------------
-  function saveJobData(SurvivorJobData jobData)
-    let ownerUnit = getOwnerUnit()
-    jobData.setLevel(ownerUnit.getLevel())
-    jobData.setExperience(ownerUnit.getXp())
-    jobData.setUnitId(ownerUnit.getTypeId())
-    jobData.setSkillPoints(ownerUnit.getSkillPoints())
-    jobData.clearAbilities()
+  function onSkillPointSpent()
+    saveJobData()
 
   // --------------------------------------------------------------------------
-  function loadJobData(SurvivorJobData jobData)
+  override function onEnabled()
+    super.onEnabled()
+    loadJobData()
+
+  // --------------------------------------------------------------------------
+  override function onDisabled()
+    super.onDisabled()
+    saveJobData()
+
+  // --------------------------------------------------------------------------
+  protected function loadJobData()
     let ownerUnit = getOwnerUnit()
 
-    let xp = jobData.getExperience()
+    let xp = getExperience()
     if (xp > 0)
       ownerUnit.setXp(xp, false)
 
-    ownerUnit.setSkillPoints(jobData.getSkillPoints())
-    
-    for i = 0 to jobData.getAbilityCount() - 1
-      let abilId = jobData.getAbilityId(i)
-      let abilLvl = jobData.getAbilityLevel(i)
-      ownerUnit.addAbility(abilId)
-      ownerUnit.setAbilityLevel(abilId, abilLvl)
+    ownerUnit.setSkillPoints(getSkillPoints())
+
+  // --------------------------------------------------------------------------
+  protected function saveJobData()
+    let ownerUnit = getOwnerUnit()
+    setLevel(ownerUnit.getLevel())
+    setExperience(ownerUnit.getXp())
+    setUnitId(ownerUnit.getTypeId())
+    setSkillPoints(ownerUnit.getSkillPoints())
+
+  // --------------------------------------------------------------------------
+  static function registerSurvivorJobComponentGetter(SurvivorJobDefinition job, Func1<IUnitMetadata, SurvivorJobComponent> getter)
+    g_survivorJobComponentGetterMap.put(job, getter)
+
+  // --------------------------------------------------------------------------
+  static function registerSurvivorJobComponentFactory(SurvivorJobDefinition job, Func1<IUnitMetadata, SurvivorJobComponent> getter)
+    g_survivorJobComponentFactoryMap.put(job, getter)
+
+// ============================================================================
+public function IUnitMetadata.getSurvivorJobComponent(SurvivorJobDefinition job) returns SurvivorJobComponent
+  let getter = g_survivorJobComponentGetterMap.get(job)
+  if (getter == null)
+    return null
+  return getter.call(this)
+
+// ============================================================================
+public function IUnitMetadata.getOrAddSurvivorJobComponent(SurvivorJobDefinition job) returns SurvivorJobComponent
+  let factory = g_survivorJobComponentFactoryMap.get(job)
+  if (factory == null)
+    return null
+  return factory.call(this)
