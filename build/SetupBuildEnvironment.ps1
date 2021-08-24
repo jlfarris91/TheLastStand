@@ -17,7 +17,7 @@ if ($VersionInfo.BranchName.StartsWith("develop") -or
 $env:TestEnvironment = "false"
 if ($env:Build -eq "Tester") {
   $env:TestEnvironment = "true"
-  $env:MapVersion = "v{0}" -f $VersionInfo.SemVer
+  $env:MapVersion = "v{0}" -f $VersionInfo.FullSemVer.Replace("+","_")
 }
 
 $env:ProjectRoot = Split-Path (Get-Location)
