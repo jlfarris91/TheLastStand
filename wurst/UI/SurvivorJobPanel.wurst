@@ -17,6 +17,9 @@ import SurvivorJobComponent
 import ClosureKeyPresses
 import Survivors
 import TlsItemDefinition
+import Panel
+import StackPanel
+import Layout
 
 constant string TOGGLEJOBSYNCDATAPREFIX = "TJK"
 
@@ -120,14 +123,13 @@ class SurvivorJobFrameUpdateData
     frame.setJobTooltip(m_jobTooltip)
 
 // ============================================================================
-public class SurvivorJobPanel extends TLSFrame
+public class SurvivorJobPanel extends StackPanel
   private IterableMap<SurvivorJobDefinition, SurvivorJobFrame> m_jobDefToFrameMap
   private int m_ignoreUpdates
   private int m_awaitingUpdate
 
   // --------------------------------------------------------------------------
   construct()
-    super(createFrame("FRAME", "SurvivorJobPanel", GAME_UI, "", 0))
     m_jobDefToFrameMap = new IterableMap<SurvivorJobDefinition, SurvivorJobFrame>()
 
   // --------------------------------------------------------------------------
@@ -144,18 +146,21 @@ public class SurvivorJobPanel extends TLSFrame
   override function initialize()
     super.initialize()
 
-    let panel = getFrameHandle()
-    panel.setAbsPoint(FRAMEPOINT_BOTTOMLEFT, 0.21, 0.14)
-    panel.setSize(0.3, 0.35)
+    setLocalPos(vec2(0.21, 0.14))
+    setSize(vec2(0.3, 0.35))
+    setLayoutOrientation(LayoutOrientation.LEFTTORIGHT)
+    setVerticalLayoutMode(VerticalLayoutMode.CENTER)
 
     for jobDef in g_allJobDefinitions
     //{
       let jobFrame = new SurvivorJobFrame()
-        ..setParent(panel)
         ..setPlayer(getPlayer())
+        ..setMargin(0.002)
         ..setJobDef(jobDef)
         ..initialize()
-        ..hide()
+        ..setVisibility(FrameVisibility.COLLAPSED)
+
+      addChild(jobFrame)
         
       let jobItemDef = getItemDefinition(jobDef.getItemType())
       if (jobItemDef != null)
@@ -163,8 +168,6 @@ public class SurvivorJobPanel extends TLSFrame
 
       m_jobDefToFrameMap.put(jobDef, jobFrame)
     //}
-
-    invalidateLayout()
 
   // --------------------------------------------------------------------------
   override function setPlayer(player value)
@@ -210,34 +213,9 @@ public class SurvivorJobPanel extends TLSFrame
 
     selectedUnits.release()
 
-    invalidateLayout()
+    invalidateArrange()
     
-    if (survivorCount == 0)
-      hide()
-    else
-      show()
-
-  // --------------------------------------------------------------------------
-  function invalidateLayout()
-    
-    let panel = getFrameHandle()
-
-    let layout = new WrapPanelLayout()
-    ..setOrientation(LayoutOrientation.UP)
-    ..setSpacing(vec2(0.002, 0.002))
-    ..layoutBegin()
-
-    for jobDef in g_allJobDefinitions
-    //{
-      let jobFrame = getJobFrame(jobDef)
-      if (jobFrame != null and jobFrame.getEnabledState() != SurvivorJobFrameEnabledState.DISABLED)
-        layout.layoutNextFrame(jobFrame.getFrameHandle(), panel)
-    //}
-
-    panel.setHeight(layout.getHeight())
-
-    layout.layoutEnd()
-    destroy layout
+    setVisibility(survivorCount > 0 ? FrameVisibility.VISIBLE : FrameVisibility.COLLAPSED)
 
   // --------------------------------------------------------------------------
   private function updateJobFrame(SurvivorJobDefinition jobDef, group units)
@@ -320,11 +298,7 @@ function onToggleJobKeyPressed()
   let keyPressingPlayer = GetTriggerPlayer()
 
   let jobPanel = getSurvivorJobPanel(keyPressingPlayer)
-  if (jobPanel == null)
-    return
-
-  let frameHandle = jobPanel.getFrameHandle()
-  if (frameHandle == null or not frameHandle.isVisible() or not frameHandle.isEnabled())
+  if (jobPanel == null or not jobPanel.getIsVisible())
     return
 
   keyPressingPlayer.sendSyncData(TOGGLEJOBSYNCDATAPREFIX, keyPressingPlayer.getId().toString())
@@ -351,7 +325,7 @@ init
       let survivorJobPanel = new SurvivorJobPanel()
       ..setPlayer(p)
       ..initialize()
-      ..hide()
+      ..setVisibility(FrameVisibility.COLLAPSED)
       g_playerSurvivorJobPanels.put(p, survivorJobPanel)
 
   for p in g_PlayingHumanPlayers
