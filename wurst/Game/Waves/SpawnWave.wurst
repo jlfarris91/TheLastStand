@@ -39,8 +39,8 @@ ItemSet g_coinItemSet = new ItemSet("Coins", COLOR_GOLD.withoutAlpha())
 // ============================================================================
 public class SpawnWave extends Runnable
   private SpawnWaveDefinition m_definition
-  private EventCallback m_onActivatedHandler
-  private Event1Callback<IProgress> m_onDefProgressChangedEventHandler
+  private Handle m_onActivatedHandler
+  private Handle m_onDefProgressChangedEventHandler
   private LinkedList<unit> m_aliveSpawnedUnits
   private int m_numSpawned
   private string m_id
@@ -336,9 +336,6 @@ public class SpawnWave extends Runnable
   private function listenToActivatedEvent()
     unlistenToActivatedEvent()
 
-    if (m_onActivatedHandler != null)
-      return
-
     let activator = m_definition.getActivator()
     if (activator == null)
       return
@@ -347,13 +344,17 @@ public class SpawnWave extends Runnable
     if (e == null)
       return
 
+    if (e.isHandleValid(m_onActivatedHandler))
+      return
+
     m_onActivatedHandler = e.register(() -> requestActivation())
 
   // --------------------------------------------------------------------------
   private function unlistenToActivatedEvent()
-    if (m_onActivatedHandler != null)
-      destroy m_onActivatedHandler
-      m_onActivatedHandler = null
+    let activatedEvent = m_definition.getActivator().getActivatedEvent()
+    if (activatedEvent != null)
+      activatedEvent.unregister(m_onActivatedHandler)
+    m_onActivatedHandler = HANDLE_INVALID
 
   // --------------------------------------------------------------------------
   private function onDefProgressChanged()
@@ -366,20 +367,21 @@ public class SpawnWave extends Runnable
   private function listenToDefProgressChangedEvent()
     unlistenToDefProgressChangedEvent()
 
-    if (m_onDefProgressChangedEventHandler != null)
-      return
-
     let progressChangedEvent = m_definition.getProgress().getProgressChangedEvent()
     if (progressChangedEvent == null)
+      return
+
+    if (progressChangedEvent.isHandleValid(m_onDefProgressChangedEventHandler))
       return
 
     m_onDefProgressChangedEventHandler = progressChangedEvent.register((progress) -> onDefProgressChanged())
 
   // --------------------------------------------------------------------------
   private function unlistenToDefProgressChangedEvent()
-    if (m_onDefProgressChangedEventHandler != null)
-      destroy m_onDefProgressChangedEventHandler
-      m_onDefProgressChangedEventHandler = null
+    let progressChangedEvent = m_definition.getProgress().getProgressChangedEvent()
+    if (progressChangedEvent != null)
+      progressChangedEvent.unregister(m_onDefProgressChangedEventHandler)
+    m_onDefProgressChangedEventHandler = HANDLE_INVALID
 
 // ============================================================================
 function onUnitDeath()

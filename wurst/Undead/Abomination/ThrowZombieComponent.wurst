@@ -1,0 +1,245 @@
+package ThrowZombieComponent
+import UnitComponent
+import GroupUtils
+import UnitExtensions
+import HumanPlayers
+import FX
+import TlsAbilityIds
+import Orders
+import Math
+import ClosureEvents
+import DummyUtils
+import ClosureTimers
+import ZombieProjectile
+import Events
+
+constant real ABOM_THROW_PROJ_DURATION = 1.5
+constant real ABOM_THROW_PROJ_HEIGHT = 200.0
+constant real ABOM_THROW_ANIM_PROJECTILE_POINT = 0.5
+
+constant real MIN_THROW_RANGE = 200.0
+constant real MAX_THROW_RANGE = 1024.0
+constant string TARGET_INDICATOR_EFFECT = "Abilities\\Spells\\NightElf\\TrueshotAura\\TrueshotAura.mdl"
+constant int THROW_ABILITY_ID = TlsAbilityIds.abomThrowZombie
+constant int THROW_ORDER_ID = OrderIds.flare
+
+rect g_minThrowArea
+
+// ============================================================================
+public class ThrowZombieComponent extends UnitComponent
+  private effect m_targetIndicatorEffect
+
+  Event throwingZombieEvent
+  Event1<ZombieProjectile> zombieThrownEvent
+
+  // --------------------------------------------------------------------------
+  construct(IUnitMetadata metadata)
+    super(metadata)
+    throwingZombieEvent = new Event()
+    zombieThrownEvent = new Event1<ZombieProjectile>()
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    destroy throwingZombieEvent
+    throwingZombieEvent = null
+    destroy zombieThrownEvent
+    zombieThrownEvent = null
+
+  // --------------------------------------------------------------------------
+  protected override function getTypeId() returns int
+    return ThrowZombieComponent.getTypeId()
+
+  // --------------------------------------------------------------------------
+  protected override function onDisabled()
+    super.onDisabled()
+    hideTargetIndicator()
+
+  // --------------------------------------------------------------------------
+  function tryThrowZombieAtNearestTarget() returns bool
+    let target = findThrowTarget()
+    if (target == null)
+      // Log.debug("ThrowZombieComponent", "tryThrowZombieAtNearestTarget", "", "Found no target")
+      hideTargetIndicator()
+      return false
+    return tryThrowZombieAtTarget(target)
+
+  // --------------------------------------------------------------------------
+  function tryThrowZombieAtTarget(unit target) returns bool
+    if (target == null)
+      return false
+
+    // Log.debug("ThrowZombieComponent", "tryThrowZombieAtTarget", "", "Target: " + target.getName())
+
+    let ownerUnit = getOwnerUnit()
+    let currentPos = ownerUnit.getPos()
+    let targetPos = target.getPos()
+    let throwRange = getThrowRange()
+    let angle = currentPos.angleTo(targetPos)
+    var dist = currentPos.distanceTo(targetPos)
+    dist = clamp(dist, MIN_THROW_RANGE, throwRange)
+
+    let finalPos = currentPos.polarOffset(angle, dist)
+
+    return ownerUnit.issuePointOrderById(THROW_ORDER_ID, finalPos)
+
+  // --------------------------------------------------------------------------
+  private function findThrowTarget() returns unit
+    let ownerUnit = getOwnerUnit()
+
+    // === These must be cleaned up
+    let ug = getGroup()
+    let cond = Condition(function isFilterUnitAValidThrowTarget)
+    g_minThrowArea = ownerUnit.getPos().withRadiusRect(MIN_THROW_RANGE)
+    // ===
+
+    ug.enumUnitsInRange(ownerUnit.getPos(), MAX_THROW_RANGE, cond)
+    let target = ug.getRandomUnit()
+
+    // === Cleanup
+    RemoveRect(g_minThrowArea)
+    DestroyCondition(cond)
+    ug.release()
+    // ===
+
+    return target
+
+  // --------------------------------------------------------------------------
+  protected function showTargetIndicator(vec2 pos)
+    if (m_targetIndicatorEffect == null)
+      m_targetIndicatorEffect = FX.createEffect(TARGET_INDICATOR_EFFECT, pos)
+    else
+      m_targetIndicatorEffect.setPos(pos)
+
+  // --------------------------------------------------------------------------
+  protected function hideTargetIndicator()
+    if (m_targetIndicatorEffect != null)
+      m_targetIndicatorEffect.setAlpha(0)
+      m_targetIndicatorEffect.destr()
+      m_targetIndicatorEffect = null
+
+  // --------------------------------------------------------------------------
+  private function getThrowRange() returns real
+    return getOwnerUnit().getAbility(THROW_ABILITY_ID).getField(ABILITY_RLF_CAST_RANGE, 0)
+
+  // --------------------------------------------------------------------------
+  protected function doThrow(vec2 targetPos)
+    
+    // Log.info("ThrowZombieComp", "doThrow", "", "")
+
+    let ownerUnit = getOwnerUnit()
+    let throwStartPos = ownerUnit.getPos()
+    var throwEndPos = targetPos
+    let facingAngle = throwStartPos.angleTo(throwEndPos)
+
+    // Create a dummy target just to get a valid point for the zombie to land
+    // Otherwise, the arc could show the zombie landing in a different place
+    let dummyTarget = createDummy(throwEndPos, DUMMY_PLAYER, facingAngle)
+    throwEndPos = dummyTarget.getPos()
+    nullTimer(() -> dummyTarget.remove())
+  
+    showTargetIndicator(throwEndPos)
+
+    throwingZombieEvent.call()
+
+    doAfter(ABOM_THROW_ANIM_PROJECTILE_POINT) () ->
+      // Log.info("ThrowZombieComp", "doThrow", "", "Throw animation proj point")
+      onThrowAnimProjectilePoint(ownerUnit, throwStartPos, throwEndPos)
+
+  // --------------------------------------------------------------------------
+  private static function onThrowAnimProjectilePoint(unit ownerUnit, vec2 throwStartPos, vec2 throwEndPos)
+    let metadata = ownerUnit.getMetadata()
+    if (metadata == null)
+      return
+    let comp = metadata.getThrowZombieComponent()
+    if (comp == null or not comp.getEnabled())
+      return
+    comp.onThrowAnimProjectilePoint(throwStartPos, throwEndPos)
+
+  // --------------------------------------------------------------------------
+  private function onThrowAnimProjectilePoint(vec2 throwStartPos, vec2 throwEndPos)
+    let distance = throwStartPos.distanceTo(throwEndPos)
+    let throwRange = getThrowRange()
+    let rangeScalar = distance / throwRange
+    let projectileDuration = rangeScalar * ABOM_THROW_PROJ_DURATION
+    let projectile = new ZombieProjectile(throwStartPos, throwEndPos, ABOM_THROW_PROJ_HEIGHT, projectileDuration)
+    zombieThrownEvent.call(projectile)
+
+// ============================================================================
+public function IUnitMetadata.getThrowZombieComponent() returns ThrowZombieComponent
+  return this.getComponent(typeInfo(ThrowZombieComponent.typeId)) castTo ThrowZombieComponent
+
+// ============================================================================
+public function IUnitMetadata.getOrAddThrowZombieComponent() returns ThrowZombieComponent
+  var component = this.getThrowZombieComponent()
+  if (component == null)
+    component = this.addComponent(new ThrowZombieComponent(this)) castTo ThrowZombieComponent
+  return component
+
+// ============================================================================
+function isFilterUnitAValidThrowTarget() returns bool
+  let target = GetFilterUnit()
+  return not target.isStructure() and target.getOwner().isHumanPlayer() and not g_minThrowArea.contains(target.getPos())
+
+// ============================================================================
+function onAbomIssuedPointOrder()
+  let orderedUnit = GetOrderedUnit()
+  let targetPos = vec2(GetOrderPointX(), GetOrderPointY())
+
+  let metadata = orderedUnit.getMetadata()
+  if (metadata == null)
+    return
+
+  let throwComp = metadata.getThrowZombieComponent()
+  if (throwComp == null)
+    return
+
+  if (not throwComp.getEnabled())
+    // Log.debug("Throw component is disabled")
+    return
+
+  if (GetIssuedOrderId() == THROW_ORDER_ID)
+    throwComp.showTargetIndicator(targetPos)
+  else
+    throwComp.hideTargetIndicator()
+
+// ============================================================================
+function onAbomIssuedNonPointOrder()
+  let orderedUnit = GetOrderedUnit()
+
+  let metadata = orderedUnit.getMetadata()
+  if (metadata == null)
+    return
+
+  let throwComp = metadata.getThrowZombieComponent()
+  if (throwComp == null)
+    return
+
+  throwComp.hideTargetIndicator()
+
+// ============================================================================
+function onAbomSpellCast()
+  if (GetSpellAbilityId() != TlsAbilityIds.abomThrowZombie)
+    return
+
+  let caster = GetSpellAbilityUnit()
+  let metadata = caster.getMetadata()
+  if (metadata == null)
+    return
+
+  let throwComp = metadata.getThrowZombieComponent()
+  if (throwComp == null)
+    return
+
+  if (not throwComp.getEnabled())
+    // Log.debug("Throw component is disabled")
+    return
+
+  throwComp.doThrow(EventData.getSpellTargetPos())
+
+// ============================================================================
+init
+
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_SPELL_CAST, () -> onAbomSpellCast())
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ISSUED_POINT_ORDER, () -> onAbomIssuedPointOrder())
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ISSUED_ORDER, () -> onAbomIssuedNonPointOrder())
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ISSUED_TARGET_ORDER, () -> onAbomIssuedNonPointOrder())

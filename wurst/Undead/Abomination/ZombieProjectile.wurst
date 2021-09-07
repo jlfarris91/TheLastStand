@@ -1,0 +1,125 @@
+package ZombieProjectile
+import LinkedList
+import Interpolation
+import Math
+import AbomUtils
+
+constant string PROJECTILE_EFFECT1 = "Units\\Abomination\\GrabbedZombie.mdx"
+constant string THROW_DUST_EFFECT = "Objects\\Spawnmodels\\Undead\\ImpaleTargetDust\\ImpaleTargetDust.mdl"
+
+LinkedList<ZombieProjectile> g_zombieProjectiles = new LinkedList<ZombieProjectile>()
+trigger g_updateZombieProjectilesTrigger
+
+// ==========================================================================
+public class ZombieProjectile
+  private unit m_zombie
+  private vec2 m_startPos
+  private vec2 m_endPos
+  private angle m_facingAngle
+  private real m_height
+  private real m_elapsed
+  private real m_duration
+  private effect m_effect
+
+  // --------------------------------------------------------------------------
+  construct(vec2 startPos, vec2 endPos, real height, real duration)
+    m_startPos = startPos
+    m_endPos = endPos
+    m_height = height
+    m_duration = duration
+    m_elapsed = 0
+    m_facingAngle = startPos.angleTo(endPos)
+
+    m_effect = AddSpecialEffect(PROJECTILE_EFFECT1, startPos.x, startPos.y)
+    ..setYaw(m_facingAngle)
+
+    registerZombieProjectile(this)
+
+    update(0)
+
+  // --------------------------------------------------------------------------
+  ondestroy
+
+    if (m_effect != null)
+      m_effect.destr()
+      m_effect = null
+
+    unregisterZombieProjectile(this)
+
+  // --------------------------------------------------------------------------
+  function setZombie(unit zombie)
+    m_zombie = zombie
+
+  // --------------------------------------------------------------------------
+  function getZombie() returns unit
+    return m_zombie
+
+  // --------------------------------------------------------------------------
+  function update(real dt)
+
+    m_elapsed += dt
+
+    let t = clamp01(m_elapsed / m_duration)
+    let pos = calculatePos(t)
+    let pitch = calculatePitchRads(t)
+
+    m_effect.setPos(pos)
+    m_effect.setPitch(pitch)
+
+    if (t >= 1.0)
+      onCompleted()
+      
+  // --------------------------------------------------------------------------
+  private function calculatePos(real t) returns vec3
+    let xy = m_startPos.lerp(m_endPos, t)
+    let z = m_height + bezier3(0, 1.5, -1., t) * m_height
+    return xy.withTerrainZ(z)
+
+  // --------------------------------------------------------------------------
+  private function calculatePitchRads(real t) returns real
+    return lerp(-60, 60, t) * DEGTORAD
+
+  // --------------------------------------------------------------------------
+  function onCompleted()
+
+    // Hide the effect
+    m_effect.setColor(colorA(0, 0, 0, 0))
+    m_effect.setAlpha(0)
+
+    // create a dust effect
+    addEffect(THROW_DUST_EFFECT, m_endPos)
+    ..setScale(0.5)
+    ..setColor(50, 50, 50)
+    ..setAlpha(100)
+    ..destr()
+
+    // Actually move the zombie and unhide it
+    if (m_zombie != null)
+      unsuspendAndShowZombie(m_zombie, m_endPos, m_facingAngle)
+    else
+      Log.debug("ZombieProjectile", "onCompleted", "", "Zombie was null")
+
+    destroy this
+
+// ==========================================================================
+function registerZombieProjectile(ZombieProjectile zombieProjectile)
+  g_zombieProjectiles.add(zombieProjectile)
+  if (g_zombieProjectiles.size() == 1)
+    g_updateZombieProjectilesTrigger.enable()
+
+// ==========================================================================
+function unregisterZombieProjectile(ZombieProjectile zombieProjectile)
+  g_zombieProjectiles.remove(zombieProjectile)
+  if (g_zombieProjectiles.isEmpty())
+    g_updateZombieProjectilesTrigger.disable()
+
+// ==========================================================================
+function updateZombieProjectiles()
+  for zombieProjectile in g_zombieProjectiles
+    zombieProjectile.update(ANIMATION_PERIOD)
+
+// ==========================================================================
+init
+  g_updateZombieProjectilesTrigger = CreateTrigger()
+  g_updateZombieProjectilesTrigger.addAction(function updateZombieProjectiles)
+  TriggerRegisterTimerEventPeriodic(g_updateZombieProjectilesTrigger, ANIMATION_PERIOD)
