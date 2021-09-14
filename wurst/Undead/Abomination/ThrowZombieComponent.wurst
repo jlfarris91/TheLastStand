@@ -23,8 +23,6 @@ constant string TARGET_INDICATOR_EFFECT = "Abilities\\Spells\\NightElf\\Trueshot
 constant int THROW_ABILITY_ID = TlsAbilityIds.abomThrowZombie
 constant int THROW_ORDER_ID = OrderIds.flare
 
-rect g_minThrowArea
-
 // ============================================================================
 public class ThrowZombieComponent extends UnitComponent
   private effect m_targetIndicatorEffect
@@ -52,7 +50,7 @@ public class ThrowZombieComponent extends UnitComponent
 
   // --------------------------------------------------------------------------
   function tryThrowZombieAtNearestTarget() returns bool
-    let target = findThrowTarget()
+    let target = findThrowTarget(getThrowRange())
     if (target == null)
       Log.debug("ThrowZombieComponent", "tryThrowZombieAtNearestTarget", "", "Found no target")
       hideTargetIndicator()
@@ -79,20 +77,18 @@ public class ThrowZombieComponent extends UnitComponent
     return ownerUnit.issuePointOrderById(THROW_ORDER_ID, finalPos)
 
   // --------------------------------------------------------------------------
-  private function findThrowTarget() returns unit
+  private function findThrowTarget(real range) returns unit
     let ownerUnit = getOwnerUnit()
 
     // === These must be cleaned up
     let ug = getGroup()
     let cond = Condition(function isFilterUnitAValidThrowTarget)
-    g_minThrowArea = ownerUnit.getPos().withRadiusRect(MIN_THROW_RANGE)
     // ===
 
-    ug.enumUnitsInRange(ownerUnit.getPos(), MAX_THROW_RANGE, cond)
+    ug.enumUnitsInRange(ownerUnit.getPos(), min(range, MAX_THROW_RANGE), cond)
     let target = ug.getRandomUnit()
 
     // === Cleanup
-    RemoveRect(g_minThrowArea)
     DestroyCondition(cond)
     ug.release()
     // ===
@@ -120,7 +116,7 @@ public class ThrowZombieComponent extends UnitComponent
   // --------------------------------------------------------------------------
   protected function doThrow(vec2 targetPos)
     
-    Log.info("ThrowZombieComp", "doThrow", "", "")
+    Log.debug("ThrowZombieComp", "doThrow", "", "")
 
     let ownerUnit = getOwnerUnit()
     let throwStartPos = ownerUnit.getPos()
@@ -139,7 +135,7 @@ public class ThrowZombieComponent extends UnitComponent
 
     dispatch(ABOM_THROW_ANIM_PROJECTILE_POINT) (ThrowZombieComponent comp) ->
     //{
-      Log.info("ThrowZombieComp", "doThrow", "", "Throw animation proj point")
+      Log.debug("ThrowZombieComp", "doThrow", "", "Throw animation proj point")
 
       let distance = throwStartPos.distanceTo(throwEndPos)
       let throwRange = getThrowRange()
@@ -174,7 +170,7 @@ public function unit.getThrowZombieComponent() returns ThrowZombieComponent
 // ============================================================================
 function isFilterUnitAValidThrowTarget() returns bool
   let target = GetFilterUnit()
-  return not target.isStructure() and target.getOwner().isHumanPlayer() and not g_minThrowArea.contains(target.getPos())
+  return not target.isStructure() and target.isAlive() and target.getOwner().isHumanPlayer()
 
 // ============================================================================
 function onAbomIssuedPointOrder()

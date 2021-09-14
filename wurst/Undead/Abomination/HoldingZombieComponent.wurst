@@ -5,6 +5,7 @@ import ClosureTimers
 import AbomUtils
 import ThrowZombieComponent
 import Events
+import UndeadTargetingComponent
 
 constant real HOLD_DURATION = 2.0
 constant string ALERT_EFFECT = "Abilities\\Spells\\Other\\TalkToMe\\TalkToMe.mdl"
@@ -57,6 +58,7 @@ public class HoldingZombieComponent extends UnitComponent
       return
     Log.debug("HoldingZombieComp", "dropZombieAtPos", "", "")
     m_heldZombie = null
+    m_throwFailedCount = 0
     unsuspendAndShowZombie(zombie, pos, facingAngle)
     zombieDroppedEvent.call()
 
@@ -93,13 +95,24 @@ public class HoldingZombieComponent extends UnitComponent
       m_throwZombieTimer = null
       Log.debug("HoldingZombieComp", "startThrowTimer", "", "throw timer expired")
       if (not tryThrowZombie())
+      //{
         m_throwFailedCount++
         Log.debug("HoldingZombieComp", "startThrowTimer", "", "tryThrowZombie failed " + m_throwFailedCount.toString())
-        if (m_throwFailedCount == 3)
+        if (m_throwFailedCount >= 3)
           Log.debug("HoldingZombieComp", "startThrowTimer", "", "dropping zombie")
           dropZombie()
         else
           startThrowTimer()
+
+        // try to move closer to any targettable unit
+        let utc = getOwner().getUndeadTargetingComponent()
+        if (utc != null)
+          var targetUnit = utc.getTargetUnit()
+          if (targetUnit == null)
+            targetUnit = utc.getNearestTargettableUnit()
+          if (targetUnit != null)
+            getOwnerUnit().issuePointOrder("move", targetUnit.getPos())
+      //}
       else
         m_throwFailedCount = 0
         Log.debug("HoldingZombieComp", "startThrowTimer", "", "tryThrowZombie succeeded")
