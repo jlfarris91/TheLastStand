@@ -13,7 +13,7 @@ import ClosureTimers
 import ZombieProjectile
 import Events
 
-constant real ABOM_THROW_PROJ_DURATION = 1.5
+constant real ABOM_THROW_PROJ_DURATION = 1.0
 constant real ABOM_THROW_PROJ_HEIGHT = 200.0
 constant real ABOM_THROW_ANIM_PROJECTILE_POINT = 0.5
 
@@ -46,10 +46,6 @@ public class ThrowZombieComponent extends UnitComponent
     zombieThrownEvent = null
 
   // --------------------------------------------------------------------------
-  protected override function getTypeId() returns int
-    return ThrowZombieComponent.getTypeId()
-
-  // --------------------------------------------------------------------------
   protected override function onDisabled()
     super.onDisabled()
     hideTargetIndicator()
@@ -58,7 +54,7 @@ public class ThrowZombieComponent extends UnitComponent
   function tryThrowZombieAtNearestTarget() returns bool
     let target = findThrowTarget()
     if (target == null)
-      // Log.debug("ThrowZombieComponent", "tryThrowZombieAtNearestTarget", "", "Found no target")
+      Log.debug("ThrowZombieComponent", "tryThrowZombieAtNearestTarget", "", "Found no target")
       hideTargetIndicator()
       return false
     return tryThrowZombieAtTarget(target)
@@ -68,7 +64,7 @@ public class ThrowZombieComponent extends UnitComponent
     if (target == null)
       return false
 
-    // Log.debug("ThrowZombieComponent", "tryThrowZombieAtTarget", "", "Target: " + target.getName())
+    Log.debug("ThrowZombieComponent", "tryThrowZombieAtTarget", "", "Target: " + target.getName())
 
     let ownerUnit = getOwnerUnit()
     let currentPos = ownerUnit.getPos()
@@ -124,7 +120,7 @@ public class ThrowZombieComponent extends UnitComponent
   // --------------------------------------------------------------------------
   protected function doThrow(vec2 targetPos)
     
-    // Log.info("ThrowZombieComp", "doThrow", "", "")
+    Log.info("ThrowZombieComp", "doThrow", "", "")
 
     let ownerUnit = getOwnerUnit()
     let throwStartPos = ownerUnit.getPos()
@@ -141,32 +137,25 @@ public class ThrowZombieComponent extends UnitComponent
 
     throwingZombieEvent.call()
 
-    doAfter(ABOM_THROW_ANIM_PROJECTILE_POINT) () ->
-      // Log.info("ThrowZombieComp", "doThrow", "", "Throw animation proj point")
-      onThrowAnimProjectilePoint(ownerUnit, throwStartPos, throwEndPos)
+    dispatch(ABOM_THROW_ANIM_PROJECTILE_POINT) (ThrowZombieComponent comp) ->
+    //{
+      Log.info("ThrowZombieComp", "doThrow", "", "Throw animation proj point")
 
-  // --------------------------------------------------------------------------
-  private static function onThrowAnimProjectilePoint(unit ownerUnit, vec2 throwStartPos, vec2 throwEndPos)
-    let metadata = ownerUnit.getMetadata()
-    if (metadata == null)
-      return
-    let comp = metadata.getThrowZombieComponent()
-    if (comp == null or not comp.getEnabled())
-      return
-    comp.onThrowAnimProjectilePoint(throwStartPos, throwEndPos)
+      let distance = throwStartPos.distanceTo(throwEndPos)
+      let throwRange = getThrowRange()
+      let rangeScalar = distance / throwRange
+      let projectileDuration = rangeScalar * ABOM_THROW_PROJ_DURATION
+      let projectile = new ZombieProjectile(throwStartPos, throwEndPos, ABOM_THROW_PROJ_HEIGHT, projectileDuration)
+      zombieThrownEvent.call(projectile)
 
-  // --------------------------------------------------------------------------
-  private function onThrowAnimProjectilePoint(vec2 throwStartPos, vec2 throwEndPos)
-    let distance = throwStartPos.distanceTo(throwEndPos)
-    let throwRange = getThrowRange()
-    let rangeScalar = distance / throwRange
-    let projectileDuration = rangeScalar * ABOM_THROW_PROJ_DURATION
-    let projectile = new ZombieProjectile(throwStartPos, throwEndPos, ABOM_THROW_PROJ_HEIGHT, projectileDuration)
-    zombieThrownEvent.call(projectile)
+      dispatch(ABOM_THROW_PROJ_DURATION) (ThrowZombieComponent comp) ->
+        hideTargetIndicator()
+    //}
+    
 
 // ============================================================================
 public function IUnitMetadata.getThrowZombieComponent() returns ThrowZombieComponent
-  return this.getComponent(typeInfo(ThrowZombieComponent.typeId)) castTo ThrowZombieComponent
+  return this.getComponent(ThrowZombieComponent.typeId) castTo ThrowZombieComponent
 
 // ============================================================================
 public function IUnitMetadata.getOrAddThrowZombieComponent() returns ThrowZombieComponent
@@ -174,6 +163,13 @@ public function IUnitMetadata.getOrAddThrowZombieComponent() returns ThrowZombie
   if (component == null)
     component = this.addComponent(new ThrowZombieComponent(this)) castTo ThrowZombieComponent
   return component
+
+// ============================================================================
+public function unit.getThrowZombieComponent() returns ThrowZombieComponent
+  let metadata = this.getMetadata()
+  if (metadata == null)
+    return null
+  return metadata.getThrowZombieComponent()
 
 // ============================================================================
 function isFilterUnitAValidThrowTarget() returns bool
@@ -194,7 +190,7 @@ function onAbomIssuedPointOrder()
     return
 
   if (not throwComp.getEnabled())
-    // Log.debug("Throw component is disabled")
+    Log.debug("Throw component is disabled")
     return
 
   if (GetIssuedOrderId() == THROW_ORDER_ID)
@@ -231,7 +227,7 @@ function onAbomSpellCast()
     return
 
   if (not throwComp.getEnabled())
-    // Log.debug("Throw component is disabled")
+    Log.debug("Throw component is disabled")
     return
 
   throwComp.doThrow(EventData.getSpellTargetPos())

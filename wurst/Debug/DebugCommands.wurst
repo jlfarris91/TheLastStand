@@ -1,7 +1,6 @@
 package DebugCommands
 import ChatCommands
 import DisplayTextToPlayer
-import Host
 import MemoryTrackingMultiboard
 import ClosureTimers
 import Godlike
@@ -11,8 +10,7 @@ import Wave
 import GroupUtils
 import MainItemLibrary
 import UnitMetadata
-import HumanPlayerMetadata
-import LinkedList
+import HumanPlayerComponent
 import WeatherManager
 import Time
 import Reputation
@@ -25,6 +23,7 @@ import UnitExtensions
 import ProjectConstants
 import PathChecker
 import Survivors
+import DevChatCommandHandler
 
 constant string COMMAND_MEMORYTRACKER = "mem"
 constant string COMMAND_GODLIKE = "godlike"
@@ -68,22 +67,9 @@ constant string COMMAND_CHECKPATH = "checkpath"
 constant string COMMAND_SPAWNSURVIVOR = "spawnSurvivor"
 constant string COMMAND_SELECTALL = "selectAll"
 
-DebugChatCommandHandler g_commandHandler
+DevChatCommandHandler g_commandHandler
 MemoryTrackingMultiboard g_memoryTrackingMultiboard
 fogmodifier array g_seeVisionModifiers
-
-// ============================================================================
-public class DebugChatCommandHandler extends ChatCommandHandler
-
-  // --------------------------------------------------------------------------
-  construct(string name, quest _quest)
-    super(name, _quest)
-
-  // --------------------------------------------------------------------------
-  override function handleChatCommand(player p, string command, LinkedList<string> commandArgs) returns bool
-    if (not p.isHost())
-      return false
-    return super.handleChatCommand(p, command, commandArgs)    
 
 // ============================================================================
 function showMemoryTrackerMultiboard()
@@ -167,7 +153,7 @@ function spawnone()
       error("Found no spawn wave at index " + spawnWaveId.toString())
       return
 
-    spawnWave.activate()
+    spawnWave.activate(true)
     displayMessageToPlayer(p, "Activated {0} {1} spawn wave {2} once".format(dayNightWave, waveId.toString(), spawnWave.getDefinition().getName()))
     return
   // }
@@ -177,7 +163,7 @@ function spawnone()
     return
 
   for spawnWave in spawnWaves
-    spawnWave.activate()
+    spawnWave.activate(true)
     displayMessageToPlayer(p, "Activated {0} {1} spawn wave {2} once".format(dayNightWave, waveId.toString(), spawnWave.getDefinition().getName()))
 
 // ============================================================================
@@ -328,12 +314,12 @@ function addMats()
     error("Player id argument is invalid")
     return
 
-  let playerMetadata = p.getMetadata() castTo HumanPlayerMetadata
+  let playerMetadata = p.getHumanPlayerComponent()
   if (playerMetadata == null)
     error("Can't give materials to player \"{0}\"".format(p.getName()))
     return
 
-  playerMetadata.giveMaterials(matsCount)
+  playerMetadata.getOwnerPlayer().addLumber(matsCount)
   displayMessageToPlayer(commandPlayer, "Gave {0} materials to {1}".format(I2S(matsCount), p.getNameColored()))
 
 // ============================================================================
@@ -947,7 +933,7 @@ init
 
   if (DEV_ENVIRONMENT)
   //{
-    g_commandHandler = new DebugChatCommandHandler("Debug", null)
+    g_commandHandler = new DevChatCommandHandler("Debug", null)
     registerChatCommandHandler(g_commandHandler, -1)
 
     nullTimer(() -> registerDebugCommands())

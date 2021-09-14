@@ -1,0 +1,190 @@
+package ProfileCommands
+import DevChatCommandHandler
+import ProjectConstants
+import ChatCommands
+import ClosureTimers
+import DevProfile
+import GroupUtils
+import ColorUtility
+
+constant string COMMAND_PROFILE = "profile"
+
+DevChatCommandHandler g_commandHandler
+
+// ============================================================================
+function profileHandler()
+  let command = getChatCommand()
+  let commandPlayer = getChatCommandPlayer()
+  let subCommandArg = command.getArgument(0)
+  let valueArg = command.getArgument(1)
+
+  if (subCommandArg == null)
+    let profile = DevProfile.getActiveProfile()
+    chatCommandPrintToPlayer(commandPlayer, "Current profile: " + (profile != null ? profile.getName() : "none"))
+    return
+
+  let subCommand = subCommandArg.getString()
+  switch (subCommand)
+
+    case "new"
+      let profile = DevProfile.newProfile(valueArg.getString(), commandPlayer)
+      chatCommandPrintToPlayer(commandPlayer, "Created new profile: " + profile.getName())
+      DevProfile.setActiveProfile(profile)
+      chatCommandPrintToPlayer(commandPlayer, "Activated profile " + profile.getName())
+      return
+
+    case "delete"
+      let profile = DevProfile.getProfile(valueArg.getString())
+      if (profile == null)
+        chatCommandPrintToPlayer(commandPlayer, "Could not find profile named " + valueArg.getString())
+        return
+      DevProfile.deleteProfile(profile)
+      chatCommandPrintToPlayer(commandPlayer, "Deleted profile " + valueArg.getString())
+      return
+
+    case "list"
+      let profiles = DevProfile.getProfiles()
+      let activeProfile = DevProfile.getActiveProfile()
+      chatCommandPrintToPlayer(commandPlayer, "Profiles: " + profiles.size().toString() + " Active: " + (activeProfile != null ? activeProfile.getName() : "none"))
+      var i = 1
+      for profile in profiles
+        chatCommandPrintToPlayer(commandPlayer, i.toString() + ": " + profile.getName())
+        i++
+      return
+
+    case "load"
+      chatCommandPrintToPlayer(commandPlayer, "Loading profile " + valueArg.getString() + "...")
+      let profile = DevProfile.loadProfile(valueArg.getString(), commandPlayer)
+      if (profile != null)
+        chatCommandPrintToPlayer(commandPlayer, "Failed to load profile " + valueArg.getString())
+        return
+      chatCommandPrintToPlayer(commandPlayer, "Successfully loaded profile.")
+      DevProfile.setActiveProfile(profile)
+      chatCommandPrintToPlayer(commandPlayer, "Activated profile " + profile.getName())
+      return
+
+    case "save"
+
+      DevProfile profile
+
+      if (valueArg == null)
+        let currentProfile = DevProfile.getActiveProfile()
+        if (currentProfile != null)
+          profile = currentProfile
+        else
+          chatCommandPrintToPlayer(commandPlayer, "You must specify a profile name")
+          return
+      else
+        profile = DevProfile.getProfile(valueArg.getString())
+        if (profile == null)
+          chatCommandPrintToPlayer(commandPlayer, "No profile found named " + valueArg.getString())
+          return
+
+      chatCommandPrintToPlayer(commandPlayer, "Saving profile " + profile.getName() + "...")
+      DevProfile.saveProfile(profile)
+      chatCommandPrintToPlayer(commandPlayer, "Successfully saved profile.")
+      return
+
+    case "activate"
+      let profile = DevProfile.getProfile(valueArg.getString())
+      if (profile == null)
+        chatCommandPrintToPlayer(commandPlayer, "Could not find profile named " + valueArg.getString())
+        return
+      DevProfile.setActiveProfile(profile)
+      chatCommandPrintToPlayer(commandPlayer, "Activated profile " + profile.getName())
+      return
+
+    case "units"
+
+      let currentProfile = DevProfile.getActiveProfile()
+      if (currentProfile == null)
+        chatCommandPrintToPlayer(commandPlayer, "Requires an active profile".colorize(Colors.red))
+        return
+
+      chatCommandPrintToPlayer(commandPlayer, "Profile is storing {0} units".format(currentProfile.getPersistedUnits().size().toString()))
+      return
+
+    case "addSelectedUnits"
+
+      let currentProfile = DevProfile.getActiveProfile()
+      if (currentProfile == null)
+        chatCommandPrintToPlayer(commandPlayer, "Requires an active profile".colorize(Colors.red))
+        return
+
+      let persistedUnits = currentProfile.getPersistedUnits()
+
+      let g = getGroup()
+      g.enumUnitsSelected(commandPlayer, null)
+      while g.hasNext()
+        let u = g.next()
+        if (u.isAlive())
+          persistedUnits.addUnit(u)
+      g.release()
+
+      chatCommandPrintToPlayer(commandPlayer, "Profile is storing {0} units".format(currentProfile.getPersistedUnits().size().toString()))
+      return
+
+    case "removeSelectedUnits"
+
+      let currentProfile = DevProfile.getActiveProfile()
+      if (currentProfile == null)
+        chatCommandPrintToPlayer(commandPlayer, "Requires an active profile".colorize(Colors.red))
+        return
+
+      let persistedUnits = currentProfile.getPersistedUnits()
+
+      let g = getGroup()
+      g.enumUnitsSelected(commandPlayer, null)
+      persistedUnits.removeGroup(g)
+      g.release()
+
+      chatCommandPrintToPlayer(commandPlayer, "Profile is storing {0} units".format(currentProfile.getPersistedUnits().size().toString()))
+      return
+
+    case "addAllUnits"
+
+      let currentProfile = DevProfile.getActiveProfile()
+      if (currentProfile == null)
+        chatCommandPrintToPlayer(commandPlayer, "Requires an active profile".colorize(Colors.red))
+        return
+
+      let persistedUnits = currentProfile.getPersistedUnits()
+
+      let g = getGroup()
+      g.enumUnitsOfPlayer(commandPlayer, null)
+      while g.hasNext()
+        let u = g.next()
+        if (u.isAlive())
+          persistedUnits.addUnit(u)
+      g.release()
+
+      chatCommandPrintToPlayer(commandPlayer, "Profile is storing {0} units".format(currentProfile.getPersistedUnits().size().toString()))
+      return
+      
+    case "clearUnits"
+
+      let currentProfile = DevProfile.getActiveProfile()
+      if (currentProfile == null)
+        chatCommandPrintToPlayer(commandPlayer, "Requires an active profile".colorize(Colors.red))
+        return
+
+      currentProfile.getPersistedUnits().clear()
+      chatCommandPrintToPlayer(commandPlayer, "Profile is storing {0} units".format(currentProfile.getPersistedUnits().size().toString()))
+      return
+
+// ============================================================================
+function registerDebugCommands()
+
+  g_commandHandler.registerCommandDefinition(COMMAND_PROFILE, function profileHandler)
+    ..addStringArgument("PROFILE_COMMAND", true)
+    ..addStringArgument("COMMAND_VALUE", true)
+
+// ============================================================================
+init
+
+  if (DEV_ENVIRONMENT)
+  //{
+    g_commandHandler = new DevChatCommandHandler("Profile", null)
+    registerChatCommandHandler(g_commandHandler, -1)
+    nullTimer(() -> registerDebugCommands())
+  //}

@@ -6,17 +6,17 @@ import AbomUtils
 import ThrowZombieComponent
 import Events
 
-constant real HOLD_DURATION = 3.0
+constant real HOLD_DURATION = 2.0
 constant string ALERT_EFFECT = "Abilities\\Spells\\Other\\TalkToMe\\TalkToMe.mdl"
 
 // ============================================================================
 public class HoldingZombieComponent extends UnitComponent
   private unit m_heldZombie
   private effect m_alertEffect
-  private CallbackSingle m_throwZombieTimer
+  private CallbackSingle m_throwZombieTimer = null
   private int m_throwFailedCount = 0
 
-  Event zombieDroppedEvent
+  Event zombieDroppedEvent = null
 
   // --------------------------------------------------------------------------
   construct(IUnitMetadata metadata)
@@ -27,10 +27,10 @@ public class HoldingZombieComponent extends UnitComponent
   ondestroy
     destroy zombieDroppedEvent
     zombieDroppedEvent = null
-
-  // --------------------------------------------------------------------------
-  protected override function getTypeId() returns int
-    return HoldingZombieComponent.getTypeId()
+    
+    if (m_throwZombieTimer != null)
+      destroy m_throwZombieTimer
+      m_throwZombieTimer = null
 
   // --------------------------------------------------------------------------
   function getHeldZombie() returns unit
@@ -40,8 +40,10 @@ public class HoldingZombieComponent extends UnitComponent
   function setHeldZombie(unit zombie)
     m_heldZombie = zombie
     if (zombie != null)
+      Log.debug("HoldingZombieComp", "setHeldZombie", "", zombie.getName())
       showHeldZombieEffect()
     else
+      Log.debug("HoldingZombieComp", "setHeldZombie", "", "null")
       hideHeldZombieEffect()
 
   // --------------------------------------------------------------------------
@@ -53,6 +55,7 @@ public class HoldingZombieComponent extends UnitComponent
     let zombie = m_heldZombie
     if (zombie == null)
       return
+    Log.debug("HoldingZombieComp", "dropZombieAtPos", "", "")
     m_heldZombie = null
     unsuspendAndShowZombie(zombie, pos, facingAngle)
     zombieDroppedEvent.call()
@@ -64,7 +67,7 @@ public class HoldingZombieComponent extends UnitComponent
     showHeldZombieEffect()
     startThrowTimer()
 
-    // Log.debug("HoldingZombieComp", "onEnabled", "", "Enabled")
+    Log.debug("HoldingZombieComp", "onEnabled", "", "Enabled")
 
   // --------------------------------------------------------------------------
   protected override function onDisabled()
@@ -73,38 +76,34 @@ public class HoldingZombieComponent extends UnitComponent
     hideHeldZombieEffect()
     dropZombie()
 
-    // Log.debug("HoldingZombieComp", "onDisabled", "", "Disabled")
+    m_throwZombieTimer = null
+
+    Log.debug("HoldingZombieComp", "onDisabled", "", "Disabled")
 
   // --------------------------------------------------------------------------
   private function startThrowTimer()
+
     if (m_throwZombieTimer != null)
-      let ownerUnit = getOwnerUnit()
-      m_throwZombieTimer = doAfter(HOLD_DURATION, () -> onThrowTimerExpired(ownerUnit))
-
-  // --------------------------------------------------------------------------
-  private static function onThrowTimerExpired(unit u)
-    let metadata = u.getMetadata()
-    if (metadata == null)
       return
-    let comp = metadata.getHoldingZombieComponent()
-    if (comp == null or not comp.getEnabled())
-      return
-    comp.onThrowTimerExpired()
 
-  // --------------------------------------------------------------------------
-  private function onThrowTimerExpired()
-    m_throwZombieTimer = null
+    Log.debug("HoldingZombieComp", "startThrowTimer", "", "")
 
-    // Log.debug("HoldingZombieComp", "onThrowTimerExpired", "", "")
-
-    if (not tryThrowZombie())
-      // Log.debug("HoldingZombieComp", "onThrowTimerExpired", "", "tryThrowZombie failed")
-      m_throwFailedCount++
-      if (m_throwFailedCount == 3)
-        dropZombie()
-    else
-      m_throwFailedCount = 0
-      // Log.debug("HoldingZombieComp", "onThrowTimerExpired", "", "tryThrowZombie succeeded")
+    m_throwZombieTimer = dispatch(HOLD_DURATION) (HoldingZombieComponent comp) ->
+    //{
+      m_throwZombieTimer = null
+      Log.debug("HoldingZombieComp", "startThrowTimer", "", "throw timer expired")
+      if (not tryThrowZombie())
+        m_throwFailedCount++
+        Log.debug("HoldingZombieComp", "startThrowTimer", "", "tryThrowZombie failed " + m_throwFailedCount.toString())
+        if (m_throwFailedCount == 3)
+          Log.debug("HoldingZombieComp", "startThrowTimer", "", "dropping zombie")
+          dropZombie()
+        else
+          startThrowTimer()
+      else
+        m_throwFailedCount = 0
+        Log.debug("HoldingZombieComp", "startThrowTimer", "", "tryThrowZombie succeeded")
+    //}
 
   // --------------------------------------------------------------------------
   private function tryThrowZombie() returns bool
@@ -136,7 +135,7 @@ public class HoldingZombieComponent extends UnitComponent
 
 // ============================================================================
 public function IUnitMetadata.getHoldingZombieComponent() returns HoldingZombieComponent
-  return this.getComponent(typeInfo(HoldingZombieComponent.typeId)) castTo HoldingZombieComponent
+  return this.getComponent(HoldingZombieComponent.typeId) castTo HoldingZombieComponent
 
 // ============================================================================
 public function IUnitMetadata.getOrAddHoldingZombieComponent() returns HoldingZombieComponent
