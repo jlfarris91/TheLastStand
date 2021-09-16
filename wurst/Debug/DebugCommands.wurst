@@ -24,6 +24,9 @@ import ProjectConstants
 import PathChecker
 import Survivors
 import DevChatCommandHandler
+import CircularCachedSpawnManager
+import HostileCircularCachedSpawnManager
+import FriendlyCircularCachedSpawnManager
 
 constant string COMMAND_MEMORYTRACKER = "mem"
 constant string COMMAND_GODLIKE = "godlike"
@@ -66,6 +69,10 @@ constant string COMMAND_ATTACKSENABLED = "setAttacksEnabled"
 constant string COMMAND_CHECKPATH = "checkpath"
 constant string COMMAND_SPAWNSURVIVOR = "spawnSurvivor"
 constant string COMMAND_SELECTALL = "selectAll"
+constant string COMMAND_KILLALL = "killAll"
+constant string COMMAND_SPAWNPOINTS = "spawnPoints"
+constant string COMMAND_POS = "pos"
+constant string COMMAND_USEITEM = "useItem"
 
 DevChatCommandHandler g_commandHandler
 MemoryTrackingMultiboard g_memoryTrackingMultiboard
@@ -782,6 +789,236 @@ function selectAll()
 
   if (count > 0)
     displayMessageToPlayer(commandPlayer, "Selected {0} {1}".format(count.toString(), UnitId2String(unitType)))
+  else
+    displayMessageToPlayer(commandPlayer, "No {0} could be selected".format(UnitId2String(unitType)))
+
+// ============================================================================
+function killAll()
+  let commandPlayer = getChatCommandPlayer()
+  let unitType = getChatCommand().getArgument(0).getRawCode()
+
+  var count = 0
+  let temp = getGroup()
+
+  temp.enumUnitsOfType(unitType, null)
+  if (temp.isEmpty())
+    displayMessageToPlayer(commandPlayer, "ERROR: Unknown unit type {0} ({1})".format(UnitId2String(unitType), unitType.toString()))
+  else
+    for u in temp
+      if (u.isAlive())
+        u.kill()
+        count++
+
+  temp.release()
+
+  if (count > 0)
+    displayMessageToPlayer(commandPlayer, "Killed {0} {1}".format(count.toString(), UnitId2String(unitType)))
+  else
+    displayMessageToPlayer(commandPlayer, "No {0} alive to kill".format(UnitId2String(unitType)))
+
+// ============================================================================
+function spawnPoints()
+  let command = getChatCommand()
+  let commandPlayer = getChatCommandPlayer()
+  let playerId = command.getArgument(0).getInt()
+  let spawnerTypeArg = command.getArgument(1)
+  let operationArg = command.getArgument(2)
+
+  let targetPlayer = Player(playerId)
+  if (targetPlayer == null or not targetPlayer.isPlayingHumanPlayer())
+    chatCommandPrintToPlayer(commandPlayer, "Player must be a playing human player")
+    return
+
+  if (spawnerTypeArg == null)
+    if (g_ccsmDebugger != null)
+      g_ccsmDebugger.setIsVisible(not g_ccsmDebugger.getIsVisible())
+      chatCommandPrintToPlayer(commandPlayer, (g_ccsmDebugger.getIsVisible() ? "Showing debugger" : "Hiding debugger"))
+    return
+
+  let spawnerType = spawnerTypeArg.getString()
+  CircularCachedSpawnManager spawnManager
+
+  switch (spawnerType)
+    case "friendly"
+      spawnManager = getPlayerCachedFriendlySpawnManager(targetPlayer)
+    case "hostile"
+      spawnManager = getPlayerCachedHostileSpawnManager(targetPlayer)
+    default
+      chatCommandPrintToPlayer(commandPlayer, "Unknown spawn manager type")
+      return
+
+  if (operationArg == null)
+    spawnManager.setShowDebug(not spawnManager.getShowDebug())
+    chatCommandPrintToPlayer(commandPlayer, (spawnManager.getShowDebug() ? "Showing {0} spawn points" : "Hiding {0} spawn points").format(spawnerType))
+    return
+
+  let operation = operationArg.getString()
+
+  switch (operation)
+    case "invalidate"
+      spawnManager.invalidateSpawnPoints()
+      chatCommandPrintToPlayer(commandPlayer, "Invalidating all {0} spawn points".format(spawnerType))
+
+    case "enable"
+      spawnManager.setIsEnabled(true)
+      chatCommandPrintToPlayer(commandPlayer, "Enabled {0} spawn manager".format(spawnerType))
+
+    case "disable"
+      spawnManager.setIsEnabled(false)
+      chatCommandPrintToPlayer(commandPlayer, "Disabled {0} spawn manager".format(spawnerType))
+
+    case "center"
+      chatCommandPrintToPlayer(commandPlayer, "{0} spawn manager center: ".format(spawnManager.getCenter().toString()))
+      return
+
+    case "setcenter"
+      let selectedUnit = commandPlayer.getFirstSelectedUnit()
+      if (selectedUnit == null)
+        chatCommandPrintToPlayer(commandPlayer, "Must have a unit selected")
+        return
+      spawnManager.setCenter(selectedUnit.getPos())
+      chatCommandPrintToPlayer(commandPlayer, "Set {0} spawn manager center to ".format(spawnManager.getCenter().toString()))
+      return
+
+    default
+      chatCommandPrintToPlayer(commandPlayer, "Unknown operation " + operation)
+      return
+
+// ============================================================================
+function pos()
+  let command = getChatCommand()
+  let commandPlayer = getChatCommandPlayer()
+  let xArg = command.getArgument(0)
+  let yArg = command.getArgument(1)
+
+  let selectedUnits = commandPlayer.getSelectedUnits()
+  if (selectedUnits.isEmpty())
+    chatCommandPrintToPlayer(commandPlayer, "Must have at least one unit selected")
+  else if (xArg == null or yArg == null)
+  //{
+    var average = ZERO2
+    var count = 0
+
+    for u in selectedUnits
+      average += u.getPos()
+      count++
+
+    chatCommandPrintToPlayer(commandPlayer, "Position: " + (average / count.toReal()).toString())
+  //}
+  else
+  //{
+    let x = xArg.getReal()
+    let y = yArg.getReal()
+    var count = 0
+    for u in selectedUnits
+      u.setPos(x, y)
+      count++
+    chatCommandPrintToPlayer(commandPlayer, "Move {0} unit(s) to ({1}, {2})".format(count.toString(), x.toString(), y.toString()))
+  //}
+
+  destroy selectedUnits
+
+// ============================================================================
+function useItem()
+  let command = getChatCommand()
+  let commandPlayer = getChatCommandPlayer()
+  let itemOrSlotId = command.getArgument(0).getString()
+  let targetArg = command.getArgument(1)
+  let xArg = command.getArgument(2)
+  let yArg = command.getArgument(3)
+
+  let selectedUnits = commandPlayer.getSelectedUnits()
+  if (selectedUnits.isEmpty())
+    chatCommandPrintToPlayer(commandPlayer, "Must have at least one unit selected")
+    destroy selectedUnits
+    return
+  
+  var hasItem = false
+  var isSlotId = false
+  var itemId = 0
+
+  let slotId = itemOrSlotId.toInt()
+  if (slotId >= 0 and slotId < 6)
+    isSlotId = true
+    for u in selectedUnits
+      let itm = u.itemInSlot(slotId)
+      if (itm != null)
+        hasItem = true
+  else 
+    itemId = itemOrSlotId.fromRawCode()
+    for u in selectedUnits
+      let itm = u.getItemById(itemId)
+      if (itm != null)
+        hasItem = true
+
+  if (not hasItem)
+    chatCommandPrintToPlayer(commandPlayer, "No selected unit has item " + (isSlotId ? "in slot " + itemOrSlotId : " of type " + itemOrSlotId))
+    destroy selectedUnits
+    return
+      
+  if (targetArg == null)
+    if (isSlotId)
+      for u in selectedUnits
+        let itm = u.itemInSlot(slotId)
+        if (itm != null)
+          u.useItem(itm)
+    else
+      for u in selectedUnits
+        let itm = u.getItemById(itemId)
+        if (itm != null)
+          u.useItem(itm)
+    chatCommandPrintToPlayer(commandPlayer, "Ordered selected units to use item " + (isSlotId ? "in slot " + itemOrSlotId : " of type " + itemOrSlotId))
+    destroy selectedUnits
+    return
+
+  switch (targetArg.getString())
+    case "self"
+      if (isSlotId)
+        for u in selectedUnits
+          let itm = u.itemInSlot(slotId)
+          if (itm != null)
+            u.useItemTarget(itm, u)
+      else
+        for u in selectedUnits
+          let itm = u.getItemById(itemId)
+          if (itm != null)
+            u.useItemTarget(itm, u)
+      chatCommandPrintToPlayer(commandPlayer, "Ordered selected units to use item " + (isSlotId ? "in slot " + itemOrSlotId : " of type " + itemOrSlotId) + " on themselves")
+      destroy selectedUnits
+      return
+
+    case "selfPos"
+      if (isSlotId)
+        for u in selectedUnits
+          let itm = u.itemInSlot(slotId)
+          if (itm != null)
+            u.useItemPoint(itm, u.getPos())
+      else
+        for u in selectedUnits
+          let itm = u.getItemById(itemId)
+          if (itm != null)
+            u.useItemPoint(itm, u.getPos())
+      chatCommandPrintToPlayer(commandPlayer, "Ordered selected units to use item " + (isSlotId ? "in slot " + itemOrSlotId : " of type " + itemOrSlotId) + " at their position")
+      destroy selectedUnits
+      return
+
+    case "pos"
+      let x = xArg.getString().toReal()
+      let y = yArg.getString().toReal()
+      let pos = vec2(x, y)
+      if (isSlotId)
+        for u in selectedUnits
+          let itm = u.itemInSlot(slotId)
+          if (itm != null)
+            u.useItemPoint(itm, pos)
+      else
+        for u in selectedUnits
+          let itm = u.getItemById(itemId)
+          if (itm != null)
+            u.useItemPoint(itm, pos)
+      chatCommandPrintToPlayer(commandPlayer, "Ordered selected units to use item " + (isSlotId ? "in slot " + itemOrSlotId : " of type " + itemOrSlotId) + " at position " + pos.toString())
+      destroy selectedUnits
+      return
 
 // ============================================================================
 function registerDebugCommands()
@@ -927,6 +1164,28 @@ function registerDebugCommands()
   g_commandHandler.registerCommandDefinition(COMMAND_SELECTALL, function selectAll)
     ..setDescription("Selects all types of a unit")
     ..addFourCCArgument("UNIT_TYPE", false)
+
+  g_commandHandler.registerCommandDefinition(COMMAND_KILLALL, function killAll)
+    ..setDescription("Kills all types of a unit")
+    ..addFourCCArgument("UNIT_TYPE", false)
+
+  g_commandHandler.registerCommandDefinition(COMMAND_SPAWNPOINTS, function spawnPoints)
+    ..setDescription("Spawn point operations")
+    ..addIntegerArgument("PLAYER_ID", false)
+    ..addArgument(new ChatCommandArgument("SPAWN_MGR", ChatCommandArgumentType.STRING, true)..setStringOptions("hostile", "friendly"))
+    ..addArgument(new ChatCommandArgument("OPERATION", ChatCommandArgumentType.STRING, true)..setStringOptions("invalidate", "enable", "disable", "center", "setcenter"))
+
+  g_commandHandler.registerCommandDefinition(COMMAND_POS, function pos)
+    ..setDescription("Gets or sets the center of the currently selected units")
+    ..addRealArgument("X", true)
+    ..addRealArgument("Y", true)
+    
+  g_commandHandler.registerCommandDefinition(COMMAND_USEITEM, function useItem)
+    ..setDescription("Orders the selected units to use an item in their inventory")
+    ..addStringArgument("ITEM_OR_SLOT", false)
+    ..addStringArgument("TARGET", true)
+    ..addStringArgument("ARG1", true)
+    ..addStringArgument("ARG2", true)
 
 // ============================================================================
 init

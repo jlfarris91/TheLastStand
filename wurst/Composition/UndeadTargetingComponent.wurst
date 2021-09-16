@@ -117,12 +117,14 @@ public class UndeadTargetingComponent extends UnitComponent
   // --------------------------------------------------------------------------
   override function onEnabled()
     super.onEnabled()
-    m_targetPlayer = null
-    m_targetUnit = null
 
   // --------------------------------------------------------------------------
   override function onDisabled()
     super.onDisabled()
+    m_targetPlayer = null
+    m_targetUnit = null
+    m_numberOfTimesFailedOrder = 0
+
     unregisterUnitAwaitingOrder(getOwnerUnit())
     setTargetUnit_impl(null)
     stopDOT()
@@ -130,13 +132,6 @@ public class UndeadTargetingComponent extends UnitComponent
     if (m_attackTimer != null)
       destroy m_attackTimer
       m_attackTimer = null
-
-  // --------------------------------------------------------------------------
-  override function onUnitChanged(unit oldUnit, unit _newUnit)
-    super.onUnitChanged(oldUnit, _newUnit)
-
-    if (oldUnit != null)
-      g_dealDOTGroup.removeUnit(oldUnit)
 
   // --------------------------------------------------------------------------
   function getIsAwaitingOrder() returns bool
@@ -220,6 +215,7 @@ public class UndeadTargetingComponent extends UnitComponent
 
   // --------------------------------------------------------------------------
   function issueOrderTargetingNewPlayerUnit()
+    recordNote("issueOrderTargetingNewPlayerUnit", "")
     setTargetUnit_impl(null)
     issueOrderTargetingPlayer()
 
@@ -240,14 +236,16 @@ public class UndeadTargetingComponent extends UnitComponent
       recordNote("issueOrderTargetingPlayer", "Is in dot group")
       return
 
-    registerUnitAwaitingOrder(ownerUnit)
+    if (registerUnitAwaitingOrder(ownerUnit))
+      recordNote("issueOrderTargetingPlayer", "Added to waiting group")
 
     recordNote("issueOrderTargetingPlayer", "Dispatching order")
 
   // --------------------------------------------------------------------------
   protected function issueOrderTargetingPlayer_impl()
 
-    unregisterUnitAwaitingOrder(getOwnerUnit())
+    if (unregisterUnitAwaitingOrder(getOwnerUnit()))
+      recordNote("issueOrderTargetingPlayer_impl", "Removed from waiting group")      
 
     recordNote("issueOrderTargetingPlayer_impl", "Order dispatched")
 
@@ -341,18 +339,22 @@ public class UndeadTargetingComponent extends UnitComponent
   // --------------------------------------------------------------------------
   private function setTargetUnit_impl(unit targetUnit) returns bool
     if (m_targetUnit == targetUnit)
-      recordNote("setTargetUnit_impl", "m_targetUnit == targetUnit")
+      recordNote("setTargetUnit_impl", "m_targetUnit == targetUnit, m_targetUnit = " + (m_targetUnit != null ? m_targetUnit.getName() : "null"))
       return false
+
     if (m_targetUnit != null)
       recordNote("setTargetUnit_impl", "Target unit was not null : " + m_targetUnit.getName())
       unregisterTargetedUnit(m_targetUnit, this)
+
     m_targetUnit = targetUnit
+
     if (m_targetUnit != null)
       recordNote("setTargetUnit_impl", "Target unit is not null : " + m_targetUnit.getName())
       registerTargetedUnit(m_targetUnit, this)
       restartAttackTimer()
     else
       recordNote("setTargetUnit_impl", "Target unit is null")
+
     return true
 
   // --------------------------------------------------------------------------
@@ -496,7 +498,7 @@ function filterUnitIsValidTargetStructure() returns bool
 
 // ============================================================================
 function unitIsValidTargetNonStructure(unit u) returns bool
-  return u.isAlive() and not u.isInvulnerable() and not u.isStructure()
+  return u.isAlive() and not u.isInvulnerable() and (u.isCampHeadquarters() or not u.isStructure())
 
 // ============================================================================
 function filterUnitIsValidTargetNonStructure() returns bool
@@ -596,12 +598,16 @@ function applyDOT()
       _unit.subHP(_unit.getMaxHP() * DOT_PERCENT01)
 
 // ============================================================================
-function registerUnitAwaitingOrder(unit utcUnit)
+function registerUnitAwaitingOrder(unit utcUnit) returns bool
+  let didNotContainUnit = not g_awaitingOrderGroup.contains(utcUnit)
   g_awaitingOrderGroup.addUnit(utcUnit)
+  return didNotContainUnit and g_awaitingOrderGroup.contains(utcUnit)
 
 // ============================================================================
-function unregisterUnitAwaitingOrder(unit utcUnit)
+function unregisterUnitAwaitingOrder(unit utcUnit) returns bool
+  let didContainUnit = g_awaitingOrderGroup.contains(utcUnit)
   g_awaitingOrderGroup.removeUnit(utcUnit)
+  return didContainUnit and not g_awaitingOrderGroup.contains(utcUnit)
 
 int g_numberOfTimesIssueOrdersStartCalled = 0
 int g_numberOfTimesIssueOrdersEndCalled = 0
@@ -615,6 +621,7 @@ function issueOrders()
   g_numberOfTimesIssueOrdersStartCalled++
 
   while (not g_awaitingOrderGroup.isEmpty() and executionCount < maxUpdateExecutionCount)
+  //{
     let utcUnit = g_awaitingOrderGroup.getRandomUnit()
     if (utcUnit != null)
       g_awaitingOrderGroup.removeUnit(utcUnit)
@@ -628,13 +635,13 @@ function issueOrders()
           let comp = metadata.getUndeadTargetingComponent()
           if (comp == null or not comp.getEnabled())
             Log.debug("UTC", "issueOrders", "", "UTC is null or disabled")
-            return
           else
             comp.issueOrderTargetingPlayer_impl()
             executionCount++
             g_numberOfOrdersIssued++
+    //}
 
-  g_numberOfTimesIssueOrdersEndCalled ++
+  g_numberOfTimesIssueOrdersEndCalled++
 
 // ============================================================================
 class UTCDebugger extends TLSFrame
@@ -698,6 +705,7 @@ class UTCDebugger extends TLSFrame
     BlzFrameAddText(m_textArea, "Target player : " + ((utc.m_targetPlayer != null) ? utc.m_targetPlayer.getName() : "null"))
     BlzFrameAddText(m_textArea, "Target unit : " + ((utc.m_targetUnit != null) ? utc.m_targetUnit.getName() : "null"))
     BlzFrameAddText(m_textArea, "Awaiting Order : " + utc.getIsAwaitingOrder().toString())
+    BlzFrameAddText(m_textArea, "Times Failed Order : " + utc.m_numberOfTimesFailedOrder.toString())
     BlzFrameAddText(m_textArea, "In DOT Group : " + utc.getIsInDOTGroup().toString())
 
     let recycler = m_selectedUnit.getRecycler()

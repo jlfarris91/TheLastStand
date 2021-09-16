@@ -6,7 +6,6 @@ import HumanPlayers
 import ErrorHandling
 import GameConstants
 import RegisterEvents
-import LinkedList
 import HostileCircularCachedSpawnManager
 import FriendlyCircularCachedSpawnManager
 import GroupUtils
@@ -17,18 +16,18 @@ public class HumanPlayerComponent extends PlayerComponent
   private int m_kills
   private int m_score
   private IUnitMetadata m_hero
-  private LinkedList<unit> m_campCenterContributors
+  private group m_campCenterContributors
   private bool m_canPathToHeadquartersOrHero
 
   // --------------------------------------------------------------------------
   construct(IPlayerMetadata owner)
     super(owner)
-    m_campCenterContributors = new LinkedList<unit>()
+    m_campCenterContributors = CreateGroup()
     m_canPathToHeadquartersOrHero = false
 
   // --------------------------------------------------------------------------
   ondestroy
-    destroy m_campCenterContributors
+    m_campCenterContributors.destr()
 
   // --------------------------------------------------------------------------
   function getKills() returns int
@@ -95,18 +94,27 @@ public class HumanPlayerComponent extends PlayerComponent
 
   // --------------------------------------------------------------------------
   function addCampCenter(unit centerContributor)
-    m_campCenterContributors.add(centerContributor)
+    if (centerContributor == null)
+      argumentNullError("centerContributor")
+    m_campCenterContributors.addUnit(centerContributor)
+    Log.debug("HumanPlayerComponent", "addCampCenter", "", "Added camp center contributor ({0} total)".format(m_campCenterContributors.size().toString()))
     onCampCenterChanged()
 
   // --------------------------------------------------------------------------
   function removeCampCenter(unit centerContributor)
-    m_campCenterContributors.remove(centerContributor)
+    if (centerContributor == null)
+      argumentNullError("centerContributor")
+    m_campCenterContributors.removeUnit(centerContributor)
+    Log.debug("HumanPlayerComponent", "removeCampCenter", "", "Removed camp center contributor ({0} total)".format(m_campCenterContributors.size().toString()))
     onCampCenterChanged()
 
   // --------------------------------------------------------------------------
   function getCampCenter() returns vec2
-    if (m_campCenterContributors.isEmpty() and m_hero != null)
-      return m_hero.getUnit().getPos()
+    if (m_campCenterContributors.isEmpty())
+      if (m_hero != null)
+        return m_hero.getUnit().getPos()
+      Log.warn("HumanPlayerComponent", "getCampCenter", "", "Player {0} has no valid camp center".format(getOwnerPlayer().getName()))
+      return ZERO2
     var center = ZERO2
     for centerContributor in m_campCenterContributors
       center += centerContributor.getPos()
@@ -116,14 +124,22 @@ public class HumanPlayerComponent extends PlayerComponent
   // --------------------------------------------------------------------------
   private function onCampCenterChanged()
     let center = getCampCenter()
+    let hasCenterContributors = not m_campCenterContributors.isEmpty()
+
     let hostileSpawnManager = getPlayerCachedHostileSpawnManager(getOwnerPlayer())
     if (hostileSpawnManager != null)
       hostileSpawnManager.setCenter(center)
-      hostileSpawnManager.setIsEnabled(not m_campCenterContributors.isEmpty())
+      hostileSpawnManager.setIsEnabled(hasCenterContributors)
+    else
+      Log.warn("HumanPlayerComponent", "onCampCenterChanged", "", "Player {0} has no hostile spawn manager".format(getOwnerPlayer().getName()))
+
     let friendlySpawnManager = getPlayerCachedFriendlySpawnManager(getOwnerPlayer())
     if (friendlySpawnManager != null)
       friendlySpawnManager.setCenter(center)
-      friendlySpawnManager.setIsEnabled(not m_campCenterContributors.isEmpty())
+      friendlySpawnManager.setIsEnabled(hasCenterContributors)
+    else
+      Log.warn("HumanPlayerComponent", "onCampCenterChanged", "", "Player {0} has no friendly spawn manager".format(getOwnerPlayer().getName()))
+
     Log.debug("Camp center for player " + getOwnerPlayer().getName() + " : " + center.toString())
 
 // ============================================================================
