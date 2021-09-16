@@ -1,5 +1,7 @@
 .\SetupBuildEnvironment.ps1
 
+Write-Output "Creating map junctions..."
+
 $lastStandMapDir = [System.IO.Path]::Combine($env:SourceMapsRoot, "TheLastStand.w3x")
 
 foreach ($file in (Get-ChildItem -Path $lastStandMapDir) | Where-Object { $_.LinkType -eq 'Junction'}) {
@@ -22,3 +24,5 @@ foreach ($file in (Get-ChildItem -Path $env:ImportsRoot)) {
     }
   }
 }
+
+Write-Output "Done creating map junctions"
