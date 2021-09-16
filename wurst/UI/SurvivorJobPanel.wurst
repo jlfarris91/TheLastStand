@@ -13,18 +13,16 @@ import SurvivorJobFrame
 import HumanPlayers
 import LoadToc
 import RegisterEvents
-import UnitExtensions
-import HashList
 import SurvivorJobComponent
 import ClosureKeyPresses
 import Survivors
 import TlsItemDefinition
+import Debouncer
+import Action
 
 constant string TOGGLEJOBSYNCDATAPREFIX = "TJK"
 
 HashMap<player, SurvivorJobPanel> g_playerSurvivorJobPanels = new HashMap<player, SurvivorJobPanel>()
-HashList<unit> g_wasSelected = new HashList<unit>()
-HashList<unit> g_waitingToBeSelected = new HashList<unit>()
 HashMap<SurvivorJobDefinition, SurvivorJobFrameUpdateData> g_survivorJobFrameUpdateDataMap = new HashMap<SurvivorJobDefinition, SurvivorJobFrameUpdateData>()
 
 // ============================================================================
@@ -124,23 +122,14 @@ class SurvivorJobFrameUpdateData
 // ============================================================================
 public class SurvivorJobPanel extends TLSFrame
   private IterableMap<SurvivorJobDefinition, SurvivorJobFrame> m_jobDefToFrameMap
-  private int m_ignoreUpdates
-  private int m_awaitingUpdate
+  private Action m_updateAction
+  private Debouncer m_debouncer = new Debouncer()
 
   // --------------------------------------------------------------------------
   construct()
     super(createFrame("FRAME", "SurvivorJobPanel", GAME_UI, "", 0))
     m_jobDefToFrameMap = new IterableMap<SurvivorJobDefinition, SurvivorJobFrame>()
-
-  // --------------------------------------------------------------------------
-  function batchUpdates(bool value)
-    m_ignoreUpdates += value ? 1 : -1
-    if (m_ignoreUpdates == 0)
-      update()
-
-  // --------------------------------------------------------------------------
-  function getIsBatchingUpdates() returns bool
-    return m_ignoreUpdates > 0
+    m_updateAction = () -> update_impl()
 
   // --------------------------------------------------------------------------
   override function initialize()
@@ -180,19 +169,10 @@ public class SurvivorJobPanel extends TLSFrame
 
   // --------------------------------------------------------------------------
   function update()
-    if (getIsBatchingUpdates())
-      return
-    m_awaitingUpdate++
-    nullTimer() () ->
-      m_awaitingUpdate--
-      if (m_awaitingUpdate == 0)
-        update_impl()
+    m_debouncer.debounce(m_updateAction, 0.1)
 
   // --------------------------------------------------------------------------
   private function update_impl()
-
-    if (getIsBatchingUpdates())
-      return
 
     let owningPlayer = getPlayer()
     var survivorCount = 0
@@ -267,44 +247,23 @@ public class SurvivorJobPanel extends TLSFrame
 // ============================================================================
 function onSelectionChanged()
   let p = GetTriggerPlayer()
-  let selectedUnit = GetTriggerUnit()
 
   let panel = g_playerSurvivorJobPanels.get(p)
-  if (panel == null)
-    return
-
-  if (GetTriggerEventId() == EVENT_PLAYER_UNIT_SELECTED and g_waitingToBeSelected.has(selectedUnit))
-    g_waitingToBeSelected.remove(selectedUnit)
-    panel.batchUpdates(false)
-    return
-  
-  panel.update()
-
-// ============================================================================
-function _onSurvivorJobPreChanged()
-  let survivor = getJobChangingSurvivor_PreJobChange()
-  let panel = g_playerSurvivorJobPanels.get(survivor.getOwner())
-  if (panel == null)
-    return
-  panel.batchUpdates(true)
-
-  if (survivor.isSelectedByOwner())
-    g_wasSelected.add(survivor)
+  if (panel != null)
+    panel.update()
 
 // ============================================================================
 function _onSurvivorJobPostChanged()
-  let survivorPre = getJobChangingSurvivor_PreJobChange()
-  let survivorPost = getJobChangingSurvivor_PostJobChange()
 
-  let panel = g_playerSurvivorJobPanels.get(survivorPre.getOwner())
-  if (panel == null)
-    return
-  
-  if (g_wasSelected.has(survivorPre))
-    g_wasSelected.remove(survivorPre)
-    g_waitingToBeSelected.add(survivorPost)
-  else
-    panel.batchUpdates(false)
+  let survivorPost = getJobChangingSurvivor_PostJobChange()
+  let panelPostJobChange = g_playerSurvivorJobPanels.get(survivorPost.getOwner())
+  if (panelPostJobChange != null)
+    panelPostJobChange.update()
+
+  let survivorPre = getJobChangingSurvivor_PreJobChange()
+  let panelPreJobChange = g_playerSurvivorJobPanels.get(survivorPre.getOwner())
+  if (panelPreJobChange != null and panelPostJobChange != panelPreJobChange)
+    panelPostJobChange.update()
 
 // ============================================================================
 function onUnitLeveledUp()
@@ -362,7 +321,6 @@ init
     TriggerRegisterPlayerUnitEvent(playerSelectionChangedTrigger, p, EVENT_PLAYER_UNIT_SELECTED, null)
     TriggerRegisterPlayerUnitEvent(playerSelectionChangedTrigger, p, EVENT_PLAYER_UNIT_DESELECTED, null)
 
-  onSurvivorJobPreChanged(function _onSurvivorJobPreChanged)
   onSurvivorJobPostChanged(function _onSurvivorJobPostChanged)
   registerPlayerUnitEvent(EVENT_PLAYER_HERO_LEVEL, function onUnitLeveledUp)
 
