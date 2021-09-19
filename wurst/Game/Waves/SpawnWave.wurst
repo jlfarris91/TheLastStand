@@ -34,6 +34,8 @@ HashMap<unit, SpawnWave> g_unitToSpawnWaveMap
 CircularBuffer<SpawnWave> g_spawnRequests = new CircularBuffer<SpawnWave>(512)
 int g_lastNumberOfUnitsSpawned = 0
 
+@configurable public bool g_enableSpawnWaveLogging = false
+
 ItemSet g_coinItemSet = new ItemSet("Coins", COLOR_GOLD.withoutAlpha())
 
 // ============================================================================
@@ -46,6 +48,7 @@ public class SpawnWave extends Runnable
   private string m_id
   private player m_targetPlayer
   private int m_totalGoldAwarded
+  private string m_debugState
 
   // --------------------------------------------------------------------------
   construct(player targetPlayer, SpawnWaveDefinition def)
@@ -60,6 +63,7 @@ public class SpawnWave extends Runnable
     m_numSpawned = 0
     m_totalGoldAwarded = 0
     m_id = def.getName()
+    m_debugState = ""
 
   // --------------------------------------------------------------------------
   ondestroy
@@ -78,6 +82,10 @@ public class SpawnWave extends Runnable
   // --------------------------------------------------------------------------
   function getId() returns string
     return m_id
+
+  // --------------------------------------------------------------------------
+  function getDebugState() returns string
+    return m_debugState
 
   // --------------------------------------------------------------------------
   override function onStarted()
@@ -130,18 +138,29 @@ public class SpawnWave extends Runnable
   function activate(bool forceActivation) returns bool
 
     g_lastNumberOfUnitsSpawned = 0
+    
+    m_debugState = "Spawning"
  
     if (m_targetPlayer == null)
       error("[SpawnWave.onActivated] Target player has not been set")
       return false
 
     if (not forceActivation and isCompleted())
-      // log("activateForPlayer", m_targetPlayer.getName() + " : Spawn wave has already completed")
+      log("activateForPlayer", m_targetPlayer.getName() + " : Spawn wave has already completed")
+      m_debugState = "Spawn wave has completed"
       return false
 
-    let playerMetadata = m_targetPlayer.getHumanPlayerComponent()
-    if (playerMetadata == null or playerMetadata.getIsHeroDead())
-      // log("activateForPlayer", m_targetPlayer.getName() + " : Player is dead")
+    let playerMetadata = m_targetPlayer.getMetadata()
+    if (playerMetadata == null)
+      m_debugState = "Player metadata is null"
+      return false
+
+    if (playerMetadata.getHasLeftGame())
+      m_debugState = "Player left"
+      return false
+
+    if (playerMetadata.getHasLostGame())
+      m_debugState = "Player lost"
       return false
 
     let waveProgress = getProgress()
@@ -159,6 +178,7 @@ public class SpawnWave extends Runnable
     let spawnPointsResult = spawnPointProvider.getSpawnPoints(numSpawnGroups)
     if (not spawnPointsResult.succeeded)
       error("[SpawnWave.onActivated] Found no spawn points!")
+      m_debugState = "Found no spawn points"
       return false
 
     var numSpawnsAvailable = getNumSpawnsAvailable(aliveCountMax, spawnCountMax)
@@ -219,11 +239,13 @@ public class SpawnWave extends Runnable
     let numSpawnsAvailable = max(min(remainingAlive, remainingSpawn), 0)
 
     if (spawnedCount >= spawnCountMax)
-      //log("getNumSpawnsAvailable", m_targetPlayer.getName() + " : Reached max number of spawns for wave")
+      log("getNumSpawnsAvailable", m_targetPlayer.getName() + " : Reached max number of spawns for wave")
+      m_debugState = "Reached max spawns"
       return 0
 
     if (aliveCount >= aliveCountMax)
-      //log("getNumSpawnsAvailable", m_targetPlayer.getName() + " : Reached max number of concurrent alive")
+      log("getNumSpawnsAvailable", m_targetPlayer.getName() + " : Reached max number of concurrent alive")
+      m_debugState = "Reached max alive"
       return 0
 
     return numSpawnsAvailable
@@ -247,7 +269,8 @@ public class SpawnWave extends Runnable
         GetRandomDirectionDeg())
 
     if (spawnedUnit == null)
-      // Log.debug("SpawnWave", "spawnSingleUnit", getId(), "Unable to spawn unit " + UnitId2String(unitTypeId))
+      log("spawnSingleUnit", "Unable to spawn unit " + UnitId2String(unitTypeId))
+      m_debugState = "Spawned unit == null"
       return false
 
     registerSpawnedUnit(spawnedUnit)
@@ -276,6 +299,7 @@ public class SpawnWave extends Runnable
         spawnedUnit.getName(),
         spawnedUnit.getTypeId().toString(),
         UnitId2StringBJ(spawnedUnit.getTypeId())))
+      m_debugState = "Spawned unit has no metadata"
       return false
 
     // If the unit is going to drop a coin, track that
@@ -393,6 +417,11 @@ public class SpawnWave extends Runnable
       progressChangedEvent.unregister(m_onDefProgressChangedEventHandler)
     m_onDefProgressChangedEventHandler = HANDLE_INVALID
 
+  // --------------------------------------------------------------------------
+  private function log(string funcName, string message)
+    if (g_enableSpawnWaveLogging)
+      Log.debug("SpawnWave", funcName, getId(), message)
+
 // ============================================================================
 function onUnitDeath()
   let dyingUnit = GetDyingUnit()
@@ -406,12 +435,15 @@ function onUnitDeath()
 // ============================================================================
 function processSpawnRequests()
   int numberOfUnitsSpawned = 0
+  let numSpawnRequests = g_spawnRequests.getCount()
+  var count = 0
   while (not g_spawnRequests.isEmpty() and numberOfUnitsSpawned < MAX_SPAWNS_PER_PROCESS)
     let spawnRequest = g_spawnRequests.dequeue()
+    count++
     if (spawnRequest != null and spawnRequest.activate())
       numberOfUnitsSpawned += g_lastNumberOfUnitsSpawned
-  //if (numberOfUnitsSpawned > 0)
-    //Log.debug("Number of units spawned : {0}/{1}".format(numberOfUnitsSpawned.toString(), MAX_SPAWNS_PER_PROCESS.toString()))
+  if (g_enableSpawnWaveLogging)
+    Log.debug("Processed spawn requests : {0}/{1} - {2}/{3} units spawned".format(count.toString(), numSpawnRequests.toString(), numberOfUnitsSpawned.toString(), MAX_SPAWNS_PER_PROCESS.toString()))
 
 // ============================================================================
 init
