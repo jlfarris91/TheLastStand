@@ -9,6 +9,11 @@ foreach ($file in (Get-ChildItem -Path $lastStandMapDir) | Where-Object { $_.Lin
   $file.Delete()
 }
 
+foreach ($file in (Get-ChildItem -Path $lastStandMapDir) | Where-Object { $_.PSIsContainer }) {
+  Write-Output "Deleting existing folder $($file.FullName)"
+  Remove-Item -Recurse -Force $file.FullName
+}
+
 foreach ($file in (Get-ChildItem -Path $env:ImportsRoot)) {
 
   $mapRelativeFilePath = [System.IO.Path]::Combine($lastStandMapDir, $file.Name)
