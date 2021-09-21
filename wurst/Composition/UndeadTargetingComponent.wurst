@@ -13,7 +13,6 @@ import Unit_WoodFence
 import Unit_StoneWall
 import Unit_GateCommon
 import Unit_MetalWall
-import Orders
 import TargetUtility
 import UnitExtensions
 import ClosureTimers
@@ -212,7 +211,7 @@ public class UndeadTargetingComponent extends UnitComponent
     return true
 
   // --------------------------------------------------------------------------
-  private function recordNote(string methodName, string note)
+  protected function recordNote(string methodName, string note)
     m_notes.add("[{0}] {1}".format(methodName, note))
 
   // --------------------------------------------------------------------------
@@ -305,7 +304,9 @@ public class UndeadTargetingComponent extends UnitComponent
       issuedOrder = getOwnerUnit().issueTargetOrder("attack", m_targetUnit)
     else
       recordNote("tIO", "ordering attack-move on " + m_targetUnit.getName())
-      issuedOrder = getOwnerUnit().issuePointOrderById(OrderIds.attack, m_targetUnit.getPos())
+      issuedOrder = getOwnerUnit().issuePointOrder("attack", m_targetUnit.getPos())
+    if (issuedOrder == false)
+      m_orderFailedReason = "Failed to issue order"
     return issuedOrder
 
   // --------------------------------------------------------------------------
@@ -631,7 +632,8 @@ function issueOrders()
   // was returning null since it uses FirstOfGroup() which will return null when
   // one of those ghost units is the first unit in the group. So, we need use
   // refresh() here to get rid of any ghost units.
-  g_awaitingOrderGroup.refresh()
+  if (g_awaitingOrderGroup.isEmpty() and g_awaitingOrderGroup.size() > 0)
+    g_awaitingOrderGroup.refresh()
 
   while (not g_awaitingOrderGroup.isEmpty() and executionCount < maxUpdateExecutionCount)
   //{
@@ -721,7 +723,9 @@ class UTCDebugger extends TLSFrame
     BlzFrameAddText(m_textArea, "Target player : " + ((utc.m_targetPlayer != null) ? utc.m_targetPlayer.getName() : "null"))
     BlzFrameAddText(m_textArea, "Target unit : " + ((utc.m_targetUnit != null) ? utc.m_targetUnit.getName() : "null"))
     BlzFrameAddText(m_textArea, "Awaiting Order : " + utc.getIsAwaitingOrder().toString())
+    BlzFrameAddText(m_textArea, "Failed Order : " + utc.m_orderFailedReason)
     BlzFrameAddText(m_textArea, "Times Failed Order : " + utc.m_numberOfTimesFailedOrder.toString())
+    BlzFrameAddText(m_textArea, "Order : {0} ({1})".format(OrderId2String(GetUnitCurrentOrder(utc.getOwnerUnit())), GetUnitCurrentOrder(utc.getOwnerUnit()).toString()))
     BlzFrameAddText(m_textArea, "In DOT Group : " + utc.getIsInDOTGroup().toString())
 
     let recycler = m_selectedUnit.getRecycler()
@@ -732,6 +736,19 @@ class UTCDebugger extends TLSFrame
       BlzFrameAddText(m_textArea, "=== Notes: === ")
       for note in utc.m_notes
         BlzFrameAddText(m_textArea, note)
+
+// ============================================================================
+function onIssuedOrder()
+  let orderedUnit = GetOrderedUnit()
+  let comp = orderedUnit.getUndeadTargetingComponent()
+  if (comp == null)
+    return
+  if (GetTriggerEventId() == EVENT_PLAYER_UNIT_ISSUED_ORDER)
+    comp.recordNote("onIssuedOrder", "Issued order: {0} ({1})".format(OrderId2String(orderedUnit.getCurrentOrder()), orderedUnit.getCurrentOrder().toString()))
+  if (GetTriggerEventId() == EVENT_PLAYER_UNIT_ISSUED_POINT_ORDER)
+    comp.recordNote("onIssuedOrder", "Issued point order: {0} ({1}) -> [{2}, {3}]".format(OrderId2String(orderedUnit.getCurrentOrder()), orderedUnit.getCurrentOrder().toString(), GetOrderPointX().toString(), GetOrderPointY().toString()))
+  if (GetTriggerEventId() == EVENT_PLAYER_UNIT_ISSUED_UNIT_ORDER)
+    comp.recordNote("onIssuedOrder", "Issued unit order: {0} ({1}) -> {2}".format(OrderId2String(orderedUnit.getCurrentOrder()), orderedUnit.getCurrentOrder().toString(), GetOrderTargetUnit().getName()))
 
 // ============================================================================
 init
@@ -760,6 +777,10 @@ init
   onUnitDeindex(() -> onUnitDeindexed())
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_DEATH, function onUnitDeath)
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ATTACKED, function onUnitAttacked)
+  
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ISSUED_ORDER, function onIssuedOrder)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ISSUED_POINT_ORDER, function onIssuedOrder)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ISSUED_TARGET_ORDER, function onIssuedOrder)
 
   // Populate with initial structures (for debug purposes)
   populateInitialValidHumanStructureTargets()

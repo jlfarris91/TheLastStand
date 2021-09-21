@@ -85,6 +85,7 @@ constant string COMMAND_WORKINGGROUP = "workingGroup"
 constant string COMMAND_TYPE = "type"
 constant string COMMAND_SELECTNONE = "selectNone"
 constant string COMMAND_LOGGING = "logging"
+constant string COMMAND_ISSUE_ORDER = "order"
 
 DevChatCommandHandler g_commandHandler
 MemoryTrackingMultiboard g_memoryTrackingMultiboard
@@ -1104,6 +1105,37 @@ function logging()
       chatCommandPrintToPlayer(commandPlayer, "Unknown system name: " + command.getArgument(0).getString())
 
 // ============================================================================
+function issueOrder()
+  let commandPlayer = getChatCommandPlayer()
+  let command = getChatCommand()
+  let orderType = command.getArgument(0).getString()
+  let order = command.getArgument(1).getString()
+
+  let units = getWorkingGroupUnits(commandPlayer)
+  var succeeded = false
+
+  switch (orderType)
+    case "immediate"
+      for u in units
+        succeeded = u.issueImmediateOrder(order) or succeeded
+    case "point"
+      let x = command.getArgument(2).getString().toReal()
+      let y = command.getArgument(3).getString().toReal()
+      for u in units
+        succeeded = u.issuePointOrder(order, vec2(x, y)) or succeeded
+    case "target"
+      let target = units.get(units.size() - 1)
+      for u in units
+        if (u != target)
+          succeeded = u.issueTargetOrder(order, target) or succeeded
+    case "self"
+      for u in units
+        succeeded = u.issueTargetOrder(order, u) or succeeded
+
+  destroy units
+  chatCommandPrintToPlayer(commandPlayer, (succeeded ? "Successfully issued " + orderType +" order " + order : "Failed to issue " + orderType + " order " + order))
+
+// ============================================================================
 function registerDebugCommands()
 
   g_commandHandler.registerCommandDefinition(COMMAND_MEMORYTRACKER, function showMemoryTrackerMultiboard)
@@ -1284,6 +1316,13 @@ function registerDebugCommands()
   g_commandHandler.registerCommandDefinition(COMMAND_LOGGING, function logging)
     ..setDescription("Enables different system logging")
     ..addStringArgument("SYSTEM", false)
+
+  g_commandHandler.registerCommandDefinition(COMMAND_ISSUE_ORDER, function issueOrder)
+    ..setDescription("Issues an order to the units in the working group")
+    ..addArgument(new ChatCommandArgument("ORDER_TYPE", ChatCommandArgumentType.STRING, false)..setStringOptions("immediate", "point", "target", "self"))
+    ..addStringArgument("ORDER", false)
+    ..addStringArgument("ARG1", true)
+    ..addStringArgument("ARG2", true)
 
 // ============================================================================
 init
