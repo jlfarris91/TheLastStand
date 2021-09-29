@@ -1,13 +1,15 @@
 package LootableSurvivorReward
 import LootableReward
-import UnitMetadata
 import GameConstants
-import TlsUnitIds
 import FX
 import Orders
 import LootableComponent
 import ColorUtility
 import SurvivorJobs
+import WeightedSet
+import Survivors
+
+WeightedSet<SurvivorJobDefinition> g_weightedSurvivorJobSet
 
 // ============================================================================
 public class LootableSurvivorReward implements ILootableReward
@@ -24,13 +26,11 @@ public class LootableSurvivorReward implements ILootableReward
   // --------------------------------------------------------------------------
   function spawnSurvivor(LootableComponent lootable, unit looter)
     let lootableUnit = lootable.getOwnerUnit()
-    let survivor = createUnitTLS(
-      PLAYER_VILLAGERS,
-      TlsUnitIds.Survivors.survivorMale,
-      lootableUnit.getX(),
-      lootableUnit.getY(),
-      GetRandomDirectionDeg())
+    
+    let survivor = SurvivorUtility.spawnSurvivorWithRandomJob(PLAYER_VILLAGERS, lootableUnit.getPos(), g_weightedSurvivorJobSet)
+
     survivor.issuePointOrderById(OrderIds.move, looter.getPos())
+
     FX.createFoundSurvivorTag(lootableUnit.getPos(), lootableUnit.getOwner())
     
     let job = getJobDefinitionForUnitType(survivor.getTypeId())
@@ -40,3 +40,16 @@ public class LootableSurvivorReward implements ILootableReward
       "Found {0} {1}!".format(
         job.getTitle().colorize(Colors.gold),
         survivor.getProperName()))
+
+// ============================================================================
+init
+  
+  g_weightedSurvivorJobSet = new WeightedSet<SurvivorJobDefinition>()
+    ..add(SurvivorJobs.none, 50)
+    ..add(SurvivorJobs.builder, 5)
+    ..add(SurvivorJobs.militia, 3)
+    ..add(SurvivorJobs.spearman, 3)
+    ..add(SurvivorJobs.medic, 3)
+    ..add(SurvivorJobs.marksman, 1)
+    ..add(SurvivorJobs.acolyte, 1)
+    // ..add(SurvivorJobs.engineer, 1)

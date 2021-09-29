@@ -12,10 +12,8 @@ import ClosureTimers
 import GameConstants
 import FX
 import Bounds
-import BoundsExtensions
 import Range
 import HumanPlayers
-import FriendlyCircularCachedSpawnManager
 import RandomSpawnPointProvider
 import UnitExtensions
 import SurvivorJobs
@@ -23,8 +21,10 @@ import SurvivorComponent
 import PlayerExtensions
 import Math
 import GameInstance
+import FriendlyGridCachedSpawnManager
 
 group g_tempGroup = CreateGroup()
+WeightedSet<SurvivorJobDefinition> g_weightedSurvivorJobSet
 
 // ============================================================================
 public class SurvivorUtility
@@ -106,6 +106,23 @@ public class SurvivorUtility
     destroy selectedUnits
 
   // --------------------------------------------------------------------------
+  static function spawnSurvivorWithRandomJob(player forPlayer, vec2 pos) returns unit
+    return spawnSurvivorWithRandomJob(forPlayer, pos, g_weightedSurvivorJobSet)
+
+  // --------------------------------------------------------------------------
+  static function spawnSurvivorWithRandomJob(player forPlayer, vec2 pos, WeightedSet<SurvivorJobDefinition> jobSet) returns unit
+
+    let survivor = createUnitTLS(forPlayer, jobSet.getRandom().getInitialUnitType(), pos, GetRandomDirectionDeg())
+
+    // Scale survivor level with game progress
+    let gameProgress01 = clamp01(g_GameInstance.getGameProgress01())
+    let survivorLevel = SURVIVORS_SPAWN_LEVEL_RANGE.lerp(gameProgress01).floor()
+    if (survivorLevel > 1)
+      survivor.setLevel(survivorLevel, false)
+
+    return survivor
+
+  // --------------------------------------------------------------------------
   static function spawnSurvivorUnitForPlayer(player _player) returns unit
 
     if (_player == null)
@@ -137,22 +154,7 @@ public class SurvivorUtility
       doAfter(1.0, () -> spawnSurvivorUnitForPlayer(_player))
       return null
 
-    let weightedSet = new WeightedSet<int>()
-    ..add(TlsUnitIds.Survivors.survivorMale, 50)
-    ..add(TlsUnitIds.Survivors.survivorMilitia1, 1)
-    ..add(TlsUnitIds.Survivors.survivorSpearman1, 1)
-    ..add(TlsUnitIds.Survivors.survivorMedic1, 1)
-    ..add(TlsUnitIds.Survivors.survivorAcolyte1, 1)
-    ..add(TlsUnitIds.Survivors.survivorMarksman1, 1)
-    ..add(TlsUnitIds.Survivors.survivorEngineer1, 1)
-
-    let survivor = createUnitTLS(_player, weightedSet.getRandom(), spawnPointResult.spawnPoint, GetRandomDirectionDeg())
-
-    // Scale survivor level with game progress
-    let gameProgress01 = clamp01(g_GameInstance.getGameProgress01())
-    let survivorLevel = SURVIVORS_SPAWN_LEVEL_RANGE.lerp(gameProgress01).floor()
-    if (survivorLevel > 1)
-      survivor.setLevel(survivorLevel, false)
+    let survivor = spawnSurvivorWithRandomJob(_player, spawnPointResult.spawnPoint, g_weightedSurvivorJobSet)
 
     survivor.issuePointOrderById(OrderIds.move, playerHumanComp.getCampCenter())
     
@@ -224,11 +226,17 @@ public class SurvivorUtility
 
 // ============================================================================
 function getSpawnPoint(player p) returns spawnPointResult
+
+  let playerHumanComp = p.getHumanPlayerComponent()
+  if (playerHumanComp == null)
+    return spawnPointResult(false, ZERO2)
+
   let currentSpawnManager = getPlayerCachedFriendlySpawnManager(p)
   let fallbackSpawnManager = getPlayerSurvivorSpawnManager(p)
-  let spawnPointProvider = new RandomSpawnPointProvider(currentSpawnManager, fallbackSpawnManager, SpawnRange.CLOSE)
-  let result = spawnPointProvider.getSpawnPoint()
+  let spawnPointProvider = new RandomSpawnPointProvider(currentSpawnManager, fallbackSpawnManager)
+  let result = spawnPointProvider.getRandomSpawnPointInRange(playerHumanComp.getCampCenter(), SpawnRange.CLOSE)
   destroy spawnPointProvider
+  
   return result
 
 // ============================================================================
@@ -242,3 +250,15 @@ public function unit.isUnrescuedSurvivor() returns bool
 // ============================================================================
 public function unit.isRescuableSurvivor() returns bool
   return this.isUnrescuedSurvivor()
+
+// ============================================================================
+init
+  g_weightedSurvivorJobSet = new WeightedSet<SurvivorJobDefinition>()
+    ..add(SurvivorJobs.none, 50)
+    // ..add(SurvivorJobs.builder, 1)
+    // ..add(SurvivorJobs.militia, 1)
+    // ..add(SurvivorJobs.spearman, 1)
+    // ..add(SurvivorJobs.medic, 1)
+    // ..add(SurvivorJobs.marksman, 1)
+    // ..add(SurvivorJobs.acolyte, 1)
+    // ..add(SurvivorJobs.engineer, 1)

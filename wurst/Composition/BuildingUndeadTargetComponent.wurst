@@ -1,0 +1,226 @@
+package BuildingUndeadTargetComponent
+import UnitComponent
+import Action
+import PathChecker
+import SpawnManager
+import UndeadTargetingComponent
+import UnitExtensions
+import GroupUtils
+import ColorUtility
+import ClosureTimers
+import PlayerSpawnPointProviders
+import Range
+import TLSFrame
+import ProjectConstants
+import HumanPlayerComponent
+
+@configurable public bool g_enableBUTCDebugging = false
+
+Action1<PathCheckerComponent> g_pathCheckCompleteCallback
+constant rangeReal PATH_CHECK_COOLDOWN_RANGE = rangeReal(3.0, 5.0)
+public BUTCDebugger g_butcDebugger
+
+// ============================================================================
+public class BuildingUndeadTargetComponent extends UnitComponent
+  private unit m_pathChecker
+  private ISpawnPointProvider m_spawnPointManager
+  private bool m_affectUTCTargetOrganic = false
+  protected bool m_foundPath = false
+  protected bool m_searching = false
+
+  // --------------------------------------------------------------------------
+  construct (IUnitMetadata owner)
+    super(owner)
+
+  // --------------------------------------------------------------------------
+  function getIsPathableFromHostileSpawn() returns bool
+    return m_foundPath
+
+  // --------------------------------------------------------------------------
+  function setAffectUTCTargetOrganic(bool value)
+    m_affectUTCTargetOrganic = value
+
+  // --------------------------------------------------------------------------
+  override function onEnabled()
+    super.onEnabled()
+
+    m_spawnPointManager = getHostileSpawnPointProviderForPlayer(getOwnerUnit().getOwner())
+
+    setFoundPath(false)
+    startPathCheck()
+
+  // --------------------------------------------------------------------------
+  override function onDisabled()
+    super.onDisabled()
+
+    destroyPathChecker()
+
+  // --------------------------------------------------------------------------
+  private function setFoundPath(bool foundPath)
+    if (m_foundPath != foundPath)
+      m_foundPath = foundPath
+      updateUTCStatus()
+    if (g_enableBUTCDebugging)
+      getOwnerUnit().setVertexColor(foundPath ? Colors.green : Colors.red)
+    if (m_affectUTCTargetOrganic)
+      let humanPlayerComp = getOwnerUnit().getOwner().getHumanPlayerComponent()
+      if (humanPlayerComp != null)
+        humanPlayerComp.setCanPathToHeadquartersOrHero(foundPath)
+
+  // --------------------------------------------------------------------------
+  protected function getPathCheckerActive() returns bool
+    if (m_pathChecker == null)
+      return false
+    let comp = m_pathChecker.getPathCheckerComponent()
+    return comp != null and comp.getEnabled()
+
+  // --------------------------------------------------------------------------
+  protected function startPathCheck_Delayed()
+    dispatch(PATH_CHECK_COOLDOWN_RANGE.getRandom(), (BuildingUndeadTargetComponent comp) -> comp.startPathCheck())
+
+  // --------------------------------------------------------------------------
+  protected function startPathCheck()
+
+    let ownerUnit = getOwnerUnit()
+
+    let spawnPosResult = m_spawnPointManager.getRandomSpawnPointInRange(ownerUnit.getPos(), SpawnRange.CLOSE)
+    if (spawnPosResult.succeeded == false)
+      Log.debug("Could not find spawn point for path checker")
+      startPathCheck_Delayed()
+      return
+
+    if (m_pathChecker == null)
+      createPathChecker()
+      
+    Log.debug("Starting path check for " + ownerUnit.getName())
+
+    m_pathChecker.getPathCheckerComponent()
+    ..setCallback(g_pathCheckCompleteCallback)
+    ..setTargetUnit(ownerUnit)
+    ..activate(spawnPosResult.spawnPoint)
+
+    m_searching = true
+
+  // --------------------------------------------------------------------------
+  private function createPathChecker()
+    if (m_pathChecker != null)
+      return
+    m_pathChecker = PathChecker.getPathChecker()
+    m_pathChecker.getPathCheckerComponent().setAutoDestroy(false)
+
+  // --------------------------------------------------------------------------
+  protected function onPathCheckComplete(bool foundPath)
+    Log.debug((foundPath ? "Found" : "Did not find") + " path for unit " + getOwnerUnit().getName() + " : " + foundPath.toString())
+    setFoundPath(foundPath)
+
+    // Continuously path check
+    startPathCheck_Delayed()
+
+    m_searching = false
+
+  // --------------------------------------------------------------------------
+  private function updateUTCStatus()
+    if (m_foundPath)
+      registerPlayerTargetStructure(getOwnerUnit())
+    else
+      unregisterPlayerTargetStructure(getOwnerUnit())      
+
+  // --------------------------------------------------------------------------
+  private function destroyPathChecker()
+    if (m_pathChecker != null)
+      m_pathChecker.remove()
+      m_pathChecker = null
+
+  // --------------------------------------------------------------------------
+  static function runPathCheckersForAllStructures(player ownerPlayer)
+    let temp = getGroup()
+    temp.enumUnitsOfPlayer(ownerPlayer, null)
+    for u in temp
+      if (u.isStructure())
+        let metadata = u.getMetadata()
+        if (metadata != null)
+          let comp = metadata.getBuildingUndeadTargetComponent()
+          if (comp != null)
+            comp.startPathCheck()
+    temp.release()
+
+// ============================================================================
+public function IUnitMetadata.getBuildingUndeadTargetComponent() returns BuildingUndeadTargetComponent
+  return this.getComponent(BuildingUndeadTargetComponent.typeId) castTo BuildingUndeadTargetComponent
+
+// ============================================================================
+public function IUnitMetadata.getOrAddBuildingUndeadTargetComponent() returns BuildingUndeadTargetComponent
+  var component = this.getBuildingUndeadTargetComponent()
+  if (component == null)
+    component = this.addComponent(new BuildingUndeadTargetComponent(this)) castTo BuildingUndeadTargetComponent
+  return component
+
+// ============================================================================
+class BUTCDebugger extends TLSFrame
+  private framehandle m_textArea
+  private player m_context
+  private group m_contextUnitGroup = CreateGroup()
+
+  // --------------------------------------------------------------------------
+  construct()
+    super(createFrame("FRAME", "BUTCDebugger", GAME_UI, "", 0))
+
+  // --------------------------------------------------------------------------
+  override function initialize()
+    super.initialize()
+
+    let frame = getFrameHandle()
+    ..setWidth(0.35)
+    ..setHeight(0.3)
+    ..setAbsPoint(FRAMEPOINT_TOPLEFT, 0.46, 0.56)
+    ..show()
+
+    createFrame("BACKDROP", "UTCDebuggerBackdrop", GAME_UI, "BattleNetControlBackdropTemplate", 0)
+    ..setParent(frame)
+    ..setAllPoints(frame)
+
+    m_textArea = createFrame("TEXTAREA", "UTCDebuggerTextArea", GAME_UI, "ConsoleTextArea", 0)
+    ..setParent(frame)
+    ..setAllPoints(frame)
+
+    doPeriodically(0.1) (CallbackPeriodic cb) ->
+      update()
+
+  // --------------------------------------------------------------------------
+  function setContext(player context)
+    m_context = context
+
+  // --------------------------------------------------------------------------
+  function update()
+
+    if (getFrameHandle().isVisible() == false)
+      return
+
+    BlzFrameSetText(m_textArea, "===== BUTC ({0}) =====".format(m_context.getName()))
+
+    m_contextUnitGroup.enumUnitsOfPlayer(m_context, null)
+
+    for u in m_contextUnitGroup
+      let metadata = u.getMetadata()
+      if (metadata != null)
+        let comp = metadata.getBuildingUndeadTargetComponent()
+        if (comp != null)
+          BlzFrameAddText(m_textArea, "{0} : {1} {2}".format(u.getName(), (comp.m_foundPath ? "Found path".colorize(Colors.green) : "No path".colorize(Colors.red)), (comp.m_searching ? " Searching..." : "")))
+
+// ============================================================================
+init
+
+  g_pathCheckCompleteCallback = (PathCheckerComponent pathChecker) ->
+    let targetUnit = pathChecker.getTargetUnit()
+    if (targetUnit != null)
+      let metadata = targetUnit.getMetadata()
+      if (metadata != null)
+        let comp = metadata.getBuildingUndeadTargetComponent()
+        if (comp != null)
+          comp.onPathCheckComplete(pathChecker.getFoundPath())
+  g_pathCheckCompleteCallback.setDestroyAfterUse(false)
+
+  if (DEV_ENVIRONMENT)
+    doAfter(2) () ->
+      g_butcDebugger = new BUTCDebugger()
+      ..setContext(localPlayer)

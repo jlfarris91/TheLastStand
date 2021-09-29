@@ -21,12 +21,8 @@ import ObjectIds
 import HumanPlayers
 import UnitExtensions
 import ProjectConstants
-import PathChecker
 import Survivors
 import DevChatCommandHandler
-import CircularCachedSpawnManager
-import HostileCircularCachedSpawnManager
-import FriendlyCircularCachedSpawnManager
 import LinkedList
 import Action
 import HashList
@@ -35,6 +31,10 @@ import SpawnWave
 import Runnable
 import UndeadTargetingComponent
 import GroupExtensions
+import BuildingUndeadTargetComponent
+import GridCachedSpawnManager
+import FriendlyGridCachedSpawnManager
+import HostileGridCachedSpawnManager
 
 constant string COMMAND_MEMORYTRACKER = "mem"
 constant string COMMAND_GODLIKE = "godlike"
@@ -284,11 +284,26 @@ function removeSelectedUnits()
 // ============================================================================
 function moveSelectedUnits()
   let commandPlayer = getChatCommandPlayer()
-  let cameraPos = vec2(GetCameraTargetPositionX(), GetCameraTargetPositionY())
+  let command = getChatCommand()
+  let xArg = command.getArgument(0)
+  let yArg = command.getArgument(1)
 
-  cameraPos.sync(commandPlayer) cameraPosSyncd ->
-    let unitCount = forEachWorkingGroupUnit(commandPlayer, u -> u.setPos(cameraPosSyncd))
-    chatCommandPrintToPlayer(commandPlayer, "Moved {0} units".format(unitCount.toString()))
+  if (xArg == null or yArg == null)
+  //{
+    let cameraPos = vec2(GetCameraTargetPositionX(), GetCameraTargetPositionY())
+
+    cameraPos.sync(commandPlayer) cameraPosSyncd ->
+      let unitCount1 = forEachWorkingGroupUnit(commandPlayer, u -> u.setXY(cameraPosSyncd))
+      chatCommandPrintToPlayer(commandPlayer, "Moved {0} units".format(unitCount1.toString()))
+
+    return
+  //}
+
+  let x = xArg.getReal()
+  let y = yArg.getReal()
+
+  let unitCount = forEachWorkingGroupUnit(commandPlayer, u -> u.setXY(vec2(x, y)))
+  chatCommandPrintToPlayer(commandPlayer, "Moved {0} units".format(unitCount.toString()))
 
 // ============================================================================
 function createItemForSelectedUnit()
@@ -751,7 +766,7 @@ function checkPath()
     displayMessageToPlayer(commandPlayer, "PLAYER must be the id of a playing human player")
     return
 
-  startPathCheck(targetPlayer)
+  BuildingUndeadTargetComponent.runPathCheckersForAllStructures(targetPlayer)
   displayMessageToPlayer(commandPlayer, "Starting path check for player " + targetPlayer.getName())
 
 // ============================================================================
@@ -838,13 +853,13 @@ function spawnPoints()
     return
 
   if (spawnerTypeArg == null)
-    if (g_ccsmDebugger != null)
-      g_ccsmDebugger.setIsVisible(not g_ccsmDebugger.getIsVisible())
-      chatCommandPrintToPlayer(commandPlayer, (g_ccsmDebugger.getIsVisible() ? "Showing debugger" : "Hiding debugger"))
+    if (g_gcsmDebugger != null)
+      g_gcsmDebugger.setIsVisible(not g_gcsmDebugger.getIsVisible())
+      chatCommandPrintToPlayer(commandPlayer, (g_gcsmDebugger.getIsVisible() ? "Showing debugger" : "Hiding debugger"))
     return
 
   let spawnerType = spawnerTypeArg.getString()
-  CircularCachedSpawnManager spawnManager
+  GridCachedSpawnManager spawnManager
 
   switch (spawnerType)
     case "friendly"
@@ -862,31 +877,10 @@ function spawnPoints()
 
   let operation = operationArg.getString()
 
-  switch (operation)
+  switch (operation)    
     case "invalidate"
       spawnManager.invalidateSpawnPoints()
       chatCommandPrintToPlayer(commandPlayer, "Invalidating all {0} spawn points".format(spawnerType))
-
-    case "enable"
-      spawnManager.setIsEnabled(true)
-      chatCommandPrintToPlayer(commandPlayer, "Enabled {0} spawn manager".format(spawnerType))
-
-    case "disable"
-      spawnManager.setIsEnabled(false)
-      chatCommandPrintToPlayer(commandPlayer, "Disabled {0} spawn manager".format(spawnerType))
-
-    case "center"
-      chatCommandPrintToPlayer(commandPlayer, "{0} spawn manager center: ".format(spawnManager.getCenter().toString()))
-      return
-
-    case "setcenter"
-      let selectedUnit = commandPlayer.getFirstSelectedUnit()
-      if (selectedUnit == null)
-        chatCommandPrintToPlayer(commandPlayer, "Must have a unit selected")
-        return
-      spawnManager.setCenter(selectedUnit.getPos())
-      chatCommandPrintToPlayer(commandPlayer, "Set {0} spawn manager center to ".format(spawnManager.getCenter().toString()))
-      return
 
     default
       chatCommandPrintToPlayer(commandPlayer, "Unknown operation " + operation)
@@ -1094,13 +1088,18 @@ function logging()
   switch (command.getArgument(0).getString())
     case "spawning"
       g_enableSpawnWaveLogging = not g_enableSpawnWaveLogging
-      chatCommandPrintToPlayer(commandPlayer, (g_enableSpawnWaveLogging ? "Enabled spawn wave logging" : "Disabled spawn wave logging"))
+      chatCommandPrintToPlayer(commandPlayer, (g_enableSpawnWaveLogging ? "Enabled spawn wave debugging" : "Disabled spawn wave debugging"))
     case "runnable"
       g_enableRunnableLogging = not g_enableRunnableLogging
-      chatCommandPrintToPlayer(commandPlayer, (g_enableRunnableLogging ? "Enabled runnable logging" : "Disabled runnable logging"))
+      chatCommandPrintToPlayer(commandPlayer, (g_enableRunnableLogging ? "Enabled runnable debugging" : "Disabled runnable debugging"))
     case "utc"
       g_enableUTCLogging = not g_enableUTCLogging
-      chatCommandPrintToPlayer(commandPlayer, (g_enableUTCLogging ? "Enabled utc logging" : "Disabled utc logging"))
+      chatCommandPrintToPlayer(commandPlayer, (g_enableUTCLogging ? "Enabled utc debugging" : "Disabled utc debugging"))
+    case "butc"
+      g_enableBUTCDebugging = not g_enableBUTCDebugging
+      if (g_butcDebugger != null)
+        g_butcDebugger.setIsVisible(g_enableBUTCDebugging)
+      chatCommandPrintToPlayer(commandPlayer, (g_enableBUTCDebugging ? "Enabled butc debugging" : "Disabled butc debugging"))
     default
       chatCommandPrintToPlayer(commandPlayer, "Unknown system name: " + command.getArgument(0).getString())
 
@@ -1159,6 +1158,8 @@ function registerDebugCommands()
   g_commandHandler.registerCommandDefinition(COMMAND_KILL_SELECTED_UNITS, function killSelectedUnits)
   g_commandHandler.registerCommandDefinition(COMMAND_REMOVE_SELECTED_UNITS, function removeSelectedUnits)
   g_commandHandler.registerCommandDefinition(COMMAND_MOVE_SELECTED_UNITS, function moveSelectedUnits)
+    ..addRealArgument("X", true)
+    ..addRealArgument("Y", true)
 
   g_commandHandler.registerCommandDefinition(COMMAND_CREATE_ITEM, function createItemForSelectedUnit)
     ..addFourCCArgument("ITEM_ID", false)

@@ -3,38 +3,37 @@ import ObjectIdGenerator
 import UnitObjEditing
 import UnitIds
 import Bounds
-import HumanPlayers
-import SpawnManager
-import PlayerSpawnPointProviders
 import AbilityIds
 import ObjectIds
 import Orders
 import UnitComponent
 import HashList
-import HashMap
 import ClosureTimers
 import GameConstants
-import RegisterEvents
-import UnitIndexer
-import UnitExtensions
-import HumanPlayerComponent
+import Action
+import UnitRecycler
+import Suspend
 
 constant int PATH_CHECKER_UNIT_ID = compiletime(UNIT_ID_GEN.next())
 constant player PATH_CHECKER_OWNER = Player(GetPlayerNeutralPassive())
-constant vec2 SPAWN_POS = mapBounds.max
-constant real DISTANCE_THRESHOLD = 32.0
-constant real UPDATE_INTERVAL = 1.0
+constant vec2 DEACTIVATED_POS = mapBounds.max
+constant real MIN_DISTANCE_MOVED_THRESHOLD = 64.0
+constant real MIN_DISTANCE_MOVED_THRESHOLD_SQ = MIN_DISTANCE_MOVED_THRESHOLD * MIN_DISTANCE_MOVED_THRESHOLD
+constant real ARRIVAL_DISTANCE = 64.0
+constant real UPDATE_INTERVAL = 0.5
+constant real PATH_CHECKER_COLLISION_SIZE = 0
 
-HashMap<player, unit> g_pathCheckers = new HashMap<player, unit>()
 HashList<unit> g_activePathCheckers = new HashList<unit>()
 CallbackPeriodic g_updatePathCheckerTimer
+
+UnitRecycler g_pathCheckerRecycler = new UnitRecycler(PATH_CHECKER_OWNER, PATH_CHECKER_UNIT_ID, 128)
 
 // ============================================================================
 @compiletime function createUnitDef()
   new UnitDefinition(PATH_CHECKER_UNIT_ID, UnitIds.shade)
-    ..setCollisionSize(0)
+    ..setCollisionSize(PATH_CHECKER_COLLISION_SIZE)
     ..setSpeedBase(512)
-    ..setNormalAbilities(commaList(AbilityIds.invulnerable))
+    ..setNormalAbilities(commaList(AbilityIds.invulnerable, AbilityIds.ghostVisible))
     ..setShadowImageWidth(0)
     ..setShadowImageHeight(0)
     ..setShadowImageUnit("")
@@ -46,44 +45,109 @@ CallbackPeriodic g_updatePathCheckerTimer
     ..setModelFile("")
     ..setScalingValue(0.01)
     ..setHideMinimapDisplay(true)
+    ..setMovementType(MovementType.Hover)
+
+    // Debugging
+    //..setModelFile("units\\human\\Footman\\Footman")
+    //..setScalingValue(0.5)
 
 // ============================================================================
-class PathCheckerComponent extends UnitComponent
-  private player m_targetPlayer
+public class PathCheckerComponent extends UnitComponent
   private unit m_targetUnit
   private vec2 m_lastPos
+  private Action1<PathCheckerComponent> m_callback
+  private bool m_foundPath
+  private real m_arrivalDistanceSq
+  private bool m_autoRelease = true
+  private bool m_hasMovedBeyondThreshold = false
 
   // --------------------------------------------------------------------------
   construct(IUnitMetadata owner)
     super(owner)
 
   // --------------------------------------------------------------------------
-  function setTargetPlayer(player p)
-    m_targetPlayer = p
+  function getCallback() returns Action1<PathCheckerComponent>
+    return m_callback
+
+  // --------------------------------------------------------------------------
+  function setCallback(Action1<PathCheckerComponent> callback)
+    m_callback = callback
+
+  // --------------------------------------------------------------------------
+  function getTargetUnit() returns unit
+    return m_targetUnit
+
+  // --------------------------------------------------------------------------
+  function setTargetUnit(unit targetUnit)
+    m_targetUnit = targetUnit
+    
+    let combinedCollisionSize = PATH_CHECKER_COLLISION_SIZE + m_targetUnit.getCollisionSize()
+    let distance = combinedCollisionSize + ARRIVAL_DISTANCE + MELEE_UNIT_ATTACK_RANGE
+    m_arrivalDistanceSq = distance * distance
+
+  // --------------------------------------------------------------------------
+  function getFoundPath() returns bool
+    return m_foundPath
+
+  // --------------------------------------------------------------------------
+  function getAutoDestroy() returns bool
+    return m_autoRelease
+
+  // --------------------------------------------------------------------------
+  function setAutoDestroy(bool autoDestroy)
+    m_autoRelease = autoDestroy
+
+  // --------------------------------------------------------------------------
+  override function onEnabled()
+    super.onEnabled()
+    registerActivePathChecker(getOwnerUnit())
+
+  // --------------------------------------------------------------------------
+  override function onDisabled()
+    super.onDisabled()
+
+    let ownerUnit = getOwnerUnit()
+    
+    unregisterActivePathChecker(ownerUnit)
+
+    m_targetUnit = null
+    m_foundPath = false
+    m_hasMovedBeyondThreshold = false
+
+    destroyCallback()
+
+    ownerUnit.hide()
+    ownerUnit.setPos(DEACTIVATED_POS)
+    ownerUnit.suspend()
+    
+    if (m_autoRelease)
+      release()
 
   // --------------------------------------------------------------------------
   function update()
     if (m_targetUnit == null or m_targetUnit.isAlive() == false)
+      onPathNotFound()
       deactivate()
       return
+
     let ownerUnit = getOwnerUnit()
     let currentPos = ownerUnit.getPos()
-    let dist = currentPos.distanceTo(m_lastPos)
-    if (dist < DISTANCE_THRESHOLD)
-      onPathCheckerStuck()
-    else
-      let targetPos = m_targetUnit.getPos()
-      ownerUnit.issuePointOrderById(OrderIds.move, targetPos)
+    let distMovedFromLastPosSq = currentPos.distanceToSq(m_lastPos)
     m_lastPos = currentPos
+    
+    if (distMovedFromLastPosSq < MIN_DISTANCE_MOVED_THRESHOLD_SQ)
+      if (m_hasMovedBeyondThreshold and getOwnerUnit().getCurrentOrder() != OrderIds.move)
+        onPathCheckerStuck()
+    else
+      m_hasMovedBeyondThreshold = true
 
   // --------------------------------------------------------------------------
   function onPathCheckerStuck()
     let ownerUnit = getOwnerUnit()
-    let dist = ownerUnit.getPos().distanceTo(m_targetUnit.getPos())
-    let collisionSize = ownerUnit.getCollisionSize() + m_targetUnit.getCollisionSize()
+    let dist = ownerUnit.getPos().distanceToSq(m_targetUnit.getPos())
     
     // Standing within attack range of the target, it's pathable
-    if (dist < collisionSize + DISTANCE_THRESHOLD + MELEE_UNIT_ATTACK_RANGE)
+    if (dist < m_arrivalDistanceSq)
       onPathFound()
     else
       onPathNotFound()
@@ -92,59 +156,53 @@ class PathCheckerComponent extends UnitComponent
 
   // --------------------------------------------------------------------------
   function onPathFound()
-    let humanPlayerComp = m_targetPlayer.getHumanPlayerComponent()
-    if (humanPlayerComp != null)
-      humanPlayerComp.setCanPathToHeadquartersOrHero(true)
-      Log.debug("Path found for player " + m_targetPlayer.getName())
+    m_foundPath = true
+    raiseCallback()
 
   // --------------------------------------------------------------------------
   function onPathNotFound()
-    let humanPlayerComp = m_targetPlayer.getHumanPlayerComponent()
-    if (humanPlayerComp != null)
-      humanPlayerComp.setCanPathToHeadquartersOrHero(false)
-      Log.debug("No path found for player " + m_targetPlayer.getName())
+    m_foundPath = false
+    raiseCallback()
 
   // --------------------------------------------------------------------------
-  function startPathCheck() returns bool
+  function raiseCallback()
+    if (m_callback != null)
+      m_callback.call(this)
+      if (m_callback.getDestroyAfterUse())
+        destroy m_callback
+
+  // --------------------------------------------------------------------------
+  function activate(vec2 startPos)
     let ownerUnit = getOwnerUnit()
 
-    let spawnPointProvider = getSpawnPointProviderForPlayer(m_targetPlayer, SpawnRange.MID)
-    let spawnPosResult = spawnPointProvider.getSpawnPoint()
-    if (spawnPosResult.succeeded == false)
-      return false
-    
-    let spawnPos = spawnPosResult.spawnPoint
-    activate(spawnPos)
+    ownerUnit.setXY(startPos)
+    ownerUnit.show()
+    ownerUnit.unsuspend()
 
-    let targetPlayerComp = m_targetPlayer.getHumanPlayerComponent()
-    if (targetPlayerComp == null)
-      return false
-
-    m_targetUnit = targetPlayerComp.getHQOrHero()
-    if (m_targetUnit == null or not m_targetUnit.isAlive())
-      return false
+    m_lastPos = ownerUnit.getPos()
+    m_foundPath = false
+    m_hasMovedBeyondThreshold = false
 
     let targetPos = m_targetUnit.getPos()
-    if (ownerUnit.issuePointOrderById(OrderIds.move, targetPos))
-      Log.debug("Started path check for player " + m_targetPlayer.getName())
-      return true
-    
-    return false
+    if (getOwnerUnit().issuePointOrderById(OrderIds.move, targetPos))
+      Log.debug("Started path check for unit " + m_targetUnit.getName())
 
-  // --------------------------------------------------------------------------
-  function activate(vec2 pos)
-    let ownerUnit = getOwnerUnit()
-    ownerUnit.show()
-    ownerUnit.setPos(pos)
-    m_lastPos = ownerUnit.getPos()
-    registerActivePathChecker(ownerUnit)
+    enable()
 
   // --------------------------------------------------------------------------
   function deactivate()
-    let ownerUnit = getOwnerUnit()
-    ownerUnit.hide()
-    ownerUnit.setPos(SPAWN_POS)
-    unregisterActivePathChecker(ownerUnit)
+    disable()
+
+  // --------------------------------------------------------------------------
+  /** Make sure not to call anything after this since this object will be destroyed **/
+  function release()
+    g_pathCheckerRecycler.stock(getOwnerUnit())
+
+  // --------------------------------------------------------------------------
+  function destroyCallback()
+    if (m_callback != null and m_callback.getDestroyAfterUse())
+      destroy m_callback
+    m_callback = null
 
 // ============================================================================
 public function IUnitMetadata.getPathCheckerComponent() returns PathCheckerComponent
@@ -154,7 +212,7 @@ public function IUnitMetadata.getPathCheckerComponent() returns PathCheckerCompo
 public function IUnitMetadata.getOrAddPathCheckerComponent() returns PathCheckerComponent
   var component = this.getPathCheckerComponent()
   if (component == null)
-    component = this.addComponent(new PathCheckerComponent(this)) castTo PathCheckerComponent
+    component = this.addComponent(new PathCheckerComponent(this), false) castTo PathCheckerComponent
   return component
 
 // ============================================================================
@@ -172,11 +230,49 @@ public function unit.getOrAddPathCheckerComponent() returns PathCheckerComponent
   return metadata.getOrAddPathCheckerComponent()
 
 // ============================================================================
-function getPathChecker(player p) returns unit
-  var pathChecker = g_pathCheckers.get(p)
-  if (pathChecker == null)
-    pathChecker = createPathCheckerForPlayer(p)
-  return pathChecker
+public class PathChecker
+
+  // --------------------------------------------------------------------------
+  static function getPathChecker() returns unit
+    let pathCheckerUnit = createPathCheckerUnit(DEACTIVATED_POS, angle(0))
+    pathCheckerUnit.getOrAddPathCheckerComponent()..setAutoDestroy(false)..deactivate()
+    return pathCheckerUnit
+
+  // --------------------------------------------------------------------------
+  static function findPathToUnit(vec2 fromPos, unit toUnit, Action1<PathCheckerComponent> callback)
+    let pathChecker = createPathCheckerUnit(fromPos, fromPos.angleTo(toUnit.getPos()))
+    pathChecker.getOrAddPathCheckerComponent()
+    ..setAutoDestroy(true)
+    ..setTargetUnit(toUnit)
+    ..setCallback(callback)
+    ..activate(fromPos)
+
+  // // --------------------------------------------------------------------------
+  // @deprecated static function startPathChecker(player targetPlayer) returns bool
+
+  //   let spawnPointProvider = getHostileSpawnPointProviderForPlayer(targetPlayer, SpawnRange.MID)
+  //   let spawnPosResult = spawnPointProvider.getSpawnPoint()
+  //   if (spawnPosResult.succeeded == false)
+  //     return false
+    
+  //   let spawnPos = spawnPosResult.spawnPoint
+
+  //   let targetPlayerComp = targetPlayer.getHumanPlayerComponent()
+  //   if (targetPlayerComp == null)
+  //     return false
+
+  //   let targetUnit = targetPlayerComp.getHQOrHero()
+  //   if (targetUnit == null or not targetUnit.isAlive())
+  //     return false
+
+  //   findPathToUnit(spawnPos, targetUnit, g_pathCheckCallback)
+  //   Log.debug("Started path check for player " + targetPlayer.getName())
+
+  //   return true
+
+  // --------------------------------------------------------------------------
+  private static function createPathCheckerUnit(vec2 pos, angle facing) returns unit
+    return g_pathCheckerRecycler.getUnit(PATH_CHECKER_OWNER, pos, facing)
 
 // ============================================================================
 function registerActivePathChecker(unit pathChecker)
@@ -201,53 +297,3 @@ function updatePathCheckers()
     let comp = u.getOrAddPathCheckerComponent()
     if (comp != null)
       comp.update()
-
-// ============================================================================
-function createPathCheckerForPlayer(player p) returns unit
-  let pathChecker = createUnit(PATH_CHECKER_OWNER, PATH_CHECKER_UNIT_ID, SPAWN_POS, GetRandomDirectionDeg().asAngleDegrees())
-  let comp = pathChecker.getMetadata().getOrAddPathCheckerComponent()
-  comp.setTargetPlayer(p)
-  comp.deactivate()
-  g_pathCheckers.put(p, pathChecker)
-  return pathChecker
-
-// ============================================================================
-public function startPathCheck(player p)
-  let pathChecker = getPathChecker(p)
-  pathChecker.getOrAddPathCheckerComponent().startPathCheck()
-
-// ============================================================================
-function startPathCheckForEventTriggeringUnit(unit triggerUnit)
-  if (not triggerUnit.isStructure() or
-      not triggerUnit.getOwner().isPlayingHumanPlayer())
-    return
-  startPathCheck(triggerUnit.getOwner())
-
-// ============================================================================
-function onUnitConstructStartCancel()
-  startPathCheckForEventTriggeringUnit(GetConstructingStructure())
-
-// ============================================================================
-function onUnitDeath()
-  startPathCheckForEventTriggeringUnit(GetDyingUnit())
-
-// ============================================================================
-function onUnitIndexed()
-  startPathCheckForEventTriggeringUnit(getIndexingUnit())
-
-// ============================================================================
-function onUnitUpgradeFinished()
-  startPathCheckForEventTriggeringUnit(GetTriggerUnit())
-
-// ============================================================================
-init
-
-  // If any of these events occur it could mean that the player has either built
-  // or destroyed a structure that would have otherwise blocked a path for the
-  // path checker to reach. We need to check the path again.
-  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_CONSTRUCT_CANCEL, function onUnitConstructStartCancel)
-  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_CONSTRUCT_START, function onUnitConstructStartCancel)
-  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_UPGRADE_FINISH, function onUnitUpgradeFinished)
-  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_DEATH, function onUnitDeath)
-  onUnitIndex(function onUnitIndexed)
-  onUnitDeindex(function onUnitIndexed)
