@@ -6,31 +6,30 @@ import RegisterEvents
 import HashMap
 import HumanPlayers
 import TlsUnitIds
-import HashList
 import GroupUtils
-import Unit_WoodFence
-import Unit_StoneWall
-import Unit_GateCommon
-import Unit_MetalWall
 import TargetUtility
 import UnitExtensions
 import ClosureTimers
 import Host
 import GameConstants
 import UnitRecycler
-import Unit_BrickWall
 import Vector
 import TLSFrame
 import ColorUtility
 import Range
 import TimerUtils
-import UnitIndexer
 import ProjectConstants
 import GroupExtensions
+import BuildingUndeadTarget
+import PlayerSpawnPointProviders
+import SpawnManager
+import initlater OnPlayerHeroDied
 
 constant rangeReal ATTACK_TIMER_DURATION_RANGE = rangeReal(5.0, 10.0)
 constant real ATTACK_TIMER_DISTANCE_THRESHOLD = 128.0
 constant real ATTACK_TIMER_DISTANCE_THRESHOLD_SQ = ATTACK_TIMER_DISTANCE_THRESHOLD * ATTACK_TIMER_DISTANCE_THRESHOLD
+constant real TELEPORT_DISTANCE_THRESHOLD = SPAWN_RANGE_FAR.max
+constant real TELEPORT_DISTANCE_THRESHOLD_SQ = TELEPORT_DISTANCE_THRESHOLD * TELEPORT_DISTANCE_THRESHOLD
 
 constant real DOT_INTERVAL = 1.0
 constant real DOT_PERCENT01 = 0.1
@@ -42,7 +41,6 @@ constant real UPDATE_INTERVAL = 0.2
 @configurable constant public int VALID_HUMAN_STRUCTURE_TARGETS_ATTACKER_COUNT_THRESHOLD = 3
 
 PlayerData array g_playerData
-HashList<int> g_validTargetStructureIds
 conditionfunc g_filterUnitIsValidTargetStructure = Condition(function filterUnitIsValidTargetStructure)
 conditionfunc g_filterUnitIsValidTargetNonStructure = Condition(function filterUnitIsValidTargetNonStructure)
 IterableMap<unit, group> g_targetedUnitToUTCMap = new IterableMap<unit, group>()
@@ -93,7 +91,6 @@ public class UndeadTargetingComponent extends UnitComponent
   protected Vector<string> m_notes
   protected int m_numberOfTimesFailedOrder = 0
   protected int m_numberOfTimesAttackTimerExpired = 0
-  protected vec2 m_lastPos
 
   // --------------------------------------------------------------------------
   construct(IUnitMetadata owner)
@@ -439,16 +436,27 @@ public class UndeadTargetingComponent extends UnitComponent
       recordNote("onAttackTimer", "Awaiting order")
       return
 
-    // If the timer has expired then this unit hasn't been able to attack
-    // it's target in a while so try to target a new enemy
-    recordNote("onAttackTimer", "Timer has expired, issuing new order")
+    recordNote("onAttackTimer", "Timer has expired")
 
-    let currentPos = getOwnerUnit().getPos()
+    // Distance to target unit is way too far to walk all the way there, just teleport
+    if (m_targetUnit != null and tryTeleportCloserToTargetUnit())
+      recordNote("onAttackTimer", "Teleporting to the target")
 
-    if (currentPos.distanceToSq(m_lastPos) < ATTACK_TIMER_DISTANCE_THRESHOLD_SQ)
-      issueOrderTargetingNewPlayerUnit()
+    recordNote("onAttackTimer", "Issuing new order")
+    issueOrderTargetingNewPlayerUnit()
 
-    m_lastPos = currentPos
+  // --------------------------------------------------------------------------
+  private function tryTeleportCloserToTargetUnit() returns bool
+    let targetUnitPos = m_targetUnit.getPos()
+    if (targetUnitPos.distanceToSq(getOwnerUnit().getPos()) < TELEPORT_DISTANCE_THRESHOLD_SQ)
+      return false
+    let spawnPointProvider = getHostileSpawnPointProviderForPlayer(m_targetPlayer)
+    if (spawnPointProvider != null)
+      let spawnPointResult = spawnPointProvider.getRandomSpawnPointInRange(targetUnitPos, SpawnRange.CLOSE)
+      if (spawnPointResult.succeeded)
+        getOwnerUnit().setPos(spawnPointResult.spawnPoint)
+        return true
+    return false
 
   // --------------------------------------------------------------------------
   protected function restartAttackTimer()
@@ -457,7 +465,6 @@ public class UndeadTargetingComponent extends UnitComponent
         onAttackTimer()
     else
       m_attackTimer.restart(ATTACK_TIMER_DURATION_RANGE.getRandom())
-    m_lastPos = getOwnerUnit().getPos()
 
   // --------------------------------------------------------------------------
   private function startDOT()
@@ -509,7 +516,6 @@ class PlayerData
     m_structureTargets = CreateGroup()
     m_structureTargets_LowPri = CreateGroup()
     m_structureTargets_HighPri = CreateGroup()
-    populateInitializeStructureTargets()
 
     // offset by player id so that one player's structure targets are sorted every second
     let period = g_PlayingHumanPlayerCount.toReal()
@@ -518,8 +524,14 @@ class PlayerData
         sortStructureTargets()
 
   // --------------------------------------------------------------------------
+  function clear()
+    m_structureTargets.clear()
+    m_structureTargets_LowPri.clear()
+    m_structureTargets_HighPri.clear()
+
+  // --------------------------------------------------------------------------
   function registerPlayerTargetStructure(unit targetStructure)
-    if (not unitIsValidTargetStructure(targetStructure))
+    if (not unitIsValidTargetStructure(targetStructure) or not canAcceptNewStructures())
       return
     m_structureTargets.addUnit(targetStructure)
     m_structureTargets.refresh()
@@ -533,13 +545,18 @@ class PlayerData
     unregisterTargetedUnit(targetStructure)
 
   // --------------------------------------------------------------------------
-  function populateInitializeStructureTargets()
-    m_structureTargets.clear()
-    m_structureTargets.enumUnitsOfPlayer(m_player, g_filterUnitIsValidTargetStructure)
-    sortStructureTargets()
+  function getClosestStructureTarget(vec2 pos) returns unit
+
+    if (not m_structureTargets_HighPri.isEmpty())
+      return m_structureTargets_HighPri.getClosestUnit(pos)
+
+    if (not m_structureTargets_LowPri.isEmpty())
+      return m_structureTargets_LowPri.getClosestUnit(pos)
+    
+    return null
 
   // --------------------------------------------------------------------------
-  function sortStructureTargets()
+  private function sortStructureTargets()
     // Log.debug(m_player.getId().toString() + " Sorting structure targets")
 
     m_structureTargets_HighPri.clear()
@@ -555,15 +572,11 @@ class PlayerData
     //}
 
   // --------------------------------------------------------------------------
-  function getClosestStructureTarget(vec2 pos) returns unit
-
-    if (not m_structureTargets_HighPri.isEmpty())
-      return m_structureTargets_HighPri.getClosestUnit(pos)
-
-    if (not m_structureTargets_LowPri.isEmpty())
-      return m_structureTargets_LowPri.getClosestUnit(pos)
-    
-    return null
+  private function canAcceptNewStructures() returns bool
+    if (not m_player.isIngame())
+      return false
+    let playerMetadata = m_player.getMetadata()
+    return playerMetadata != null and not playerMetadata.getHasLeftGame() and not playerMetadata.getHasLostGame()
 
 // ============================================================================
 function getPlayerData(player p) returns PlayerData
@@ -575,7 +588,7 @@ function getPlayerData(player p) returns PlayerData
 
 // ============================================================================
 function unitIsValidTargetStructure(unit u) returns bool
-  return u.isAlive() and u.isStructure() //g_validTargetStructureIds.has(u.getTypeId())
+  return u.isAlive() and u.isStructure() and u.isBuildingUndeadTarget()
 
 // ============================================================================
 function filterUnitIsValidTargetStructure() returns bool
@@ -600,24 +613,6 @@ public function unregisterPlayerTargetStructure(unit targetStructure)
   let owningPlayer = targetStructure.getOwner()
   if (owningPlayer.isHumanPlayer())
     getPlayerData(owningPlayer).unregisterPlayerTargetStructure(targetStructure)
-
-// ============================================================================
-function onUnitIndexed()
-  let indexingUnit = getIndexingUnit()
-  if (indexingUnit.getOwner().isHumanPlayer() and indexingUnit.isStructure())
-    registerPlayerTargetStructure(indexingUnit)
-
-// ============================================================================
-function onUnitDeindexed()
-  let indexingUnit = getIndexingUnit()
-  if (indexingUnit.getOwner().isHumanPlayer() and indexingUnit.isStructure())
-    unregisterPlayerTargetStructure(indexingUnit)
-
-// ============================================================================
-function onUnitDeath()
-  let dyingUnit = GetDyingUnit()
-  if (dyingUnit.getOwner().isHumanPlayer() and dyingUnit.isStructure())
-    unregisterPlayerTargetStructure(dyingUnit)
 
 // ============================================================================
 function onUnitAttacked()
@@ -728,6 +723,20 @@ function issueOrders()
   g_numberOfTimesIssueOrdersEndCalled++
 
 // ============================================================================
+function onPlayerLeft()
+  let leavingPlayer = getLeavingPlayer()
+  let playerData = getPlayerData(leavingPlayer)
+  if (playerData != null)
+    playerData.clear()
+
+// ============================================================================
+function onPlayerLost()
+  let losingPlayer = getLosingPlayer()
+  let playerData = getPlayerData(losingPlayer)
+  if (playerData != null)
+    playerData.clear()
+
+// ============================================================================
 class UTCDebugger extends TLSFrame
   private framehandle m_textArea
   private unit m_selectedUnit
@@ -793,7 +802,6 @@ class UTCDebugger extends TLSFrame
     BlzFrameAddText(m_textArea, "Failed Order : " + utc.m_orderFailedReason)
     BlzFrameAddText(m_textArea, "Times Failed Order : " + utc.m_numberOfTimesFailedOrder.toString())
     BlzFrameAddText(m_textArea, "Attack Timer Expired : " + utc.m_numberOfTimesAttackTimerExpired.toString())
-    BlzFrameAddText(m_textArea, "Distance Moved : " + utc.getOwnerUnit().getPos().distanceTo(utc.m_lastPos).toString())
     BlzFrameAddText(m_textArea, "Order : {0} ({1})".format(OrderId2String(GetUnitCurrentOrder(utc.getOwnerUnit())), GetUnitCurrentOrder(utc.getOwnerUnit()).toString()))
     BlzFrameAddText(m_textArea, "In DOT Group : " + utc.getIsInDOTGroup().toString())
 
@@ -807,52 +815,15 @@ class UTCDebugger extends TLSFrame
         BlzFrameAddText(m_textArea, note)
 
 // ============================================================================
-function onIssuedOrder()
-  let orderedUnit = GetOrderedUnit()
-  let comp = orderedUnit.getUndeadTargetingComponent()
-  if (comp == null)
-    return
-  if (GetTriggerEventId() == EVENT_PLAYER_UNIT_ISSUED_ORDER)
-    comp.recordNote("onIssuedOrder", "Issued order: {0} ({1})".format(OrderId2String(orderedUnit.getCurrentOrder()), orderedUnit.getCurrentOrder().toString()))
-  if (GetTriggerEventId() == EVENT_PLAYER_UNIT_ISSUED_POINT_ORDER)
-    comp.recordNote("onIssuedOrder", "Issued point order: {0} ({1}) -> [{2}, {3}]".format(OrderId2String(orderedUnit.getCurrentOrder()), orderedUnit.getCurrentOrder().toString(), GetOrderPointX().toString(), GetOrderPointY().toString()))
-  if (GetTriggerEventId() == EVENT_PLAYER_UNIT_ISSUED_UNIT_ORDER)
-    comp.recordNote("onIssuedOrder", "Issued unit order: {0} ({1}) -> {2}".format(OrderId2String(orderedUnit.getCurrentOrder()), orderedUnit.getCurrentOrder().toString(), GetOrderTargetUnit().getName()))
-
-  // if (GetIssuedOrderId() == 851974)
-  //   orderedUnit.issueImmediateOrderById(Orders.stop)
-  //   comp.tryIssueOrder()
-
-// ============================================================================
 init
 
-  g_validTargetStructureIds = new HashList<int>()
-  ..add(TlsUnitIds.barricade1)
-  ..add(TlsUnitIds.barricade2)
-  ..add(TlsUnitIds.barricade3)
-  ..add(TlsUnitIds.barricade4)
-  ..add(TlsUnitIds.scoutTower1)
-  ..add(TlsUnitIds.scoutTower2)
-  ..add(TlsUnitIds.scoutTower3)
-  ..add(TlsUnitIds.scoutTower4)
-  ..add(TlsUnitIds.scoutTower5)
-  ..addAll(g_woodFenceIds)
-  ..addAll(g_stoneWallIds)
-  ..addAll(g_brickWallIds)
-  ..addAll(g_metalWallIds)
-  ..addAll(g_allGateIds)
-
-  onUnitIndex(() -> onUnitIndexed())
-  onUnitDeindex(() -> onUnitDeindexed())
-  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_DEATH, function onUnitDeath)
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ATTACKED, function onUnitAttacked)
-  
-  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ISSUED_ORDER, function onIssuedOrder)
-  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ISSUED_POINT_ORDER, function onIssuedOrder)
-  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ISSUED_TARGET_ORDER, function onIssuedOrder)
 
   doPeriodically(UPDATE_INTERVAL, (CallbackPeriodic cb) -> issueOrders())
   doPeriodically(DOT_INTERVAL, (CallbackPeriodic cb) -> applyDOT())
+
+  onPlayerLost(() -> onPlayerLost())
+  onPlayerLeft(() -> onPlayerLeft())
 
   if (DEV_ENVIRONMENT)
   //{
