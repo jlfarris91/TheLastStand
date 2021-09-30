@@ -23,9 +23,8 @@ import GroupExtensions
 import BuildingUndeadTarget
 import PlayerSpawnPointProviders
 import SpawnManager
-import initlater OnPlayerHeroDied
 
-constant rangeReal ATTACK_TIMER_DURATION_RANGE = rangeReal(5.0, 10.0)
+constant rangeReal ATTACK_TIMER_DURATION_RANGE = rangeReal(1.0, 3.0)
 constant real ATTACK_TIMER_DISTANCE_THRESHOLD = 128.0
 constant real ATTACK_TIMER_DISTANCE_THRESHOLD_SQ = ATTACK_TIMER_DISTANCE_THRESHOLD * ATTACK_TIMER_DISTANCE_THRESHOLD
 constant real TELEPORT_DISTANCE_THRESHOLD = SPAWN_RANGE_FAR.max
@@ -91,6 +90,7 @@ public class UndeadTargetingComponent extends UnitComponent
   protected Vector<string> m_notes
   protected int m_numberOfTimesFailedOrder = 0
   protected int m_numberOfTimesAttackTimerExpired = 0
+  protected vec2 m_lastPos
 
   // --------------------------------------------------------------------------
   construct(IUnitMetadata owner)
@@ -117,6 +117,7 @@ public class UndeadTargetingComponent extends UnitComponent
   override function onEnabled()
     super.onEnabled()
     m_baseAttackRange = getOwnerUnit().getFieldWeapon(UNIT_WEAPON_RF_ATTACK_RANGE, 0)
+    m_lastPos = getOwnerUnit().getPos()
 
   // --------------------------------------------------------------------------
   override function onDisabled()
@@ -278,6 +279,8 @@ public class UndeadTargetingComponent extends UnitComponent
 
     restartAttackTimer()
 
+    tryTeleportCloserToTargetUnit()
+
     if (not tryIssueOrder())
       m_orderFailedReason = "Failed to issue attack order"
       m_numberOfTimesFailedOrder++
@@ -438,12 +441,23 @@ public class UndeadTargetingComponent extends UnitComponent
 
     recordNote("onAttackTimer", "Timer has expired")
 
-    // Distance to target unit is way too far to walk all the way there, just teleport
+    // Distance to target unit is way too far to walk all the way there, teleport closer.
+    // We want to check this regularly so we might as well check it here.
     if (tryTeleportCloserToTargetUnit())
-      recordNote("onAttackTimer", "Teleporting to the target")
+      recordNote("onAttackTimer", "Issuing new order")
+      issueOrderTargetingNewPlayerUnit()
 
-    recordNote("onAttackTimer", "Issuing new order")
-    issueOrderTargetingNewPlayerUnit()
+    // If the unit is standing still and hasn't attacked anything since the last attack timer
+    // then issue a new order, otherwise give them a chance to get to their target
+    else if (getOwnerUnit().getPos().distanceToSq(m_lastPos) < ATTACK_TIMER_DISTANCE_THRESHOLD_SQ)
+      recordNote("onAttackTimer", "Issuing new order")
+      issueOrderTargetingNewPlayerUnit()
+    
+    // Otherwise, restart the attack timer to check again later
+    else
+      restartAttackTimer()
+
+    m_lastPos = getOwnerUnit().getPos()
 
   // --------------------------------------------------------------------------
   private function tryTeleportCloserToTargetUnit() returns bool
@@ -452,14 +466,21 @@ public class UndeadTargetingComponent extends UnitComponent
     let targetUnitPos = m_targetUnit.getPos()
     if (targetUnitPos == ZERO2)
       return false
-    if (targetUnitPos.distanceToSq(getOwnerUnit().getPos()) < TELEPORT_DISTANCE_THRESHOLD_SQ)
+    let ownerUnit = getOwnerUnit()
+    if (targetUnitPos.distanceToSq(ownerUnit.getPos()) < TELEPORT_DISTANCE_THRESHOLD_SQ)
       return false
     let spawnPointProvider = getHostileSpawnPointProviderForPlayer(m_targetPlayer)
     if (spawnPointProvider != null)
       let spawnPointResult = spawnPointProvider.getRandomSpawnPointInRange(targetUnitPos, SpawnRange.CLOSE)
       if (spawnPointResult.succeeded)
-        getOwnerUnit().setPos(spawnPointResult.spawnPoint)
+        recordNote("onAttackTimer", "Teleporting to the target")
+        ownerUnit.fadeIn()
+        //dispatch(0.1) (UndeadTargetingComponent comp) ->
+        ownerUnit.setPos(spawnPointResult.spawnPoint)
+        m_lastPos = ownerUnit.getPos()
         return true
+      else
+        recordNote("onAttackTimer", "Wants to teleport but found no spawn point near target")
     return false
 
   // --------------------------------------------------------------------------
@@ -529,6 +550,7 @@ class PlayerData
 
   // --------------------------------------------------------------------------
   function clear()
+
     m_structureTargets_LowPri.clear()
     m_structureTargets_HighPri.clear()
     
@@ -730,14 +752,14 @@ function issueOrders()
   g_numberOfTimesIssueOrdersEndCalled++
 
 // ============================================================================
-function onPlayerLeft()
+function clearLeavingPlayerData()
   let leavingPlayer = getLeavingPlayer()
   let playerData = getPlayerData(leavingPlayer)
   if (playerData != null)
     playerData.clear()
 
 // ============================================================================
-function onPlayerLost()
+function clearLosingPlayerData()
   let losingPlayer = getLosingPlayer()
   let playerData = getPlayerData(losingPlayer)
   if (playerData != null)
@@ -809,6 +831,7 @@ class UTCDebugger extends TLSFrame
     BlzFrameAddText(m_textArea, "Failed Order : " + utc.m_orderFailedReason)
     BlzFrameAddText(m_textArea, "Times Failed Order : " + utc.m_numberOfTimesFailedOrder.toString())
     BlzFrameAddText(m_textArea, "Attack Timer Expired : " + utc.m_numberOfTimesAttackTimerExpired.toString())
+    BlzFrameAddText(m_textArea, "Distance Moved : " + utc.getOwnerUnit().getPos().distanceTo(utc.m_lastPos).toString())
     BlzFrameAddText(m_textArea, "Order : {0} ({1})".format(OrderId2String(GetUnitCurrentOrder(utc.getOwnerUnit())), GetUnitCurrentOrder(utc.getOwnerUnit()).toString()))
     BlzFrameAddText(m_textArea, "In DOT Group : " + utc.getIsInDOTGroup().toString())
 
@@ -829,8 +852,8 @@ init
   doPeriodically(UPDATE_INTERVAL, (CallbackPeriodic cb) -> issueOrders())
   doPeriodically(DOT_INTERVAL, (CallbackPeriodic cb) -> applyDOT())
 
-  onPlayerLost(() -> onPlayerLost())
-  onPlayerLeft(() -> onPlayerLeft())
+  onPlayerLost(() -> clearLosingPlayerData())
+  onPlayerLeft(() -> clearLeavingPlayerData())
 
   if (DEV_ENVIRONMENT)
   //{
