@@ -1,6 +1,6 @@
 package Survivors
 import TlsUnitIds
-import HumanPlayerMetadata
+import HumanPlayerComponent
 import UnitMetadata
 import WeightedSet
 import DisplayTextToPlayer
@@ -12,30 +12,25 @@ import ClosureTimers
 import GameConstants
 import FX
 import Bounds
-import BoundsExtensions
 import Range
 import HumanPlayers
-import FriendlyCircularCachedSpawnManager
 import RandomSpawnPointProvider
 import UnitExtensions
 import SurvivorJobs
 import SurvivorComponent
-import initlater SurvivorJobPanel
 import PlayerExtensions
 import Math
 import GameInstance
+import FriendlyGridCachedSpawnManager
 
 group g_tempGroup = CreateGroup()
+WeightedSet<SurvivorJobDefinition> g_weightedSurvivorJobSet
 
 // ============================================================================
 public class SurvivorUtility
     
   // --------------------------------------------------------------------------
   static function orderSelectedUnitsToActivateJob(player owner, SurvivorJobDefinition job)
-    
-    let survivorJobPanel = getSurvivorJobPanel(owner)
-    if (survivorJobPanel != null)
-      survivorJobPanel.batchUpdates(true)
 
     let selectedUnits = owner.getSelectedUnits()
 
@@ -53,15 +48,8 @@ public class SurvivorUtility
 
     destroy selectedUnits
 
-    if (survivorJobPanel != null)
-      survivorJobPanel.batchUpdates(false)
-
   // --------------------------------------------------------------------------
   static function orderSelectedUnitsToUnlearnJob(player owner, SurvivorJobDefinition job)
-    
-    let survivorJobPanel = getSurvivorJobPanel(owner)
-    if (survivorJobPanel != null)
-      survivorJobPanel.batchUpdates(true)
 
     let selectedUnits = owner.getSelectedUnits()
 
@@ -76,16 +64,9 @@ public class SurvivorUtility
     //}
   
     destroy selectedUnits
-
-    if (survivorJobPanel != null)
-      survivorJobPanel.batchUpdates(false)
     
   // --------------------------------------------------------------------------
   static function orderSelectedUnitsToToggleActivateJob(player owner)
-    
-    let survivorJobPanel = getSurvivorJobPanel(owner)
-    if (survivorJobPanel != null)
-      survivorJobPanel.batchUpdates(true)
 
     let selectedUnits = owner.getSelectedUnits()
 
@@ -124,8 +105,22 @@ public class SurvivorUtility
 
     destroy selectedUnits
 
-    if (survivorJobPanel != null)
-      survivorJobPanel.batchUpdates(false)
+  // --------------------------------------------------------------------------
+  static function spawnSurvivorWithRandomJob(player forPlayer, vec2 pos) returns unit
+    return spawnSurvivorWithRandomJob(forPlayer, pos, g_weightedSurvivorJobSet)
+
+  // --------------------------------------------------------------------------
+  static function spawnSurvivorWithRandomJob(player forPlayer, vec2 pos, WeightedSet<SurvivorJobDefinition> jobSet) returns unit
+
+    let survivor = createUnitTLS(forPlayer, jobSet.getRandom().getInitialUnitType(), pos, GetRandomDirectionDeg())
+
+    // Scale survivor level with game progress
+    let gameProgress01 = clamp01(g_GameInstance.getGameProgress01())
+    let survivorLevel = SURVIVORS_SPAWN_LEVEL_RANGE.lerp(gameProgress01).floor()
+    if (survivorLevel > 1)
+      survivor.setLevel(survivorLevel, false)
+
+    return survivor
 
   // --------------------------------------------------------------------------
   static function spawnSurvivorUnitForPlayer(player _player) returns unit
@@ -134,9 +129,22 @@ public class SurvivorUtility
       argumentNullError("_player")
       return null
 
-    let playerMetadata = _player.getHumanMetadataRequired()
-    if (playerMetadata.getIsHeroDead())
-      Log.debug("[spawnSurvivorUnitForPlayer] Player {0} is dead".format(_player.getName()))
+    let playerMetadata = _player.getMetadata()
+    if (playerMetadata == null)
+      Log.debug("[spawnSurvivorUnitForPlayer] Player {0} has no metadata")
+      return null
+
+    if (playerMetadata.getHasLostGame())
+      Log.debug("[spawnSurvivorUnitForPlayer] Player {0} has lost the game")
+      return null
+
+    if (playerMetadata.getHasLeftGame())
+      Log.debug("[spawnSurvivorUnitForPlayer] Player {0} has left the game")
+      return null
+
+    let playerHumanComp = playerMetadata.getHumanPlayerComponent()
+    if (playerHumanComp == null)
+      Log.debug("[spawnSurvivorUnitForPlayer] Player {0} has no human player component")
       return null
 
     let spawnPointResult = getSpawnPoint(_player)
@@ -146,24 +154,9 @@ public class SurvivorUtility
       doAfter(1.0, () -> spawnSurvivorUnitForPlayer(_player))
       return null
 
-    let weightedSet = new WeightedSet<int>()
-    ..add(TlsUnitIds.Survivors.survivorMale, 50)
-    ..add(TlsUnitIds.Survivors.survivorMilitia1, 1)
-    ..add(TlsUnitIds.Survivors.survivorSpearman1, 1)
-    ..add(TlsUnitIds.Survivors.survivorMedic1, 1)
-    ..add(TlsUnitIds.Survivors.survivorAcolyte1, 1)
-    ..add(TlsUnitIds.Survivors.survivorMarksman1, 1)
-    ..add(TlsUnitIds.Survivors.survivorEngineer1, 1)
+    let survivor = spawnSurvivorWithRandomJob(_player, spawnPointResult.spawnPoint, g_weightedSurvivorJobSet)
 
-    let survivor = createUnitTLS(_player, weightedSet.getRandom(), spawnPointResult.spawnPoint, GetRandomDirectionDeg())
-
-    // Scale survivor level with game progress
-    let gameProgress01 = clamp01(g_GameInstance.getGameProgress01())
-    let survivorLevel = SURVIVORS_SPAWN_LEVEL_RANGE.lerp(gameProgress01).floor()
-    if (survivorLevel > 1)
-      survivor.setLevel(survivorLevel, false)
-
-    survivor.issuePointOrderById(OrderIds.move, playerMetadata.getCampCenter())
+    survivor.issuePointOrderById(OrderIds.move, playerHumanComp.getCampCenter())
     
     let message = "{0} {1} has joined your camp!".format(
       survivor.getName().colorize(Colors.gold),
@@ -233,11 +226,17 @@ public class SurvivorUtility
 
 // ============================================================================
 function getSpawnPoint(player p) returns spawnPointResult
+
+  let playerHumanComp = p.getHumanPlayerComponent()
+  if (playerHumanComp == null)
+    return spawnPointResult(false, ZERO2)
+
   let currentSpawnManager = getPlayerCachedFriendlySpawnManager(p)
   let fallbackSpawnManager = getPlayerSurvivorSpawnManager(p)
-  let spawnPointProvider = new RandomSpawnPointProvider(currentSpawnManager, fallbackSpawnManager, SpawnRange.CLOSE)
-  let result = spawnPointProvider.getSpawnPoint()
+  let spawnPointProvider = new RandomSpawnPointProvider(currentSpawnManager, fallbackSpawnManager)
+  let result = spawnPointProvider.getRandomSpawnPointInRange(playerHumanComp.getCampCenter(), SpawnRange.CLOSE)
   destroy spawnPointProvider
+  
   return result
 
 // ============================================================================
@@ -251,3 +250,15 @@ public function unit.isUnrescuedSurvivor() returns bool
 // ============================================================================
 public function unit.isRescuableSurvivor() returns bool
   return this.isUnrescuedSurvivor()
+
+// ============================================================================
+init
+  g_weightedSurvivorJobSet = new WeightedSet<SurvivorJobDefinition>()
+    ..add(SurvivorJobs.none, 50)
+    // ..add(SurvivorJobs.builder, 1)
+    // ..add(SurvivorJobs.militia, 1)
+    // ..add(SurvivorJobs.spearman, 1)
+    // ..add(SurvivorJobs.medic, 1)
+    // ..add(SurvivorJobs.marksman, 1)
+    // ..add(SurvivorJobs.acolyte, 1)
+    // ..add(SurvivorJobs.engineer, 1)

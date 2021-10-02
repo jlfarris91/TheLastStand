@@ -1,0 +1,158 @@
+package HoldingZombieComponent
+import RealtimeUnitComponent
+import ColorUtility
+import ClosureTimers
+import AbomUtils
+import ThrowZombieComponent
+import Events
+import UndeadTargetingComponent
+
+constant real HOLD_DURATION = 2.0
+constant string ALERT_EFFECT = "Abilities\\Spells\\Other\\TalkToMe\\TalkToMe.mdl"
+
+// ============================================================================
+public class HoldingZombieComponent extends UnitComponent
+  private unit m_heldZombie
+  private effect m_alertEffect
+  private CallbackSingle m_throwZombieTimer = null
+  private int m_throwFailedCount = 0
+
+  Event zombieDroppedEvent = null
+
+  // --------------------------------------------------------------------------
+  construct(IUnitMetadata metadata)
+    super(metadata)
+    zombieDroppedEvent = new Event()
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    destroy zombieDroppedEvent
+    zombieDroppedEvent = null
+    
+    if (m_throwZombieTimer != null)
+      destroy m_throwZombieTimer
+      m_throwZombieTimer = null
+
+  // --------------------------------------------------------------------------
+  function getHeldZombie() returns unit
+    return m_heldZombie
+
+  // --------------------------------------------------------------------------
+  function setHeldZombie(unit zombie)
+    m_heldZombie = zombie
+    if (zombie != null)
+      Log.debug("HoldingZombieComp", "setHeldZombie", "", zombie.getName())
+      showHeldZombieEffect()
+    else
+      Log.debug("HoldingZombieComp", "setHeldZombie", "", "null")
+      hideHeldZombieEffect()
+
+  // --------------------------------------------------------------------------
+  function dropZombie()
+    dropZombieAtPos(getOwnerUnit().getPos(), GetRandomDirectionDeg().asAngleDegrees())
+
+  // --------------------------------------------------------------------------
+  function dropZombieAtPos(vec2 pos, angle facingAngle)
+    let zombie = m_heldZombie
+    if (zombie == null)
+      return
+    Log.debug("HoldingZombieComp", "dropZombieAtPos", "", "")
+    m_heldZombie = null
+    m_throwFailedCount = 0
+    unsuspendAndShowZombie(zombie, pos, facingAngle)
+    zombieDroppedEvent.call()
+
+  // --------------------------------------------------------------------------
+  protected override function onEnabled()
+    super.onEnabled()
+    showAlertEffect()
+    showHeldZombieEffect()
+    startThrowTimer()
+
+    Log.debug("HoldingZombieComp", "onEnabled", "", "Enabled")
+
+  // --------------------------------------------------------------------------
+  protected override function onDisabled()
+    super.onDisabled()
+    hideAlertEffect()
+    hideHeldZombieEffect()
+    dropZombie()
+
+    m_throwZombieTimer = null
+
+    Log.debug("HoldingZombieComp", "onDisabled", "", "Disabled")
+
+  // --------------------------------------------------------------------------
+  private function startThrowTimer()
+
+    if (m_throwZombieTimer != null)
+      return
+
+    Log.debug("HoldingZombieComp", "startThrowTimer", "", "")
+
+    m_throwZombieTimer = dispatch(HOLD_DURATION) (HoldingZombieComponent comp) ->
+    //{
+      m_throwZombieTimer = null
+      Log.debug("HoldingZombieComp", "startThrowTimer", "", "throw timer expired")
+      if (not tryThrowZombie())
+      //{
+        m_throwFailedCount++
+        Log.debug("HoldingZombieComp", "startThrowTimer", "", "tryThrowZombie failed " + m_throwFailedCount.toString())
+        if (m_throwFailedCount >= 3)
+          Log.debug("HoldingZombieComp", "startThrowTimer", "", "dropping zombie")
+          dropZombie()
+        else
+          startThrowTimer()
+
+        // try to move closer to any targettable unit
+        let utc = getOwner().getUndeadTargetingComponent()
+        if (utc != null)
+          var targetUnit = utc.getTargetUnit()
+          if (targetUnit == null)
+            targetUnit = utc.getNearestTargettableUnit()
+          if (targetUnit != null)
+            getOwnerUnit().issuePointOrder("move", targetUnit.getPos())
+      //}
+      else
+        m_throwFailedCount = 0
+        Log.debug("HoldingZombieComp", "startThrowTimer", "", "tryThrowZombie succeeded")
+    //}
+
+  // --------------------------------------------------------------------------
+  private function tryThrowZombie() returns bool
+    let throwZombieComp = getOwner().getOrAddThrowZombieComponent()
+    if (throwZombieComp == null)
+      return false
+    return throwZombieComp.tryThrowZombieAtNearestTarget()
+
+  // --------------------------------------------------------------------------
+  private function showAlertEffect()
+    if (m_alertEffect == null)
+      m_alertEffect = AddSpecialEffectTargetUnitBJ("overhead", getOwnerUnit(), ALERT_EFFECT)
+        ..setColor(Colors.red)
+
+  // --------------------------------------------------------------------------
+  private function hideAlertEffect()
+    if (m_alertEffect != null)
+      m_alertEffect.setAlpha(0)
+      m_alertEffect.destr()
+      m_alertEffect = null
+
+  // --------------------------------------------------------------------------
+  private function showHeldZombieEffect()
+    getOwnerUnit().addAnimationProperties("alternate", true)
+
+  // --------------------------------------------------------------------------
+  private function hideHeldZombieEffect()
+    getOwnerUnit().addAnimationProperties("alternate", false)
+
+// ============================================================================
+public function IUnitMetadata.getHoldingZombieComponent() returns HoldingZombieComponent
+  return this.getComponent(HoldingZombieComponent.typeId) castTo HoldingZombieComponent
+
+// ============================================================================
+public function IUnitMetadata.getOrAddHoldingZombieComponent() returns HoldingZombieComponent
+  var component = this.getHoldingZombieComponent()
+  if (component == null)
+    component = this.addComponent(new HoldingZombieComponent(this), false) castTo HoldingZombieComponent
+  return component

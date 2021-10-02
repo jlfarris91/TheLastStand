@@ -4,7 +4,6 @@ import Statistic
 import SurvivorJobs
 import SurvivorJobComponent
 import DisplayTextToPlayer
-import ClosureTimers
 import MainItemLibrary
 import RangedTargetXpReceieverComponent
 import PersistActiveAbilityComponent
@@ -76,10 +75,6 @@ public class SurvivorComponent extends UnitComponent
   ondestroy
     destroy m_stats
     m_stats = null
-
-  // --------------------------------------------------------------------------
-  override function getTypeId() returns int
-    return SurvivorComponent.typeId
 
   // --------------------------------------------------------------------------
   function getName() returns string
@@ -211,10 +206,7 @@ public class SurvivorComponent extends UnitComponent
     job.setIsJobKnownToPlayer(ownerUnit.getOwner(), true)
 
     let replacementUnitId = jobComponent.getUnitId()
-    let replacedUnit = replaceUnit(replacementUnitId)
-
-    // Let the replaced unit settle before saying the job has been succesfully changed
-    nullTimer(() -> postJobChange_static(ownerUnit, replacedUnit))
+    replaceUnit(replacementUnitId)
 
     return true
 
@@ -237,8 +229,6 @@ public class SurvivorComponent extends UnitComponent
 
     resetExperienceIfPromoting(ownerUnit, nextUnitId)
 
-    let replacedUnit = replaceUnit(nextUnitId)
-
     // There is a bug with upgrading non-building units where the player is not
     // charged for the upgrade - so do that now.
     let nextUnitDef = getUnitDefinition(nextUnitId)
@@ -250,8 +240,7 @@ public class SurvivorComponent extends UnitComponent
       Log.error("SurvivorComponent", "upgradeActiveJob", ownerUnit.getName(), "No definition registered for unit type {0}".format(nextUnitId.toString()))
       return false
 
-    // Let the replaced unit settle before saying the job has been succesfully changed
-    nullTimer(() -> postJobChange_static(ownerUnit, replacedUnit))
+    replaceUnit(nextUnitId)
 
     return true
 
@@ -312,28 +301,11 @@ public class SurvivorComponent extends UnitComponent
     raiseSurvivorJobPreChangeEvent(oldUnit)
 
   // --------------------------------------------------------------------------
-  private static function postJobChange_static(unit oldUnit, unit newUnit)
-
-    let metadata = newUnit.getMetadata()
-    if (metadata != null)
-    //{
-      let survivorComp = metadata.getSurvivorComponent()
-      if (survivorComp != null)
-        survivorComp.postJobChange(newUnit)
-      else
-        Log.debug("SurvivorComponent", "postJobChange_static", newUnit.getHandleId().toString(), "Unit does not have a Survivor component!")
-    //}
-    else
-    //{
-      Log.debug("SurvivorComponent", "postJobChange_static", newUnit.getHandleId().toString(), "Unit does not have metadata!")
-    //}
+  private function postJobChange(unit oldUnit, unit newUnit)
 
     // We need to raise this no matter what, even if there is an error above, otherwise the job panel will get stuck
     // waiting for the job change to end
     raiseSurvivorJobPostChangeEvent(oldUnit, newUnit)
-
-  // --------------------------------------------------------------------------
-  private function postJobChange(unit newUnit)
 
     if (newUnit == null)
       return
@@ -369,6 +341,12 @@ public class SurvivorComponent extends UnitComponent
     return replacedUnit
 
   // --------------------------------------------------------------------------
+  override function onUnitChanged(unit oldUnit, unit newUnit)
+
+    if (oldUnit != null and newUnit != null)
+      postJobChange(oldUnit, newUnit)
+
+  // --------------------------------------------------------------------------
   private function updateUnitProperName()
     getOwnerUnit().setProperName(getName())
 
@@ -388,7 +366,7 @@ public class SurvivorComponent extends UnitComponent
 
 // ============================================================================
 public function IUnitMetadata.getSurvivorComponent() returns SurvivorComponent
-  return this.getComponent(typeInfo(SurvivorComponent.typeId)) castTo SurvivorComponent
+  return this.getComponent(SurvivorComponent.typeId) castTo SurvivorComponent
 
 // ============================================================================
 public function IUnitMetadata.getOrAddSurvivorComponent() returns SurvivorComponent

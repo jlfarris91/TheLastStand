@@ -1,0 +1,191 @@
+package GrabZombieComponent
+import UnitComponent
+import ClosureTimers
+import TargetUtility
+import TlsUnitIds
+import Orders
+import UndeadTargetingComponent
+import ClosureEvents
+import TlsAbilityIds
+import Events
+
+constant int GRAB_ZOMBIE_ABIL_ID = TlsAbilityIds.abomGrabZombie
+constant int GRAB_ZOMBIE_ORDER_ID = OrderIds.charm
+
+constant real IDLE_RADIUS = 128.0
+constant real IDLE_RADIUS_SQ = IDLE_RADIUS*IDLE_RADIUS
+constant real IDLE_TIME_TO_GRAB = 10.0
+constant real GRABBING_ZOMBIE_TIMEOUT = 5.0
+
+constant real ANIM_GRAB_POINT = 0.4
+
+constant conditionfunc g_isFilterUnitAnAliveZombieCondition = Condition(function isFilterUnitAnAliveZombie)
+
+// ============================================================================
+public class GrabZombieComponent extends UnitComponent
+  private bool m_grabbingZombie
+  private CallbackSingle m_grabZombieTimer
+  private CallbackSingle m_grabZombieTimoutTimer
+
+  Event1<unit> grabbingZombieEvent
+  Event1<unit> zombieGrabbedEvent
+
+  // --------------------------------------------------------------------------
+  construct(IUnitMetadata metadata)
+    super(metadata)
+    grabbingZombieEvent = new Event1<unit>()
+    zombieGrabbedEvent = new Event1<unit>()
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    destroy grabbingZombieEvent
+    grabbingZombieEvent = null
+    destroy zombieGrabbedEvent
+    zombieGrabbedEvent = null
+
+  // --------------------------------------------------------------------------
+  protected override function onEnabled()
+    super.onEnabled()
+    m_grabbingZombie = false
+    startGrabZombieTimer()
+
+    Log.debug("GrabZombieComp", "onEnabled", "", "Enabled")
+
+  // --------------------------------------------------------------------------
+  protected override function onDisabled()
+    super.onDisabled()
+    m_grabbingZombie = false
+    stopGrabZombieTimer()
+    stopGrabZombieTimeoutTimer()
+
+    Log.debug("GrabZombieComp", "onDisabled", "", "Disabled")
+    
+  // --------------------------------------------------------------------------
+  private function startGrabZombieTimer()
+    if (m_grabZombieTimer != null)
+      return
+
+    Log.debug("GrabZombieComponent", "startGrabZombieTimer", "", "")
+
+    m_grabZombieTimer = dispatch(IDLE_TIME_TO_GRAB) (GrabZombieComponent comp) ->
+    //{
+      Log.debug("GrabZombieComponent", "startGrabZombieTimer", "", "Timer expired")
+      m_grabZombieTimer = null
+      m_grabbingZombie = tryGrabZombie()
+      if (m_grabbingZombie)
+        startGrabZombieTimeoutTimer()
+      else
+        startGrabZombieTimer()
+        attackPlayer()
+    //}
+
+  // --------------------------------------------------------------------------
+  private function stopGrabZombieTimer()
+    if (m_grabZombieTimer != null)
+      destroy m_grabZombieTimer
+      m_grabZombieTimer = null
+
+  // --------------------------------------------------------------------------
+  private function startGrabZombieTimeoutTimer()
+    if (m_grabZombieTimoutTimer != null)
+      return
+
+    Log.debug("GrabZombieComponent", "startGrabZombieTimeoutTimer", "", "")
+
+    m_grabZombieTimoutTimer = dispatch(GRABBING_ZOMBIE_TIMEOUT) (GrabZombieComponent comp) ->
+    //{
+      Log.debug("GrabZombieComponent", "startGrabZombieTimeoutTimer", "", "Timer expired")
+      m_grabZombieTimoutTimer = null
+      m_grabbingZombie = false
+      startGrabZombieTimer()
+    //}
+
+  // --------------------------------------------------------------------------
+  private function stopGrabZombieTimeoutTimer()
+    if (m_grabZombieTimoutTimer != null)
+      destroy m_grabZombieTimoutTimer
+      m_grabZombieTimoutTimer = null
+
+  // --------------------------------------------------------------------------
+  private function tryGrabZombie() returns bool
+    let ownerUnit = getOwnerUnit()
+
+    let target = getNearestUnit(ownerUnit.getPos(), 512.0, g_isFilterUnitAnAliveZombieCondition)
+
+    if (target == null)
+      Log.debug("GrabZombieComponent", "tryGrabZombie", "", "Found no zombie nearby")
+      return false
+
+    Log.debug("GrabZombieComponent", "tryGrabZombie", "", "Grab zombie: " + target.getName())
+
+    if (not ownerUnit.issueTargetOrderById(GRAB_ZOMBIE_ORDER_ID, target))
+      Log.debug("GrabZombieComponent", "tryGrabZombie", "", "Failed to issue grab order")
+
+    return true
+
+  // --------------------------------------------------------------------------
+  private function attackPlayer()
+    let utc = getOwner().getUndeadTargetingComponent()
+    if (utc != null and utc.getEnabled())
+      utc.issueOrderTargetingPlayer()
+
+  // --------------------------------------------------------------------------
+  protected function doGrab(unit targetUnit)
+    Log.debug("GrabZombieComp", "doGrab", "", "Grabbing unit " + targetUnit.getName())
+
+    grabbingZombieEvent.call(targetUnit)
+
+    // "Grab" the zombie half way through the animation when the abom's hand comes closest to the target
+    dispatch(ANIM_GRAB_POINT) (GrabZombieComponent comp) ->
+    //{
+      Log.debug("GrabZombieComp", "doGrab", "", "anim grab point")
+      if (targetUnit.isAlive() == false)
+        Log.debug("GrabZombieComp", "doGrab", "", "targetUnit is no longer alive")
+      else
+        zombieGrabbedEvent.call(targetUnit)
+    //}
+
+// ============================================================================
+function isFilterUnitAnAliveZombie() returns bool
+  let u = GetFilterUnit()
+  return u.isZombie() and u.isAlive()
+
+// ============================================================================
+function onAbomSpellCast()
+  if (GetSpellAbilityId() != TlsAbilityIds.abomGrabZombie)
+    return
+
+  let target = GetSpellTargetUnit()
+  if (not target.isZombie())
+    return
+
+  let caster = GetSpellAbilityUnit()
+  let metadata = caster.getMetadata()
+  if (metadata == null)
+    return
+
+  let grabComp = metadata.getGrabZombieComponent()
+  if (grabComp == null)
+    return
+
+  if (grabComp.getEnabled() == false)
+    Log.debug("Grab component is disabled")
+    return
+
+  grabComp.doGrab(target)
+
+// ============================================================================
+public function IUnitMetadata.getGrabZombieComponent() returns GrabZombieComponent
+  return this.getComponent(GrabZombieComponent.typeId) castTo GrabZombieComponent
+
+// ============================================================================
+public function IUnitMetadata.getOrAddGrabZombieComponent() returns GrabZombieComponent
+  var component = this.getGrabZombieComponent()
+  if (component == null)
+    component = this.addComponent(new GrabZombieComponent(this), false) castTo GrabZombieComponent
+  return component
+
+// ==========================================================================
+init
+
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_SPELL_CAST, () -> onAbomSpellCast())

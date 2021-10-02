@@ -1,30 +1,29 @@
-package HumanPlayerMetadata
+package HumanPlayerComponent
 import public PlayerMetadata
+import PlayerComponent
+import UnitMetadata
 import HumanPlayers
 import ErrorHandling
 import GameConstants
 import RegisterEvents
-import LinkedList
-import HostileCircularCachedSpawnManager
-import FriendlyCircularCachedSpawnManager
 import GroupUtils
 import TlsUnitIds
 
 // ============================================================================
-public class HumanPlayerMetadata extends PlayerMetadata
+public class HumanPlayerComponent extends PlayerComponent
   private int m_kills
   private int m_score
   private unit m_hero
   private int m_heroTypeId
-  private LinkedList<unit> m_campCenterContributors
+  private group m_campCenterContributors
   private bool m_canPathToHeadquartersOrHero
   private real m_difficulty
   private real array[MAX_ELITE_TIER] m_tierChances
 
   // --------------------------------------------------------------------------
-  construct(player p)
-    super(p)
-    m_campCenterContributors = new LinkedList<unit>()
+  construct(IPlayerMetadata owner)
+    super(owner)
+    m_campCenterContributors = CreateGroup()
     m_canPathToHeadquartersOrHero = false
     m_hero = null
     m_heroTypeId = 0
@@ -32,7 +31,7 @@ public class HumanPlayerMetadata extends PlayerMetadata
 
   // --------------------------------------------------------------------------
   ondestroy
-    destroy m_campCenterContributors
+    m_campCenterContributors.destr()
 
   // --------------------------------------------------------------------------
   function getKills() returns int
@@ -57,38 +56,6 @@ public class HumanPlayerMetadata extends PlayerMetadata
   // --------------------------------------------------------------------------
   function setCanPathToHeadquartersOrHero(bool value)
     m_canPathToHeadquartersOrHero = value
-
-  // --------------------------------------------------------------------------
-  function getMaterials() returns int
-    return GetPlayerState(getPlayer(), PLAYER_STATE_RESOURCE_LUMBER)
-
-  // --------------------------------------------------------------------------
-  function setMaterials(int value)
-    SetPlayerState(getPlayer(), PLAYER_STATE_RESOURCE_LUMBER, value)
-  
-  // --------------------------------------------------------------------------
-  function giveMaterials(int value)
-    setMaterials(this.getMaterials() + value)
-
-  // --------------------------------------------------------------------------
-  function removeMaterials(int value)
-    setMaterials(IMaxBJ(this.getMaterials() - value, 0))
-
-  // --------------------------------------------------------------------------
-  function getGold() returns int
-    return GetPlayerState(getPlayer(), PLAYER_STATE_RESOURCE_GOLD)
-
-  // --------------------------------------------------------------------------
-  function setGold(int value)
-    SetPlayerState(getPlayer(), PLAYER_STATE_RESOURCE_GOLD, value)
-  
-  // --------------------------------------------------------------------------
-  function giveGold(int value)
-    setGold(getGold() + value)
-
-  // --------------------------------------------------------------------------
-  function removeGold(int value)
-    setMaterials(IMaxBJ(this.getGold() - value, 0))
 
   // --------------------------------------------------------------------------
   function getDifficulty() returns real
@@ -138,7 +105,7 @@ public class HumanPlayerMetadata extends PlayerMetadata
   function getHQOrHero() returns unit
     unit hqOrHero = null
     let temp = getGroup()
-    temp.enumUnitsOfPlayer(getPlayer(), null)
+    temp.enumUnitsOfPlayer(getOwnerPlayer(), null)
     for u in temp
     //{
       if (u.isAlive())
@@ -155,55 +122,65 @@ public class HumanPlayerMetadata extends PlayerMetadata
 
   // --------------------------------------------------------------------------
   function addCampCenter(unit centerContributor)
-    m_campCenterContributors.add(centerContributor)
-    onCampCenterChanged()
+    if (centerContributor == null)
+      argumentNullError("centerContributor")
+    m_campCenterContributors.addUnit(centerContributor)
+    Log.debug("HumanPlayerComponent", "addCampCenter", "", "Added camp center contributor ({0} total)".format(m_campCenterContributors.size().toString()))
 
   // --------------------------------------------------------------------------
   function removeCampCenter(unit centerContributor)
-    m_campCenterContributors.remove(centerContributor)
-    onCampCenterChanged()
+    if (centerContributor == null)
+      argumentNullError("centerContributor")
+    m_campCenterContributors.removeUnit(centerContributor)
+    Log.debug("HumanPlayerComponent", "removeCampCenter", "", "Removed camp center contributor ({0} total)".format(m_campCenterContributors.size().toString()))
 
   // --------------------------------------------------------------------------
   function getCampCenter() returns vec2
-    if (m_campCenterContributors.isEmpty() and m_hero != null)
-      return m_hero.getPos()
+    if (m_campCenterContributors.isEmpty())
+      if (m_hero != null)
+        return m_hero.getUnit().getPos()
+      Log.debug("HumanPlayerComponent", "getCampCenter", "", "Player {0} has no valid camp center".format(getOwnerPlayer().getName()))
+      return ZERO2
     var center = ZERO2
     for centerContributor in m_campCenterContributors
       center += centerContributor.getPos()
     center /= m_campCenterContributors.size().toReal()
     return center
 
-  // --------------------------------------------------------------------------
-  private function onCampCenterChanged()
-    let center = getCampCenter()
-    let hostileSpawnManager = getPlayerCachedHostileSpawnManager(getPlayer())
-    if (hostileSpawnManager != null)
-      hostileSpawnManager.setCenter(center)
-      hostileSpawnManager.setIsEnabled(not m_campCenterContributors.isEmpty())
-    let friendlySpawnManager = getPlayerCachedFriendlySpawnManager(getPlayer())
-    if (friendlySpawnManager != null)
-      friendlySpawnManager.setCenter(center)
-      friendlySpawnManager.setIsEnabled(not m_campCenterContributors.isEmpty())
-    Log.debug("Camp center for player " + getPlayer().getName() + " : " + center.toString())
+// ============================================================================
+public function IPlayerMetadata.getHumanPlayerComponent() returns HumanPlayerComponent
+  return this.getComponent(HumanPlayerComponent.typeId) castTo HumanPlayerComponent
 
 // ============================================================================
-public function player.getHumanMetadata() returns HumanPlayerMetadata
-  return this.getMetadata() castTo HumanPlayerMetadata
+public function IPlayerMetadata.getOrAddHumanPlayerComponent() returns HumanPlayerComponent
+  var component = this.getHumanPlayerComponent()
+  if (component == null)
+    component = this.addComponent(new HumanPlayerComponent(this)) castTo HumanPlayerComponent
+  return component
 
 // ============================================================================
-public function player.getHumanMetadataRequired() returns HumanPlayerMetadata
-  let metadata = this.getMetadata() castTo HumanPlayerMetadata
+public function player.getHumanPlayerComponent() returns HumanPlayerComponent
+  let metadata = this.getMetadata()
+  return metadata != null ? metadata.getHumanPlayerComponent() : null
+
+// ============================================================================
+public function player.getHumanPlayerComponentRequired() returns HumanPlayerComponent
+  let metadata = this.getMetadata()
   if (metadata == null)
     error("Player \"{0}\" does not have required metadata".format(this.getName()))
-  return metadata
+  let comp = metadata.getHumanPlayerComponent()
+  if (comp == null)
+    error("Player \"{0}\" does not have required component".format(this.getName()))
+  return metadata != null ? metadata.getHumanPlayerComponent() : null
 
 // ============================================================================
-public function unit.getOwnerHumanMetadata() returns HumanPlayerMetadata
-  return this.getOwnerMetadata() castTo HumanPlayerMetadata
+public function unit.getOwnerHumanPlayerComponent() returns HumanPlayerComponent
+  return this.getOwner().getHumanPlayerComponent()
 
 // ============================================================================
 function initializePlayerMetadata(player p)
-  let metadata = new HumanPlayerMetadata(p)
+  let metadata = new PlayerMetadata(p)
+  metadata.addComponent(new HumanPlayerComponent(metadata))
   registerPlayerMetadata(metadata)
 
 // ============================================================================
@@ -216,11 +193,11 @@ function onUnitKilled()
   if (not dyingPlayer.isEnemyOf(killingPlayer))
     return
 
-  let playerMetadata = killingPlayer.getHumanMetadata()
-  if (playerMetadata == null)
+  let comp = killingPlayer.getHumanPlayerComponent()
+  if (comp == null)
     return
 
-  playerMetadata.incrementKills()
+  comp.incrementKills()
 
 // ============================================================================
 init

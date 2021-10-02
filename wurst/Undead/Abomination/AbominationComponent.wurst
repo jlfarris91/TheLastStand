@@ -1,0 +1,247 @@
+package AbominationComponent
+import RealtimeUnitComponent
+import GrabZombieComponent
+import HoldingZombieComponent
+import ThrowZombieComponent
+import Events
+import UndeadTargetingComponent
+import ZombieProjectile
+import AbomUtils
+import ClosureTimers
+
+// ============================================================================
+public class AbominationComponent extends UnitComponent
+  private Handle m_throwingZombieEventCallback
+  private Handle m_zombieThrownEventCallback
+  private Handle m_zombieDroppedEventCallback
+  private Handle m_grabbingZombieEventCallback
+  private Handle m_zombieGrabbedEventCallback
+  private player m_targetPlayer
+
+  // --------------------------------------------------------------------------
+  construct(IUnitMetadata metadata)
+    super(metadata)
+
+  // --------------------------------------------------------------------------
+  protected override function onEnabled()
+    super.onEnabled()
+
+    let ownerUnit = getOwnerUnit()
+
+    let throwComp = getOwner().getOrAddThrowZombieComponent()
+    m_throwingZombieEventCallback = throwComp.throwingZombieEvent.register(() -> onThrowingZombie(ownerUnit))
+    m_zombieThrownEventCallback = throwComp.zombieThrownEvent.register((projectile) -> onZombieThrown(ownerUnit, projectile))
+
+    let holdComp = getOwner().getOrAddHoldingZombieComponent()
+    m_zombieDroppedEventCallback = holdComp.zombieDroppedEvent.register(() -> onZombieDropped(ownerUnit))
+
+    let grabComp = getOwner().getOrAddGrabZombieComponent()
+    m_grabbingZombieEventCallback = grabComp.grabbingZombieEvent.register((zombie) -> onGrabbingZombie(ownerUnit, zombie))
+    m_zombieGrabbedEventCallback = grabComp.zombieGrabbedEvent.register((zombie) -> onZombieGrabbed(ownerUnit, zombie))
+    
+    // Holding is disabled until the abom grabs a zombie
+    holdComp.disable()
+
+    // Grab is enabled until the abom grabs a zombie
+    grabComp.enable()
+
+    // Throw comp is enabled while the abom component is enabled
+    throwComp.enable()
+
+  // --------------------------------------------------------------------------
+  protected override function onDisabled()
+    super.onDisabled()
+    
+    let grabZombieComp = getOwner().getGrabZombieComponent()
+    if (grabZombieComp != null)
+      grabZombieComp.grabbingZombieEvent.unregister(m_zombieGrabbedEventCallback)
+      m_zombieGrabbedEventCallback = HANDLE_INVALID
+      grabZombieComp.grabbingZombieEvent.unregister(m_grabbingZombieEventCallback)
+      m_grabbingZombieEventCallback = HANDLE_INVALID
+      grabZombieComp.disable()
+
+    let holdZombieComp = getOwner().getOrAddHoldingZombieComponent()
+    if (holdZombieComp != null)
+      holdZombieComp.zombieDroppedEvent.unregister(m_zombieDroppedEventCallback)
+      m_zombieDroppedEventCallback = HANDLE_INVALID
+      holdZombieComp.disable()
+
+    let throwZombieComp = getOwner().getOrAddThrowZombieComponent()
+    if (throwZombieComp != null)
+      throwZombieComp.throwingZombieEvent.unregister(m_throwingZombieEventCallback)
+      m_throwingZombieEventCallback = HANDLE_INVALID
+      throwZombieComp.zombieThrownEvent.unregister(m_zombieThrownEventCallback)
+      m_zombieThrownEventCallback = HANDLE_INVALID
+      throwZombieComp.disable()
+
+  // --------------------------------------------------------------------------
+  private static function onThrowingZombie(unit ownerUnit)
+    let metadata = ownerUnit.getMetadata()
+    if (metadata == null)
+      return
+    let comp = metadata.getAbominationComponent()
+    if (comp == null)
+      return
+    comp.onThrowingZombie()
+
+  unit m_lastThrownZombie = null
+
+  // --------------------------------------------------------------------------
+  private function onThrowingZombie()
+    
+    Log.debug("AbomComp", "onThrowingZombie", "", "")
+
+    m_lastThrownZombie = null
+
+    // Disable the holding component since the abom is no longer holding a zombie
+    let holdComp = getOwner().getHoldingZombieComponent()
+    if (holdComp != null)
+      m_lastThrownZombie = holdComp.getHeldZombie()
+      holdComp.setHeldZombie(null)
+
+  // --------------------------------------------------------------------------
+  private static function onZombieThrown(unit ownerUnit, ZombieProjectile projectile)
+    let metadata = ownerUnit.getMetadata()
+    if (metadata == null)
+      return
+    let comp = metadata.getAbominationComponent()
+    if (comp == null)
+      return
+    comp.onZombieThrown(projectile)
+
+  // --------------------------------------------------------------------------
+  private function onZombieThrown(ZombieProjectile projectile)
+    
+    Log.debug("AbomComp", "onZombieThrown", "", "")
+
+    if (m_lastThrownZombie == null)
+      Log.error("AbominationComponent", "onZombieThrown", "", "Abom was not holding a zombie!")
+      destroy projectile
+      return
+
+    Log.debug("AbomComp", "onZombieThrown", "", "Threw unit " + m_lastThrownZombie.getName())
+
+    projectile.setZombie(m_lastThrownZombie)
+    
+    m_lastThrownZombie = null
+
+    let ownerUnit = getOwnerUnit()
+    doAfter(3.0, () -> onPostZombieThrown(ownerUnit))
+
+  // --------------------------------------------------------------------------
+  private static function onPostZombieThrown(unit ownerUnit)
+    let metadata = ownerUnit.getMetadata()
+    if (metadata == null)
+      return
+    let comp = metadata.getAbominationComponent()
+    if (comp == null)
+      return
+    comp.onPostZombieThrown()
+
+  // --------------------------------------------------------------------------
+  private function onPostZombieThrown()
+
+    // Disable the holding component since the abom is no longer holding a zombie
+    let holdComp = getOwner().getHoldingZombieComponent()
+    if (holdComp != null)
+      holdComp.disable()
+
+    // Abom can start grabbing zombies again
+    let grabComp = getOwner().getGrabZombieComponent()
+    if (grabComp != null)
+      grabComp.enable()
+    
+    // Tell the abom to get back to fighting as usual
+    let utc = getOwner().getUndeadTargetingComponent()
+    if (utc != null)
+      utc.enable()
+      utc.setTargetPlayer(m_targetPlayer)
+
+    getOwnerUnit().setFieldWeapon(UNIT_WEAPON_BF_ATTACKS_ENABLED, 0, true)
+
+  // --------------------------------------------------------------------------
+  private static function onZombieDropped(unit ownerUnit)
+    let metadata = ownerUnit.getMetadata()
+    if (metadata == null)
+      return
+    let comp = metadata.getAbominationComponent()
+    if (comp == null)
+      return
+    comp.onZombieDropped()
+
+  // --------------------------------------------------------------------------
+  private function onZombieDropped()
+
+    Log.debug("AbomComp", "onZombieDropped", "", "")
+
+    // Disable the holding component since the abom is no longer holding a zombie
+    let holdComp = getOwner().getHoldingZombieComponent()
+    if (holdComp != null)
+      holdComp.disable()
+
+    // Abom can start grabbing zombies again
+    getOwner().getGrabZombieComponent().enable()
+    
+    // Tell the abom to get back to fighting as usual
+    let utc = getOwner().getUndeadTargetingComponent()
+    if (utc != null)
+      utc.enable()
+      utc.setTargetPlayer(m_targetPlayer)
+
+    getOwnerUnit().setFieldWeapon(UNIT_WEAPON_BF_ATTACKS_ENABLED, 0, true)
+    
+  // --------------------------------------------------------------------------
+  private static function onGrabbingZombie(unit ownerUnit, unit zombieUnit)
+    let metadata = ownerUnit.getMetadata()
+    if (metadata == null)
+      return
+    let comp = metadata.getAbominationComponent()
+    if (comp == null)
+      return
+    comp.onGrabbingZombie(zombieUnit)
+    
+  // --------------------------------------------------------------------------
+  private function onGrabbingZombie(unit zombie)
+    Log.debug("AbomComp", "onGrabbingZombie", "", "Grabbing " + zombie.getName())
+
+    let holdingComp = getOwner().getHoldingZombieComponent()
+    if (holdingComp != null)
+      holdingComp.setHeldZombie(zombie)
+      holdingComp.enable()
+    
+  // --------------------------------------------------------------------------
+  private static function onZombieGrabbed(unit ownerUnit, unit zombieUnit)
+    let metadata = ownerUnit.getMetadata()
+    if (metadata == null)
+      return
+    let comp = metadata.getAbominationComponent()
+    if (comp == null)
+      return
+    comp.onZombieGrabbed(zombieUnit)
+    
+  // --------------------------------------------------------------------------
+  private function onZombieGrabbed(unit zombie)
+    Log.debug("AbomComp", "onZombieGrabbed", "", "Grabbed " + zombie.getName())
+    suspendAndHideZombie(zombie)
+  
+    // The abom can no longer grab zombies while one is held
+    getOwner().getGrabZombieComponent()..disable()
+    
+    // Tell the abom to get back to fighting as usual
+    let utc = getOwner().getUndeadTargetingComponent()
+    if (utc != null)
+      m_targetPlayer = utc.getTargetPlayer()
+      utc.disable()
+
+    getOwnerUnit().setFieldWeapon(UNIT_WEAPON_BF_ATTACKS_ENABLED, 0, false)
+
+// ============================================================================
+public function IUnitMetadata.getAbominationComponent() returns AbominationComponent
+  return this.getComponent(AbominationComponent.typeId) castTo AbominationComponent
+
+// ============================================================================
+public function IUnitMetadata.getOrAddAbominationComponent() returns AbominationComponent
+  var component = this.getAbominationComponent()
+  if (component == null)
+    component = this.addComponent(new AbominationComponent(this)) castTo AbominationComponent
+  return component

@@ -1,10 +1,17 @@
 .\SetupBuildEnvironment.ps1
 
+Write-Output "Creating map junctions..."
+
 $lastStandMapDir = [System.IO.Path]::Combine($env:SourceMapsRoot, "TheLastStand.w3x")
 
 foreach ($file in (Get-ChildItem -Path $lastStandMapDir) | Where-Object { $_.LinkType -eq 'Junction'}) {
   Write-Output "Deleting existing junction $($file.FullName)"
   $file.Delete()
+}
+
+foreach ($file in (Get-ChildItem -Path $lastStandMapDir) | Where-Object { $_.PSIsContainer }) {
+  Write-Output "Deleting existing folder $($file.FullName)"
+  Remove-Item -Recurse -Force $file.FullName
 }
 
 foreach ($file in (Get-ChildItem -Path $env:ImportsRoot)) {
@@ -22,3 +29,5 @@ foreach ($file in (Get-ChildItem -Path $env:ImportsRoot)) {
     }
   }
 }
+
+Write-Output "Done creating map junctions"

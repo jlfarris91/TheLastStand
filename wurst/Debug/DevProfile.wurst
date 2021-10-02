@@ -1,0 +1,223 @@
+package DevProfile
+import Dictionary
+import Object
+import Serialization
+import Meta
+import BinaryReaderWriter
+import TLSSerializationContext
+import PlayerMetadata
+import HashMap
+import HashList
+
+HashList<DevProfile> g_loadedProfiles = new HashList<DevProfile>()
+HashMap<string, DevProfile> g_idToProfileMap = new HashMap<string, DevProfile>()
+DevProfile g_currentProfile
+constant string FILE_PATH_FORMAT_STR = "LastStand/{0}/{1}.txt"
+
+// ============================================================================
+public class DevProfile implements ISerializable
+  private player m_player
+  private string m_id
+  private Dictionary m_data
+  private group m_unitsToPersist
+
+  // --------------------------------------------------------------------------
+  construct(player owner)
+    m_player = owner
+    m_data = new Dictionary<string>()
+    m_unitsToPersist = CreateGroup()
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    destroy m_data
+    m_unitsToPersist.destr()
+
+  /////////////////////////////////////////////////////////////////////////////
+  protected static function registerMetadata()
+    let metaType = Meta.registerClass(DevProfile.typeId)..registerInterface(typeId_ISerializable)
+    
+    metaType.registerFactory1() (context) ->
+      var profileObject = NULL
+      let serializationContext = context.as<SerializationContext>(SerializationContext.typeId)
+      if (serializationContext != null)
+        profileObject = toObject(new DevProfile(serializationContext.getPlayer()), DevProfile.typeId)
+      return profileObject
+  /////////////////////////////////////////////////////////////////////////////
+
+  // --------------------------------------------------------------------------
+  function getPlayer() returns player
+    return m_player
+
+  // --------------------------------------------------------------------------
+  function getName() returns string
+    return m_id
+
+  // --------------------------------------------------------------------------
+  function get<T>(string key, T defaultValue) returns T
+    return m_data.get<T>(key, defaultValue)
+
+  // --------------------------------------------------------------------------
+  function put<T>(string key, T object, int objectTypeId)
+    put(key, toObject(object, objectTypeId))
+
+  // --------------------------------------------------------------------------
+  function put(string key, object object)
+    m_data.put(key, object)
+
+  // --------------------------------------------------------------------------
+  function getPersistedUnits() returns group
+    return m_unitsToPersist
+
+  // --------------------------------------------------------------------------
+  override function getVersion() returns int
+    return 0
+
+  // --------------------------------------------------------------------------
+  override function serialize(SerializationContext context, BinaryWriter writer) returns bool
+    context.debug("ProfileSerializer", "serialize", "", "")
+    
+    writer.write(m_id)
+    writer.write(m_player.getGold())
+    writer.write(m_player.getLumber())
+
+    if (context.writeObject(writer, toObject(m_data, Dictionary.typeId)) == false)
+      context.warn("Failed to write data dictionary")
+      return false
+
+    if (context.writeObject(writer, m_unitsToPersist.toObject()) == false)
+      context.warn("Failed to write persisted units group")
+      return false
+
+    let metadata = m_player.getMetadata()
+    writer.write(metadata != null)
+    if (metadata != null)
+      if (context.writeObject(writer, toObject(metadata, metadata.typeId)) == false)
+        return false
+
+    return true
+
+  // --------------------------------------------------------------------------
+  override function deserialize(SerializationContext context, BinaryReader reader) returns bool
+    context.debug("ProfileSerializer", "deserialize", "", "")
+
+    m_id = reader.readString()
+    m_player.setGold(reader.readInt())
+    m_player.setLumber(reader.readInt())
+
+    if (context.readObject(reader, toObject(m_data, Dictionary.typeId)) == false)
+      context.warn("Failed to read data dictionary")
+
+    // Read persisted units
+    if (context.readObject(reader, m_unitsToPersist.toObject()) == false)
+      context.warn("Failed to read persisted units group")
+
+    // Read player metadata
+    if (reader.readBool())
+      let metadata = m_player.getMetadata()
+      if (context.readObject(reader, metadata != null ? toObject(metadata, metadata.typeId) : NULL) == false)
+        context.warn("Failed to read player metadata")
+
+    return true
+
+  // --------------------------------------------------------------------------
+  static function getActiveProfile() returns DevProfile
+    return g_currentProfile
+
+  // --------------------------------------------------------------------------
+  static function setActiveProfile(DevProfile profile)
+    g_currentProfile = profile
+    Log.debug("DevProfile", "setActive", "", "Set active profile to " + profile.m_id)
+
+  // --------------------------------------------------------------------------
+  static function getProfile(string profileName) returns DevProfile
+    return g_idToProfileMap.get(profileName)
+
+  // --------------------------------------------------------------------------
+  static function newProfile(string profileName, player owner) returns DevProfile
+    
+    let profile = new DevProfile(owner)
+
+    var uniqueProfileName = profileName
+    var i = 1
+    while (g_idToProfileMap.has(uniqueProfileName))
+      uniqueProfileName = profileName + i.toString()
+      i++
+
+    profile.m_id = profileName
+
+    g_loadedProfiles.add(profile)
+    g_idToProfileMap.put(profile.m_id, profile)
+
+    Log.debug("DevProfile", "newProfile", "", "Created profile " + profileName)
+
+    return profile
+
+  // --------------------------------------------------------------------------
+  static function deleteProfile(DevProfile profile)
+    g_loadedProfiles.remove(profile)
+    g_idToProfileMap.remove(profile.m_id)
+    destroy profile
+
+  // --------------------------------------------------------------------------
+  static function loadProfile(string profileName, player owner) returns DevProfile
+
+    Log.debug("DevProfile", "loadProfile", "", "Loading profile " + profileName + "...")
+    
+    let profile = new DevProfile(owner)
+    profile.m_id = profileName
+
+    g_loadedProfiles.add(profile)
+    g_idToProfileMap.put(profile.m_id, profile)
+
+    g_serializationContext.setPlayer(owner)
+
+    if (Serialization.readObjectFromFile(g_serializationContext, FILE_PATH_FORMAT_STR.format(owner.getName(), profileName), toObject(profile, DevProfile.typeId)) == false)
+      destroy profile
+      Log.warn("DevProfile", "loadProfile", "", "Failed to load profile " + profileName)
+      return null
+    else
+      Log.debug("DevProfile", "loadProfile", "", "Loaded profile successfully.")
+      return profile
+
+  // --------------------------------------------------------------------------
+  static function saveProfile(DevProfile profile)
+
+    let filePath = FILE_PATH_FORMAT_STR.format(profile.m_player.getName(), profile.m_id)
+
+    Log.debug("DevProfile", "saveProfile", "", "Saving profile {0} to file {1} ...".format(profile.m_id, filePath))
+
+    g_serializationContext.setPlayer(profile.m_player)
+
+    if (Serialization.writeObjectToFile(g_serializationContext, filePath, toObject(profile, DevProfile.typeId)))
+      Log.debug("DevProfile", "saveProfile", "", "Saved profile successfully.")
+    else
+      Log.debug("DevProfile", "saveProfile", "", "Failed to save profile.")
+
+  // --------------------------------------------------------------------------
+  static function saveProfileAs(DevProfile profile, string profileName)
+
+    Log.debug("DevProfile", "saveProfileAs", "", "Saving profile {0} as {1}...".format(profile.m_id, profileName))
+
+    g_idToProfileMap.remove(profile.m_id)
+
+    profile.m_id = profileName
+
+    g_idToProfileMap.put(profileName, profile)
+
+    g_serializationContext.setPlayer(profile.m_player)
+    Serialization.writeObjectToFile(g_serializationContext, FILE_PATH_FORMAT_STR.format(profile.m_id), toObject(profile, DevProfile.typeId))
+
+    Log.debug("DevProfile", "saveProfileAs", "", "Saved profile successfully.")
+
+  // --------------------------------------------------------------------------
+  static function getProfiles() returns HashList<DevProfile>
+    return g_loadedProfiles
+
+// ============================================================================
+init
+  registerPackageMetadata()
+
+///////////////////////////////////////////////////////////////////////////////
+function registerPackageMetadata()
+  DevProfile.registerMetadata()
+///////////////////////////////////////////////////////////////////////////////

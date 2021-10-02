@@ -1,6 +1,5 @@
 package DebugCommands
 import ChatCommands
-import Host
 import MemoryTrackingMultiboard
 import ClosureTimers
 import Godlike
@@ -10,8 +9,7 @@ import Wave
 import GroupUtils
 import MainItemLibrary
 import UnitMetadata
-import HumanPlayerMetadata
-import LinkedList
+import HumanPlayerComponent
 import WeatherManager
 import Time
 import Reputation
@@ -28,6 +26,19 @@ import PathChecker
 import Survivors
 import PowerSourceComponent
 import PoweredComponent
+import DevChatCommandHandler
+import LinkedList
+import Action
+import HashList
+import SyncSimpleExtensions
+import SpawnWave
+import Runnable
+import UndeadTargetingComponent
+import GroupExtensions
+import BuildingUndeadTargetComponent
+import GridCachedSpawnManager
+import FriendlyGridCachedSpawnManager
+import HostileGridCachedSpawnManager
 
 constant string COMMAND_MEMORYTRACKER = "mem"
 constant string COMMAND_GODLIKE = "godlike"
@@ -73,23 +84,51 @@ constant string COMMAND_SELECTALL = "selectAll"
 constant string COMMAND_LINK = "link"
 constant string COMMAND_UNLINK = "unlink"
 constant string COMMAND_GAMESPEED = "gameSpeed"
+constant string COMMAND_KILLALL = "killAll"
+constant string COMMAND_SPAWNPOINTS = "spawnPoints"
+constant string COMMAND_POS = "pos"
+constant string COMMAND_USEITEM = "useItem"
+constant string COMMAND_WORKINGGROUP = "workingGroup"
+constant string COMMAND_TYPE = "type"
+constant string COMMAND_SELECTNONE = "selectNone"
+constant string COMMAND_LOGGING = "logging"
+constant string COMMAND_ISSUE_ORDER = "order"
 
-DebugChatCommandHandler g_commandHandler
+DevChatCommandHandler g_commandHandler
 MemoryTrackingMultiboard g_memoryTrackingMultiboard
 fogmodifier array g_seeVisionModifiers
+group g_workingGroup = CreateGroup()
 
 // ============================================================================
-public class DebugChatCommandHandler extends ChatCommandHandler
+function getFirstWorkingGroupUnit(player p) returns unit
+  g_workingGroup.refresh()
+  if (not g_workingGroup.isEmpty())
+    for u in g_workingGroup
+      return u
+  return p.getFirstSelectedUnit()
 
-  // --------------------------------------------------------------------------
-  construct(string name, quest _quest)
-    super(name, _quest)
+// ============================================================================
+function getWorkingGroupUnits(player p) returns LinkedList<unit>
+  let workingUnits = new LinkedList<unit>()
+  g_workingGroup.refresh()
+  if (not g_workingGroup.isEmpty())
+    for u in g_workingGroup
+      workingUnits.add(u)
+    return workingUnits
+  return p.getSelectedUnits()
 
-  // --------------------------------------------------------------------------
-  override function handleChatCommand(player p, string command, LinkedList<string> commandArgs) returns bool
-    if (not p.isHost())
-      return false
-    return super.handleChatCommand(p, command, commandArgs)    
+// ============================================================================
+function forEachWorkingGroupUnit(player p, Action1<unit> action) returns int
+  let workingUnits = getWorkingGroupUnits(p)
+  if (workingUnits.isEmpty())
+    displayMessageToPlayer(p, "Must have at least one unit selected or in working group")
+    return 0
+  var count = 0
+  for u in workingUnits
+    action.call(u)
+    count++
+  destroy workingUnits
+  return count
 
 // ============================================================================
 function showMemoryTrackerMultiboard()
@@ -173,7 +212,7 @@ function spawnone()
       error("Found no spawn wave at index " + spawnWaveId.toString())
       return
 
-    spawnWave.activate()
+    spawnWave.activate(true)
     chatCommandPrintToPlayer(p, "Activated {0} {1} spawn wave {2} once".format(dayNightWave, waveId.toString(), spawnWave.getDefinition().getName()))
     return
   // }
@@ -183,7 +222,7 @@ function spawnone()
     return
 
   for spawnWave in spawnWaves
-    spawnWave.activate()
+    spawnWave.activate(true)
     chatCommandPrintToPlayer(p, "Activated {0} {1} spawn wave {2} once".format(dayNightWave, waveId.toString(), spawnWave.getDefinition().getName()))
 
 // ============================================================================
@@ -242,31 +281,38 @@ function turnOnMapVisibility()
 // ============================================================================
 function killSelectedUnits()
   let commandPlayer = getChatCommandPlayer()
-  let ug = getGroup()
-  ug.enumUnitsSelected(commandPlayer, null)
-  for u from ug
-    u.kill()
-  ug.release()
+  let unitCount = forEachWorkingGroupUnit(commandPlayer, u -> u.kill())
+  chatCommandPrintToPlayer(commandPlayer, "Killed {0} units".format(unitCount.toString()))
 
 // ============================================================================
 function removeSelectedUnits()
   let commandPlayer = getChatCommandPlayer()
-  let ug = getGroup()
-  ug.enumUnitsSelected(commandPlayer, null)
-  for u from ug
-    u.remove()
-  ug.release()
+  let unitCount = forEachWorkingGroupUnit(commandPlayer, u -> u.remove())
+  chatCommandPrintToPlayer(commandPlayer, "Removed {0} units".format(unitCount.toString()))
 
 // ============================================================================
 function moveSelectedUnits()
-  let cameraLoc = GetCameraTargetPositionLoc()
-  let cameraPos = vec2(GetLocationX(cameraLoc), GetLocationY(cameraLoc))
-  let ug = getGroup()
-  ug.enumUnitsSelected(GetTriggerPlayer(), null)
-  for u in ug
-    u.setPos(cameraPos)
-  ug.release()
-  RemoveLocation(cameraLoc)
+  let commandPlayer = getChatCommandPlayer()
+  let command = getChatCommand()
+  let xArg = command.getArgument(0)
+  let yArg = command.getArgument(1)
+
+  if (xArg == null or yArg == null)
+  //{
+    let cameraPos = vec2(GetCameraTargetPositionX(), GetCameraTargetPositionY())
+
+    cameraPos.sync(commandPlayer) cameraPosSyncd ->
+      let unitCount1 = forEachWorkingGroupUnit(commandPlayer, u -> u.setXY(cameraPosSyncd))
+      chatCommandPrintToPlayer(commandPlayer, "Moved {0} units".format(unitCount1.toString()))
+
+    return
+  //}
+
+  let x = xArg.getReal()
+  let y = yArg.getReal()
+
+  let unitCount = forEachWorkingGroupUnit(commandPlayer, u -> u.setXY(vec2(x, y)))
+  chatCommandPrintToPlayer(commandPlayer, "Moved {0} units".format(unitCount.toString()))
 
 // ============================================================================
 function createItemForSelectedUnit()
@@ -280,29 +326,15 @@ function createItemForSelectedUnit()
   let countArg = command.getArgument(1)
   if (countArg != null)
     count = countArg.getInt()
-
-  let g = getGroup()
-  g.enumUnitsSelected(commandPlayer, null)
-  if (g.isEmpty())
-    chatCommandPrintToPlayer(commandPlayer, "Must selected a unit to give the items to")
-    g.release()
-    return
-
-  let selectedUnit = g.getUnitAt(0)
-  g.release()
-
-  let pos = selectedUnit.getPos()
-
-  for i = 1 to count
-    let itm = g_MainItemLibrary.createItem(itemId, pos)
-    if (itm != null)
-      chatCommandPrintToPlayer(commandPlayer, "Created " + count.toString() + " item(s) of type " + itm.getName())
+  
+  forEachWorkingGroupUnit(commandPlayer) u ->
+    for i = 1 to count
+      let itm = g_MainItemLibrary.createItem(itemId, u.getPos())
+      if (itm != null)
+        displayMessageToPlayer(commandPlayer, "Created " + count.toString() + " item(s) of type " + itm.getName())  
 
 // ============================================================================
 function createUnitAtCameraPos()
-  let cameraLoc = GetCameraTargetPositionLoc()
-  let cameraPos = vec2(GetLocationX(cameraLoc), GetLocationY(cameraLoc))
-
   let command = getChatCommand()
   let commandPlayer = getChatCommandPlayer()
   let playerId = command.getArgument(0).getInt()
@@ -312,17 +344,20 @@ function createUnitAtCameraPos()
   let p = Player(playerId)
   if (p == null)
     error("Player id argument is invalid")
+    return
 
-  string unitName = null
-  for i = 1 to count
-    let u = createUnitTLS(p, unitId, cameraPos.x, cameraPos.y, GetRandomDirectionDeg())
-    if (u != null and unitName == null)
-      unitName = u.getName()
-  
-  if (unitName != null)
-    chatCommandPrintToPlayer(commandPlayer, "Created " + I2S(count) + " " + unitName)
-
-  RemoveLocation(cameraLoc)
+  let cameraPos = vec2(GetCameraTargetPositionX(), GetCameraTargetPositionY())
+  cameraPos.sync(commandPlayer) cameraPosSyncd ->
+  //{
+    string unitName = null
+    for i = 1 to count
+      let u = createUnitTLS(p, unitId, cameraPosSyncd.x, cameraPosSyncd.y, GetRandomDirectionDeg())
+      if (u != null and unitName == null)
+        unitName = u.getName()
+    
+    if (unitName != null)
+      displayMessageToPlayer(commandPlayer, "Created " + I2S(count) + " " + unitName)
+  //}
 
 // ============================================================================
 function addMats()
@@ -336,12 +371,12 @@ function addMats()
     error("Player id argument is invalid")
     return
 
-  let playerMetadata = p.getMetadata() castTo HumanPlayerMetadata
+  let playerMetadata = p.getHumanPlayerComponent()
   if (playerMetadata == null)
     error("Can't give materials to player \"{0}\"".format(p.getName()))
     return
 
-  playerMetadata.giveMaterials(matsCount)
+  playerMetadata.getOwnerPlayer().addLumber(matsCount)
   chatCommandPrintToPlayer(commandPlayer, "Gave {0} materials to {1}".format(I2S(matsCount), p.getNameColored()))
 
 // ============================================================================
@@ -453,24 +488,23 @@ function toggleWeatherUpdate()
 // ============================================================================
 function setLevel()
   let command = getChatCommand()
-  let level = command.getArgument(0).getInt()
-
   let commandPlayer = getChatCommandPlayer()
-  let ug = getGroup()
-  ug.enumUnitsSelected(commandPlayer, null)
-  for u from ug
+  let level = command.getArgument(0).getInt()
+  
+  let unitCount = forEachWorkingGroupUnit(commandPlayer) u ->
     u.resetLevelAndXP()
     u.setLevel(level, false)
-  ug.release()
+
+  chatCommandPrintToPlayer(commandPlayer, "Set level of {0} units to level {1}".format(unitCount.toString(), level.toString()))
 
 // ============================================================================
 function resetLevel()
   let commandPlayer = getChatCommandPlayer()
-  let ug = getGroup()
-  ug.enumUnitsSelected(commandPlayer, null)
-  for u from ug
+  
+  let unitCount = forEachWorkingGroupUnit(commandPlayer) u ->
     u.resetLevelAndXP()
-  ug.release()
+
+  chatCommandPrintToPlayer(commandPlayer, "Reset level of {0} units to level 1".format(unitCount.toString()))
 
 // ============================================================================
 function todScale()
@@ -626,7 +660,7 @@ function spawnAllItems()
 function showSelectedUnitStats()
   let commandPlayer = getChatCommandPlayer()
 
-  let selectedUnit = commandPlayer.getFirstSelectedUnit()
+  let selectedUnit = getFirstWorkingGroupUnit(commandPlayer)
   if (selectedUnit == null)
     chatCommandPrintToPlayer(commandPlayer, "Must have a unit selected")
     return
@@ -650,45 +684,41 @@ function setSelectedUnitProperty()
   let propName = command.getArgument(0).getString()
   let propValue = command.getArgument(1).getReal()
 
-  let selectedUnit = commandPlayer.getFirstSelectedUnit()
-  if (selectedUnit == null)
-    chatCommandPrintToPlayer(commandPlayer, "Must have a unit selected")
+  let selectedUnits = getWorkingGroupUnits(commandPlayer)
+  if (selectedUnits.isEmpty())
+    displayMessageToPlayer(commandPlayer, "Must have at least one unit selected")
+    destroy selectedUnits
     return
 
-  let metadata = selectedUnit.getMetadata()
-  if (metadata == null)
-    chatCommandPrintToPlayer(commandPlayer, "Selected unit does not have metadata")
-    return
+  for u in selectedUnits
+  //{
+    let metadata = u.getMetadata()
+    if (metadata != null)
+      let comp = metadata.getOrAddUnitPropertiesComponent()
 
-  let comp = metadata.getOrAddUnitPropertiesComponent()
+      switch (propName)
+        case "critchance"
+          comp.setCritChancePercentage(propValue)
+        case "critmult"
+          comp.setCritDamageMultiplier(propValue)
+        case "critbonus"
+          comp.setCritBonusDamage(propValue)
+        case "evade"
+          comp.setEvadeChancePercentage(propValue)
+        case "lifesteal"
+          comp.setLifeStealPercentage(propValue)
 
-  switch (propName)
-    case "critchance"
-      comp.setCritChancePercentage(propValue)
-    case "critmult"
-      comp.setCritDamageMultiplier(propValue)
-    case "critbonus"
-      comp.setCritBonusDamage(propValue)
-    case "evade"
-      comp.setEvadeChancePercentage(propValue)
-    case "lifesteal"
-      comp.setLifeStealPercentage(propValue)
+      comp.printDebug((message) -> displayMessageToPlayer(commandPlayer, message))
+  //}
 
-  comp.printDebug((message) -> chatCommandPrintToPlayer(commandPlayer, message))
+  destroy selectedUnits
 
 // ============================================================================
 function setSelectedUnitHealth()
   let command = getChatCommand()
   let commandPlayer = getChatCommandPlayer()
   let value = command.getArgument(0).getReal()
-
-  let selectedUnit = commandPlayer.getFirstSelectedUnit()
-  if (selectedUnit == null)
-    chatCommandPrintToPlayer(commandPlayer, "Must have a unit selected")
-    return
-
-  selectedUnit.setHP(value)
-
+  forEachWorkingGroupUnit(commandPlayer, u -> u.setHP(value))
   chatCommandPrintToPlayer(commandPlayer, "Set unit health to {0}".format(value.toString()))
 
 // ============================================================================
@@ -696,32 +726,19 @@ function setSelectedUnitMana()
   let command = getChatCommand()
   let commandPlayer = getChatCommandPlayer()
   let value = command.getArgument(0).getReal()
-
-  let selectedUnit = commandPlayer.getFirstSelectedUnit()
-  if (selectedUnit == null)
-    chatCommandPrintToPlayer(commandPlayer, "Must have a unit selected")
-    return
-
-  selectedUnit.setMana(value)
-
+  forEachWorkingGroupUnit(commandPlayer, u -> u.setMana(value))
   chatCommandPrintToPlayer(commandPlayer, "Set unit mana to {0}".format(value.toString()))
 
 // ============================================================================
 function pauseSelectedUnits()
   let commandPlayer = getChatCommandPlayer()
-
-  commandPlayer.forEachSelectedUnit() (unit arg) ->
-    arg.pause()
-
+  forEachWorkingGroupUnit(commandPlayer, u -> u.pause())
   chatCommandPrintToPlayer(commandPlayer, "Paused unit(s)")
 
 // ============================================================================
 function resumeSelectedUnits()
   let commandPlayer = getChatCommandPlayer()
-
-  commandPlayer.forEachSelectedUnit() (unit arg) ->
-    arg.unpause()
-
+  forEachWorkingGroupUnit(commandPlayer, u -> u.unpause())
   chatCommandPrintToPlayer(commandPlayer, "Resumed unit(s)")
 
 // ============================================================================
@@ -744,7 +761,7 @@ function setAttacksEnabled()
   let commandPlayer = getChatCommandPlayer()
   let attacksEnabled = getChatCommand().getArgument(0).getInt()
 
-  commandPlayer.forEachSelectedUnit() (unit _unit) ->
+  forEachWorkingGroupUnit(commandPlayer) (unit _unit) ->
     _unit.setFieldWeapon(UNIT_WEAPON_BF_ATTACKS_ENABLED, 0, attacksEnabled == 1 or attacksEnabled == 3)
     _unit.setFieldWeapon(UNIT_WEAPON_BF_ATTACKS_ENABLED, 1, attacksEnabled == 2 or attacksEnabled == 3)
 
@@ -947,7 +964,7 @@ function checkPath()
     chatCommandPrintToPlayer(commandPlayer, "PLAYER must be the id of a playing human player")
     return
 
-  startPathCheck(targetPlayer)
+  BuildingUndeadTargetComponent.runPathCheckersForAllStructures(targetPlayer)
   chatCommandPrintToPlayer(commandPlayer, "Starting path check for player " + targetPlayer.getName())
 
 // ============================================================================
@@ -974,6 +991,348 @@ function spawnSurvivor()
       SurvivorUtility.trySpawnSurvivorForPlayer(targetPlayer)
 
 // ============================================================================
+function selectAll()
+  let commandPlayer = getChatCommandPlayer()
+  let unitType = getChatCommand().getArgument(0).getRawCode()
+
+  var count = 0
+  let temp = getGroup()
+
+  temp.enumUnitsOfType(unitType, null)
+  if (temp.isEmpty())
+    displayMessageToPlayer(commandPlayer, "ERROR: Unknown unit type {0} ({1})".format(UnitId2String(unitType), unitType.toString()))
+  else
+    for u in temp
+      commandPlayer.select(u)
+      count++
+
+  temp.release()
+
+  if (count > 0)
+    displayMessageToPlayer(commandPlayer, "Selected {0} {1}".format(count.toString(), UnitId2String(unitType)))
+  else
+    displayMessageToPlayer(commandPlayer, "No {0} could be selected".format(UnitId2String(unitType)))
+
+// ============================================================================
+function killAll()
+  let commandPlayer = getChatCommandPlayer()
+  let unitType = getChatCommand().getArgument(0).getRawCode()
+
+  var count = 0
+  let temp = getGroup()
+
+  temp.enumUnitsOfType(unitType, null)
+  if (temp.isEmpty())
+    displayMessageToPlayer(commandPlayer, "ERROR: Unknown unit type {0} ({1})".format(UnitId2String(unitType), unitType.toString()))
+  else
+    for u in temp
+      if (u.isAlive())
+        u.kill()
+        count++
+
+  temp.release()
+
+  if (count > 0)
+    displayMessageToPlayer(commandPlayer, "Killed {0} {1}".format(count.toString(), UnitId2String(unitType)))
+  else
+    displayMessageToPlayer(commandPlayer, "No {0} alive to kill".format(UnitId2String(unitType)))
+
+// ============================================================================
+function spawnPoints()
+  let command = getChatCommand()
+  let commandPlayer = getChatCommandPlayer()
+  let playerId = command.getArgument(0).getInt()
+  let spawnerTypeArg = command.getArgument(1)
+  let operationArg = command.getArgument(2)
+
+  let targetPlayer = Player(playerId)
+  if (targetPlayer == null or not targetPlayer.isPlayingHumanPlayer())
+    chatCommandPrintToPlayer(commandPlayer, "Player must be a playing human player")
+    return
+
+  if (spawnerTypeArg == null)
+    if (g_gcsmDebugger != null)
+      g_gcsmDebugger.setIsVisible(not g_gcsmDebugger.getIsVisible())
+      chatCommandPrintToPlayer(commandPlayer, (g_gcsmDebugger.getIsVisible() ? "Showing debugger" : "Hiding debugger"))
+    return
+
+  let spawnerType = spawnerTypeArg.getString()
+  GridCachedSpawnManager spawnManager
+
+  switch (spawnerType)
+    case "friendly"
+      spawnManager = getPlayerCachedFriendlySpawnManager(targetPlayer)
+    case "hostile"
+      spawnManager = getPlayerCachedHostileSpawnManager(targetPlayer)
+    default
+      chatCommandPrintToPlayer(commandPlayer, "Unknown spawn manager type")
+      return
+
+  if (operationArg == null)
+    spawnManager.setShowDebug(not spawnManager.getShowDebug())
+    chatCommandPrintToPlayer(commandPlayer, (spawnManager.getShowDebug() ? "Showing {0} spawn points" : "Hiding {0} spawn points").format(spawnerType))
+    return
+
+  let operation = operationArg.getString()
+
+  switch (operation)    
+    case "invalidate"
+      spawnManager.invalidateSpawnPoints()
+      chatCommandPrintToPlayer(commandPlayer, "Invalidating all {0} spawn points".format(spawnerType))
+
+    default
+      chatCommandPrintToPlayer(commandPlayer, "Unknown operation " + operation)
+      return
+
+// ============================================================================
+function pos()
+  let command = getChatCommand()
+  let commandPlayer = getChatCommandPlayer()
+  let xArg = command.getArgument(0)
+  let yArg = command.getArgument(1)
+
+  let selectedUnits = getWorkingGroupUnits(commandPlayer)
+  if (selectedUnits.isEmpty())
+    chatCommandPrintToPlayer(commandPlayer, "Must have at least one unit selected or in working group")
+  else if (xArg == null or yArg == null)
+  //{
+    var average = ZERO2
+    var count = 0
+
+    for u in selectedUnits
+      average += u.getPos()
+      count++
+
+    chatCommandPrintToPlayer(commandPlayer, "Position: " + (average / count.toReal()).toString())
+  //}
+  else
+  //{
+    let x = xArg.getReal()
+    let y = yArg.getReal()
+    var count = 0
+    for u in selectedUnits
+      u.setPos(x, y)
+      count++
+    chatCommandPrintToPlayer(commandPlayer, "Move {0} unit(s) to ({1}, {2})".format(count.toString(), x.toString(), y.toString()))
+  //}
+
+  destroy selectedUnits
+
+// ============================================================================
+function useItem()
+  let command = getChatCommand()
+  let commandPlayer = getChatCommandPlayer()
+  let itemOrSlotId = command.getArgument(0).getString()
+  let targetArg = command.getArgument(1)
+  let xArg = command.getArgument(2)
+  let yArg = command.getArgument(3)
+
+  let selectedUnits = getWorkingGroupUnits(commandPlayer)
+  if (selectedUnits.isEmpty())
+    chatCommandPrintToPlayer(commandPlayer, "Must have at least one unit selected")
+    destroy selectedUnits
+    return
+  
+  var hasItem = false
+  var isSlotId = false
+  var itemId = 0
+
+  let slotId = itemOrSlotId.toInt()
+  if (slotId >= 0 and slotId < 6)
+    isSlotId = true
+    for u in selectedUnits
+      let itm = u.itemInSlot(slotId)
+      if (itm != null)
+        hasItem = true
+  else 
+    itemId = itemOrSlotId.fromRawCode()
+    for u in selectedUnits
+      let itm = u.getItemById(itemId)
+      if (itm != null)
+        hasItem = true
+
+  if (not hasItem)
+    chatCommandPrintToPlayer(commandPlayer, "No selected unit has item " + (isSlotId ? "in slot " + itemOrSlotId : " of type " + itemOrSlotId))
+    destroy selectedUnits
+    return
+      
+  if (targetArg == null)
+    if (isSlotId)
+      for u in selectedUnits
+        let itm = u.itemInSlot(slotId)
+        if (itm != null)
+          u.useItem(itm)
+    else
+      for u in selectedUnits
+        let itm = u.getItemById(itemId)
+        if (itm != null)
+          u.useItem(itm)
+    chatCommandPrintToPlayer(commandPlayer, "Ordered selected units to use item " + (isSlotId ? "in slot " + itemOrSlotId : " of type " + itemOrSlotId))
+    destroy selectedUnits
+    return
+
+  switch (targetArg.getString())
+    case "self"
+      if (isSlotId)
+        for u in selectedUnits
+          let itm = u.itemInSlot(slotId)
+          if (itm != null)
+            u.useItemTarget(itm, u)
+      else
+        for u in selectedUnits
+          let itm = u.getItemById(itemId)
+          if (itm != null)
+            u.useItemTarget(itm, u)
+      chatCommandPrintToPlayer(commandPlayer, "Ordered selected units to use item " + (isSlotId ? "in slot " + itemOrSlotId : " of type " + itemOrSlotId) + " on themselves")
+      destroy selectedUnits
+      return
+
+    case "selfPos"
+      if (isSlotId)
+        for u in selectedUnits
+          let itm = u.itemInSlot(slotId)
+          if (itm != null)
+            u.useItemPoint(itm, u.getPos())
+      else
+        for u in selectedUnits
+          let itm = u.getItemById(itemId)
+          if (itm != null)
+            u.useItemPoint(itm, u.getPos())
+      chatCommandPrintToPlayer(commandPlayer, "Ordered selected units to use item " + (isSlotId ? "in slot " + itemOrSlotId : " of type " + itemOrSlotId) + " at their position")
+      destroy selectedUnits
+      return
+
+    case "pos"
+      let x = xArg.getString().toReal()
+      let y = yArg.getString().toReal()
+      let pos = vec2(x, y)
+      if (isSlotId)
+        for u in selectedUnits
+          let itm = u.itemInSlot(slotId)
+          if (itm != null)
+            u.useItemPoint(itm, pos)
+      else
+        for u in selectedUnits
+          let itm = u.getItemById(itemId)
+          if (itm != null)
+            u.useItemPoint(itm, pos)
+      chatCommandPrintToPlayer(commandPlayer, "Ordered selected units to use item " + (isSlotId ? "in slot " + itemOrSlotId : " of type " + itemOrSlotId) + " at position " + pos.toString())
+      destroy selectedUnits
+      return
+
+// ============================================================================
+function workingGroup()
+  let command = getChatCommand()
+  let commandPlayer = getChatCommandPlayer()
+  let opArg = command.getArgument(0)
+
+  g_workingGroup.refresh()
+
+  if (opArg == null)
+    chatCommandPrintToPlayer(commandPlayer, "Working group contains {0} units".format(g_workingGroup.size().toString()))
+    return
+
+  let selectedUnits = commandPlayer.getSelectedUnits()
+
+  switch (opArg.getString())
+    case "add"
+      for u in selectedUnits
+        g_workingGroup.addUnit(u)
+    case "remove"
+      for u in selectedUnits
+        g_workingGroup.removeUnit(u)
+    case "clear"
+      g_workingGroup.clear()
+    case "addType"
+      let val = command.getArgument(1).getString().fromRawCode()
+      let g = getGroup()
+      g.enumUnitsOfType(val, null)
+      g_workingGroup.addGroup(g)
+      g.release()
+    default
+      chatCommandPrintToPlayer(commandPlayer, "Unknown operation {0}".format(opArg.getString()))
+      destroy selectedUnits
+      return
+
+  g_workingGroup.refresh()
+  
+  chatCommandPrintToPlayer(commandPlayer, "Working group contains {0} units".format(g_workingGroup.size().toString()))
+
+  destroy selectedUnits
+
+// ============================================================================
+function printType()
+  let commandPlayer = getChatCommandPlayer()
+
+  let uniqueTypeIds = new HashList<int>()
+  forEachWorkingGroupUnit(commandPlayer, u -> uniqueTypeIds.add(u.getTypeId()))
+
+  for id in uniqueTypeIds
+    chatCommandPrintToPlayer(commandPlayer, "Type: {0} ({1})".format(UnitId2String(id), id.toRawCode()))
+
+  destroy uniqueTypeIds
+
+// ============================================================================
+function selectNone()
+  let commandPlayer = getChatCommandPlayer()
+  commandPlayer.clearSelection()
+  chatCommandPrintToPlayer(commandPlayer, "Cleared selection")
+
+// ============================================================================
+function logging()
+  let commandPlayer = getChatCommandPlayer()
+  let command = getChatCommand()
+
+  switch (command.getArgument(0).getString())
+    case "spawning"
+      g_enableSpawnWaveLogging = not g_enableSpawnWaveLogging
+      chatCommandPrintToPlayer(commandPlayer, (g_enableSpawnWaveLogging ? "Enabled spawn wave debugging" : "Disabled spawn wave debugging"))
+    case "runnable"
+      g_enableRunnableLogging = not g_enableRunnableLogging
+      chatCommandPrintToPlayer(commandPlayer, (g_enableRunnableLogging ? "Enabled runnable debugging" : "Disabled runnable debugging"))
+    case "utc"
+      g_enableUTCLogging = not g_enableUTCLogging
+      chatCommandPrintToPlayer(commandPlayer, (g_enableUTCLogging ? "Enabled utc debugging" : "Disabled utc debugging"))
+    case "butc"
+      g_enableBUTCDebugging = not g_enableBUTCDebugging
+      if (g_butcDebugger != null)
+        g_butcDebugger.setIsVisible(g_enableBUTCDebugging)
+      chatCommandPrintToPlayer(commandPlayer, (g_enableBUTCDebugging ? "Enabled butc debugging" : "Disabled butc debugging"))
+    default
+      chatCommandPrintToPlayer(commandPlayer, "Unknown system name: " + command.getArgument(0).getString())
+
+// ============================================================================
+function issueOrder()
+  let commandPlayer = getChatCommandPlayer()
+  let command = getChatCommand()
+  let orderType = command.getArgument(0).getString()
+  let order = command.getArgument(1).getString()
+
+  let units = getWorkingGroupUnits(commandPlayer)
+  var succeeded = false
+
+  switch (orderType)
+    case "immediate"
+      for u in units
+        succeeded = u.issueImmediateOrder(order) or succeeded
+    case "point"
+      let x = command.getArgument(2).getString().toReal()
+      let y = command.getArgument(3).getString().toReal()
+      for u in units
+        succeeded = u.issuePointOrder(order, vec2(x, y)) or succeeded
+    case "target"
+      let target = units.get(units.size() - 1)
+      for u in units
+        if (u != target)
+          succeeded = u.issueTargetOrder(order, target) or succeeded
+    case "self"
+      for u in units
+        succeeded = u.issueTargetOrder(order, u) or succeeded
+
+  destroy units
+  chatCommandPrintToPlayer(commandPlayer, (succeeded ? "Successfully issued " + orderType +" order " + order : "Failed to issue " + orderType + " order " + order))
+
+// ============================================================================
 function registerDebugCommands()
 
   g_commandHandler.registerCommandDefinition(COMMAND_MEMORYTRACKER, function showMemoryTrackerMultiboard)
@@ -997,6 +1356,8 @@ function registerDebugCommands()
   g_commandHandler.registerCommandDefinition(COMMAND_KILL_SELECTED_UNITS, function killSelectedUnits)
   g_commandHandler.registerCommandDefinition(COMMAND_REMOVE_SELECTED_UNITS, function removeSelectedUnits)
   g_commandHandler.registerCommandDefinition(COMMAND_MOVE_SELECTED_UNITS, function moveSelectedUnits)
+    ..addRealArgument("X", true)
+    ..addRealArgument("Y", true)
 
   g_commandHandler.registerCommandDefinition(COMMAND_CREATE_ITEM, function createItemForSelectedUnit)
     ..addFourCCArgument("ITEM_ID", false)
@@ -1136,12 +1497,56 @@ function registerDebugCommands()
     ..setDescription("Sets the game speed")
     ..addRealArgument("Speed", false)
 
+  g_commandHandler.registerCommandDefinition(COMMAND_KILLALL, function killAll)
+    ..setDescription("Kills all types of a unit")
+    ..addFourCCArgument("UNIT_TYPE", false)
+
+  g_commandHandler.registerCommandDefinition(COMMAND_SPAWNPOINTS, function spawnPoints)
+    ..setDescription("Spawn point operations")
+    ..addIntegerArgument("PLAYER_ID", false)
+    ..addArgument(new ChatCommandArgument("SPAWN_MGR", ChatCommandArgumentType.STRING, true)..setStringOptions("hostile", "friendly"))
+    ..addArgument(new ChatCommandArgument("OPERATION", ChatCommandArgumentType.STRING, true)..setStringOptions("invalidate", "enable", "disable", "center", "setcenter"))
+
+  g_commandHandler.registerCommandDefinition(COMMAND_POS, function pos)
+    ..setDescription("Gets or sets the center of the currently selected units")
+    ..addRealArgument("X", true)
+    ..addRealArgument("Y", true)
+    
+  g_commandHandler.registerCommandDefinition(COMMAND_USEITEM, function useItem)
+    ..setDescription("Orders the selected units to use an item in their inventory")
+    ..addStringArgument("ITEM_OR_SLOT", false)
+    ..addStringArgument("TARGET", true)
+    ..addStringArgument("ARG1", true)
+    ..addStringArgument("ARG2", true)
+
+  g_commandHandler.registerCommandDefinition(COMMAND_WORKINGGROUP, function workingGroup)
+    ..setDescription("Manipulates the working unit group")
+    ..addStringArgument("OP", true)
+    ..addStringArgument("OP_ARG1", true)
+
+  g_commandHandler.registerCommandDefinition(COMMAND_TYPE, function printType)
+    ..setDescription("Prints the fourcc types of the selected units or items")
+
+  g_commandHandler.registerCommandDefinition(COMMAND_SELECTNONE, function selectNone)
+    ..setDescription("Clears the players selection")
+
+  g_commandHandler.registerCommandDefinition(COMMAND_LOGGING, function logging)
+    ..setDescription("Enables different system logging")
+    ..addStringArgument("SYSTEM", false)
+
+  g_commandHandler.registerCommandDefinition(COMMAND_ISSUE_ORDER, function issueOrder)
+    ..setDescription("Issues an order to the units in the working group")
+    ..addArgument(new ChatCommandArgument("ORDER_TYPE", ChatCommandArgumentType.STRING, false)..setStringOptions("immediate", "point", "target", "self"))
+    ..addStringArgument("ORDER", false)
+    ..addStringArgument("ARG1", true)
+    ..addStringArgument("ARG2", true)
+
 // ============================================================================
 init
 
   if (DEV_ENVIRONMENT)
   //{
-    g_commandHandler = new DebugChatCommandHandler("Debug", null)
+    g_commandHandler = new DevChatCommandHandler("Debug", null)
     registerChatCommandHandler(g_commandHandler, -1)
 
     nullTimer(() -> registerDebugCommands())
