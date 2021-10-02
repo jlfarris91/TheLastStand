@@ -4,61 +4,39 @@ import GameConstants
 import Range
 import WeightedSet
 import LootableReward
-import LinkedList
 import Math
 import LooterComponent
 import DisplayTextToPlayer
 import ColorUtility
 import ErrorHandling
 import Time
-import TlsAbilityIds
-import Orders
 import FX
-import LootableTypes
-import RegisterEvents
-import TextProgressBar
-import ClosureTimers
-import TextProgressBarTag
-import HashMap
-import TimerUtils
 import Vector
-
-constant int ABILITY_ID_SEARCH = TlsAbilityIds.search
-constant int ABILITY_SEARCH_ORDER = Orders.phaseshift
-constant int ABILITY_ID_LOOTABLE = 'A02C'
+import initlater LootOperationComponent
+import LootableUtility
 
 constant colorA LOOTABLE_COLOR = colorA(255, 255, 255, 255)
 constant colorA LOOTED_COLOR = colorA(150, 150, 150, 150)
 
-constant int PROGRESS_BAR_LENGTH = 20
-constant colorA PROGRESS_BAR_FOREGROUND = colorA(0, 170, 0, 255)
-constant colorA PROGRESS_BAR_BACKGROUND = colorA(0, 64, 0, 255)
-constant real PROGRESS_BAR_UPDATE_PERIOD = 0.1
-
 constant colorA COUNTDOWN_COLOR = colorA(0, 170, 0, 255)
 
-LinkedList<LootOperation> g_activeOperations
-HashMap<unit, LootOperation> g_looterToOperationMap = new HashMap<unit, LootOperation>()
-
-TextProgressBar g_LootOperationProgressBar
 Vector<LootableComponent> g_lootableUnits
 
 // ============================================================================
 public class LootableComponent extends UnitComponent
   private WeightedSet<ILootableReward> m_rewards
-  private real m_searchDuration
+  private real m_searchDurationUnscaled
   private int m_cooldownDays
   private unit m_lootingUnit
   private texttag m_cooldownDayTextTag
   private real m_chanceToRetrigger01
   private rangeInt m_cooldownDaysRange
   private int m_lootRewardMultiplier = 1
-
   // --------------------------------------------------------------------------
   construct(IUnitMetadata owner)
     super(owner)
 
-    m_searchDuration = 3.0
+    m_searchDurationUnscaled = 3.0
     m_cooldownDays = 0
     m_cooldownDaysRange = LOOTABLES_DEFAULT_COOLDOWN_RANGE
     m_rewards = new WeightedSet<ILootableReward>()
@@ -111,11 +89,11 @@ public class LootableComponent extends UnitComponent
 
   // --------------------------------------------------------------------------
   function getSearchDuration() returns real
-    return m_searchDuration
+    return m_searchDurationUnscaled
 
   // --------------------------------------------------------------------------
   function setSearchDuration(real duration)
-    m_searchDuration = duration
+    m_searchDurationUnscaled = duration
 
   // --------------------------------------------------------------------------
   function getChanceToRetrigger() returns real
@@ -184,30 +162,20 @@ public class LootableComponent extends UnitComponent
     setCooldownDays(m_cooldownDays - 1)
 
   // --------------------------------------------------------------------------
-  function getUnitSearchDuration(unit lootingUnit) returns real
-    var searchDuration = m_searchDuration
-
-    // Shapeshifting Key decreases duration by 50%
-    let metadata = lootingUnit.getMetadata()
-    if (metadata != null)
-      let comp = metadata.getLooterComponent()
-      if (comp != null)
-        searchDuration = comp.scaleLootDuration(searchDuration)
-
-    return searchDuration
-
-  // --------------------------------------------------------------------------
-  function startLooting(unit lootingUnit)
+  function startLooting(unit looter)
 
     if (not canLoot() or getIsBeingLooted())
       return
 
-    m_lootingUnit = lootingUnit
+    let scaledSearchDuration = getUnitSearchDuration(looter, m_searchDurationUnscaled)
+
+    m_lootingUnit = looter
 
     // Stand 4 in HD
     m_lootingUnit.setAnimation(15)
 
-    new LootOperation(lootingUnit, this, getUnitSearchDuration(lootingUnit))
+    let operation = getOwner().getOrAddLootOperationComponent()
+    operation.start(looter, scaledSearchDuration)
 
   // --------------------------------------------------------------------------
   function onLootingFinished(unit lootingUnit)
@@ -344,276 +312,10 @@ public function IUnitMetadata.getOrAddLootableComponent() returns LootableCompon
   return component
 
 // ============================================================================
-public class LootOperation
-  private unit m_lootingUnit
-  private LootableComponent m_lootable
-  private ProgressBarTag m_progressBar
-  private real m_duration
-  private timer m_timer
-  private timerdialog m_timerDialog
-  private int m_secondsElapsed
-  private int m_manaCost
-  private CallbackSingle m_destroyTimer
-
-  // --------------------------------------------------------------------------
-  construct(unit lootingUnit, LootableComponent lootable, real duration)
-    m_lootingUnit = lootingUnit
-    m_lootable = lootable
-    m_duration = duration
-
-    if (m_duration <= 0.0)
-      error("Argument 'duration' must be greater than zero")
-    
-    m_progressBar = new ProgressBarTag(g_LootOperationProgressBar, m_lootable.getOwnerUnit().getPos().withZ(0.0), 10.0)
-    m_progressBar.show()
-
-    m_timer = getTimer()
-    m_timer.doAfter(duration, () -> onOperationFinished())
-
-    m_timerDialog = CreateTimerDialog(m_timer)
-    ..setTitle("Looting {0}...".format(lootable.getOwnerUnit().getName()))
-    ..display(lootingUnit.getOwner(), true)
-
-    g_looterToOperationMap.put(lootingUnit, this)
-
-    m_manaCost = m_lootingUnit.getAbility(ABILITY_ID_SEARCH).getField(ABILITY_ILF_MANA_COST, 0)
-
-    registerForUpdate()
-
-  // --------------------------------------------------------------------------
-  ondestroy
-
-    g_looterToOperationMap.remove(m_lootingUnit)
-
-    if (m_timerDialog != null)
-      m_timerDialog.destr()
-      m_timerDialog = null
-
-    if (m_timer != null)
-      m_timer.release()
-      m_timer = null
-
-    if (m_destroyTimer != null)
-      destroy m_destroyTimer
-      m_destroyTimer = null
-
-    unregisterForUpdate()
-    
-    if (m_progressBar != null)
-      destroy m_progressBar
-      m_progressBar = null
-
-  // --------------------------------------------------------------------------
-  function getLootable() returns LootableComponent
-    return m_lootable
-
-  // --------------------------------------------------------------------------
-  function getTimeRemaining() returns real
-    return m_timer != null ? m_timer.getRemaining() : 0.0
-
-  // --------------------------------------------------------------------------
-  private function registerForUpdate()
-    unregisterForUpdate()
-    g_activeOperations.add(this)
-
-  // --------------------------------------------------------------------------
-  private function unregisterForUpdate()
-    g_activeOperations.remove(this)
-
-  // --------------------------------------------------------------------------
-  private function isBeingDestroyed() returns bool
-    return m_destroyTimer != null
-
-  // --------------------------------------------------------------------------
-  function update()
-    if (isBeingDestroyed())
-      return
-
-    if (m_progressBar != null)
-      m_progressBar.update(1.0 - (m_timer.getRemaining() / m_duration))
-
-    // Remove mana per second
-    let secondsElapsed = m_timer.getElapsed().floor()
-    if (m_secondsElapsed != secondsElapsed)
-      m_secondsElapsed = secondsElapsed
-      m_lootingUnit.addMana(-m_manaCost.toReal())
-      if (m_lootingUnit.getMana() == 0)
-        FX.createOutOfManaTag(m_lootingUnit.getPos(), m_lootingUnit.getOwner())
-        cancel()
-
-  // --------------------------------------------------------------------------
-  function resume()
-    if (m_destroyTimer != null)
-      destroy m_destroyTimer
-      m_destroyTimer = null
-    if (m_timer != null)
-      m_timer.resume()
-
-  // --------------------------------------------------------------------------
-  function cancel()
-    if (isBeingDestroyed())
-      return
-    m_lootable.onLootingCanceled(m_lootingUnit)
-    delayDestroyThis()
-  
-  // --------------------------------------------------------------------------
-  private function onOperationFinished()
-    if (isBeingDestroyed())
-      return
-    m_lootable.onLootingFinished(m_lootingUnit)
-    // The callback will handle destroying the timer
-    m_timer = null
-    destroy this
-
-  // --------------------------------------------------------------------------
-  private function delayDestroyThis()
-    if (isBeingDestroyed())
-      return
-    if (m_timer != null)
-      m_timer.pause()
-    m_destroyTimer = doAfter(0.1) () ->
-      m_destroyTimer = null
-      destroy this
-
-// ============================================================================
-function updateProgressBars()
-  for operation in g_activeOperations
-    operation.update()
-
-// ============================================================================
 function onDayStart()
   for lootableUnit in g_lootableUnits
     lootableUnit.decrementCooldown()
 
 // ============================================================================
-function resetUnitAnimationAfterRightClickingSameLootable(unit lootingUnit, LootOperation lootOperation)
-  // Stand 4 in HD
-  lootingUnit.setAnimation(15)
-  // Reset the cooldown since
-  lootingUnit.setAbilityCooldown(ABILITY_ID_SEARCH, 0, lootOperation.getTimeRemaining())
-
-// ============================================================================
-function prepareSearchSpell(unit lootingUnit, unit lootableUnit)
-  
-  let lootableUnitMetadata = lootableUnit.getMetadata()
-  if (lootableUnitMetadata == null)
-    return
-
-  let lootableComp = lootableUnitMetadata.getLootableComponent()
-  if (lootableComp == null)
-    return
-
-  let searchAbility = lootingUnit.getAbility(ABILITY_ID_SEARCH)
-  if (searchAbility == null)
-    return
-  
-  let searchDuration = lootableComp.getUnitSearchDuration(lootingUnit)
-
-  let lvl = 0
-  lootingUnit.setAbilityLevel(ABILITY_ID_SEARCH, lvl + 1)
-  searchAbility.setField(ABILITY_RLF_DURATION_NORMAL, lvl, searchDuration)
-  searchAbility.setField(ABILITY_RLF_DURATION_HERO, lvl, searchDuration)
-  searchAbility.setField(ABILITY_RLF_ART_DURATION, lvl, searchDuration)
-  searchAbility.setField(ABILITY_RLF_FOLLOW_THROUGH_TIME, lvl, searchDuration)
-  searchAbility.setField(ABILITY_RLF_COOLDOWN, lvl, searchDuration)
-  lootingUnit.setAbilityLevel(ABILITY_ID_SEARCH, lvl)
-
-// ============================================================================
-function onSpellChannel()
-  if (GetSpellAbilityId() != ABILITY_ID_SEARCH)
-    return
-
-  let lootingUnit = GetSpellAbilityUnit()
-  let lootableUnit = GetSpellTargetUnit()
-
-  let looterMetadata = lootingUnit.getMetadata()
-  if (looterMetadata == null)
-    Log.debug("Searching unit has no metadata")
-    lootingUnit.issueImmediateOrderById(Orders.stop)
-    lootingUnit.resetAbilityCooldown(TlsAbilityIds.search)
-    return
-  
-  let lootableMetadata = lootableUnit.getMetadata()
-  if (lootableMetadata == null)
-    Log.debug("Search target has no metadata")
-    lootingUnit.issueImmediateOrderById(Orders.stop)
-    lootingUnit.resetAbilityCooldown(TlsAbilityIds.search)
-    return
-
-  let lootable = lootableMetadata.getLootableComponent()
-  if (lootable == null or not lootable.getEnabled())
-    lootingUnit.issueImmediateOrderById(Orders.stop)
-    lootingUnit.resetAbilityCooldown(TlsAbilityIds.search)
-    displayMessageToPlayer(lootingUnit.getOwner(), "Failed To Search".colorize(Colors.red) + " Must target a lootable unit to search")
-    return
-
-  if (lootable.getIsBeingLooted())
-    lootingUnit.issueImmediateOrderById(Orders.stop)
-    lootingUnit.resetAbilityCooldown(TlsAbilityIds.search)
-    displayMessageToPlayer(lootingUnit.getOwner(), "Failed To Search".colorize(Colors.red) + " Lootable is already being looted")
-    return
-
-  let activeLootingOperation = g_looterToOperationMap.get(lootingUnit)
-  if (activeLootingOperation != null)
-    activeLootingOperation.resume()
-    resetUnitAnimationAfterRightClickingSameLootable(lootingUnit, activeLootingOperation)
-  else
-    prepareSearchSpell(lootingUnit, lootableUnit)
-    lootable.startLooting(lootingUnit)
-
-// ============================================================================
-function onSpellEndCast()
-  if (GetSpellAbilityId() != ABILITY_ID_SEARCH)
-    return
-  
-  let lootingUnit = GetSpellAbilityUnit()
-  let lootingOperation = g_looterToOperationMap.get(lootingUnit)
-  if (lootingOperation == null)
-    return
-
-  lootingOperation.cancel()
-
-// ============================================================================
-function onUnitIssuedUnitOrder()
-  let orderedUnit = GetOrderedUnit()
-  let targetUnit = GetOrderTargetUnit()
-  let issuedOrder = GetIssuedOrderId()
-
-  // Turn around and issue a new search order
-  if (issuedOrder == Orders.smart and targetUnit.isLootable())
-    orderedUnit.issueTargetOrderById(ABILITY_SEARCH_ORDER, targetUnit)
-    return
-
-  let lootingOperation = g_looterToOperationMap.get(orderedUnit) 
-  if (lootingOperation == null)
-    return
-
-  // If the order issued was search and its the same target lootable dont cancel the operation
-  // Instead we'll reuse the loot operation object
-  if (issuedOrder == ABILITY_SEARCH_ORDER and lootingOperation.getLootable().getOwnerUnit() == targetUnit)
-    return
-
-  // For any other case cancel the current operation
-  lootingOperation.cancel()
-
-// ============================================================================
-function onUnitIssuedImmediateOrPointOrder()
-  let orderedUnit = GetOrderedUnit()
-  let lootingOperation = g_looterToOperationMap.get(orderedUnit)
-  if (lootingOperation == null)
-    return
-  lootingOperation.cancel()
-
-// ============================================================================
 init
   registerDayEvent(function onDayStart)
-  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_SPELL_CHANNEL, function onSpellChannel)
-  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_SPELL_ENDCAST, function onSpellEndCast)
-  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ISSUED_UNIT_ORDER, function onUnitIssuedUnitOrder)
-  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ISSUED_ORDER, function onUnitIssuedImmediateOrPointOrder)
-  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ISSUED_POINT_ORDER, function onUnitIssuedImmediateOrPointOrder)
-  
-  g_LootOperationProgressBar = new TextProgressBar(PROGRESS_BAR_LENGTH, PROGRESS_BAR_FOREGROUND, PROGRESS_BAR_BACKGROUND)
-  g_activeOperations = new LinkedList<LootOperation>()
-
-  doPeriodically(PROGRESS_BAR_UPDATE_PERIOD, (cb) -> updateProgressBars())

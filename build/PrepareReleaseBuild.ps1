@@ -1,4 +1,6 @@
+$env:Build = "Release"
 .\SetupBuildEnvironment.ps1
+.\CreateMapJunctions.ps1
 
 Copy-Item ".\wurst_run_release.args" "..\wurst_run.args" -Force
 

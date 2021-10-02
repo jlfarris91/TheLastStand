@@ -1,5 +1,4 @@
 package CryptFiendComponent
-import UnitComponent
 import ClosureEvents
 import TlsAbilityIds
 import UnitAnimations
@@ -13,19 +12,21 @@ import TlsUnitIds
 import UnitIds
 import UnitObjEditing
 import RealtimeUnitComponent
-import RealtimeUpdate
 import ObjectIds
 import AbilityIds
 import Vector
 import Suspend
+// import GroupUtils
+// import Host
 
-constant real BURROW_SETTLE_DURATION = 2.0
+constant real BURROW_SETTLE_DURATION = 1.0
 constant real BURROW_TRAVEL_DURATION = 3.0
 constant real BURROW_FINALIZE_DURATION = 3.0
 constant real BURROW_CAST_INTERVAL = 5.0
 constant real BURROW_CAST_RANGE_MIN = 200.0
 constant real BURROW_CAST_RANGE_MIN_SQ = BURROW_CAST_RANGE_MIN*BURROW_CAST_RANGE_MIN
 constant real BURROW_CAST_RANGE_MAX = 800.0
+constant real BURROW_LIFETIME_TIMER = 5.0
 
 constant int EFFECT_COUNT = 16
 constant real EFFECT_SCALE = 0.3
@@ -35,17 +36,40 @@ constant real EFFECT_LIFETIME = 1.0
 
 constant conditionfunc g_burrowTargetFilter = Condition(function isFilterUnitValidBurrowTarget)
 
+enum BurrowState
+  Unburrowed
+  Burrowing
+  Burrowed
+  Traveling
+  Unburrowing
+
+function BurrowState.toString() returns string
+  switch this
+    case Unburrowed
+      return "Unburrowed"
+    case Burrowing
+      return "Burrowing"
+    case Burrowed
+      return "Burrowed"
+    case Traveling
+      return "Traveling"
+    case Unburrowing
+      return "Unburrowing"
+
 // ============================================================================
 public class CryptFiendComponent extends UnitComponent
-  private bool m_isBurrowing
-  private angle m_facingAngle
-  private unit m_targetUnit
-  private unit m_dummyUnit
-  private CallbackManual m_burrowCastTimer
+  protected bool m_isBurrowing
+  protected angle m_facingAngle
+  protected unit m_targetUnit
+  protected unit m_dummyUnit
+  protected CallbackManual m_burrowCastTimer
+
+  protected BurrowState m_burrowState
 
   // --------------------------------------------------------------------------
   construct(IUnitMetadata owner)
     super(owner)
+    m_burrowState = Unburrowed
 
   // --------------------------------------------------------------------------
   ondestroy
@@ -58,6 +82,10 @@ public class CryptFiendComponent extends UnitComponent
   // --------------------------------------------------------------------------
   override function getTypeId() returns int
     return CryptFiendComponent.typeId
+
+  // --------------------------------------------------------------------------
+  function getIsBurrowing() returns bool
+    return m_isBurrowing
 
   // --------------------------------------------------------------------------
   override function onEnabled()
@@ -74,6 +102,8 @@ public class CryptFiendComponent extends UnitComponent
     m_isBurrowing = true
     m_targetUnit = targetUnit
 
+    m_burrowState = Burrowing
+
     let ownerUnit = getOwnerUnit()
 
     m_facingAngle = ownerUnit.getFacingAngle()
@@ -86,6 +116,7 @@ public class CryptFiendComponent extends UnitComponent
 
     // Start the burrowing animation
     ownerUnit.setAnimation(UnitAnimations.CryptFiend.morph.idx)
+    // Log.info("line 118 UnitAnimations.CryptFiend.morph.idx")
 
     doAfter(UnitAnimations.CryptFiend.morph.duration, () -> burrow_animationFinished(ownerUnit))
   
@@ -95,31 +126,21 @@ public class CryptFiendComponent extends UnitComponent
     if (comp == null)
       return
 
-    if (comp.isBurrowStillValid())
-    //{
-      comp.m_dummyUnit = createUnit(Player(PLAYER_NEUTRAL_PASSIVE), TlsUnitIds.Undead.cryptFiendBurrowDummy, ownerUnit.getPos(), comp.m_facingAngle)
-      comp.m_dummyUnit.issueTargetOrderById(OrderIds.attack, comp.m_targetUnit)
-      comp.m_dummyUnit.getMetadataRequired().getCryptFiendDummyComponent()
-        ..setCryptFiend(comp)
-        ..setTargetUnit(comp.m_targetUnit)
-    //}
-    else
-      comp.unburrow()
-  
-    // Let the burrow animation finish
-    doAfter(UnitAnimations.CryptFiend.morph.duration + BURROW_SETTLE_DURATION, () -> burrow_afterBurrowSettle(ownerUnit))
-  
-  // --------------------------------------------------------------------------
-  static function burrow_afterBurrowSettle(unit ownerUnit)
-    let comp = ownerUnit.getCryptFiendComponent()
-    if (comp == null)
+    if (comp.isBurrowStillValid() == false)
+      comp.cancelBurrow()
       return
 
-    if (comp.isBurrowStillValid())
-      // Play the stand alternate animation
-      ownerUnit.setAnimation(UnitAnimations.CryptFiend.standAlternate.idx)
-    else
-      comp.unburrow()
+    comp.m_burrowState = Burrowed
+
+    // Play the stand alternate animation
+    ownerUnit.setAnimation(UnitAnimations.CryptFiend.standAlternate.idx)
+    // Log.info("line 155 UnitAnimations.CryptFiend.standAlternate.idx")
+
+    comp.m_dummyUnit = createUnit(Player(PLAYER_NEUTRAL_PASSIVE), TlsUnitIds.Undead.cryptFiendBurrowDummy, ownerUnit.getPos(), comp.m_facingAngle)
+    comp.m_dummyUnit.issueTargetOrderById(OrderIds.attack, comp.m_targetUnit)
+    comp.m_dummyUnit.getMetadataRequired().getCryptFiendDummyComponent()
+      ..setCryptFiend(ownerUnit)
+      ..setTargetUnit(comp.m_targetUnit)
 
   // --------------------------------------------------------------------------
   function unburrow()
@@ -128,32 +149,32 @@ public class CryptFiendComponent extends UnitComponent
 
     let ownerUnit = getOwnerUnit()
 
-    if (m_dummyUnit != null)
-      m_dummyUnit.remove()
-      m_dummyUnit = null
-    
-    // If the target is no longer valid we can unborrow in the same spot
+    // If the target is no longer valid we can unburrow in the current spot
     vec2 targetPos = ownerUnit.getPos()
     
     if (m_targetUnit.isValidBurrowTarget())
       targetPos = m_targetUnit.getPos()
 
+    if (m_dummyUnit != null)
+      targetPos = m_dummyUnit.getPos()
+      m_dummyUnit.remove()
+      m_dummyUnit = null
+
+    m_burrowState = Unburrowing
+
     // Move the unit to the end position while it's invisible
     ownerUnit.setX(targetPos.x)
     ownerUnit.setY(targetPos.y)
     BlzSetUnitFacingEx(ownerUnit, m_facingAngle.degrees())
-
-    // Now course correct the dummy to the new final pos
-    m_dummyUnit.issuePointOrderById(OrderIds.move, targetPos)
     
-    // Now that the unit is in the new location play the unborrow animation
+    // Now that the unit is in the new location play the unburrow animation
     ownerUnit.setAnimation(UnitAnimations.CryptFiend.morphAlternate.idx)
 
     // Let the unburrow animation finish
-    doAfter(UnitAnimations.CryptFiend.morphAlternate.duration, () -> unborrow_animationFinished(ownerUnit))
+    doAfter(UnitAnimations.CryptFiend.morphAlternate.duration, () -> unburrow_animationFinished(ownerUnit))
 
   // --------------------------------------------------------------------------
-  static function unborrow_animationFinished(unit ownerUnit)
+  static function unburrow_animationFinished(unit ownerUnit)
 
     // Unpause the unit so that it can continue on with its plans
     ownerUnit.unsuspend()
@@ -162,22 +183,31 @@ public class CryptFiendComponent extends UnitComponent
     if (ownerUnit.hasAbility(AbilityIds.invulnerable))
       ownerUnit.removeAbility(AbilityIds.invulnerable)
 
-    if (ownerUnit.isAlive())
-      ownerUnit.issueTargetOrderById(OrderIds.attack, ownerUnit)
-    else
+    bool issuedOrderToAttackTargetUnit = false
+    let metadata = ownerUnit.getMetadata()
+    if (metadata != null)
+      let comp = metadata.getCryptFiendComponent()
+      if (comp != null and comp.m_targetUnit != null and comp.m_targetUnit.isAlive())
+        issuedOrderToAttackTargetUnit = ownerUnit.issueTargetOrderById(OrderIds.attack, ownerUnit)
+
+    if (not issuedOrderToAttackTargetUnit)
       ownerUnit.issuePointOrderById(OrderIds.attack, ownerUnit.getPos())
 
     // Delay cleanup
-    doAfter(BURROW_FINALIZE_DURATION, () -> ownerUnit)
+    doAfter(BURROW_FINALIZE_DURATION, () -> unburrow_finalizeFinished(ownerUnit))
 
   // --------------------------------------------------------------------------
-  static function unborrow_finilizeFinished(unit ownerUnit)
+  static function unburrow_finalizeFinished(unit ownerUnit)
     let comp = ownerUnit.getCryptFiendComponent()
     if (comp == null)
       return
 
-    comp.restartCastTimer()
     comp.cleanup()
+
+  // --------------------------------------------------------------------------
+  function cancelBurrow()
+    if (m_isBurrowing)
+      unburrow()
 
   // --------------------------------------------------------------------------
   function burrowToNearestTarget() returns bool
@@ -218,8 +248,8 @@ public class CryptFiendComponent extends UnitComponent
     // Make sure the crypt fiend is not invulnerable
     if (ownerUnit.hasAbility(AbilityIds.invulnerable))
       ownerUnit.removeAbility(AbilityIds.invulnerable)
-
-    ResetUnitAnimation(ownerUnit)
+    
+    m_burrowState = Unburrowed
 
     m_isBurrowing = false
     m_targetUnit = null
@@ -228,6 +258,8 @@ public class CryptFiendComponent extends UnitComponent
     if (m_dummyUnit != null)
       m_dummyUnit.remove()
       m_dummyUnit = null
+
+    restartCastTimer()
 
 // ============================================================================
 public function unit.getCryptFiendComponent() returns CryptFiendComponent
@@ -304,9 +336,9 @@ public class CryptFiendDummyComponent extends RealtimeUnitComponent
   private constant real APPROACH_DIST = 64.0
   private constant real APPROACH_DIST_SQ = APPROACH_DIST*APPROACH_DIST
 
-  private vec2 m_lastPos
-  private unit m_targetUnit
-  private CryptFiendComponent m_cryptFiend
+  protected vec2 m_lastPos
+  protected unit m_targetUnit
+  protected unit m_cryptFiend
 
   // --------------------------------------------------------------------------
   construct(IUnitMetadata owner)
@@ -330,33 +362,49 @@ public class CryptFiendDummyComponent extends RealtimeUnitComponent
     m_targetUnit = value
 
   // --------------------------------------------------------------------------
-  function getCryptFiend() returns CryptFiendComponent
+  function getCryptFiendUnit() returns unit
     return m_cryptFiend
 
   // --------------------------------------------------------------------------
-  function setCryptFiend(CryptFiendComponent value)
+  function setCryptFiend(unit value)
     m_cryptFiend = value
+
+  // --------------------------------------------------------------------------
+  function getCryptFiendComponent() returns CryptFiendComponent
+    let metadata = m_cryptFiend.getMetadata()
+    if (metadata == null)
+      return null
+    return metadata.getCryptFiendComponent()
 
   // --------------------------------------------------------------------------
   override function onEnabled()
     super.onEnabled()
 
+    let ownerUnit = getOwnerUnit()
+
     this.registerForRealtimeUpdate(RealtimeUpdatePriority.Realtime)
-    m_lastPos = getOwnerUnit().getPos()
+    m_lastPos = ownerUnit.getPos()
+
+    // The dummy has a max lifespan
+    doAfter(BURROW_LIFETIME_TIMER, () -> destroyDummy(ownerUnit))
+
+    // Log.info("[CFDC] enabled")
 
   // --------------------------------------------------------------------------
   override function realtimeUpdate(real dt)
     super.realtimeUpdate(dt)
 
-    if (m_cryptFiend == null)
-      return
-
-    if (not m_targetUnit.isValidBurrowTarget())
-      m_cryptFiend.unburrow()
-      removeThis()
-      return
-
     let ownerUnit = getOwnerUnit()
+
+    if (m_cryptFiend == null or not m_targetUnit.isValidBurrowTarget())
+      // Log.info("[CFDC] target is not valid")
+      let comp = getCryptFiendComponent()
+      if (comp != null)
+        comp.cancelBurrow()
+      ownerUnit.remove()
+      return
+    
+    // Log.info("[CFDC] current order " + OrderId2String(getOwnerUnit().getCurrentOrder()))
 
     ownerUnit.issuePointOrderById(OrderIds.move, m_targetUnit.getPos())
 
@@ -368,9 +416,32 @@ public class CryptFiendDummyComponent extends RealtimeUnitComponent
 
     let distToTargetSq = pos.distanceToSq(m_targetUnit.getPos())
     if (distToTargetSq < APPROACH_DIST_SQ)
-      m_cryptFiend.unburrow()
-      removeThis()
+      // Log.info("[CFDC] reached destination")
+      this.unregisterForRealtimeUpdate()
+      doAfter(BURROW_SETTLE_DURATION, () -> delayedUnborrow(ownerUnit))
       return
+
+  // --------------------------------------------------------------------------
+  private static function delayedUnborrow(unit dummyUnit)
+    let metadata = dummyUnit.getMetadata()
+    if (metadata != null)
+      let comp = metadata.getCryptFiendDummyComponent()
+      if (comp != null)
+        let cryptFiend = comp.getCryptFiendComponent()
+        if (cryptFiend != null)
+          cryptFiend.unburrow()
+    dummyUnit.remove()
+
+  // --------------------------------------------------------------------------
+  private static function destroyDummy(unit dummyUnit)
+    let metadata = dummyUnit.getMetadata()
+    if (metadata != null)
+      let comp = metadata.getCryptFiendDummyComponent()
+      if (comp != null)
+        let cryptFiend = comp.getCryptFiendComponent()
+        if (cryptFiend != null and cryptFiend.getIsBurrowing())
+          cryptFiend.cancelBurrow()
+    dummyUnit.remove()
 
 // ============================================================================
 public function IUnitMetadata.getCryptFiendDummyComponent() returns CryptFiendDummyComponent
@@ -393,9 +464,9 @@ public function IUnitMetadata.getOrAddCryptFiendDummyComponent() returns CryptFi
     ..setShadowImageWidth(0)
     ..setShadowImageHeight(0)
     ..setCollisionSize(0)
-    ..setAttack1CooldownTime(99999)
+    ..setAttack1CooldownTime(5)
     ..setAttack1DamageBase(1)
-    ..setAttack1Range(10)
+    ..setAttack1Range(32)
 
 // ============================================================================
 function unit.isValidBurrowTarget() returns bool
@@ -424,4 +495,45 @@ function onCryptFiendBurrowCast(unit sender, unit target)
 // ============================================================================
 init
   EventListener.onTargetCast(TlsAbilityIds.cryptFiendBurrow, (sender, target) -> onCryptFiendBurrowCast(sender, target))
-  
+
+  // doPeriodically(0.25) (CallbackPeriodic cb) ->
+  //   let g = getGroup()
+  //   g.enumUnitsSelected(g_HostPlayer, null)
+  //   for u in g
+  //   //{
+  //     if (u.getOwner() == PLAYER_UNDEAD)
+  //       let m = u.getMetadata()
+  //       if (m == null)
+  //         Log.info("Metadata is null")
+  //       else
+  //         let c1 = m.getCryptFiendComponent()
+  //         if (c1 == null)
+  //           Log.info("CFC is null")
+  //         else
+  //         //{
+  //           Log.info("[CFC] burrowing " + c1.getIsBurrowing().toString() )
+
+  //           if (c1.m_targetUnit != null)
+  //             Log.info("[CFC] target unit " + c1.m_targetUnit.getName())
+  //           else
+  //             Log.info("[CFC] target unit is null")
+
+  //           Log.info("[CFC] state " + c1.m_burrowState.toString())
+
+  //           if (c1.m_dummyUnit != null)
+  //             let dummyComp = c1.m_dummyUnit.getMetadataRequired().getCryptFiendDummyComponent()
+  //             if (dummyComp != null)
+  //               Log.info("[CFDC] pos: " + c1.m_dummyUnit.getPos().toString() + ", lastPos: " + dummyComp.m_lastPos.toString())
+  //               if (dummyComp.m_targetUnit != null)
+  //                 Log.info("[CFDC] target unit: " + dummyComp.m_targetUnit.getName())
+  //               else
+  //                 Log.info("[CFDC] target unit is null")
+
+  //             else
+  //               Log.info("[CFDC] dummy unit component is null")
+  //           else
+  //             Log.info("[CFDC] dummy unit is null")
+
+  //         //}
+  //   //}
+  //   g.release()

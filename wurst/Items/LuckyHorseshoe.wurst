@@ -1,42 +1,58 @@
 package LuckyHorseshoe
 import TlsItemIds
 import UnitMetadata
-import ItemEvents
 import LooterComponent
+import ItemEffectComponent
 
 constant real CHANCE = 0.1
 
 // ============================================================================
-function onUnitAcquiredItem(unit _unit, item _item)
+class LuckyHorseshoeComponent extends ItemEffectComponent
 
-  let metadata = _unit.getMetadata()
-  if (metadata == null)
-    return
+  // --------------------------------------------------------------------------
+  construct (IUnitMetadata owner)
+    super(owner)
 
-  let comp = metadata.getLooterComponent()
-  if (comp == null)
-    return
+    setMode(ItemEffectApplication.ACQUIRED)
+    setItemTypeId(TlsItemIds.luckyHorseshoe)
+    setDestroyOnDrop(true)
 
-  comp.setChanceToLootTwice(comp.getChanceToLootTwice() + CHANCE)
+  // --------------------------------------------------------------------------
+  override function getTypeId() returns int
+    return LuckyHorseshoeComponent.typeId
+  
+  // --------------------------------------------------------------------------
+  override function onApplied(int stacks)
+    super.onApplied(stacks)
+    let comp = getOwner().getLooterComponent()
+    if (comp != null)
+      comp.setChanceToLootTwice(comp.getChanceToLootTwice() + CHANCE)
+
+  // --------------------------------------------------------------------------
+  override function onReverted(int stacks)
+    super.onReverted(stacks)
+    let comp = getOwner().getLooterComponent()
+    if (comp != null)
+      comp.setChanceToLootTwice(comp.getChanceToLootTwice() - CHANCE)
 
 // ============================================================================
-function onUnitDroppedItem(unit _unit, item _item)
+function IUnitMetadata.getLuckyHorseshoeComponent() returns LuckyHorseshoeComponent
+  return this.getComponent(typeInfo(LuckyHorseshoeComponent.typeId)) castTo LuckyHorseshoeComponent
 
-  let metadata = _unit.getMetadata()
-  if (metadata == null)
-    return
-
-  let comp = metadata.getLooterComponent()
-  if (comp == null)
-    return
-
-  // Unit is still holding a key
-  if (_unit.itemCount(TlsItemIds.shapeshiftingKey) > 1)
-    return
-
-  comp.setChanceToLootTwice(comp.getChanceToLootTwice() - CHANCE)
+// ============================================================================
+function IUnitMetadata.getOrAddLuckyHorseshoeComponent() returns LuckyHorseshoeComponent
+  var component = this.getLuckyHorseshoeComponent()
+  if (component == null)
+    component = this.addComponent(new LuckyHorseshoeComponent(this)) castTo LuckyHorseshoeComponent
+  return component
 
 // ============================================================================
 init
-  registerItemAcquiredEvent(TlsItemIds.luckyHorseshoe, (unit u, item i) -> onUnitAcquiredItem(u, i))
-  registerItemDroppedEvent(TlsItemIds.luckyHorseshoe, (unit u, item i) -> onUnitDroppedItem(u, i))
+  g_itemIdToComponentFactoryMap.put(TlsItemIds.luckyHorseshoe) (_unit) ->
+  //{
+    let metadata = _unit.getMetadata()
+    ItemEffectComponent comp = null
+    if (metadata != null)
+      comp = metadata.getOrAddLuckyHorseshoeComponent()
+    return comp
+  //}

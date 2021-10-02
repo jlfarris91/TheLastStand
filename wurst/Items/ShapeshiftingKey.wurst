@@ -2,39 +2,55 @@ package ShapeshiftingKey
 import TlsItemIds
 import LooterComponent
 import UnitMetadata
-import ItemEvents
+import ItemEffectComponent
 
 // ============================================================================
-function onUnitAcquiredItem(unit _unit, item _item)
+class ShapeshiftingKeyComponent extends ItemEffectComponent
 
-  let metadata = _unit.getMetadata()
-  if (metadata == null)
-    return
+  // --------------------------------------------------------------------------
+  construct (IUnitMetadata owner)
+    super(owner)
 
-  let comp = metadata.getLooterComponent()
-  if (comp == null)
-    return
+    setMode(ItemEffectApplication.ACQUIRED)
+    setItemTypeId(TlsItemIds.shapeshiftingKey)
+    setDestroyOnDrop(true)
 
-  comp.setDurationScale(0.5)
+  // --------------------------------------------------------------------------
+  override function getTypeId() returns int
+    return ShapeshiftingKeyComponent.typeId
+  
+  // --------------------------------------------------------------------------
+  override function onApplied(int stacks)
+    super.onApplied(stacks)
+    let comp = getOwner().getOrAddLooterComponent()
+    if (comp != null)
+      comp.setDurationScale(0.5)
+
+  // --------------------------------------------------------------------------
+  override function onReverted(int stacks)
+    super.onReverted(stacks)
+    let comp = getOwner().getOrAddLooterComponent()
+    if (comp != null)
+      comp.setDurationScale(1.0)
 
 // ============================================================================
-function onUnitDroppedItem(unit _unit, item _item)
+function IUnitMetadata.getShapeshiftingKeyComponent() returns ShapeshiftingKeyComponent
+  return this.getComponent(typeInfo(ShapeshiftingKeyComponent.typeId)) castTo ShapeshiftingKeyComponent
 
-  let metadata = _unit.getMetadata()
-  if (metadata == null)
-    return
-
-  let comp = metadata.getLooterComponent()
-  if (comp == null)
-    return
-
-  // Unit is still holding a key
-  if (_unit.itemCount(TlsItemIds.shapeshiftingKey) > 1)
-    return
-
-  comp.setDurationScale(1.0)
+// ============================================================================
+function IUnitMetadata.getOrAddShapeshiftingKeyComponent() returns ShapeshiftingKeyComponent
+  var component = this.getShapeshiftingKeyComponent()
+  if (component == null)
+    component = this.addComponent(new ShapeshiftingKeyComponent(this)) castTo ShapeshiftingKeyComponent
+  return component
 
 // ============================================================================
 init
-  registerItemAcquiredEvent(TlsItemIds.shapeshiftingKey, (unit u, item i) -> onUnitAcquiredItem(u, i))
-  registerItemDroppedEvent(TlsItemIds.shapeshiftingKey, (unit u, item i) -> onUnitDroppedItem(u, i))
+  g_itemIdToComponentFactoryMap.put(TlsItemIds.shapeshiftingKey) (_unit) ->
+  //{
+    let metadata = _unit.getMetadata()
+    ItemEffectComponent comp = null
+    if (metadata != null)
+      comp = metadata.getOrAddShapeshiftingKeyComponent()
+    return comp
+  //}

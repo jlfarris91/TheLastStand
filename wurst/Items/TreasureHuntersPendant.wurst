@@ -3,42 +3,58 @@ import TlsItemIds
 import LooterComponent
 import UnitMetadata
 import MainItemLibrary
-import ItemEvents
+import ItemEffectComponent
 
-ItemChances g_betterItemChances = ItemChances(32.0, 48.0, 16.0, 4.0)
-
-// ============================================================================
-function onUnitAcquiredItem(unit _unit, item _item)
-
-  let metadata = _unit.getMetadata()
-  if (metadata == null)
-    return
-
-  let comp = metadata.getLooterComponent()
-  if (comp == null)
-    return
-
-  comp.setOverrideItemChances(true)
-  comp.setItemChances(g_betterItemChances)
+ItemChances g_betterItemChances = ItemChances(32.0, 32.0, 18.0, 8.0)
 
 // ============================================================================
-function onUnitDroppedItem(unit _unit, item _item)
+class TreasureHuntersPendantComponent extends ItemEffectComponent
 
-  let metadata = _unit.getMetadata()
-  if (metadata == null)
-    return
+  // --------------------------------------------------------------------------
+  construct (IUnitMetadata owner)
+    super(owner)
 
-  let comp = metadata.getLooterComponent()
-  if (comp == null)
-    return
+    setMode(ItemEffectApplication.ACQUIRED)
+    setItemTypeId(TlsItemIds.treasureHuntersPendant)
+    setDestroyOnDrop(true)
 
-  // Unit is still holding a pendant
-  if (_unit.itemCount(TlsItemIds.treasureHuntersPendant) > 1)
-    return
+  // --------------------------------------------------------------------------
+  override function getTypeId() returns int
+    return TreasureHuntersPendantComponent.typeId
+  
+  // --------------------------------------------------------------------------
+  override function onApplied(int stacks)
+    super.onApplied(stacks)
+    let comp = getOwner().getLooterComponent()
+    if (comp != null)
+      comp.setOverrideItemChances(true)
+      comp.setItemChances(g_betterItemChances)
 
-  comp.setOverrideItemChances(false)
+  // --------------------------------------------------------------------------
+  override function onReverted(int stacks)
+    super.onReverted(stacks)
+    let comp = getOwner().getLooterComponent()
+    if (comp != null)
+      comp.setOverrideItemChances(false)
+
+// ============================================================================
+function IUnitMetadata.getTreasureHuntersPendantComponent() returns TreasureHuntersPendantComponent
+  return this.getComponent(typeInfo(TreasureHuntersPendantComponent.typeId)) castTo TreasureHuntersPendantComponent
+
+// ============================================================================
+function IUnitMetadata.getOrAddTreasureHuntersPendantComponent() returns TreasureHuntersPendantComponent
+  var component = this.getTreasureHuntersPendantComponent()
+  if (component == null)
+    component = this.addComponent(new TreasureHuntersPendantComponent(this)) castTo TreasureHuntersPendantComponent
+  return component
 
 // ============================================================================
 init
-  registerItemAcquiredEvent(TlsItemIds.treasureHuntersPendant, (unit u, item i) -> onUnitAcquiredItem(u, i))
-  registerItemDroppedEvent(TlsItemIds.treasureHuntersPendant, (unit u, item i) -> onUnitDroppedItem(u, i))
+  g_itemIdToComponentFactoryMap.put(TlsItemIds.treasureHuntersPendant) (_unit) ->
+  //{
+    let metadata = _unit.getMetadata()
+    ItemEffectComponent comp = null
+    if (metadata != null)
+      comp = metadata.getOrAddTreasureHuntersPendantComponent()
+    return comp
+  //}

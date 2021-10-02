@@ -1,8 +1,24 @@
 # =============================================================================
 #
-# This script is inteded to be run from the build directory
+# This script is intended to be run from the build directory
 #
 # =============================================================================
+
+$VersionInfo = [PSCustomObject](GitVersion | ConvertFrom-Json)
+$env:MapVersion = "v{0}" -f $VersionInfo.MajorMinorPatch
+
+$env:DevEnvironment = "false"
+if ($VersionInfo.BranchName.StartsWith("develop") -or
+    $VersionInfo.BranchName.StartsWith("feature") -or
+    $env:Build -eq "Debug") {
+  $env:DevEnvironment = "true"
+}
+
+$env:TestEnvironment = "false"
+if ($env:Build -eq "Tester") {
+  $env:TestEnvironment = "true"
+  $env:MapVersion = "v{0}" -f $VersionInfo.FullSemVer.Replace("+","_")
+}
 
 $env:ProjectRoot = Split-Path (Get-Location)
 
@@ -18,6 +34,9 @@ $env:ToolsRoot = [System.IO.Path]::Combine($env:ProjectRoot, $env:ToolsDirName)
 $env:WurstDirName = "wurst"
 $env:WurstRoot = [System.IO.Path]::Combine($env:ProjectRoot, $env:WurstDirName)
 
+$env:ImportsDirName = "imports"
+$env:ImportsRoot = [System.IO.Path]::Combine($env:ProjectRoot, $env:ImportsDirName)
+
 $env:TempDirName = "_build"
 $env:TempRoot = [System.IO.Path]::Combine($env:ProjectRoot, $env:TempDirName)
 
@@ -30,9 +49,6 @@ if ($env:CI -eq "true") { $env:IsLocalBuild = 0 }
 # Write-Host ("Is Local Build: {0}" -f $env:IsLocalBuild)
 
 $env:MapAuthor = "Ozymandias"
-
-$VersionInfo = [PSCustomObject](GitVersion | ConvertFrom-Json)
-$env:MapVersion = "v{0}" -f $VersionInfo.MajorMinorPatch
 
 if ($VersionInfo.BranchName -eq "develop") {
   $env:MapVersion = "{0}.{1}" -f $env:MapVersion, $VersionInfo.PreReleaseTag
@@ -55,9 +71,3 @@ $env:WurstOutputMapArtifactFilePath = [System.IO.Path]::Combine($env:ArtifactRoo
 $env:DiscordLink = "discord.gg/VzjbPkGN3r"
 
 $env:BuildDate = (Get-Date -Format "MM/dd/yy")
-
-$env:DevEnvironment = "false"
-if ($VersionInfo.BranchName.StartsWith("develop") -or
-    $VersionInfo.BranchName.StartsWith("feature")) {
-  $env:DevEnvironment = "true"
-}

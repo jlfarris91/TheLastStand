@@ -1,5 +1,4 @@
 package SpikesComponent
-import UnitComponent
 import TlsUnitIds
 import TlsAbilityIds
 import RegisterEvents
@@ -7,7 +6,6 @@ import TimerUtils
 import ClosureTimers
 import ObjectIdGenerator
 import RealtimeUnitComponent
-import RealtimeUpdate
 import DamageEvent
 import Damage
 import Orders
@@ -53,6 +51,7 @@ public class SpikesComponent extends RealtimeUnitComponent
   override function onEnabled()
     super.onEnabled()
     forceUpdate()
+    updateRepairEnabled()
 
   // --------------------------------------------------------------------------
   override function onDisabled()
@@ -63,6 +62,7 @@ public class SpikesComponent extends RealtimeUnitComponent
     ownerUnit.removeAbility(TlsAbilityIds.spikeDisabledIcon)
 
     releaseSpike4AttackTimer()
+    updateRepairEnabled()
 
   // --------------------------------------------------------------------------
   function getSpikesEnabled() returns bool
@@ -183,11 +183,16 @@ public class SpikesComponent extends RealtimeUnitComponent
 
   // --------------------------------------------------------------------------
   function setRepairEnabled(bool enabled)
-    getOwnerUnit().setField(UNIT_IF_TARGETED_AS, (enabled ? SPIKE_REPAIR_ENABLED_TARGETFLAG : SPIKE_REPAIR_DISABLED_TARGETFLAG))
+    let val = (enabled ? SPIKE_REPAIR_ENABLED_TARGETFLAG : SPIKE_REPAIR_DISABLED_TARGETFLAG)
+    getOwnerUnit().setField(UNIT_IF_TARGETED_AS, val)
 
   // --------------------------------------------------------------------------
   function getRepairEnabled() returns bool
     return getOwnerUnit().getField(UNIT_IF_TARGETED_AS) == SPIKE_REPAIR_ENABLED_TARGETFLAG
+
+  // --------------------------------------------------------------------------
+  function updateRepairEnabled()
+    setRepairEnabled(isDay())
 
   // --------------------------------------------------------------------------
   private function playSpike4AttackAnimation()
@@ -232,6 +237,19 @@ public function IUnitMetadata.getOrAddSpikesComponent() returns SpikesComponent
   if (component == null)
     component = this.addComponent(new SpikesComponent(this)) castTo SpikesComponent
   return component
+
+// ============================================================================
+function onUpgradeStarted()
+  let upgradedUnit = GetTriggerUnit()
+  if (not upgradedUnit.isSpikes())
+    return  
+  let metadata = upgradedUnit.getMetadata()
+  if (metadata == null)
+    return
+  let spikesComponent = metadata.getSpikesComponent()
+  if (spikesComponent == null)
+    return
+  spikesComponent.updateRepairEnabled()
 
 // ============================================================================
 function onUpgradeFinished()
@@ -311,6 +329,7 @@ function onNightStart()
 
 // ============================================================================
 init
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_UPGRADE_START, function onUpgradeStarted)
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_UPGRADE_FINISH, function onUpgradeFinished)
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ISSUED_TARGET_ORDER, function onUnitIssuedTargetOrder)
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ATTACKED, function onUnitAttacked)
