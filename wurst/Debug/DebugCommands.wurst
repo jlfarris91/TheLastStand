@@ -22,10 +22,7 @@ import UnitExtensions
 import ProjectConstants
 import PowerSourceComponent
 import PoweredComponent
-import PathChecker
 import Survivors
-import PowerSourceComponent
-import PoweredComponent
 import DevChatCommandHandler
 import LinkedList
 import Action
@@ -121,7 +118,7 @@ function getWorkingGroupUnits(player p) returns LinkedList<unit>
 function forEachWorkingGroupUnit(player p, Action1<unit> action) returns int
   let workingUnits = getWorkingGroupUnits(p)
   if (workingUnits.isEmpty())
-    displayMessageToPlayer(p, "Must have at least one unit selected or in working group")
+    chatCommandPrintToPlayer(p, "Must have at least one unit selected or in working group")
     return 0
   var count = 0
   for u in workingUnits
@@ -273,10 +270,10 @@ function turnOnMapVisibility()
   //{
     wasEnabledForAnyPlayer = g_seeVisionModifiers[targetPlayer.getId()] != null
     togglePlayerVisibility(targetPlayer, not wasEnabledForAnyPlayer)
-    chatCommandPrintToPlayer(commandPlayer, wasEnabledForAnyPlayer ? "Enabled vision for all players" : "Disabled vision for all players")
+    chatCommandPrintToPlayer(commandPlayer, wasEnabledForAnyPlayer ? "Enabled vision for " + targetPlayer.getName() : "Disabled vision for " + targetPlayer.getName())
   //}
   
-  chatCommandPrintToPlayer(commandPlayer, enabled ? "Enabled vision for all players" : "Disabled vision for all players")
+  chatCommandPrintToPlayer(commandPlayer, wasEnabledForAnyPlayer ? "Enabled vision for all players" : "Disabled vision for all players")
 
 // ============================================================================
 function killSelectedUnits()
@@ -331,7 +328,7 @@ function createItemForSelectedUnit()
     for i = 1 to count
       let itm = g_MainItemLibrary.createItem(itemId, u.getPos())
       if (itm != null)
-        displayMessageToPlayer(commandPlayer, "Created " + count.toString() + " item(s) of type " + itm.getName())  
+        chatCommandPrintToPlayer(commandPlayer, "Created " + count.toString() + " item(s) of type " + itm.getName())  
 
 // ============================================================================
 function createUnitAtCameraPos()
@@ -356,7 +353,7 @@ function createUnitAtCameraPos()
         unitName = u.getName()
     
     if (unitName != null)
-      displayMessageToPlayer(commandPlayer, "Created " + I2S(count) + " " + unitName)
+      chatCommandPrintToPlayer(commandPlayer, "Created " + I2S(count) + " " + unitName)
   //}
 
 // ============================================================================
@@ -686,7 +683,7 @@ function setSelectedUnitProperty()
 
   let selectedUnits = getWorkingGroupUnits(commandPlayer)
   if (selectedUnits.isEmpty())
-    displayMessageToPlayer(commandPlayer, "Must have at least one unit selected")
+    chatCommandPrintToPlayer(commandPlayer, "Must have at least one unit selected")
     destroy selectedUnits
     return
 
@@ -708,7 +705,7 @@ function setSelectedUnitProperty()
         case "lifesteal"
           comp.setLifeStealPercentage(propValue)
 
-      comp.printDebug((message) -> displayMessageToPlayer(commandPlayer, message))
+      comp.printDebug((message) -> chatCommandPrintToPlayer(commandPlayer, message))
   //}
 
   destroy selectedUnits
@@ -850,111 +847,6 @@ function setGameSpeed()
   chatCommandPrintToPlayer(commandPlayer, "Set the game speed to " + value.toString() + "x")
 
 // ============================================================================
-function selectAll()
-  let commandPlayer = getChatCommandPlayer()
-  let unitType = getChatCommand().getArgument(0).getRawCode()
-
-  var count = 0
-  let temp = getGroup()
-
-  temp.enumUnitsOfType(unitType, null)
-  if (temp.isEmpty())
-    chatCommandPrintToPlayer(commandPlayer, "ERROR: Unknown unit type {0} ({1})".format(UnitId2String(unitType), unitType.toString()))
-  else
-    for u in temp
-      commandPlayer.select(u)
-      count++
-
-  temp.release()
-
-  if (count > 0)
-    chatCommandPrintToPlayer(commandPlayer, "Selected {0} {1}".format(count.toString(), UnitId2String(unitType)))
-
-// ============================================================================
-function linkSelectedUnits()
-  let commandPlayer = getChatCommandPlayer()
-
-  PowerSourceComponent source = null
-  PowerSourceComponent backup = null
-
-  let selectedUnits = commandPlayer.getSelectedUnits()
-
-  for u in selectedUnits
-    let metadata = u.getMetadata()
-    if (metadata != null)
-      let sourceComp = metadata.getPowerSourceComponent()
-      let consumerComp = metadata.getPoweredComponent()
-      if (sourceComp != null)
-        if (consumerComp == null)
-          source = sourceComp
-        else
-          backup = sourceComp
-
-  if (source == null)
-    source = backup
-
-  if (source == null)
-    chatCommandPrintToPlayer(commandPlayer, "No power source selected")
-    destroy selectedUnits
-    return
-
-  var consumerCount = 0
-
-  for u in selectedUnits
-    let metadata = u.getMetadata()
-    if (metadata != null)
-      let consumerComp = metadata.getPoweredComponent()
-      if (consumerComp != null and source.getOwnerUnit() != u)
-        consumerComp.link(source)
-        source.tryLink(consumerComp)
-        consumerCount++
-
-  if (consumerCount == 0)
-    chatCommandPrintToPlayer(commandPlayer, "No power consumers selected")
-    destroy selectedUnits
-    return
-
-  chatCommandPrintToPlayer(commandPlayer, "Linked " + consumerCount.toString() + " consumer(s) to source " + source.getOwnerUnit().getName())
-  destroy selectedUnits
-
-// ============================================================================
-function unlinkSelectedUnits()
-  let commandPlayer = getChatCommandPlayer()
-
-  let selectedUnits = commandPlayer.getSelectedUnits()
-
-  var consumerCount = 0
-
-  for u in selectedUnits
-    let metadata = u.getMetadata()
-    if (metadata != null)
-      let comp = metadata.getPoweredComponent()
-      if (comp != null)
-        let source = comp.getPowerSource()
-        if (source != null)
-          source.unlink(comp)
-          comp.unlink()
-        consumerCount++
-
-  if (consumerCount == 0)
-    chatCommandPrintToPlayer(commandPlayer, "No power consumers selected")
-    destroy selectedUnits
-    return
-
-  chatCommandPrintToPlayer(commandPlayer, "Unlinked " + consumerCount.toString() + " consumer(s)")
-  destroy selectedUnits
-
-// ============================================================================
-function setGameSpeed()
-  let command = getChatCommand()
-  let commandPlayer = getChatCommandPlayer()
-  let value = command.getArgument(0).getReal()
-
-  g_GameInstance.setGameSpeed(value)
-
-  chatCommandPrintToPlayer(commandPlayer, "Set the game speed to " + value.toString() + "x")
-
-// ============================================================================
 function checkPath()
   let commandPlayer = getChatCommandPlayer()
   let targetPlayerId = getChatCommand().getArgument(0).getInt()
@@ -1000,7 +892,7 @@ function selectAll()
 
   temp.enumUnitsOfType(unitType, null)
   if (temp.isEmpty())
-    displayMessageToPlayer(commandPlayer, "ERROR: Unknown unit type {0} ({1})".format(UnitId2String(unitType), unitType.toString()))
+    chatCommandPrintToPlayer(commandPlayer, "ERROR: Unknown unit type {0} ({1})".format(UnitId2String(unitType), unitType.toString()))
   else
     for u in temp
       commandPlayer.select(u)
@@ -1009,9 +901,9 @@ function selectAll()
   temp.release()
 
   if (count > 0)
-    displayMessageToPlayer(commandPlayer, "Selected {0} {1}".format(count.toString(), UnitId2String(unitType)))
+    chatCommandPrintToPlayer(commandPlayer, "Selected {0} {1}".format(count.toString(), UnitId2String(unitType)))
   else
-    displayMessageToPlayer(commandPlayer, "No {0} could be selected".format(UnitId2String(unitType)))
+    chatCommandPrintToPlayer(commandPlayer, "No {0} could be selected".format(UnitId2String(unitType)))
 
 // ============================================================================
 function killAll()
@@ -1023,7 +915,7 @@ function killAll()
 
   temp.enumUnitsOfType(unitType, null)
   if (temp.isEmpty())
-    displayMessageToPlayer(commandPlayer, "ERROR: Unknown unit type {0} ({1})".format(UnitId2String(unitType), unitType.toString()))
+    chatCommandPrintToPlayer(commandPlayer, "ERROR: Unknown unit type {0} ({1})".format(UnitId2String(unitType), unitType.toString()))
   else
     for u in temp
       if (u.isAlive())
@@ -1033,9 +925,9 @@ function killAll()
   temp.release()
 
   if (count > 0)
-    displayMessageToPlayer(commandPlayer, "Killed {0} {1}".format(count.toString(), UnitId2String(unitType)))
+    chatCommandPrintToPlayer(commandPlayer, "Killed {0} {1}".format(count.toString(), UnitId2String(unitType)))
   else
-    displayMessageToPlayer(commandPlayer, "No {0} alive to kill".format(UnitId2String(unitType)))
+    chatCommandPrintToPlayer(commandPlayer, "No {0} alive to kill".format(UnitId2String(unitType)))
 
 // ============================================================================
 function spawnPoints()
