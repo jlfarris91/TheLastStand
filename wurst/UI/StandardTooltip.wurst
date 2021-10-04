@@ -1,6 +1,4 @@
 package StandardTooltip
-import ClosureTimers
-import StackLayout
 import Layout
 
 framehandle g_tooltipFrame
@@ -8,21 +6,23 @@ framehandle g_tooltipTitle
 framehandle g_tooltipExtendedText
 framehandle g_separator
 
-StackLayout g_stackPanelLayout = new StackLayout()
-  ..setOrientation(LayoutOrientation.BOTTOMTOTOP)
-  ..setSpacing(vec2(0.0, 0.004))
-
 // ============================================================================
 public class StandardTooltip
+  @configurable static constant rectr DRAW_AREA = rectr(0.512, 0.16, 0.288, 0.0)
+  static constant real TOTAL_ADDITIONAL_SPACING = 0.018 // in fdf 0.005 + 0.0035 + 0.0005 + 0.004 + 0.005
 
   // --------------------------------------------------------------------------
   static function show(string tooltip, string tooltipExtended, player _player)
-    if (g_tooltipFrame != null)
-      if (GetLocalPlayer() == _player)
-        g_tooltipTitle.setText(tooltip)
-        g_tooltipExtendedText.setText(tooltipExtended)
-        updateLayout()
-      g_tooltipFrame.show(_player)
+    if (g_tooltipFrame == null)
+      createFrames()
+
+    if (localPlayer == _player)
+      g_tooltipTitle.setText(tooltip)
+      g_tooltipExtendedText.setText(tooltipExtended)
+    
+    updateFrameHeight()
+
+    g_tooltipFrame.show(_player)
 
   // --------------------------------------------------------------------------
   static function hide(player _player)
@@ -30,35 +30,22 @@ public class StandardTooltip
       g_tooltipFrame.hide(_player)
 
   // --------------------------------------------------------------------------
-  private static function updateLayout()
+  private static function updateFrameHeight()
+    let totalHeight = TOTAL_ADDITIONAL_SPACING +
+                      g_tooltipExtendedText.getHeight() +
+                      g_tooltipTitle.getHeight() +
+                      g_separator.getHeight()
+    g_tooltipFrame.setHeight(totalHeight)
 
-    g_stackPanelLayout.reset(rectr(0.512, 0.16, 0.288, 1.0))
+  // ============================================================================
+  protected static function createFrames()
 
-    if (g_tooltipExtendedText.getHeight() > 0)
-      g_stackPanelLayout.layoutNextFrame(g_tooltipExtendedText, g_tooltipFrame)
-    
-    if (g_tooltipExtendedText.getHeight() > 0 and g_tooltipTitle.getHeight() > 0)
-      g_stackPanelLayout.layoutNextFrame(g_separator, g_tooltipFrame)
-    
-    if (g_tooltipTitle.getHeight() > 0)
-      g_stackPanelLayout.layoutNextFrame(g_tooltipTitle, g_tooltipFrame)
+    g_tooltipFrame = createFrame("BoxedText", GAME_UI, 0, 0)
+      ..setAbsPoint(FRAMEPOINT_BOTTOMLEFT, DRAW_AREA.bottomLeft())
+      ..setAbsPoint(FRAMEPOINT_BOTTOMRIGHT, DRAW_AREA.bottomRight())
 
-    g_tooltipFrame.setHeight(g_stackPanelLayout.getHeight())
+    g_tooltipExtendedText = getFrame("BoxedTextValue", 0)
+    g_separator = getFrame("Separator", 0)
+    g_tooltipTitle = getFrame("BoxedTextTitle", 0)
 
-// ============================================================================
-function createFrames()
-
-  g_tooltipFrame = createFrame("BoxedText", GAME_UI, 0, 0)
-    ..setAbsPoint(FRAMEPOINT_BOTTOMLEFT, 0.512, 0.16)
-    ..setAbsPoint(FRAMEPOINT_BOTTOMRIGHT, 0.8, 0.16)
-    ..hide()
-
-  g_tooltipExtendedText = getFrame("BoxedTextValue", 0)..setLevel(1)
-  g_separator = getFrame("Separator", 0)..setLevel(2)
-  g_tooltipTitle = getFrame("BoxedTextTitle", 0)..setLevel(3)
-
-  g_tooltipFrame.hide()
-
-// ============================================================================
-init
-  nullTimer(() -> createFrames())
+    g_tooltipFrame.hide()
