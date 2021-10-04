@@ -4,19 +4,14 @@ import Grid
 import Bounds
 import ColorUtility
 import LinkedList
-import SpawnManager
+import ISpawnPointProvider
 import SpawnRegion
 import RegionExtensions
 import GameConstants
-import TLSFrame
 import ClosureTimers
-import ProjectConstants
 import Execute
 import FX
 import Range
-
-import initlater FriendlyGridCachedSpawnManager
-import initlater HostileGridCachedSpawnManager
 import Vector
 import SpawnPointCollection
 
@@ -27,26 +22,27 @@ constant int MAX_ATTEMPTS_PER_REQUEST = 10
 constant int MAX_ATTEMPTS_PER_LOOP = 10
 constant int MAX_REQUEUES_PER_REQUEST = 5
 
-constant Grid g_mapGrid = new Grid(playableBounds, COLUMNS, ROWS)
-constant LinkedList<SpawnAreaUpdateRequest> g_updateRequests = new LinkedList<SpawnAreaUpdateRequest>()
 constant group g_testGroup = CreateGroup()
 constant Vector<int> g_tempSpawnPointAreaIndices = new Vector<int>()
 
 @configurable public bool g_enableGCSMLogging = false
-public GCSMDebugger g_gcsmDebugger
 
-int g_totalRequestsProcessed = 0
-int g_totalUpdateSpawnAreaAttempts = 0
-int g_mostAttempts = 0
-int g_totalFound = 0
-int g_totalAbandoned = 0
-int g_totalRequeues = 0
+// ============================================================================
+public class GCSM
+  static constant Grid mapGrid = new Grid(playableBounds, COLUMNS, ROWS)
+  static constant LinkedList<SpawnAreaUpdateRequest> updateRequests = new LinkedList<SpawnAreaUpdateRequest>()
+  static int totalRequestsProcessed = 0
+  static int totalUpdateSpawnAreaAttempts = 0
+  static int mostAttempts = 0
+  static int totalFound = 0
+  static int totalAbandoned = 0
+  static int totalRequeues = 0
 
 tuple debugData(effect fx, colorA color)
 tuple spawnArea(cell cell, bounds bounds, vec2 pos, bool valid, bool processingRequest, debugData debug)
 
 // ============================================================================
-function spawnArea.toString() returns string
+public function spawnArea.toString() returns string
   return "{0}:{1}".format(this.cell.column.toString(), this.cell.row.toString())
 
 // ============================================================================
@@ -101,8 +97,8 @@ public class GridCachedSpawnManager implements ISpawnPointProvider
     execute() () ->
       for i = 0 to NUM_SPAWN_AREAS-1
       //{
-        m_areaData[i].cell = g_mapGrid.getCell(i)
-        m_areaData[i].bounds = g_mapGrid.getCellBounds(m_areaData[i].cell)
+        m_areaData[i].cell = GCSM.mapGrid.getCell(i)
+        m_areaData[i].bounds = GCSM.mapGrid.getCellBounds(m_areaData[i].cell)
         m_areaData[i].valid = false
         m_areaData[i].processingRequest = false
         m_areaData[i].debug.color = debugColor
@@ -127,7 +123,7 @@ public class GridCachedSpawnManager implements ISpawnPointProvider
     updateEffects()
 
   // --------------------------------------------------------------------------
-  protected function getSpawnArea(int index) returns spawnArea
+  function getSpawnArea(int index) returns spawnArea
     return m_areaData[index]
 
   // --------------------------------------------------------------------------
@@ -135,15 +131,23 @@ public class GridCachedSpawnManager implements ISpawnPointProvider
     return m_areaData[index].valid
 
   // --------------------------------------------------------------------------
-  override function getRandomSpawnPointInRange(vec2 pos, SpawnRange range) returns spawnPointResult
+  override function getRandomSpawnPointInRange(vec2 pos, rangeReal range) returns spawnPointResult
+    return getRandomSpawnPointInRect(bounds(pos, range.max))
+    
+  // --------------------------------------------------------------------------
+  override function getRandomSpawnPointsInRange(vec2 pos, rangeReal range, int count) returns spawnPointsResult
+    return getRandomSpawnPointsInRect(bounds(pos, range.max), count)
+    
+  // --------------------------------------------------------------------------
+  override function getRandomSpawnPointInRect(bounds bounds) returns spawnPointResult
 
     g_tempSpawnPointAreaIndices.clear()
 
-    let span = g_mapGrid.getArea(pos, range.toRangeReal().max)
+    let span = GCSM.mapGrid.getArea(bounds)
 
     for r = span.min.row to span.max.row
       for c = span.min.column to span.max.column
-        let index = g_mapGrid.getIndex(cell(r, c))
+        let index = GCSM.mapGrid.getIndex(cell(r, c))
         if (isAreaValid(index))
           g_tempSpawnPointAreaIndices.add(index)
 
@@ -156,17 +160,17 @@ public class GridCachedSpawnManager implements ISpawnPointProvider
     g_tempSpawnPointAreaIndices.clear()
 
     return result
-    
+
   // --------------------------------------------------------------------------
-  override function getRandomSpawnPointsInRange(vec2 pos, SpawnRange range, int count) returns spawnPointsResult
+  override function getRandomSpawnPointsInRect(bounds bounds, int count) returns spawnPointsResult
 
     g_tempSpawnPointAreaIndices.clear()
 
-    let span = g_mapGrid.getArea(pos, range.toRangeReal().max)
+    let span = GCSM.mapGrid.getArea(bounds)
 
     for r = span.min.row to span.max.row
       for c = span.min.column to span.max.column
-        let index = g_mapGrid.getIndex(cell(r, c))
+        let index = GCSM.mapGrid.getIndex(cell(r, c))
         if (isAreaValid(index))
           g_tempSpawnPointAreaIndices.add(index)
 
@@ -231,11 +235,11 @@ public class GridCachedSpawnManager implements ISpawnPointProvider
   // --------------------------------------------------------------------------
   function invalidateSpawnPoints(bounds bounds)
 
-    let span = g_mapGrid.getArea(bounds.center(), bounds.getHalfExtents())
+    let span = GCSM.mapGrid.getArea(bounds.center(), bounds.getHalfExtents())
 
     for r = span.min.row to span.max.row
       for c = span.min.column to span.max.column
-        let index = g_mapGrid.getIndex(cell(r, c))
+        let index = GCSM.mapGrid.getIndex(cell(r, c))
         if (m_areaData[index].valid or not m_areaData[index].processingRequest)
           invalidateSpawnArea(index)
           updateEffects()
@@ -246,7 +250,7 @@ public class GridCachedSpawnManager implements ISpawnPointProvider
 
     if (not m_areaData[index].processingRequest)
       m_areaData[index].processingRequest = true
-      g_updateRequests.add(new SpawnAreaUpdateRequest(this, index))
+      GCSM.updateRequests.add(new SpawnAreaUpdateRequest(this, index))
     
     updateEffects(index)
 
@@ -262,18 +266,18 @@ public class GridCachedSpawnManager implements ISpawnPointProvider
 
 // ============================================================================
 function processRequests()
-  if (g_updateRequests.isEmpty())
+  if (GCSM.updateRequests.isEmpty())
     return
 
   var attemptsCounter = 0
 
-  while (not g_updateRequests.isEmpty() and attemptsCounter < MAX_ATTEMPTS_PER_LOOP)
+  while (not GCSM.updateRequests.isEmpty() and attemptsCounter < MAX_ATTEMPTS_PER_LOOP)
   //{
-    let request = g_updateRequests.dequeue()
+    let request = GCSM.updateRequests.dequeue()
     let spawnManager = request.getSpawnManager()
     let spawnAreaIndex = request.getSpawnAreaIndex()
 
-    g_totalRequestsProcessed++
+    GCSM.totalRequestsProcessed++
 
     if (spawnManager.isAreaValid(spawnAreaIndex))
       spawnManager.finishRequest(spawnAreaIndex)
@@ -287,14 +291,14 @@ function processRequests()
       //{
         i++
         attemptsCounter++
-        g_totalUpdateSpawnAreaAttempts++
+        GCSM.totalUpdateSpawnAreaAttempts++
 
         request.incrementAttempts()
-        g_mostAttempts = max(g_mostAttempts, request.getAttempts())
+        GCSM.mostAttempts = max(GCSM.mostAttempts, request.getAttempts())
         
         if (spawnManager.updateSpawnArea(spawnAreaIndex))
           foundValidSpawnPoint = true
-          g_totalFound++
+          GCSM.totalFound++
           break
       //}
 
@@ -303,8 +307,8 @@ function processRequests()
         destroy request
       else if (request.getRequeues() < MAX_REQUEUES_PER_REQUEST)
         request.incrementRequeues()
-        g_totalRequeues++
-        g_updateRequests.add(request)
+        GCSM.totalRequeues++
+        GCSM.updateRequests.add(request)
         if (g_enableGCSMLogging)
           Log.debug("Requeuing request {0}:{1} after {2} attempts".format(
             spawnManager.getId(),
@@ -317,82 +321,11 @@ function processRequests()
             spawnManager.getId(),
             spawnManager.getSpawnArea(spawnAreaIndex).toString(),
             request.getRequeues().toString()))
-        g_totalAbandoned++
+        GCSM.totalAbandoned++
         destroy request
     //}
   //}
 
 // ============================================================================
-class GCSMDebugger extends TLSFrame
-  private framehandle m_textArea
-  private unit m_selectedUnit
-
-  // --------------------------------------------------------------------------
-  construct()
-    super(createFrame("FRAME", "GCSMDebugger", GAME_UI, "", 0))
-
-  // --------------------------------------------------------------------------
-  override function initialize()
-    super.initialize()
-
-    let frame = getFrameHandle()
-    ..setWidth(0.35)
-    ..setHeight(0.3)
-    ..setAbsPoint(FRAMEPOINT_TOPLEFT, 0.46, 0.56)
-    ..show()
-
-    createFrame("BACKDROP", "UTCDebuggerBackdrop", GAME_UI, "BattleNetControlBackdropTemplate", 0)
-    ..setParent(frame)
-    ..setAllPoints(frame)
-
-    m_textArea = createFrame("TEXTAREA", "UTCDebuggerTextArea", GAME_UI, "ConsoleTextArea", 0)
-    ..setParent(frame)
-    ..setAllPoints(frame)
-
-    doPeriodically(0.1) (CallbackPeriodic cb) ->
-      update()
-
-  // --------------------------------------------------------------------------
-  function setSelectedUnit(unit context)
-    m_selectedUnit = context
-
-  // --------------------------------------------------------------------------
-  function update()
-
-    if (getFrameHandle().isVisible() == false)
-      return
-
-    BlzFrameSetText(m_textArea, "===== Grid Spawn Manager =====")
-    BlzFrameAddText(m_textArea, "Requests : " + g_updateRequests.size().toString())
-    BlzFrameAddText(m_textArea, "Processed : " + g_totalRequestsProcessed.toString())
-    BlzFrameAddText(m_textArea, "Attempts : " + g_totalUpdateSpawnAreaAttempts.toString())
-    BlzFrameAddText(m_textArea, "Most Attempts : " + g_mostAttempts.toString())
-    BlzFrameAddText(m_textArea, "Found : " + g_totalFound.toString())
-    BlzFrameAddText(m_textArea, "Requeues : " + g_totalRequeues.toString())
-    BlzFrameAddText(m_textArea, "Abandoned : " + g_totalAbandoned.toString())
-    
-    let friendlySpawnManager = getPlayerCachedFriendlySpawnManager(localPlayer)
-    if (friendlySpawnManager != null)
-      update_spawnManager(friendlySpawnManager)
-    
-    let hostileSpawnManager = getPlayerCachedHostileSpawnManager(localPlayer)
-    if (hostileSpawnManager != null)
-      update_spawnManager(hostileSpawnManager)
-
-  // --------------------------------------------------------------------------
-  private function update_spawnManager(GridCachedSpawnManager spawnManager)
-    BlzFrameAddText(m_textArea, "----- {0} ({1}) -----".format(spawnManager.getId()))
-    let camCursor = vec2(GetCameraTargetPositionX(), GetCameraTargetPositionY())
-    let camCell = g_mapGrid.getCell(camCursor)
-    let spawnAreaData = spawnManager.getSpawnArea(g_mapGrid.getIndex(camCell))
-    BlzFrameAddText(m_textArea, "Focused: {0} d:{1} v:{2} r:{3}".format(
-      spawnAreaData.toString(),
-      spawnAreaData.valid.toString(), spawnAreaData.processingRequest.toString()))
-
-// ============================================================================
 init
   doPeriodically(0.5, (CallbackPeriodic cb) -> processRequests())
-
-  if (DEV_ENVIRONMENT)
-    doAfter(2) () ->
-      g_gcsmDebugger = new GCSMDebugger()

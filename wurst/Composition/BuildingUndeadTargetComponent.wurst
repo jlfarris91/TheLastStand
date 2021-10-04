@@ -2,7 +2,7 @@ package BuildingUndeadTargetComponent
 import UnitComponent
 import Action
 import PathChecker
-import SpawnManager
+import ISpawnPointProvider
 import UndeadTargetingComponent
 import UnitExtensions
 import GroupUtils
@@ -10,9 +10,10 @@ import ColorUtility
 import ClosureTimers
 import PlayerSpawnPointProviders
 import Range
-import TLSFrame
 import ProjectConstants
 import HumanPlayerComponent
+import DebuggerDialog
+import Frame
 
 @configurable public bool g_enableBUTCDebugging = false
 
@@ -83,7 +84,7 @@ public class BuildingUndeadTargetComponent extends UnitComponent
 
     let ownerUnit = getOwnerUnit()
 
-    let spawnPosResult = m_spawnPointManager.getRandomSpawnPointInRange(ownerUnit.getPos(), SpawnRange.CLOSE)
+    let spawnPosResult = m_spawnPointManager.getRandomSpawnPointInRange(ownerUnit.getPos(), SpawnRange.CLOSE.toRangeReal())
     if (spawnPosResult.succeeded == false)
       Log.debug("Could not find spawn point for path checker")
       startPathCheck_Delayed()
@@ -156,8 +157,7 @@ public function IUnitMetadata.getOrAddBuildingUndeadTargetComponent() returns Bu
   return component
 
 // ============================================================================
-class BUTCDebugger extends TLSFrame
-  private framehandle m_textArea
+class BUTCDebugger extends Frame
   private player m_context
   private group m_contextUnitGroup = CreateGroup()
 
@@ -169,20 +169,6 @@ class BUTCDebugger extends TLSFrame
   override function initialize()
     super.initialize()
 
-    let frame = getFrameHandle()
-    ..setWidth(0.35)
-    ..setHeight(0.3)
-    ..setAbsPoint(FRAMEPOINT_TOPLEFT, 0.46, 0.56)
-    ..show()
-
-    createFrame("BACKDROP", "UTCDebuggerBackdrop", GAME_UI, "BattleNetControlBackdropTemplate", 0)
-    ..setParent(frame)
-    ..setAllPoints(frame)
-
-    m_textArea = createFrame("TEXTAREA", "UTCDebuggerTextArea", GAME_UI, "ConsoleTextArea", 0)
-    ..setParent(frame)
-    ..setAllPoints(frame)
-
     doPeriodically(0.1) (CallbackPeriodic cb) ->
       update()
 
@@ -193,10 +179,10 @@ class BUTCDebugger extends TLSFrame
   // --------------------------------------------------------------------------
   function update()
 
-    if (getFrameHandle().isVisible() == false)
+    if (m_handle.isVisible() == false)
       return
 
-    BlzFrameSetText(m_textArea, "===== BUTC ({0}) =====".format(m_context.getName()))
+    BlzFrameSetText(m_handle, "===== BUTC ({0}) =====".format(m_context.getName()))
 
     m_contextUnitGroup.enumUnitsOfPlayer(m_context, null)
 
@@ -205,7 +191,7 @@ class BUTCDebugger extends TLSFrame
       if (metadata != null)
         let comp = metadata.getBuildingUndeadTargetComponent()
         if (comp != null)
-          BlzFrameAddText(m_textArea, "{0} : {1} {2}".format(u.getName(), (comp.m_foundPath ? "Found path".colorize(Colors.green) : "No path".colorize(Colors.red)), (comp.m_searching ? " Searching..." : "")))
+          BlzFrameAddText(m_handle, "{0} : {1} {2}".format(u.getName(), (comp.m_foundPath ? "Found path".colorize(Colors.green) : "No path".colorize(Colors.red)), (comp.m_searching ? " Searching..." : "")))
 
 // ============================================================================
 init
@@ -222,5 +208,5 @@ init
 
   if (DEV_ENVIRONMENT)
     doAfter(2) () ->
-      g_butcDebugger = new BUTCDebugger()
-      ..setContext(localPlayer)
+      g_butcDebugger = new BUTCDebugger()..setContext(localPlayer)
+      DebuggerDialog.registerFrame("BUTC", g_butcDebugger)

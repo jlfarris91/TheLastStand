@@ -1,0 +1,128 @@
+package RandomSpawnPointProvider
+import ISpawnPointProvider
+import SpawnPointCollection
+import Range
+import Bounds
+
+constant int RETRY_COUNT = 10
+constant real RANGE_GROW_SCALE = 1.5
+
+// ============================================================================
+public class RandomSpawnPointProvider implements ISpawnPointProvider
+  private ISpawnPointProvider m_spawnPointManager
+  private ISpawnPointProvider m_fallback
+
+  // --------------------------------------------------------------------------
+  construct(ISpawnPointProvider spawnPointManager, ISpawnPointProvider fallback)
+    m_spawnPointManager = spawnPointManager
+    m_fallback = fallback
+  
+  // --------------------------------------------------------------------------
+  override function getRandomSpawnPointInRange(vec2 pos, rangeReal range) returns spawnPointResult
+
+    var currentSpawnRange = range
+
+    for i = 0 to RETRY_COUNT - 1
+      let result = m_spawnPointManager.getRandomSpawnPointInRange(pos, currentSpawnRange)
+      if (result.succeeded)
+        return result
+      // Could not find a spawn point within the range, grow the range and try again
+      currentSpawnRange = growRange(currentSpawnRange)
+
+    if (m_fallback != null)
+      return m_fallback.getRandomSpawnPointInRange(pos, range)
+
+    return spawnPointResult(false, ZERO2)
+
+  // --------------------------------------------------------------------------
+  override function getRandomSpawnPointsInRange(vec2 pos, rangeReal range, int count) returns spawnPointsResult
+
+    var currentSpawnRange = range
+    let spawnPoints = new SpawnPointCollection()
+
+    for i = 0 to RETRY_COUNT - 1
+      let remainingCount = max(count - spawnPoints.getCount(), 0)
+      if (remainingCount == 0)
+        break
+
+      let result = m_spawnPointManager.getRandomSpawnPointsInRange(pos, currentSpawnRange, remainingCount)
+      if (result.succeeded)
+        for sp in result.spawnPoints
+          spawnPoints.pushPoint(sp)
+        destroy result.spawnPoints
+
+      if (spawnPoints.getCount() == count)
+        break
+
+      // Could not find a spawn point within the range, grow the range and try again
+      currentSpawnRange = growRange(currentSpawnRange)
+
+    if (spawnPoints.getCount() != count)
+    //{
+      destroy spawnPoints
+      if (m_fallback != null)
+        return m_fallback.getRandomSpawnPointsInRange(pos, range, count)
+      return spawnPointsResult(false, null)
+    //}
+
+    return spawnPointsResult(true, spawnPoints)
+
+  // --------------------------------------------------------------------------
+  override function getRandomSpawnPointInRect(bounds bounds) returns spawnPointResult
+
+    var currentSpawnBounds = bounds
+
+    for i = 0 to RETRY_COUNT - 1
+      let result = m_spawnPointManager.getRandomSpawnPointInRect(currentSpawnBounds)
+      if (result.succeeded)
+        return result
+      // Could not find a spawn point within the range, grow the range and try again
+      currentSpawnBounds = growBounds(currentSpawnBounds)
+
+    if (m_fallback != null)
+      return m_fallback.getRandomSpawnPointInRect(bounds)
+
+    return spawnPointResult(false, ZERO2)
+
+  // --------------------------------------------------------------------------
+  override function getRandomSpawnPointsInRect(bounds bounds, int count) returns spawnPointsResult
+
+    var currentSpawnBounds = bounds
+    let spawnPoints = new SpawnPointCollection()
+
+    for i = 0 to RETRY_COUNT - 1
+      let remainingCount = max(count - spawnPoints.getCount(), 0)
+      if (remainingCount == 0)
+        break
+
+      let result = m_spawnPointManager.getRandomSpawnPointsInRect(currentSpawnBounds, remainingCount)
+      if (result.succeeded)
+        for sp in result.spawnPoints
+          spawnPoints.pushPoint(sp)
+        destroy result.spawnPoints
+
+      if (spawnPoints.getCount() == count)
+        break
+
+      // Could not find a spawn point within the range, grow the range and try again
+      currentSpawnBounds = growBounds(currentSpawnBounds)
+
+    if (spawnPoints.getCount() != count)
+    //{
+      destroy spawnPoints
+      if (m_fallback != null)
+        return m_fallback.getRandomSpawnPointsInRect(bounds, count)
+      return spawnPointsResult(false, null)
+    //}
+
+    return spawnPointsResult(true, spawnPoints)
+
+  // --------------------------------------------------------------------------
+  private function growRange(rangeReal currentSpawnRange) returns rangeReal
+    // Log.debug("Grew spawn point provider range!")
+    return rangeReal(currentSpawnRange.min, currentSpawnRange.max * RANGE_GROW_SCALE)
+
+  // --------------------------------------------------------------------------
+  private function growBounds(bounds currentSpawnBounds) returns bounds
+    // Log.debug("Grew spawn point provider range!")
+    return currentSpawnBounds.grow(RANGE_GROW_SCALE)

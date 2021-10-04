@@ -9,9 +9,7 @@ import ClosureEvents
 import Math
 import IProgress
 import HashMap
-import SpawnManager
 import UnitRecycler
-import PlayerSpawnPointProviders
 import UnitMetadata
 import UndeadTargetingComponent
 import Runnable
@@ -25,6 +23,9 @@ import DropItemOnDeathComponent
 import SpawnWaveContext
 import ISpawnWave
 import Range
+import Spawning
+import UnitExtensions
+import TlsUnitDefinition
 
 constant real PROCESS_SPAWN_REQUEST_INTERVAL = 0.3
 constant int MAX_SPAWNS_PER_PROCESS = 1
@@ -201,13 +202,11 @@ public class SpawnWave extends Runnable
     let numSpawnGroups = max(R2I(I2R(spawnsPerActivation) * (1.0 - spawnGroupingFactor)), 1)
     let spawnGroupSize = max(R2I(I2R(spawnsPerActivation) * spawnGroupingFactor), 1)
 
-    let spawnPointProvider = m_definition.getUseFriendlySpawnPointProvider()
-      ? getFriendlySpawnPointProviderForPlayer(m_targetPlayer)
-      : getHostileSpawnPointProviderForPlayer(m_targetPlayer)
+    let spawnPointProvider = getSpawnPointProvider(m_targetPlayer, m_definition.getSpawnPointProviderType())
 
     let spawnAreaCenter = playerHumanComp.getCampCenter()
 
-    let spawnPointsResult = spawnPointProvider.getRandomSpawnPointsInRange(spawnAreaCenter, m_definition.getSpawnRange(), numSpawnGroups)
+    let spawnPointsResult = spawnPointProvider.getRandomSpawnPointsInRange(spawnAreaCenter, m_definition.getSpawnRange().toRangeReal(), numSpawnGroups)
     if (not spawnPointsResult.succeeded)
       error("[SpawnWave.onActivated] Found no spawn points!")
       m_debugState = "Found no spawn points"
@@ -310,9 +309,6 @@ public class SpawnWave extends Runnable
 
     registerSpawnedUnit(spawnedUnit)
 
-    // Otherwise they may walk back to their spawn point
-    // RemoveGuardPosition(spawnedUnit)
-
     let goldReward = shouldGrantGoldReward()
     if (goldReward != 0)
       let coinTypeId = getCoinItemTypeFromGoldReward(goldReward)
@@ -351,6 +347,12 @@ public class SpawnWave extends Runnable
 
     unitMetadata.getOrAddUndeadTargetingComponent()
     ..setTargetPlayer(m_targetPlayer)
+
+    let unitDef = getUnitDefinition(spawnedUnit.getTypeId())
+    if (unitDef != null)
+      spawnedUnit.fadeIn(unitDef.getVertexColor())
+    else
+      spawnedUnit.fadeIn()
 
     return true
 

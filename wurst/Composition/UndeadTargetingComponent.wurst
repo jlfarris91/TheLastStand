@@ -14,7 +14,6 @@ import Host
 import GameConstants
 import UnitRecycler
 import Vector
-import TLSFrame
 import ColorUtility
 import Range
 import TimerUtils
@@ -22,7 +21,9 @@ import ProjectConstants
 import GroupExtensions
 import BuildingUndeadTarget
 import PlayerSpawnPointProviders
-import SpawnManager
+import ISpawnPointProvider
+import DebuggerDialog
+import Frame
 
 constant rangeReal ATTACK_TIMER_DURATION_RANGE = rangeReal(1.0, 3.0)
 constant real ATTACK_TIMER_DISTANCE_THRESHOLD = 128.0
@@ -44,10 +45,10 @@ conditionfunc g_filterUnitIsValidTargetStructure = Condition(function filterUnit
 conditionfunc g_filterUnitIsValidTargetNonStructure = Condition(function filterUnitIsValidTargetNonStructure)
 IterableMap<unit, group> g_targetedUnitToUTCMap = new IterableMap<unit, group>()
 group g_dealDOTGroup = CreateGroup()
-UTCDebugger g_utcDebugger
 group g_awaitingOrderGroup = CreateGroup()
 CallbackPeriodic g_issueOrderTimer
   
+UTCDebugger g_utcDebuggerFrame
 
 /*
 
@@ -471,7 +472,7 @@ public class UndeadTargetingComponent extends UnitComponent
       return false
     let spawnPointProvider = getHostileSpawnPointProviderForPlayer(m_targetPlayer)
     if (spawnPointProvider != null)
-      let spawnPointResult = spawnPointProvider.getRandomSpawnPointInRange(targetUnitPos, SpawnRange.CLOSE)
+      let spawnPointResult = spawnPointProvider.getRandomSpawnPointInRange(targetUnitPos, SpawnRange.CLOSE.toRangeReal())
       if (spawnPointResult.succeeded)
         recordNote("onAttackTimer", "Teleporting to the target")
         ownerUnit.fadeIn()
@@ -766,31 +767,16 @@ function clearLosingPlayerData()
     playerData.clear()
 
 // ============================================================================
-class UTCDebugger extends TLSFrame
-  private framehandle m_textArea
+class UTCDebugger extends Frame
   private unit m_selectedUnit
 
   // --------------------------------------------------------------------------
   construct()
-    super(createFrame("FRAME", "UTCDebugger", GAME_UI, "", 0))
+    super(createFrame("TEXTAREA", "UTCDebugger", GAME_UI, "", 0))
 
   // --------------------------------------------------------------------------
   override function initialize()
     super.initialize()
-
-    let frame = getFrameHandle()
-    ..setWidth(0.35)
-    ..setHeight(0.4)
-    ..setAbsPoint(FRAMEPOINT_TOPLEFT, 0.46, 0.56)
-    ..show()
-
-    createFrame("BACKDROP", "UTCDebuggerBackdrop", GAME_UI, "BattleNetControlBackdropTemplate", 0)
-    ..setParent(frame)
-    ..setAllPoints(frame)
-
-    m_textArea = createFrame("TEXTAREA", "UTCDebuggerTextArea", GAME_UI, "ConsoleTextArea", 0)
-    ..setParent(frame)
-    ..setAllPoints(frame)
 
     doPeriodically(0.1) (CallbackPeriodic cb) ->
       update()
@@ -802,47 +788,47 @@ class UTCDebugger extends TLSFrame
   // --------------------------------------------------------------------------
   function update()
 
-    if (getFrameHandle().isVisible() == false)
+    if (m_handle.isVisible() == false)
       return
 
-    BlzFrameSetText(m_textArea, "Orders : a:{0}, t:{1}, c:{2}-{3}".format(g_awaitingOrderGroup.size().toString(), g_numberOfOrdersIssued.toString(), g_numberOfTimesIssueOrdersStartCalled.toString(), g_numberOfTimesIssueOrdersEndCalled.toString()))
+    BlzFrameSetText(m_handle, "Orders : a:{0}, t:{1}, c:{2}-{3}".format(g_awaitingOrderGroup.size().toString(), g_numberOfOrdersIssued.toString(), g_numberOfTimesIssueOrdersStartCalled.toString(), g_numberOfTimesIssueOrdersEndCalled.toString()))
 
     if (m_selectedUnit == null)
-      BlzFrameAddText(m_textArea, "Selected unit : null")
+      BlzFrameAddText(m_handle, "Selected unit : null")
       return
 
-    BlzFrameAddText(m_textArea, "Selected unit : " + m_selectedUnit.getName())
+    BlzFrameAddText(m_handle, "Selected unit : " + m_selectedUnit.getName())
 
     let metadata = m_selectedUnit.getMetadata()
     if (metadata == null)
-      BlzFrameAddText(m_textArea, "Selected unit metadata is null".colorize(Colors.red))
+      BlzFrameAddText(m_handle, "Selected unit metadata is null".colorize(Colors.red))
       return
 
     let utc = metadata.getUndeadTargetingComponent()
     if (utc == null)
-      BlzFrameAddText(m_textArea, "Selected unit UTC is null".colorize(Colors.red))
+      BlzFrameAddText(m_handle, "Selected unit UTC is null".colorize(Colors.red))
       return
     
-    BlzFrameAddText(m_textArea, "UTC enabled : " + utc.getEnabled().toString())
-    BlzFrameAddText(m_textArea, "Target player : " + ((utc.m_targetPlayer != null) ? utc.m_targetPlayer.getName() : "null"))
-    BlzFrameAddText(m_textArea, "Target unit : " + ((utc.m_targetUnit != null) ? utc.m_targetUnit.getName() : "null"))
-    BlzFrameAddText(m_textArea, "Target : " + (utc.shouldTargetOrganicUnits() ? "Organic" : "Structures"))
-    BlzFrameAddText(m_textArea, "Awaiting Order : " + utc.getIsAwaitingOrder().toString())
-    BlzFrameAddText(m_textArea, "Failed Order : " + utc.m_orderFailedReason)
-    BlzFrameAddText(m_textArea, "Times Failed Order : " + utc.m_numberOfTimesFailedOrder.toString())
-    BlzFrameAddText(m_textArea, "Attack Timer Expired : " + utc.m_numberOfTimesAttackTimerExpired.toString())
-    BlzFrameAddText(m_textArea, "Distance Moved : " + utc.getOwnerUnit().getPos().distanceTo(utc.m_lastPos).toString())
-    BlzFrameAddText(m_textArea, "Order : {0} ({1})".format(OrderId2String(GetUnitCurrentOrder(utc.getOwnerUnit())), GetUnitCurrentOrder(utc.getOwnerUnit()).toString()))
-    BlzFrameAddText(m_textArea, "In DOT Group : " + utc.getIsInDOTGroup().toString())
+    BlzFrameAddText(m_handle, "UTC enabled : " + utc.getEnabled().toString())
+    BlzFrameAddText(m_handle, "Target player : " + ((utc.m_targetPlayer != null) ? utc.m_targetPlayer.getName() : "null"))
+    BlzFrameAddText(m_handle, "Target unit : " + ((utc.m_targetUnit != null) ? utc.m_targetUnit.getName() : "null"))
+    BlzFrameAddText(m_handle, "Target : " + (utc.shouldTargetOrganicUnits() ? "Organic" : "Structures"))
+    BlzFrameAddText(m_handle, "Awaiting Order : " + utc.getIsAwaitingOrder().toString())
+    BlzFrameAddText(m_handle, "Failed Order : " + utc.m_orderFailedReason)
+    BlzFrameAddText(m_handle, "Times Failed Order : " + utc.m_numberOfTimesFailedOrder.toString())
+    BlzFrameAddText(m_handle, "Attack Timer Expired : " + utc.m_numberOfTimesAttackTimerExpired.toString())
+    BlzFrameAddText(m_handle, "Distance Moved : " + utc.getOwnerUnit().getPos().distanceTo(utc.m_lastPos).toString())
+    BlzFrameAddText(m_handle, "Order : {0} ({1})".format(OrderId2String(GetUnitCurrentOrder(utc.getOwnerUnit())), GetUnitCurrentOrder(utc.getOwnerUnit()).toString()))
+    BlzFrameAddText(m_handle, "In DOT Group : " + utc.getIsInDOTGroup().toString())
 
     let recycler = m_selectedUnit.getRecycler()
     if (recycler != null)
-      BlzFrameAddText(m_textArea, "Active in recycler \"{0}\" : {1}".format(UnitId2String(recycler.getUnitId()), recycler.isUnitActive(m_selectedUnit).toString()))
+      BlzFrameAddText(m_handle, "Active in recycler \"{0}\" : {1}".format(UnitId2String(recycler.getUnitId()), recycler.isUnitActive(m_selectedUnit).toString()))
 
     if (utc.m_notes.isEmpty() == false)
-      BlzFrameAddText(m_textArea, "=== Notes: === ")
+      BlzFrameAddText(m_handle, "=== Notes: === ")
       for note in utc.m_notes
-        BlzFrameAddText(m_textArea, note)
+        BlzFrameAddText(m_handle, note)
 
 // ============================================================================
 init
@@ -858,7 +844,8 @@ init
   if (DEV_ENVIRONMENT)
   //{
     nullTimer() () ->
-      g_utcDebugger = new UTCDebugger()
+      g_utcDebuggerFrame = new UTCDebugger()
+      DebuggerDialog.registerFrame("UTC", g_utcDebuggerFrame)
 
     doPeriodically(1.0) (CallbackPeriodic cb) ->
       let g = getGroup()
@@ -874,9 +861,5 @@ init
               selectedUnit = u
       //}
       g.release()
-      g_utcDebugger.setSelectedUnit(selectedUnit)
-      if (selectedUnit != null)
-        g_utcDebugger.show()
-      else
-        g_utcDebugger.hide()
+      g_utcDebuggerFrame.setSelectedUnit(selectedUnit)
   //}

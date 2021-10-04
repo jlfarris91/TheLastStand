@@ -1,0 +1,79 @@
+package DynamicSpawnPointProvider
+import ISpawnPointProvider
+import HumanPlayerComponent
+import RegionExtensions
+import Range
+import Func
+import SpawnPointCollection
+import SpawnRegion
+import Bounds
+
+constant int NUM_RETRIES = 32
+constant real TEST_RADIUS = 800.0
+group g_testGroup = CreateGroup()
+
+// ============================================================================
+public class DynamicSpawnPointProvider implements ISpawnPointProvider
+  private player m_player
+  private real m_testRadius
+  private Func1<unit, bool> m_spawnPointInvalidationFilter
+  
+  // --------------------------------------------------------------------------
+  construct(player p, real testRadius, Func1<unit, bool> spawnPointInvalidationFilter)
+    m_player = p
+    m_testRadius = testRadius
+    m_spawnPointInvalidationFilter = spawnPointInvalidationFilter
+
+  // --------------------------------------------------------------------------
+  function getCenter() returns vec2
+    return m_player.getHumanPlayerComponent().getCampCenter()
+
+  // --------------------------------------------------------------------------
+  override function getRandomSpawnPointInRange(vec2 pos, rangeReal range) returns spawnPointResult
+    var angleDeg = GetRandomReal(0, 360.0)
+    for i = 0 to NUM_RETRIES
+      angleDeg = angleDeg + GetRandomReal(180.0 * 0.75, 180.0 * 1.25)
+      let dist = range.getRandom()
+      let angle = angle(angleDeg*DEGTORAD)
+      let testPos = pos.polarOffset(angle, dist)
+      if (isSpawnPointValid(testPos))
+        return spawnPointResult(true, testPos)
+    return spawnPointResult(false, ZERO2)
+
+  // --------------------------------------------------------------------------
+  override function getRandomSpawnPointsInRange(vec2 pos, rangeReal range, int count) returns spawnPointsResult
+    let validSpawnPoints = new SpawnPointCollection()
+    for i = 0 to count - 1
+      let spawnPosResult = getRandomSpawnPointInRange(pos, range)
+      if (spawnPosResult.succeeded)
+        validSpawnPoints.pushPoint(spawnPosResult.spawnPoint)
+    return spawnPointsResult(true, validSpawnPoints)
+
+  // --------------------------------------------------------------------------
+  override function getRandomSpawnPointInRect(bounds bounds) returns spawnPointResult
+    for i = 0 to NUM_RETRIES
+      let testPos = bounds.getRandomPoint()
+      if (isSpawnPointValid(testPos))
+        return spawnPointResult(true, testPos)
+    return spawnPointResult(false, ZERO2)
+
+  // --------------------------------------------------------------------------
+  override function getRandomSpawnPointsInRect(bounds bounds, int count) returns spawnPointsResult
+    let validSpawnPoints = new SpawnPointCollection()
+    for i = 0 to count - 1
+      let spawnPosResult = getRandomSpawnPointInRect(bounds)
+      if (spawnPosResult.succeeded)
+        validSpawnPoints.pushPoint(spawnPosResult.spawnPoint)
+    return spawnPointsResult(true, validSpawnPoints)
+
+  // --------------------------------------------------------------------------
+  private function isSpawnPointValid(vec2 pos) returns bool
+    if (not g_spawnRegion.containsPoint(pos))
+      return false
+    g_testGroup.enumUnitsInRange(pos, m_testRadius)    
+    var isValid = true
+    for u from g_testGroup
+      if (m_spawnPointInvalidationFilter.call(u))
+        isValid = false
+        break
+    return isValid

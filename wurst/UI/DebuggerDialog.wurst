@@ -1,0 +1,142 @@
+package DebuggerDialog
+import Frame
+import HashMap
+import ClosureTimers
+import Panel
+import DockPanel
+import DockLayout
+import ClosureFrames
+import ProjectConstants
+import Layout
+import ClosureKeyPresses
+import StackPanel
+
+DebuggerDialogFrame g_debuggerDialogFrame
+
+// ============================================================================
+public class DebuggerDialog
+  @configurable static constant rectr DRAW_AREA = rectr(0.46, 0.56, 0.35, 0.3)
+
+  // --------------------------------------------------------------------------
+  static function registerFrame(string id, Frame frame)
+    if (g_debuggerDialogFrame != null)
+      g_debuggerDialogFrame.registerFrame(id, frame)
+
+  // --------------------------------------------------------------------------
+  static function setSelectedFrame(string id)
+    if (g_debuggerDialogFrame != null)
+      g_debuggerDialogFrame.setSelectedFrame(id)
+
+  // --------------------------------------------------------------------------
+  static function getSelectedFrame() returns string
+    return g_debuggerDialogFrame != null ? g_debuggerDialogFrame.getSelectedFrame() : ""
+
+  // --------------------------------------------------------------------------
+  static function getIsVisible() returns bool
+    return g_debuggerDialogFrame != null and g_debuggerDialogFrame.getIsVisible()
+
+  // --------------------------------------------------------------------------
+  static function show()
+    if (g_debuggerDialogFrame != null)
+      g_debuggerDialogFrame.show()
+
+  // --------------------------------------------------------------------------
+  static function hide()
+    if (g_debuggerDialogFrame != null)
+      g_debuggerDialogFrame.hide()
+
+// ============================================================================
+class DebuggerDialogFrame extends Frame
+  private DockPanel m_dockPanel
+  private StackPanel m_buttonPanel
+  private HashMap<string, Frame> m_buttonFrames = new HashMap<string, Frame>()
+  private HashMap<string, Frame> m_frames = new HashMap<string, Frame>()
+  private string m_selectedFrameId
+  private Frame m_selectedFrame
+
+  // --------------------------------------------------------------------------
+  construct()
+    super(createFrame("FRAME", "DebuggerDialog", GAME_UI, "", 0))
+
+  // --------------------------------------------------------------------------
+  override function initialize()
+    super.initialize()
+
+    setFitToChildren(true)
+
+    createFrame("BACKDROP", "DebuggerBackdrop", GAME_UI, "BattleNetControlBackdropTemplate", 0)
+    ..setParent(m_handle)
+    ..setAllPoints(m_handle)
+
+    m_dockPanel = new DockPanel()..initialize()
+    addLogicalChild(m_dockPanel)
+
+    m_buttonPanel = new StackPanel()
+      ..setDock(Dock.TOP)
+      ..setLayoutOrientation(LayoutOrientation.LEFTTORIGHT)
+      ..initialize()
+    m_dockPanel.addChild(m_buttonPanel)
+
+    onKeyRelease(localPlayer, OSKEY_APPS) () ->
+      Log.info("OSKEY_APPS")
+      if (getIsVisible())
+        hide()
+      else
+        show()
+
+    onKeyRelease(localPlayer, OSKEY_ESCAPE) () ->
+      Log.info("OSKEY_ESCAPE")
+      if (getIsVisible())
+        hide()
+
+  // --------------------------------------------------------------------------
+  function registerFrame(string id, Frame frame)
+    
+    frame.setDock(Dock.FILL)
+    m_dockPanel.addChild(frame)
+
+    m_frames.put(id, frame)
+    frame.hide()
+
+    let buttonFrameHandle = createFrame("GLUEBUTTON", "BUTTON:"+id, GAME_UI, "", 0)
+    let buttonFrame = new Frame(buttonFrameHandle)
+    ..setText(id)
+    
+    buttonFrame.m_handle.onClick(() -> onButtonClicked(buttonFrame, id))
+    
+    m_buttonPanel.addChild(buttonFrame)
+
+    m_buttonFrames.put(id, buttonFrame)
+
+  // --------------------------------------------------------------------------
+  function getSelectedFrame() returns string
+    return m_selectedFrameId
+
+  // --------------------------------------------------------------------------
+  function setSelectedFrame(string id)
+    if (m_selectedFrameId == id)
+      return
+    
+    if (m_selectedFrame != null)
+      m_selectedFrame.hide()
+      m_selectedFrame = null
+    
+    m_selectedFrameId = id
+    m_selectedFrame = m_frames.get(m_selectedFrameId)
+    
+    if (m_selectedFrame != null)
+      m_selectedFrame.show()
+  
+  // --------------------------------------------------------------------------
+  private function onButtonClicked(Frame buttonFrame, string id)
+    buttonFrame.clearFocus()
+    setSelectedFrame(id)    
+
+// ============================================================================
+init
+  if (DEV_ENVIRONMENT)
+    nullTimer() () ->
+      g_debuggerDialogFrame = new DebuggerDialogFrame()
+      ..setOrigin(FRAMEPOINT_TOPLEFT)
+      ..initializeRoot(DebuggerDialog.DRAW_AREA)
+      ..show()
