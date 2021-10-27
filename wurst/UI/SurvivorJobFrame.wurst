@@ -4,7 +4,6 @@ import ClosureFrames
 import SurvivorJobs
 import StandardTooltip
 import ColorUtility
-import FramehandleExtensions
 import Survivors
 import ClosureKeyPresses
 
@@ -30,7 +29,6 @@ public class SurvivorJobFrame extends Frame
   private framehandle m_levelText
   private framehandle m_activeIcon
   private framehandle m_hoverActionText
-
   private SurvivorJobDefinition m_jobDef
   private string m_iconPath
   private string m_iconPathDisabled
@@ -42,18 +40,69 @@ public class SurvivorJobFrame extends Frame
   private string m_jobTitle
   private string m_jobTooltip
   private string m_itemName
-
+  private player m_player
   private bool m_isCtrlHeld
   private bool m_showHoverActionText
 
   // --------------------------------------------------------------------------
-  construct()
+  construct(player _player)
     super(createFrame("SurvivorJobFrame", GAME_UI, 0, 0))
 
+    m_player = _player
     m_iconPath = UNKNOWN_JOB_ICON_PATH
     m_iconPathDisabled = UNKNOWN_JOB_ICON_PATH
     m_level = 1
     m_enabledState = SurvivorJobFrameEnabledState.DISABLED
+    
+    let frameHandle = getFrameHandle()
+
+    let mainButton = getFrame("MainButton", 0)..setLevel(3)
+    m_mainButtonIcon = getFrame("MainButtonIcon", 0)
+    m_activeIcon = getFrame("ActiveIcon", 0)..setLevel(4)
+    getFrame("LevelBackdrop", 0)..setLevel(5)
+    m_levelText = getFrame("LevelText", 0)..setLevel(6)
+
+    m_hoverActionText = getFrame("UnassignJobText", 0)
+    ..setParent(frameHandle)
+    ..setSize(0.035, 0.008)
+    ..setLevel(10)
+    ..setPoint(FRAMEPOINT_BOTTOMLEFT, frameHandle, FRAMEPOINT_TOPLEFT, 0.0, 0.001)
+    ..setText("Unlearn")
+    ..hide()
+
+    mainButton.onMouseEnter() -> 
+      m_isHovered++
+      updateActiveFrame()
+      updateUnassignButton()
+      showTooltip()
+
+    mainButton.onMouseLeave() -> 
+      m_isHovered--
+      updateActiveFrame()
+      updateUnassignButton()
+      hideTooltip()
+
+    mainButton.onClick() ->
+      if (m_isCtrlHeld)
+        SurvivorUtility.orderSelectedUnitsToUnlearnJob(m_player, m_jobDef)
+      else
+        SurvivorUtility.orderSelectedUnitsToActivateJob(m_player, m_jobDef)
+      mainButton.clearFocus()
+
+    updateIconFrame()
+    updateLevelTextFrame()
+    updateActiveFrame()
+    updateVisibility()
+    updateUnassignButton()
+
+    let framePlayer = m_player
+    onKeyPress(framePlayer, OSKEY_LCONTROL, OSKEY_META.CTRL) () ->
+      m_isCtrlHeld = true
+      updateUnassignButton()
+
+    onKeyRelease(framePlayer, OSKEY_LCONTROL) () ->
+      m_isCtrlHeld = false
+      updateUnassignButton()
 
   // --------------------------------------------------------------------------
   function setJobDef(SurvivorJobDefinition value)
@@ -154,58 +203,6 @@ public class SurvivorJobFrame extends Frame
       showTooltip()
 
   // --------------------------------------------------------------------------
-  override function onInitialize()
-    super.onInitialize()
-
-    let mainButton = getFrame("MainButton", 0)..setLevel(3)
-    m_mainButtonIcon = getFrame("MainButtonIcon", 0)
-    m_activeIcon = getFrame("ActiveIcon", 0)..setLevel(4)
-    getFrame("LevelBackdrop", 0)..setLevel(5)
-    m_levelText = getFrame("LevelText", 0)..setLevel(6)
-
-    m_hoverActionText = getFrame("UnassignJobText", 0)
-    ..setParent(m_handle)
-    ..setSize(0.035, 0.008)
-    ..setLevel(10)
-    ..setPoint(FRAMEPOINT_BOTTOMLEFT, m_handle, FRAMEPOINT_TOPLEFT, 0.0, 0.001)
-    ..setText("Unlearn")
-    ..hide()
-
-    mainButton.onMouseEnter() -> 
-      m_isHovered++
-      updateActiveFrame()
-      updateUnassignButton()
-      showTooltip()
-
-    mainButton.onMouseLeave() -> 
-      m_isHovered--
-      updateActiveFrame()
-      updateUnassignButton()
-      hideTooltip()
-
-    mainButton.onClick() ->
-      if (m_isCtrlHeld)
-        SurvivorUtility.orderSelectedUnitsToUnlearnJob(getPlayer(), m_jobDef)
-      else
-        SurvivorUtility.orderSelectedUnitsToActivateJob(getPlayer(), m_jobDef)
-      mainButton.clearFocus()
-
-    updateIconFrame()
-    updateLevelTextFrame()
-    updateActiveFrame()
-    updateVisibility()
-    updateUnassignButton()
-
-    let framePlayer = getPlayer()
-    onKeyPress(framePlayer, OSKEY_LCONTROL, OSKEY_META.CTRL) () ->
-      m_isCtrlHeld = true
-      updateUnassignButton()
-
-    onKeyRelease(framePlayer, OSKEY_LCONTROL) () ->
-      m_isCtrlHeld = false
-      updateUnassignButton()
-
-  // --------------------------------------------------------------------------
   private function showTooltip()
     if (m_showHoverActionText)
       showUnassignTooltip()
@@ -214,7 +211,7 @@ public class SurvivorJobFrame extends Frame
 
   // --------------------------------------------------------------------------
   private function hideTooltip()
-    StandardTooltip.hide(getPlayer()) 
+    StandardTooltip.hide(m_player) 
 
   // --------------------------------------------------------------------------
   private function showJobTooltip()
@@ -235,13 +232,13 @@ public class SurvivorJobFrame extends Frame
     if (m_enabledState != DISABLED and m_jobDef != SurvivorJobs.none)
       title += "|n{0}".format("Ctrl + click to unlearn job".colorize(Colors.gold))
 
-    StandardTooltip.show(title, m_jobTooltip, getPlayer())
+    StandardTooltip.show(title, m_jobTooltip, m_player)
 
   // --------------------------------------------------------------------------
   private function showUnassignTooltip()
     let title = "Ctrl + click to unlearn the {0} job".format(m_jobTitle).colorize(Colors.gold)
     let tooltip = "Unlearn this job and place the {0}|nitem back into the Survivor's inventory.".format(m_itemName)
-    StandardTooltip.show(title, tooltip, getPlayer())
+    StandardTooltip.show(title, tooltip, m_player)
 
   // --------------------------------------------------------------------------
   private function updateIconFrame()
@@ -264,15 +261,20 @@ public class SurvivorJobFrame extends Frame
   // --------------------------------------------------------------------------
   private function updateVisibility()
     let visible = m_enabledState != SurvivorJobFrameEnabledState.DISABLED
-    setVisibility(visible ? FrameVisibility.VISIBLE : FrameVisibility.COLLAPSED)
+    if (visible)
+      show()
+    else
+      hide()
 
   // --------------------------------------------------------------------------
-  override function setVisibility(FrameVisibility value)
-    super.setVisibility(value)
-    if (value == FrameVisibility.VISIBLE)
-      m_isCtrlHeld = false
-      m_isHovered = 0
-      updateUnassignButton()
-    else
-      m_isCtrlHeld = false
-      m_isHovered = 0
+  override function show()
+    super.show()
+    m_isCtrlHeld = false
+    m_isHovered = 0
+    updateUnassignButton()
+    
+  // --------------------------------------------------------------------------
+  override function hide()
+    super.hide()
+    m_isCtrlHeld = false
+    m_isHovered = 0

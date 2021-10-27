@@ -13,7 +13,6 @@ import SurvivorJobComponent
 import ClosureKeyPresses
 import Survivors
 import TlsItemDefinition
-import Panel
 import StackPanel
 import Layout
 import BitSet
@@ -137,25 +136,22 @@ public class SurvivorJobPanel extends StackPanel
   private group m_selectedUnits = CreateGroup()
 
   // --------------------------------------------------------------------------
-  construct()
+  construct(player _player)
+    super("SJP")
+    
     m_jobDefToFrameMap = new IterableMap<SurvivorJobDefinition, SurvivorJobFrame>()
 
-  // --------------------------------------------------------------------------
-  override function onInitialize()
-    super.onInitialize()
+    setPlayer(_player)
 
-    setFitToChildren(true)
-    setLayoutOrientation(LayoutOrientation.LEFTTORIGHT)
-    setVerticalLayoutMode(VerticalLayoutMode.CENTER)
+    setOrientation(LayoutOrientation.LEFTTORIGHT)
+    setVerticalAlignment(VerticalLayoutMode.CENTER)
 
     for jobDef in g_allJobDefinitions
     //{
-      let jobFrame = new SurvivorJobFrame()
-        ..setPlayer(getPlayer())
-        ..setMargin(0.002)
+      let jobFrame = new SurvivorJobFrame(_player)
+        ..setMargin(thickness(0.002))
         ..setJobDef(jobDef)
-        ..initialize()
-        ..setVisibility(FrameVisibility.COLLAPSED)
+        ..hide()
 
       addChild(jobFrame)
         
@@ -168,12 +164,6 @@ public class SurvivorJobPanel extends StackPanel
 
     doPeriodically(0.1) (CallbackPeriodic cb) ->
       update()
-
-  // --------------------------------------------------------------------------
-  override function setPlayer(player value)
-    super.setPlayer(value)
-    for key in m_jobDefToFrameMap
-      m_jobDefToFrameMap.get(key).setPlayer(value)
 
   // --------------------------------------------------------------------------
   function getJobFrame(SurvivorJobDefinition jobDef) returns SurvivorJobFrame
@@ -190,26 +180,23 @@ public class SurvivorJobPanel extends StackPanel
     
     var visibleJobs = emptyBitset()
 
+    let _player = getPlayer()
+
     var jobIndex = 0
     for jobDef in g_allJobDefinitions
-      if (updateJobFrame(jobDef))
+      if (updateJobFrame(_player, jobDef))
         visibleJobs = visibleJobs.set(jobIndex)
       jobIndex++
 
     if (m_visibleJobs.val != visibleJobs.val)
       m_visibleJobs = visibleJobs
-      invalidateArrange()
 
   // --------------------------------------------------------------------------
   private function updateSelectedUnits()
-    
-    let owningPlayer = getPlayer()
 
-    g_sharedSelectedUnitsGroup.enumUnitsSelected(owningPlayer, g_selectedUnitsFilter)
+    g_sharedSelectedUnitsGroup.enumUnitsSelected(getPlayer(), g_selectedUnitsFilter)
 
     m_selectedUnits.addGroup(g_sharedSelectedUnitsGroup)
-
-    invalidateArrange()
 
     // Remove units that are not selected or in the middle of changing jobs
     for u in m_selectedUnits
@@ -218,14 +205,13 @@ public class SurvivorJobPanel extends StackPanel
         m_selectedUnits.removeUnit(u)
 
   // --------------------------------------------------------------------------
-  private function updateJobFrame(SurvivorJobDefinition jobDef) returns bool
+  private function updateJobFrame(player _player, SurvivorJobDefinition jobDef) returns bool
 
     let jobFrame = m_jobDefToFrameMap.get(jobDef)
     if (jobFrame == null)
       return false
 
-    let panelPlayer = getPlayer()
-    let isJobKnown = true or jobDef.getIsJobKnownToPlayer(panelPlayer)
+    let isJobKnown = true or jobDef.getIsJobKnownToPlayer(_player)
     let updateData = g_survivorJobFrameUpdateDataMap.get(jobDef)
 
     updateData.reset(isJobKnown)
@@ -234,7 +220,7 @@ public class SurvivorJobPanel extends StackPanel
     //{
       for _unit in m_selectedUnits
         let unitOwner = _unit.getOwner()
-        if (unitOwner == panelPlayer or unitOwner.isAllyOf(panelPlayer))
+        if (unitOwner == _player or unitOwner.isAllyOf(_player))
           updateData.addUnit(_unit)
     //}
 
@@ -251,7 +237,7 @@ function onToggleJobKeyPressed()
   let keyPressingPlayer = GetTriggerPlayer()
 
   let jobPanel = getSurvivorJobPanel(keyPressingPlayer)
-  if (jobPanel == null or not jobPanel.getIsVisible())
+  if (jobPanel == null or not jobPanel.isVisible())
     return
 
   keyPressingPlayer.sendSyncData(TOGGLEJOBSYNCDATAPREFIX, keyPressingPlayer.getId().toString())
@@ -274,11 +260,11 @@ init
     g_survivorJobFrameUpdateDataMap.put(job, new SurvivorJobFrameUpdateData(job))    
 
   nullTimer() () ->
-    for p in g_PlayingHumanPlayers
-      let survivorJobPanel = new SurvivorJobPanel()
-      ..setPlayer(p)
-      ..initializeRoot(PANEL_AREA)
-      g_playerSurvivorJobPanels.put(p, survivorJobPanel)
+    for _player in g_PlayingHumanPlayers
+      let survivorJobPanel = new SurvivorJobPanel(_player)
+      ..setAbsArea(FRAMEPOINT_BOTTOMLEFT, PANEL_AREA)
+      ..showOnly(_player)
+      g_playerSurvivorJobPanels.put(_player, survivorJobPanel)
 
   onKeyPress(OSKEY_Z, () -> onToggleJobKeyPressed())
 
