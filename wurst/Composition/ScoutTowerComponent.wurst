@@ -1,0 +1,120 @@
+package ScoutTowerComponent
+import UnitComponent
+import Events
+import WorkstationComponent
+import TlsUnitIds
+import ObjectIdGenerator
+import AbilityObjEditing
+
+constant int ABILITY_ID = compiletime(ABIL_ID_GEN.next())
+
+// ============================================================================
+@compiletime function createAbility()
+  new AbilityDefinitionSightBonus(ABILITY_ID)
+  ..setSightRangeBonus(1, 1800)
+
+// ============================================================================
+public class ScoutTowerComponent extends UnitComponent
+  private _handle m_workedEnteredCallback = HANDLE_INVALID
+  private _handle m_workedExitedCallback = HANDLE_INVALID
+  private bool m_activated = false
+
+  // --------------------------------------------------------------------------
+  construct (IUnitMetadata metadata)
+    super(metadata)
+
+  // --------------------------------------------------------------------------
+  override function onEnabled()
+    super.onEnabled()
+    
+    let workstationComponent = getOwner().getOrAddWorkstationComponent()
+    m_workedEnteredCallback = workstationComponent.workerEntered.registerDispatched(this, () -> onWorkerEntered())
+    m_workedExitedCallback = workstationComponent.workerExited.registerDispatched(this, () -> onWorkedExited())
+
+    if (getNumberOfWorkers() > 0)
+      activate()
+
+  // --------------------------------------------------------------------------
+  override function onDisabled()
+    super.onDisabled()
+
+    let workstationComponent = getOwner().getWorkstationComponent()
+    if (workstationComponent != null)
+      workstationComponent.workerEntered.unregister(m_workedEnteredCallback)
+      workstationComponent.workerExited.unregister(m_workedExitedCallback)
+
+    deactivate()
+    
+  // --------------------------------------------------------------------------
+  private function onWorkerEntered()
+    if (getNumberOfWorkers() == 1)
+      activate()
+
+  // --------------------------------------------------------------------------
+  private function onWorkedExited()
+    if (getNumberOfWorkers() == 0)
+      deactivate()
+
+  // --------------------------------------------------------------------------
+  private function activate()
+
+    if (m_activated)
+      return
+
+    m_activated = true
+
+    let ownerUnit = getOwnerUnit()
+
+    switch (ownerUnit.getTypeId())
+    //{
+      case TlsUnitIds.scoutTower
+      //{
+        if (ownerUnit.hasAbility(ABILITY_ID) == false)
+          ownerUnit.addAbility(ABILITY_ID)
+      //}
+
+      case TlsUnitIds.guardTower
+      //{
+        getOwnerUnit().setFieldWeapon(UNIT_WEAPON_BF_ATTACKS_ENABLED, 0, true)
+      //}
+    //}
+
+  // --------------------------------------------------------------------------
+  private function deactivate()
+
+    if (m_activated == false)
+      return
+
+    m_activated = false
+
+    let ownerUnit = getOwnerUnit()
+
+    switch (ownerUnit.getTypeId())
+    //{
+      case TlsUnitIds.scoutTower
+      //{
+        if (ownerUnit.hasAbility(ABILITY_ID))
+          ownerUnit.removeAbility(ABILITY_ID)
+      //}
+
+      case TlsUnitIds.guardTower
+      //{
+        getOwnerUnit().setFieldWeapon(UNIT_WEAPON_BF_ATTACKS_ENABLED, 0, false)
+      //}
+    //}
+
+  // --------------------------------------------------------------------------
+  private function getNumberOfWorkers() returns int
+    let workstationComponent = getOwner().getWorkstationComponent()
+    return workstationComponent != null ? workstationComponent.getWorkerUnitCount() : 0
+
+// ============================================================================
+public function IUnitMetadata.getScoutTowerComponent() returns ScoutTowerComponent
+  return this.getComponent(ScoutTowerComponent.typeId) castTo ScoutTowerComponent
+
+// ============================================================================
+public function IUnitMetadata.getOrAddScoutTowerComponent() returns ScoutTowerComponent
+  var component = this.getScoutTowerComponent()
+  if (component == null)
+    component = this.addComponent(new ScoutTowerComponent(this)) castTo ScoutTowerComponent
+  return component

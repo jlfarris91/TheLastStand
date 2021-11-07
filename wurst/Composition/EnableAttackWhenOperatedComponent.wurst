@@ -1,0 +1,78 @@
+package EnableAttackWhenOperatedComponent
+import UnitComponent
+import Events
+import WorkstationComponent
+
+// ============================================================================
+public class EnableAttackWhenOperatedComponent extends UnitComponent
+  private _handle m_workedEnteredCallback
+  private _handle m_workedExitedCallback
+
+  // --------------------------------------------------------------------------
+  construct (IUnitMetadata metadata)
+    super(metadata)
+
+  // --------------------------------------------------------------------------
+  override function onEnabled()
+    super.onEnabled()
+    
+    let workstationComponent = getOwner().getOrAddWorkstationComponent()
+    m_workedEnteredCallback = workstationComponent.workerEntered.registerDispatched(this, () -> onWorkerEntered())
+    m_workedExitedCallback = workstationComponent.workerExited.registerDispatched(this, () -> onWorkedExited())
+
+  // --------------------------------------------------------------------------
+  override function onDisabled()
+    super.onDisabled()
+
+    let workstationComponent = getOwner().getWorkstationComponent()
+    if (workstationComponent != null)
+      workstationComponent.workerEntered.unregister(m_workedEnteredCallback)
+      workstationComponent.workerExited.unregister(m_workedExitedCallback)
+    
+  // --------------------------------------------------------------------------
+  private function onWorkerEntered()
+    if (getNumberOfWorkers() == 1)
+      activate()
+
+  // --------------------------------------------------------------------------
+  private function onWorkedExited()
+    if (getNumberOfWorkers() == 0)
+      deactivate()
+
+  // --------------------------------------------------------------------------
+  private function activate()
+    getOwnerUnit().setFieldWeapon(UNIT_WEAPON_BF_ATTACKS_ENABLED, 0, true)
+
+  // --------------------------------------------------------------------------
+  private function deactivate()
+    getOwnerUnit().setFieldWeapon(UNIT_WEAPON_BF_ATTACKS_ENABLED, 0, false)
+
+  // --------------------------------------------------------------------------
+  private function getNumberOfWorkers() returns int
+    let workstationComponent = getOwner().getWorkstationComponent()
+    return workstationComponent != null ? workstationComponent.getWorkerUnitCount() : 0
+
+// ============================================================================
+public function IUnitMetadata.getEnableAttackWhenOperatedComponent() returns EnableAttackWhenOperatedComponent
+  return this.getComponent(EnableAttackWhenOperatedComponent.typeId) castTo EnableAttackWhenOperatedComponent
+
+// ============================================================================
+public function IUnitMetadata.getOrAddEnableAttackWhenOperatedComponent() returns EnableAttackWhenOperatedComponent
+  var component = this.getEnableAttackWhenOperatedComponent()
+  if (component == null)
+    component = this.addComponent(new EnableAttackWhenOperatedComponent(this)) castTo EnableAttackWhenOperatedComponent
+  return component
+
+// ============================================================================
+public function unit.getEnableAttackWhenOperatedComponent() returns EnableAttackWhenOperatedComponent
+  let metadata = this.getMetadata()
+  if (metadata == null)
+    return null
+  return metadata.getEnableAttackWhenOperatedComponent()
+
+// ============================================================================
+public function unit.getOrAddEnableAttackWhenOperatedComponent() returns EnableAttackWhenOperatedComponent
+  let metadata = this.getMetadata()
+  if (metadata == null)
+    return null
+  return metadata.getOrAddEnableAttackWhenOperatedComponent()
