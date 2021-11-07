@@ -6,12 +6,15 @@ import TlsUnitIds
 import ObjectIdGenerator
 import AbilityObjEditing
 
-constant int ABILITY_ID = compiletime(ABIL_ID_GEN.next())
+constant int SCOUT_TOWER_SIGHT_ABILITY_ID = compiletime(ABIL_ID_GEN.next())
+constant int GUARD_TOWER_SIGHT_ABILITY_ID = compiletime(ABIL_ID_GEN.next())
 
 // ============================================================================
 @compiletime function createAbility()
-  new AbilityDefinitionSightBonus(ABILITY_ID)
+  new AbilityDefinitionSightBonus(SCOUT_TOWER_SIGHT_ABILITY_ID)
   ..setSightRangeBonus(1, 1800)
+  new AbilityDefinitionSightBonus(GUARD_TOWER_SIGHT_ABILITY_ID)
+  ..setSightRangeBonus(1, 900)
 
 // ============================================================================
 public class ScoutTowerComponent extends UnitComponent
@@ -28,6 +31,9 @@ public class ScoutTowerComponent extends UnitComponent
     super.onEnabled()
     
     let workstationComponent = getOwner().getOrAddWorkstationComponent()
+    ..setWorkerUnitType(TlsUnitIds.Survivors.survivorMale)
+    ..setMaxWorkers(1)
+
     m_workedEnteredCallback = workstationComponent.workerEntered.registerDispatched(this, () -> onWorkerEntered())
     m_workedExitedCallback = workstationComponent.workerExited.registerDispatched(this, () -> onWorkedExited())
 
@@ -65,19 +71,14 @@ public class ScoutTowerComponent extends UnitComponent
 
     let ownerUnit = getOwnerUnit()
 
-    switch (ownerUnit.getTypeId())
-    //{
-      case TlsUnitIds.scoutTower
-      //{
-        if (ownerUnit.hasAbility(ABILITY_ID) == false)
-          ownerUnit.addAbility(ABILITY_ID)
-      //}
+    if (ownerUnit.getTypeId() == TlsUnitIds.scoutTower)
+      ownerUnit.removeAbility(GUARD_TOWER_SIGHT_ABILITY_ID)
+      ownerUnit.addAbility(SCOUT_TOWER_SIGHT_ABILITY_ID)
 
-      case TlsUnitIds.guardTower
-      //{
-        getOwnerUnit().setFieldWeapon(UNIT_WEAPON_BF_ATTACKS_ENABLED, 0, true)
-      //}
-    //}
+    else if (ownerUnit.getTypeId() == TlsUnitIds.guardTower)
+      ownerUnit.removeAbility(SCOUT_TOWER_SIGHT_ABILITY_ID)
+      ownerUnit.addAbility(GUARD_TOWER_SIGHT_ABILITY_ID)
+      getOwnerUnit().setFieldWeapon(UNIT_WEAPON_BF_ATTACKS_ENABLED, 0, true)
 
   // --------------------------------------------------------------------------
   private function deactivate()
@@ -89,19 +90,11 @@ public class ScoutTowerComponent extends UnitComponent
 
     let ownerUnit = getOwnerUnit()
 
-    switch (ownerUnit.getTypeId())
-    //{
-      case TlsUnitIds.scoutTower
-      //{
-        if (ownerUnit.hasAbility(ABILITY_ID))
-          ownerUnit.removeAbility(ABILITY_ID)
-      //}
+    ownerUnit.removeAbility(SCOUT_TOWER_SIGHT_ABILITY_ID)
+    ownerUnit.removeAbility(GUARD_TOWER_SIGHT_ABILITY_ID)
 
-      case TlsUnitIds.guardTower
-      //{
-        getOwnerUnit().setFieldWeapon(UNIT_WEAPON_BF_ATTACKS_ENABLED, 0, false)
-      //}
-    //}
+    if (ownerUnit.getTypeId() == TlsUnitIds.guardTower)
+      getOwnerUnit().setFieldWeapon(UNIT_WEAPON_BF_ATTACKS_ENABLED, 0, false)
 
   // --------------------------------------------------------------------------
   private function getNumberOfWorkers() returns int
