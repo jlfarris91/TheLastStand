@@ -5,15 +5,16 @@ import WorkstationComponent
 import TlsUnitIds
 import ObjectIdGenerator
 import AbilityObjEditing
+import RegisterEvents
 
-constant int SCOUT_TOWER_SIGHT_ABILITY_ID = compiletime(ABIL_ID_GEN.next())
-constant int GUARD_TOWER_SIGHT_ABILITY_ID = compiletime(ABIL_ID_GEN.next())
+constant int SCOUT_TOWER_ACTIVE_SIGHT_ABILITY_ID = compiletime(ABIL_ID_GEN.next())
+constant int GUARD_TOWER_ACTIVE_SIGHT_ABILITY_ID = compiletime(ABIL_ID_GEN.next())
 
 // ============================================================================
 @compiletime function createAbility()
-  new AbilityDefinitionSightBonus(SCOUT_TOWER_SIGHT_ABILITY_ID)
+  new AbilityDefinitionSightBonus(SCOUT_TOWER_ACTIVE_SIGHT_ABILITY_ID)
   ..setSightRangeBonus(1, 1800)
-  new AbilityDefinitionSightBonus(GUARD_TOWER_SIGHT_ABILITY_ID)
+  new AbilityDefinitionSightBonus(GUARD_TOWER_ACTIVE_SIGHT_ABILITY_ID)
   ..setSightRangeBonus(1, 900)
 
 // ============================================================================
@@ -72,13 +73,13 @@ public class ScoutTowerComponent extends UnitComponent
     let ownerUnit = getOwnerUnit()
 
     if (ownerUnit.getTypeId() == TlsUnitIds.scoutTower)
-      ownerUnit.removeAbility(GUARD_TOWER_SIGHT_ABILITY_ID)
-      ownerUnit.addAbility(SCOUT_TOWER_SIGHT_ABILITY_ID)
+      ownerUnit.removeAbility(GUARD_TOWER_ACTIVE_SIGHT_ABILITY_ID)
+      ownerUnit.addAbility(SCOUT_TOWER_ACTIVE_SIGHT_ABILITY_ID)
 
     else if (ownerUnit.getTypeId() == TlsUnitIds.guardTower)
-      ownerUnit.removeAbility(SCOUT_TOWER_SIGHT_ABILITY_ID)
-      ownerUnit.addAbility(GUARD_TOWER_SIGHT_ABILITY_ID)
-      getOwnerUnit().setFieldWeapon(UNIT_WEAPON_BF_ATTACKS_ENABLED, 0, true)
+      ownerUnit.removeAbility(SCOUT_TOWER_ACTIVE_SIGHT_ABILITY_ID)
+      ownerUnit.addAbility(GUARD_TOWER_ACTIVE_SIGHT_ABILITY_ID)
+      ownerUnit.setFieldWeapon(UNIT_WEAPON_BF_ATTACKS_ENABLED, 0, true)
 
   // --------------------------------------------------------------------------
   private function deactivate()
@@ -90,16 +91,22 @@ public class ScoutTowerComponent extends UnitComponent
 
     let ownerUnit = getOwnerUnit()
 
-    ownerUnit.removeAbility(SCOUT_TOWER_SIGHT_ABILITY_ID)
-    ownerUnit.removeAbility(GUARD_TOWER_SIGHT_ABILITY_ID)
+    ownerUnit.removeAbility(SCOUT_TOWER_ACTIVE_SIGHT_ABILITY_ID)
+    ownerUnit.removeAbility(GUARD_TOWER_ACTIVE_SIGHT_ABILITY_ID)
 
     if (ownerUnit.getTypeId() == TlsUnitIds.guardTower)
-      getOwnerUnit().setFieldWeapon(UNIT_WEAPON_BF_ATTACKS_ENABLED, 0, false)
+      ownerUnit.setFieldWeapon(UNIT_WEAPON_BF_ATTACKS_ENABLED, 0, false)
 
   // --------------------------------------------------------------------------
   private function getNumberOfWorkers() returns int
     let workstationComponent = getOwner().getWorkstationComponent()
     return workstationComponent != null ? workstationComponent.getWorkerUnitCount() : 0
+  
+  // --------------------------------------------------------------------------
+  protected function onUnitUpgradeFinished()
+    if (m_activated)
+      m_activated = false
+      activate()
 
 // ============================================================================
 public function IUnitMetadata.getScoutTowerComponent() returns ScoutTowerComponent
@@ -111,3 +118,17 @@ public function IUnitMetadata.getOrAddScoutTowerComponent() returns ScoutTowerCo
   if (component == null)
     component = this.addComponent(new ScoutTowerComponent(this)) castTo ScoutTowerComponent
   return component
+
+// ============================================================================
+function onUpgradeFinished()
+  let upgradedUnit = GetTriggerUnit()
+  let metadata = upgradedUnit.getMetadata()
+  if (metadata == null)
+    return
+  let comp = metadata.getScoutTowerComponent()
+  if (comp != null)
+    comp.onUnitUpgradeFinished()
+
+// ============================================================================
+init
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_UPGRADE_FINISH, function onUpgradeFinished)
