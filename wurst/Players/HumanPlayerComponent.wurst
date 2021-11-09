@@ -7,7 +7,12 @@ import ErrorHandling
 import GameConstants
 import RegisterEvents
 import GroupUtils
-import TlsUnitIds
+import SmartReal
+import TlsUpgradeIds
+import DefenseUpgrades
+import PlayerExtensions
+import TlsUnitDefinition
+import FX
 
 // ============================================================================
 public class HumanPlayerComponent extends PlayerComponent
@@ -19,6 +24,8 @@ public class HumanPlayerComponent extends PlayerComponent
   private bool m_canPathToHeadquartersOrHero
   private real m_difficulty
   private real array[MAX_ELITE_TIER] m_tierChances
+
+  SmartReal lumberRefundPerc01 = new SmartReal()
 
   // --------------------------------------------------------------------------
   construct(IPlayerMetadata owner)
@@ -147,6 +154,30 @@ public class HumanPlayerComponent extends PlayerComponent
     center /= m_campCenterContributors.size().toReal()
     return center
 
+  // --------------------------------------------------------------------------
+  protected function onResearchFinished(unit _researchingUnit, int research)
+    let ownerPlayer = getOwnerPlayer()
+
+    if (research == TlsUpgradeIds.lumberRefund)
+      lumberRefundPerc01.setBaseValue(getLumberRefundPerc01(ownerPlayer.getTechResearchLevel(research)))
+
+  // --------------------------------------------------------------------------
+  protected function tryRefundLumber(unit structure)
+    let refundPerc01 = lumberRefundPerc01.getValue()
+    if (refundPerc01 == 0.0)
+      return
+    let unitDef = getUnitDefinition(structure.getTypeId())
+    if (unitDef == null)
+      Log.debug("No unit def found for unit {0} ({1})".format(structure.getTypeId().toString(), UnitId2String(structure.getTypeId())))
+      return
+    let lumberCost = unitDef.getLumberCost()
+    let lumberRefunded = (lumberCost * refundPerc01).toInt()
+    if (lumberRefunded == 0)
+      return
+    let owningPlayer = getOwnerPlayer()
+    owningPlayer.addLumber(lumberRefunded)
+    FX.createFoundMaterialsTag(structure.getPos(), lumberRefunded, owningPlayer)
+
 // ============================================================================
 public function IPlayerMetadata.getHumanPlayerComponent() returns HumanPlayerComponent
   return this.getComponent(HumanPlayerComponent.typeId) castTo HumanPlayerComponent
@@ -200,6 +231,27 @@ function onUnitKilled()
   comp.incrementKills()
 
 // ============================================================================
+function onConstructionFinished()
+  let constructedUnit = GetConstructedStructure()
+  let comp = constructedUnit.getOwnerHumanPlayerComponent()
+  if (comp != null)
+    comp.tryRefundLumber(constructedUnit)
+
+// ============================================================================
+function onUpgradeFinished()
+  let upgradedUnit = GetTriggerUnit()
+  let comp = upgradedUnit.getOwnerHumanPlayerComponent()
+  if (comp != null)
+    comp.tryRefundLumber(upgradedUnit)
+
+// ============================================================================
+function onResearchFinished()
+  let researchingUnit = GetResearchingUnit()
+  let comp = researchingUnit.getOwnerHumanPlayerComponent()
+  if (comp != null)
+    comp.onResearchFinished(researchingUnit, GetResearched())  
+
+// ============================================================================
 init
   for p in g_PlayingHumanPlayers
     initializePlayerMetadata(p)
@@ -207,3 +259,6 @@ init
   initializePlayerMetadata(PLAYER_VILLAGERS)
 
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_DEATH, function onUnitKilled)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_CONSTRUCT_FINISH, function onConstructionFinished)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_UPGRADE_FINISH, function onUpgradeFinished)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_RESEARCH_FINISH, function onResearchFinished)
