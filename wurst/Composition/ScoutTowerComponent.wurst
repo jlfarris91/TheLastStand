@@ -5,28 +5,57 @@ import WorkstationComponent
 import ObjectIdGenerator
 import AbilityObjEditing
 import Range
+import TooltipBuilder
+import Unit_ScoutTower
 
-constant rangeInt SCOUT_TOWER_SIGHT_RANGE = rangeInt(1000, 1800)
-constant int array SCOUT_TOWER_ACTIVE_SIGHT_ABILITY_ID = [compiletime(ABIL_ID_GEN.next()), compiletime(ABIL_ID_GEN.next()), compiletime(ABIL_ID_GEN.next()), compiletime(ABIL_ID_GEN.next()), compiletime(ABIL_ID_GEN.next()),
-                                                          compiletime(ABIL_ID_GEN.next()), compiletime(ABIL_ID_GEN.next()), compiletime(ABIL_ID_GEN.next()), compiletime(ABIL_ID_GEN.next()), compiletime(ABIL_ID_GEN.next())]
-constant int SCOUT_TOWER_ACTIVE_ICON_ABILITY_ID = compiletime(ABIL_ID_GEN.next())
-constant int SCOUT_TOWER_INACTIVE_ICON_ABILITY_ID = compiletime(ABIL_ID_GEN.next())
+constant rangeInt   SCOUT_TOWER_SIGHT_RANGE                     = rangeInt(800, 1800)
+constant real       SCOUT_TOWER_SIGHT_RANGE_PER_LEVEL           = SCOUT_TOWER_SIGHT_RANGE.getLength() / 10.0
+
+constant rangeInt   SCOUT_TOWER_ARMOR_DEC_RANGE                 = rangeInt(1, 3)
+constant real       SCOUT_TOWER_ARMOR_DEC_RANGE_PERC_PER_LEVEL  = SCOUT_TOWER_ARMOR_DEC_RANGE.getLength() / 10.0
+
+constant int array  SCOUT_TOWER_ACTIVE_SIGHT_ABILITY_ID         = [compiletime(ABIL_ID_GEN.next()), compiletime(ABIL_ID_GEN.next()), compiletime(ABIL_ID_GEN.next()), compiletime(ABIL_ID_GEN.next()), compiletime(ABIL_ID_GEN.next()), compiletime(ABIL_ID_GEN.next()), compiletime(ABIL_ID_GEN.next()), compiletime(ABIL_ID_GEN.next()), compiletime(ABIL_ID_GEN.next()), compiletime(ABIL_ID_GEN.next())]
+constant int        SCOUT_TOWER_ACTIVE_ICON_ABILITY_ID          = compiletime(ABIL_ID_GEN.next())
+constant int        SCOUT_TOWER_INACTIVE_ICON_ABILITY_ID        = compiletime(ABIL_ID_GEN.next())
+
+// ============================================================================
+function getActiveSightRadius(int level) returns int
+  return SCOUT_TOWER_SIGHT_RANGE.lerp(RANGE_ONE_TO_TEN.parameterize01(level)).toInt()
+
+// ============================================================================
+function getActiveTargetArmorReduction(int level) returns int
+  return SCOUT_TOWER_ARMOR_DEC_RANGE.lerp(RANGE_ONE_TO_TEN.parameterize01(level)).toInt()
 
 // ============================================================================
 @compiletime function createAbility()
-  for i = 0 to 9
+  for i = 1 to 10
   //{
-    new AbilityDefinitionSightBonus(SCOUT_TOWER_ACTIVE_SIGHT_ABILITY_ID[i])
-    ..setSightRangeBonus(1, SCOUT_TOWER_SIGHT_RANGE.lerp( i.toReal() / 9 ).toInt())
+    new AbilityDefinitionSightBonus(SCOUT_TOWER_ACTIVE_SIGHT_ABILITY_ID[i-1])
+    ..setSightRangeBonus(1, getActiveSightRadius(i))
   //}
 
-  new AbilityDefinition(SCOUT_TOWER_ACTIVE_ICON_ABILITY_ID, 'Ahan')
-    ..setTooltipNormal(1, "Workstation")
+  let activeWorkstationIconTooltipBuilder = new WorkstationIconTooltipBuilder(true)..setDescription(g_scoutTowerDefinition.getTooltipExtended())
+  let inactiveWorkstationIconTooltipBuilder = new WorkstationIconTooltipBuilder(false)..setDescription(g_scoutTowerDefinition.getTooltipExtended())
+
+  let properties = new TooltipItem("[Operator Bonuses]")
+  ..addValue(lvl -> "+{0}m sight range".format(getActiveSightRadius(lvl).toString()))
+  ..addValue(lvl -> "-{0} target armor".format(getActiveTargetArmorReduction(lvl).toString()))
+  activeWorkstationIconTooltipBuilder.addItem(properties)
+  inactiveWorkstationIconTooltipBuilder.addItem(properties)
+
+  new AbilityActiveWorkstationIconDefinition(SCOUT_TOWER_ACTIVE_ICON_ABILITY_ID)
+    ..setName("Lookout Tower")
+    ..presetTooltipNormalExtended(lvl -> activeWorkstationIconTooltipBuilder.getTooltipExtended(lvl))
+
+  new AbilityInactiveWorkstationIconDefinition(SCOUT_TOWER_INACTIVE_ICON_ABILITY_ID)
+    ..setName("Lookout Tower")
+    ..presetTooltipNormalExtended(lvl -> inactiveWorkstationIconTooltipBuilder.getTooltipExtended(lvl))
 
 // ============================================================================
 public class ScoutTowerComponent extends UnitComponent
   private _handle m_workedEnteredCallback = HANDLE_INVALID
   private _handle m_workedExitedCallback = HANDLE_INVALID
+  private _handle m_workedLeveledCallback = HANDLE_INVALID
   private bool m_activated = false
 
   // --------------------------------------------------------------------------
@@ -40,9 +69,9 @@ public class ScoutTowerComponent extends UnitComponent
     let workstationComponent = getOwner().getOrAddWorkstationComponent()
     m_workedEnteredCallback = workstationComponent.workerEntered.registerDispatched(this, () -> onWorkerEntered())
     m_workedExitedCallback = workstationComponent.workerExited.registerDispatched(this, () -> onWorkedExited())
+    m_workedLeveledCallback = workstationComponent.workerLeveled.registerDispatched(this, () -> onWorkerLeveled())
 
-    if (getNumberOfWorkers() > 0)
-      activate()
+    updateAbilities()
 
   // --------------------------------------------------------------------------
   override function onDisabled()
@@ -52,6 +81,7 @@ public class ScoutTowerComponent extends UnitComponent
     if (workstationComponent != null)
       workstationComponent.workerEntered.unregister(m_workedEnteredCallback)
       workstationComponent.workerExited.unregister(m_workedExitedCallback)
+      workstationComponent.workerLeveled.unregister(m_workedLeveledCallback)
 
     deactivate()
     
@@ -64,6 +94,10 @@ public class ScoutTowerComponent extends UnitComponent
   private function onWorkedExited()
     if (getNumberOfWorkers() == 0)
       deactivate()
+
+  // --------------------------------------------------------------------------
+  private function onWorkerLeveled()
+    updateAbilities()
 
   // --------------------------------------------------------------------------
   private function getNumberOfWorkers() returns int
@@ -83,10 +117,10 @@ public class ScoutTowerComponent extends UnitComponent
     if (m_activated == active)
       return
     m_activated = active
-    updateSightAbility()
+    updateAbilities()
 
   // --------------------------------------------------------------------------
-  function updateSightAbility()
+  function updateAbilities()
     let ownerUnit = getOwnerUnit()
 
     var operatorLevel = 1
@@ -96,11 +130,19 @@ public class ScoutTowerComponent extends UnitComponent
       if (workstationComponent != null)
         operatorLevel = workstationComponent.getMaxOperatorLevel()
 
-    for i = 0 to 9
-      if (m_activated and operatorLevel == i + 1)
-        ownerUnit.addAbility(SCOUT_TOWER_ACTIVE_SIGHT_ABILITY_ID[i])
+    for i = 1 to 10
+      if (m_activated and operatorLevel == i)
+        ownerUnit.addAbility(SCOUT_TOWER_ACTIVE_SIGHT_ABILITY_ID[i-1])
       else
-        ownerUnit.removeAbility(SCOUT_TOWER_ACTIVE_SIGHT_ABILITY_ID[i])
+        ownerUnit.removeAbility(SCOUT_TOWER_ACTIVE_SIGHT_ABILITY_ID[i-1])
+
+    if (m_activated)
+      ownerUnit.removeAbility(SCOUT_TOWER_INACTIVE_ICON_ABILITY_ID)
+      ownerUnit.addAbility(SCOUT_TOWER_ACTIVE_ICON_ABILITY_ID)
+      ownerUnit.setAbilityLevel(SCOUT_TOWER_ACTIVE_ICON_ABILITY_ID, operatorLevel)
+    else
+      ownerUnit.removeAbility(SCOUT_TOWER_ACTIVE_ICON_ABILITY_ID)
+      ownerUnit.addAbility(SCOUT_TOWER_INACTIVE_ICON_ABILITY_ID)
 
 // ============================================================================
 public function IUnitMetadata.getScoutTowerComponent() returns ScoutTowerComponent

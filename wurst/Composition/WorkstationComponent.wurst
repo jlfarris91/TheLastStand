@@ -9,6 +9,8 @@ import SurvivorJobs
 import TooltipBuilder
 import ColorUtility
 import StringBuilder
+import AbilityObjEditing
+import Icons
 
 // ============================================================================
 public class WorkstationComponent extends UnitComponent
@@ -16,18 +18,21 @@ public class WorkstationComponent extends UnitComponent
 
   Event workerEntered
   Event workerExited
+  Event workerLeveled
 
   // --------------------------------------------------------------------------
   construct (IUnitMetadata metadata)
     super(metadata)
     workerEntered = new Event()
     workerExited = new Event()
+    workerLeveled = new Event()
     m_loadedUnits = CreateGroup()
 
   // --------------------------------------------------------------------------
   ondestroy
     destroy workerEntered
     destroy workerExited
+    destroy workerLeveled
     m_loadedUnits.destr()
 
   // --------------------------------------------------------------------------
@@ -63,25 +68,31 @@ public class WorkstationComponent extends UnitComponent
   protected function onUnitLoaded(unit loadedUnit)
     if (m_loadedUnits.contains(loadedUnit))
       return
-    m_loadedUnits.addUnit(loadedUnit)
-    onWorkerEntered()
+    onWorkerEntered(loadedUnit)
     workerEntered.call()
 
   // --------------------------------------------------------------------------
   protected function onUnitUnloaded(unit loadedUnit)
     if (not m_loadedUnits.contains(loadedUnit))
       return
-    m_loadedUnits.removeUnit(loadedUnit)
-    onWorkerExited()
+    onWorkerExited(loadedUnit)
     workerExited.call()
 
   // --------------------------------------------------------------------------
-  private function onWorkerEntered()
+  protected function onWorkerLeveled(unit worker)
+    if (not m_loadedUnits.contains(worker))
+      return
+    workerLeveled.call()
+
+  // --------------------------------------------------------------------------
+  private function onWorkerEntered(unit worker)
+    m_loadedUnits.addUnit(worker)
     if (getWorkerUnitCount() == 1)
       getOwnerUnit().addAnimationProperties("work")
 
   // --------------------------------------------------------------------------
-  private function onWorkerExited()
+  private function onWorkerExited(unit worker)
+    m_loadedUnits.removeUnit(worker)
     if (getWorkerUnitCount() == 0)
       getOwnerUnit().removeAnimationProperties("work")
 
@@ -109,11 +120,14 @@ public class WorkstationIconTooltipBuilder extends TooltipBuilder
   private bool m_active
 
   // --------------------------------------------------------------------------
-  override function getTooltipBasic() returns string
+  construct(bool active)
+    m_active = active
 
+  // --------------------------------------------------------------------------
+  override function getDescription(int level) returns string
     let sb = new StringBuilder()
 
-    let desc = getDescription()
+    let desc = getDescription(level)
     if (desc != null)
       sb.appendLine(desc)
       sb.appendLine()
@@ -131,11 +145,29 @@ public class WorkstationIconTooltipBuilder extends TooltipBuilder
     
     return sb.toStringAndDestroy()
 
+// ============================================================================
+public class AbilityActiveWorkstationIconDefinition extends AbilityDefinition
+
   // --------------------------------------------------------------------------
-  static function create(bool active) returns TooltipBuilder
-    let builder = new WorkstationIconTooltipBuilder()
-    builder.m_active = active
-    return builder
+  construct(int newId)
+    super (newId, 'Ahan')
+    setLevels(10)
+    setButtonPositionNormalX(0)
+    setButtonPositionNormalY(2)
+    setIconNormal(Icons.bTNEngineeringUpgrade)
+    presetTooltipNormal(lvl -> "Workstation {0} [Level {1}]".format("Active".colorize(Colors.green), lvl.toString()))
+
+// ============================================================================
+public class AbilityInactiveWorkstationIconDefinition extends AbilityDefinition
+
+  // --------------------------------------------------------------------------
+  construct(int newId)
+    super (newId, 'Ahan')
+    setLevels(1)
+    setButtonPositionNormalX(0)
+    setButtonPositionNormalY(2)
+    setIconNormal(Icons.dISBTNEngineeringUpgrade)
+    setTooltipNormal(1, "Workstation {0}".format("Inactive".colorize(Colors.gray)))
 
 // ============================================================================
 function onUnitLoaded()
@@ -164,6 +196,23 @@ function onUnitUnloaded()
     comp.onUnitUnloaded(unloadedUnit)
 
 // ============================================================================
+function onUnitLeveled()
+  let levelingUnit = GetLevelingUnit()
+
+  let holdingUnit = getTransportUnit(levelingUnit)
+  if (holdingUnit == null)
+    return
+
+  let metadata = holdingUnit.getMetadata()
+  if (metadata == null)
+    return
+
+  let comp = metadata.getWorkstationComponent()
+  if (comp != null)
+    comp.onWorkerLeveled(levelingUnit)
+
+// ============================================================================
 init
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_LOADED, function onUnitLoaded)
+  registerPlayerUnitEvent(EVENT_PLAYER_HERO_LEVEL, function onUnitLeveled)
   registerUnitUnloadedEvent(function onUnitUnloaded)
