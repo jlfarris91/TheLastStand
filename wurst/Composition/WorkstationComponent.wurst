@@ -1,23 +1,18 @@
 package WorkstationComponent
 import UnitComponent
-import TlsAbilityIds
 import Events
 import RegisterEvents
 import Loaded
 import Orders
-import HashList
-import HashMap
-import TlsUnitIds
-
-int array[2] g_cargoHoldAbilityId = [ TlsAbilityIds.workspaceCargoHold1, TlsAbilityIds.workspaceCargoHold2 ]
-
-IterableMap<int, int> g_workerTypeToLoadAbilityId = new IterableMap<int, int>()
+import SurvivorComponent
+import SurvivorJobs
+import TooltipBuilder
+import ColorUtility
+import StringBuilder
 
 // ============================================================================
 public class WorkstationComponent extends UnitComponent
-  private HashList<unit> m_loadedUnits
-  private int m_maxWorkers
-  private int m_workerUnitType
+  private group m_loadedUnits
 
   Event workerEntered
   Event workerExited
@@ -25,20 +20,18 @@ public class WorkstationComponent extends UnitComponent
   // --------------------------------------------------------------------------
   construct (IUnitMetadata metadata)
     super(metadata)
-    m_maxWorkers = 1
-    m_workerUnitType = TlsUnitIds.Survivors.survivorMale
     workerEntered = new Event()
     workerExited = new Event()
-    m_loadedUnits = new HashList<unit>()
+    m_loadedUnits = CreateGroup()
 
   // --------------------------------------------------------------------------
   ondestroy
     destroy workerEntered
     destroy workerExited
-    destroy m_loadedUnits
+    m_loadedUnits.destr()
 
   // --------------------------------------------------------------------------
-  function getWorkerUnits() returns HashList<unit>
+  function getWorkerUnits() returns group
     return m_loadedUnits
 
   // --------------------------------------------------------------------------
@@ -53,80 +46,34 @@ public class WorkstationComponent extends UnitComponent
     ownerUnit.issuePointOrderById(OrderIds.unload, ownerUnit.getPos())
 
   // --------------------------------------------------------------------------
-  function getMaxWorkers() returns int
-    return m_maxWorkers
-
-  // --------------------------------------------------------------------------
-  function setMaxWorkers(int value)
-    if (m_maxWorkers == value)
-      return
-    m_maxWorkers = value
-    let ownerUnit = getOwnerUnit()
-
-    for i = 0 to 1
-      let abilId = g_cargoHoldAbilityId[i]
-      if (abilId == value)
-        ownerUnit.addAbility(abilId)
-      else
-        ownerUnit.removeAbility(abilId)
-
-  // --------------------------------------------------------------------------
-  function getWorkerUnitType() returns int
-    return m_workerUnitType
-
-  // --------------------------------------------------------------------------
-  function setWorkerUnitType(int workerUnitType)
-    if (m_workerUnitType == workerUnitType)
-      return
-    m_workerUnitType = workerUnitType
-    let ownerUnit = getOwnerUnit()
-    for key in g_workerTypeToLoadAbilityId
-      let abilId = g_workerTypeToLoadAbilityId.get(key)
-      if (key == workerUnitType)
-        ownerUnit.addAbility(abilId)
-      else
-        ownerUnit.removeAbility(abilId)
-
-  // --------------------------------------------------------------------------
-  override function onEnabled()
-    super.onEnabled()
-
-    let ownerUnit = getOwnerUnit()
-
-    if (not ownerUnit.hasAbility(TlsAbilityIds.workspaceCargoHold1))
-      ownerUnit.addAbility(TlsAbilityIds.workspaceCargoHold1)
-
-    if (not ownerUnit.hasAbility(TlsAbilityIds.workspaceLoadSurvivor))
-      ownerUnit.addAbility(TlsAbilityIds.workspaceLoadSurvivor)
-
-    if (not ownerUnit.hasAbility(TlsAbilityIds.workspaceUnload))
-      ownerUnit.addAbility(TlsAbilityIds.workspaceUnload)
+  function getMaxOperatorLevel() returns int
+    var level = 1
+    for _unit in m_loadedUnits
+      let operator = _unit.getSurvivorJobComponent(SurvivorJobs.operator)
+      if (operator != null)
+        level = max(level, operator.getLevel())
+    return level
 
   // --------------------------------------------------------------------------
   override function onDisabled()
     super.onDisabled()
-
     unloadWorkers()
-
-    // Clears cargo hold and load abilities
-    setMaxWorkers(0)
-    setWorkerUnitType(0)
-
-    getOwnerUnit().removeAbility(TlsAbilityIds.workspaceUnload)
 
   // --------------------------------------------------------------------------
   protected function onUnitLoaded(unit loadedUnit)
-    if (m_loadedUnits.has(loadedUnit))
+    if (m_loadedUnits.contains(loadedUnit))
       return
-    m_loadedUnits.add(loadedUnit)
+    m_loadedUnits.addUnit(loadedUnit)
     onWorkerEntered()
     workerEntered.call()
 
   // --------------------------------------------------------------------------
   protected function onUnitUnloaded(unit loadedUnit)
-    if (m_loadedUnits.remove(loadedUnit))
-      onWorkerExited()
-      workerExited.call()
+    if (not m_loadedUnits.contains(loadedUnit))
+      return
+    m_loadedUnits.removeUnit(loadedUnit)
+    onWorkerExited()
+    workerExited.call()
 
   // --------------------------------------------------------------------------
   private function onWorkerEntered()
@@ -148,6 +95,47 @@ public function IUnitMetadata.getOrAddWorkstationComponent() returns Workstation
   if (component == null)
     component = this.addComponent(new WorkstationComponent(this)) castTo WorkstationComponent
   return component
+
+// ============================================================================
+/*
+    [Workstation - Active]
+    A unit is currently operating this Workstation.
+
+    [Operator Bonuses]
+    + 10% sight range
+    + 10% bonus damage to target
+*/
+public class WorkstationIconTooltipBuilder extends TooltipBuilder
+  private bool m_active
+
+  // --------------------------------------------------------------------------
+  override function getTooltipBasic() returns string
+
+    let sb = new StringBuilder()
+
+    let desc = getDescription()
+    if (desc != null)
+      sb.appendLine(desc)
+      sb.appendLine()
+
+    let activeStateString = m_active ? "Active".colorize(Colors.green) : "Inactive".colorize(Colors.gray)
+
+    sb.appendLine("[Workstation - ".colorize(Colors.gold) + activeStateString + "]".colorize(Colors.gold))
+    
+    if (m_active)
+      sb.appendLine("A unit is currently operating this Workstation.")
+    else
+      sb.appendLine("Load a unit into this Workstation to begin operations.")
+
+    sb.appendLine()
+    
+    return sb.toStringAndDestroy()
+
+  // --------------------------------------------------------------------------
+  static function create(bool active) returns TooltipBuilder
+    let builder = new WorkstationIconTooltipBuilder()
+    builder.m_active = active
+    return builder
 
 // ============================================================================
 function onUnitLoaded()
@@ -179,6 +167,3 @@ function onUnitUnloaded()
 init
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_LOADED, function onUnitLoaded)
   registerUnitUnloadedEvent(function onUnitUnloaded)
-
-  g_workerTypeToLoadAbilityId.put(TlsUnitIds.Survivors.survivorMale, TlsAbilityIds.workspaceLoadSurvivor)
-  g_workerTypeToLoadAbilityId.put(TlsUnitIds.Survivors.engineer1, TlsAbilityIds.workspaceLoadEngineer)

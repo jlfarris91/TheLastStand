@@ -2,16 +2,26 @@ package ScoutTowerComponent
 import UnitComponent
 import Events
 import WorkstationComponent
-import TlsUnitIds
 import ObjectIdGenerator
 import AbilityObjEditing
+import Range
 
-constant int SCOUT_TOWER_ACTIVE_SIGHT_ABILITY_ID = compiletime(ABIL_ID_GEN.next())
+constant rangeInt SCOUT_TOWER_SIGHT_RANGE = rangeInt(1000, 1800)
+constant int array SCOUT_TOWER_ACTIVE_SIGHT_ABILITY_ID = [compiletime(ABIL_ID_GEN.next()), compiletime(ABIL_ID_GEN.next()), compiletime(ABIL_ID_GEN.next()), compiletime(ABIL_ID_GEN.next()), compiletime(ABIL_ID_GEN.next()),
+                                                          compiletime(ABIL_ID_GEN.next()), compiletime(ABIL_ID_GEN.next()), compiletime(ABIL_ID_GEN.next()), compiletime(ABIL_ID_GEN.next()), compiletime(ABIL_ID_GEN.next())]
+constant int SCOUT_TOWER_ACTIVE_ICON_ABILITY_ID = compiletime(ABIL_ID_GEN.next())
+constant int SCOUT_TOWER_INACTIVE_ICON_ABILITY_ID = compiletime(ABIL_ID_GEN.next())
 
 // ============================================================================
 @compiletime function createAbility()
-  new AbilityDefinitionSightBonus(SCOUT_TOWER_ACTIVE_SIGHT_ABILITY_ID)
-  ..setSightRangeBonus(1, 1800)
+  for i = 0 to 9
+  //{
+    new AbilityDefinitionSightBonus(SCOUT_TOWER_ACTIVE_SIGHT_ABILITY_ID[i])
+    ..setSightRangeBonus(1, SCOUT_TOWER_SIGHT_RANGE.lerp( i.toReal() / 9 ).toInt())
+  //}
+
+  new AbilityDefinition(SCOUT_TOWER_ACTIVE_ICON_ABILITY_ID, 'Ahan')
+    ..setTooltipNormal(1, "Workstation")
 
 // ============================================================================
 public class ScoutTowerComponent extends UnitComponent
@@ -28,9 +38,6 @@ public class ScoutTowerComponent extends UnitComponent
     super.onEnabled()
     
     let workstationComponent = getOwner().getOrAddWorkstationComponent()
-    ..setWorkerUnitType(TlsUnitIds.Survivors.survivorMale)
-    ..setMaxWorkers(1)
-
     m_workedEnteredCallback = workstationComponent.workerEntered.registerDispatched(this, () -> onWorkerEntered())
     m_workedExitedCallback = workstationComponent.workerExited.registerDispatched(this, () -> onWorkedExited())
 
@@ -59,31 +66,41 @@ public class ScoutTowerComponent extends UnitComponent
       deactivate()
 
   // --------------------------------------------------------------------------
-  private function activate()
-
-    if (m_activated)
-      return
-
-    m_activated = true
-
-    let ownerUnit = getOwnerUnit()
-    ownerUnit.addAbility(SCOUT_TOWER_ACTIVE_SIGHT_ABILITY_ID)
-
-  // --------------------------------------------------------------------------
-  private function deactivate()
-
-    if (m_activated == false)
-      return
-
-    m_activated = false
-
-    let ownerUnit = getOwnerUnit()
-    ownerUnit.removeAbility(SCOUT_TOWER_ACTIVE_SIGHT_ABILITY_ID)
-
-  // --------------------------------------------------------------------------
   private function getNumberOfWorkers() returns int
     let workstationComponent = getOwner().getWorkstationComponent()
     return workstationComponent != null ? workstationComponent.getWorkerUnitCount() : 0
+
+  // --------------------------------------------------------------------------
+  private function activate()
+    setActive(true)
+
+  // --------------------------------------------------------------------------
+  private function deactivate()
+    setActive(false)
+
+  // --------------------------------------------------------------------------
+  private function setActive(bool active)
+    if (m_activated == active)
+      return
+    m_activated = active
+    updateSightAbility()
+
+  // --------------------------------------------------------------------------
+  function updateSightAbility()
+    let ownerUnit = getOwnerUnit()
+
+    var operatorLevel = 1
+
+    if (m_activated)
+      let workstationComponent = getOwner().getWorkstationComponent()
+      if (workstationComponent != null)
+        operatorLevel = workstationComponent.getMaxOperatorLevel()
+
+    for i = 0 to 9
+      if (m_activated and operatorLevel == i + 1)
+        ownerUnit.addAbility(SCOUT_TOWER_ACTIVE_SIGHT_ABILITY_ID[i])
+      else
+        ownerUnit.removeAbility(SCOUT_TOWER_ACTIVE_SIGHT_ABILITY_ID[i])
 
 // ============================================================================
 public function IUnitMetadata.getScoutTowerComponent() returns ScoutTowerComponent
