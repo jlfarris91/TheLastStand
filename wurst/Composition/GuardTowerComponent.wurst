@@ -4,18 +4,56 @@ import Events
 import WorkstationComponent
 import ObjectIdGenerator
 import AbilityObjEditing
+import Unit_GuardTower
+import TooltipBuilder
+import Range
+import GameConstants
 
-constant int ACTIVE_SIGHT_ABILITY_ID = compiletime(ABIL_ID_GEN.next())
+constant int        ACTIVE_SIGHT_ABILITY_ID               = compiletime(ABIL_ID_GEN.next())
+
+constant rangeInt   GUARD_TOWER_ATTACK_RANGE              = rangeInt(400, 800)
+constant rangeReal  GUARD_TOWER_ATTACK_SPEED              = rangeReal(2, 0.5)
+
+constant int        GUARD_TOWER_ACTIVE_ICON_ABILITY_ID    = compiletime(ABIL_ID_GEN.next())
+constant int        GUARD_TOWER_INACTIVE_ICON_ABILITY_ID  = compiletime(ABIL_ID_GEN.next())
+
+// ============================================================================
+function getActiveAttackRange(int level) returns int
+  return GUARD_TOWER_ATTACK_RANGE.lerp(RANGE_ONE_TO_TEN.parameterize01(level)).toInt()
+
+// ============================================================================
+function getActiveAttackSpeed(int level) returns real
+  return GUARD_TOWER_ATTACK_SPEED.lerp(RANGE_ONE_TO_TEN.parameterize01(level))
 
 // ============================================================================
 @compiletime function createAbility()
   new AbilityDefinitionSightBonus(ACTIVE_SIGHT_ABILITY_ID)
   ..setSightRangeBonus(1, 800)
 
+  let activeWorkstationIconTooltipBuilder = new WorkstationIconTooltipBuilder(true)..setDescription(g_guardTowerDefinition.getDescription())
+  let inactiveWorkstationIconTooltipBuilder = new WorkstationIconTooltipBuilder(false)..setDescription(g_guardTowerDefinition.getDescription())
+
+  let properties = new TooltipItem("[Operator Bonuses]")
+  ..addValue(lvl -> "{0}m attack range".format((getActiveAttackRange(lvl) * WORLD_TO_METERS).toString()))
+  ..addValue(lvl -> "{0}s attack cooldown".format(getActiveAttackSpeed(lvl).toString()))
+  activeWorkstationIconTooltipBuilder.addItem(properties)
+
+  new AbilityActiveWorkstationIconDefinition(GUARD_TOWER_ACTIVE_ICON_ABILITY_ID)
+    ..setName("Guard Tower")
+    ..presetTooltipNormalExtended(lvl -> activeWorkstationIconTooltipBuilder.getTooltipExtended(lvl))
+
+  new AbilityInactiveWorkstationIconDefinition(GUARD_TOWER_INACTIVE_ICON_ABILITY_ID)
+    ..setName("Guard Tower")
+    ..presetTooltipNormalExtended(lvl -> inactiveWorkstationIconTooltipBuilder.getTooltipExtended(lvl))
+
+  destroy activeWorkstationIconTooltipBuilder
+  destroy inactiveWorkstationIconTooltipBuilder
+
 // ============================================================================
 public class GuardTowerComponent extends UnitComponent
   private _handle m_workedEnteredCallback = HANDLE_INVALID
   private _handle m_workedExitedCallback = HANDLE_INVALID
+  private _handle m_workedLeveledCallback = HANDLE_INVALID
   private bool m_activated = false
 
   // --------------------------------------------------------------------------
@@ -29,9 +67,9 @@ public class GuardTowerComponent extends UnitComponent
     let workstationComponent = getOwner().getOrAddWorkstationComponent()
     m_workedEnteredCallback = workstationComponent.workerEntered.registerDispatched(this, () -> onWorkerEntered())
     m_workedExitedCallback = workstationComponent.workerExited.registerDispatched(this, () -> onWorkedExited())
+    m_workedLeveledCallback = workstationComponent.workerLeveled.registerDispatched(this, () -> onWorkerLeveled())
 
-    if (getNumberOfWorkers() > 0)
-      activate()
+    updateState()
 
   // --------------------------------------------------------------------------
   override function onDisabled()
@@ -41,6 +79,7 @@ public class GuardTowerComponent extends UnitComponent
     if (workstationComponent != null)
       workstationComponent.workerEntered.unregister(m_workedEnteredCallback)
       workstationComponent.workerExited.unregister(m_workedExitedCallback)
+      workstationComponent.workerLeveled.unregister(m_workedLeveledCallback)
 
     deactivate()
     
@@ -55,34 +94,57 @@ public class GuardTowerComponent extends UnitComponent
       deactivate()
 
   // --------------------------------------------------------------------------
-  private function activate()
-
-    if (m_activated)
-      return
-
-    m_activated = true
-
-    let ownerUnit = getOwnerUnit()
-    ownerUnit.addAbility(ACTIVE_SIGHT_ABILITY_ID)
-    ownerUnit.setFieldWeapon(UNIT_WEAPON_BF_ATTACKS_ENABLED, 0, true)
-
-  // --------------------------------------------------------------------------
-  private function deactivate()
-
-    if (m_activated == false)
-      return
-
-    m_activated = false
-
-    let ownerUnit = getOwnerUnit()
-
-    ownerUnit.removeAbility(ACTIVE_SIGHT_ABILITY_ID)
-    ownerUnit.setFieldWeapon(UNIT_WEAPON_BF_ATTACKS_ENABLED, 0, false)
+  private function onWorkerLeveled()
+    updateState()
 
   // --------------------------------------------------------------------------
   private function getNumberOfWorkers() returns int
     let workstationComponent = getOwner().getWorkstationComponent()
     return workstationComponent != null ? workstationComponent.getWorkerUnitCount() : 0
+
+  // --------------------------------------------------------------------------
+  private function activate()
+    setActive(true)
+
+  // --------------------------------------------------------------------------
+  private function deactivate()
+    setActive(false)
+
+  // --------------------------------------------------------------------------
+  private function setActive(bool active)
+    if (m_activated == active)
+      return
+    m_activated = active
+    updateState()
+
+  // --------------------------------------------------------------------------
+  private function updateState()
+
+    let ownerUnit = getOwnerUnit()
+
+    if (m_activated)
+      ownerUnit.addAbility(ACTIVE_SIGHT_ABILITY_ID)
+    else
+      ownerUnit.removeAbility(ACTIVE_SIGHT_ABILITY_ID)
+
+    ownerUnit.setFieldWeapon(UNIT_WEAPON_BF_ATTACKS_ENABLED, 0, m_activated)
+
+    var operatorLevel = 1
+
+    if (m_activated)
+      let workstationComponent = getOwner().getWorkstationComponent()
+      if (workstationComponent != null)
+        operatorLevel = workstationComponent.getMaxOperatorLevel()
+
+    ownerUnit.setFieldWeapon(UNIT_WEAPON_RF_ATTACK_BASE_COOLDOWN, 0, getActiveAttackSpeed(operatorLevel))
+
+    if (m_activated)
+      ownerUnit.removeAbility(GUARD_TOWER_INACTIVE_ICON_ABILITY_ID)
+      ownerUnit.addAbility(GUARD_TOWER_ACTIVE_ICON_ABILITY_ID)
+      ownerUnit.setAbilityLevel(GUARD_TOWER_ACTIVE_ICON_ABILITY_ID, operatorLevel)
+    else
+      ownerUnit.removeAbility(GUARD_TOWER_ACTIVE_ICON_ABILITY_ID)
+      ownerUnit.addAbility(GUARD_TOWER_INACTIVE_ICON_ABILITY_ID)
 
 // ============================================================================
 public function IUnitMetadata.getGuardTowerComponent() returns GuardTowerComponent

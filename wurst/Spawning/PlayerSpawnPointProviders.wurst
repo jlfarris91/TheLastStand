@@ -8,18 +8,22 @@ import GameConstants
 import UnitIndexer
 import Circle
 import ColorUtility
+import Func
 
 @configurable public constant real FRIENDLY_INVALIDATION_RANGE = 512.0
 @configurable public constant real HOSTILE_INVALIDATION_RANGE = 800.0
 
-GridCachedSpawnManager g_cachedHostileSpawnPointProvider = new GridCachedSpawnManager((unit u) -> doesUnitInvalidateHostileSpawnPoint(u), Colors.red)
-GridCachedSpawnManager g_cachedFriendlySpawnPointProvider = new GridCachedSpawnManager((unit u) -> doesUnitInvalidateFriendlySpawnPoint(u), Colors.green)
+GridCachedSpawnManager g_cachedHostileSpawnPointProvider
+GridCachedSpawnManager g_cachedFriendlySpawnPointProvider
 
 DynamicSpawnPointProvider array g_dynamicHostileSpawnPointProviders
 DynamicSpawnPointProvider array g_dynamicFriendlySpawnPointProviders
 
 RandomSpawnPointProvider array g_hostileSpawnPointProviders
 RandomSpawnPointProvider array g_friendlySpawnPointProviders
+
+Func1<unit, bool> g_doesUnitInvalidateHostileSpawnPoint
+Func1<unit, bool> g_doesUnitInvalidateFriendlySpawnPoint
 
 public enum SpawnPointProviderType
   CACHED_HOSTILE
@@ -29,24 +33,28 @@ public enum SpawnPointProviderType
 
 // ============================================================================
 public function getCachedHostileSpawnPointProvider(player _) returns ISpawnPointProvider
+  if (g_cachedHostileSpawnPointProvider == null)
+    g_cachedHostileSpawnPointProvider = new GridCachedSpawnManager(g_doesUnitInvalidateHostileSpawnPoint, Colors.red)
   return g_cachedHostileSpawnPointProvider
 
 // ============================================================================
 public function getCachedFriendlySpawnPointProvider(player _) returns ISpawnPointProvider
+  if (g_cachedFriendlySpawnPointProvider == null)
+    g_cachedFriendlySpawnPointProvider = new GridCachedSpawnManager(g_doesUnitInvalidateFriendlySpawnPoint, Colors.green)
   return g_cachedFriendlySpawnPointProvider
 
 // ============================================================================
 public function getDynamicHostileSpawnPointProvider(player p) returns ISpawnPointProvider
   let playerId = p.getId()
   if (g_dynamicHostileSpawnPointProviders[playerId] == null)
-    g_dynamicHostileSpawnPointProviders[playerId] = new DynamicSpawnPointProvider(p, HOSTILE_INVALIDATION_RANGE, (unit u) -> doesUnitInvalidateHostileSpawnPoint(u))
+    g_dynamicHostileSpawnPointProviders[playerId] = new DynamicSpawnPointProvider(p, HOSTILE_INVALIDATION_RANGE, g_doesUnitInvalidateHostileSpawnPoint)
   return g_dynamicHostileSpawnPointProviders[playerId]
 
 // ============================================================================
 public function getDynamicFriendlySpawnPointProvider(player p) returns ISpawnPointProvider
   let playerId = p.getId()
   if (g_dynamicFriendlySpawnPointProviders[playerId] == null)
-    g_dynamicFriendlySpawnPointProviders[playerId] = new DynamicSpawnPointProvider(p, FRIENDLY_INVALIDATION_RANGE, (unit u) -> doesUnitInvalidateFriendlySpawnPoint(u))
+    g_dynamicFriendlySpawnPointProviders[playerId] = new DynamicSpawnPointProvider(p, FRIENDLY_INVALIDATION_RANGE, g_doesUnitInvalidateFriendlySpawnPoint)
   return g_dynamicFriendlySpawnPointProviders[playerId]
 
 // ============================================================================
@@ -103,13 +111,20 @@ function onUnitIndexing()
   let indexingUnit = getIndexingUnit()
   let unitPos = indexingUnit.getPos()
 
-  if (doesUnitInvalidateFriendlySpawnPoint(indexingUnit))
+  if (g_cachedFriendlySpawnPointProvider != null and doesUnitInvalidateFriendlySpawnPoint(indexingUnit))
     g_cachedFriendlySpawnPointProvider.invalidateSpawnPoints(circle(unitPos, FRIENDLY_INVALIDATION_RANGE).getBounds())
 
-  if (doesUnitInvalidateHostileSpawnPoint(indexingUnit))
+  if (g_cachedHostileSpawnPointProvider != null and doesUnitInvalidateHostileSpawnPoint(indexingUnit))
     g_cachedHostileSpawnPointProvider.invalidateSpawnPoints(circle(unitPos, HOSTILE_INVALIDATION_RANGE).getBounds())
 
 // ============================================================================
 init
+
+  g_doesUnitInvalidateHostileSpawnPoint = (unit u) -> doesUnitInvalidateHostileSpawnPoint(u)
+  g_doesUnitInvalidateHostileSpawnPoint.setDestroyAfterUse(false)
+
+  g_doesUnitInvalidateFriendlySpawnPoint = (unit u) -> doesUnitInvalidateFriendlySpawnPoint(u)
+  g_doesUnitInvalidateFriendlySpawnPoint.setDestroyAfterUse(false)
+
   onUnitIndex(() -> onUnitIndexing())
   onUnitDeindex(() -> onUnitIndexing())
