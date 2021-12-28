@@ -1,0 +1,644 @@
+package TunnelEntranceComponent
+import ChannelAbilityPreset
+import Loaded
+import RegisterEvents
+import DisplayTextToPlayer
+import ErrorHandling
+import Orders
+import Suspend
+import ClosureTimers
+import Vector
+import Math
+import UnitComponent
+import TimerUtils
+import RefObject
+import CancellationToken
+import CancellableClosureTimers
+import LinkedList
+import GroupExtensions
+import TlsUnitIds
+import TlsAbilityIds
+import Unit_Tunnel
+
+LinkedList<TunnelOperation> g_activeTravelOperations = new LinkedList<TunnelOperation>()
+Vector<BurrowDirtClump> g_activeDirtClumps = new Vector<BurrowDirtClump>(256)
+group g_tunnelEntrances = CreateGroup()
+group g_tunnelWaitingGroup = CreateGroup()
+
+constant real TRAVEL_DURATION = 3.0
+constant real TUNNEL_OPERATION_FX_DURATION_OFFSET = 1.0
+constant real TUNNEL_MIN_DISTANCE = 256.0
+constant real TUNNEL_TRAVEL_TIMER = 0.1
+
+constant int EFFECT_COUNT = 16
+constant real EFFECT_SCALE = 0.3
+constant colorA EFFECT_COLOR = colorA(150, 150, 150, 255)
+constant string EFFECT_PATH = "abilities\\Burrow\\BurrowDirtClump.mdl"
+constant real EFFECT_LIFETIME = 1.0
+
+// ============================================================================
+abstract class TunnelOperation
+  protected unit m_travelingUnit
+  protected unit m_tunnelStart
+  protected unit m_tunnelEnd
+  protected real m_duration
+  protected timer m_timer
+  protected CancellationToken m_cancellationToken
+
+  // --------------------------------------------------------------------------
+  construct(unit travelingUnit, unit tunnelStart, unit tunnelEnd, real duration)
+    m_travelingUnit = travelingUnit
+    m_tunnelStart = tunnelStart
+    m_tunnelEnd = tunnelEnd
+    m_duration = duration
+    m_cancellationToken = new CancellationToken()
+    m_timer = getTimer()
+    m_timer.start(duration, null)
+    g_activeTravelOperations.add(this)
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    m_timer.release()
+    cancelToken()
+    g_activeTravelOperations.remove(this)
+
+  // --------------------------------------------------------------------------
+  function getProgress01() returns real
+    return parameterize01(0, m_duration, m_timer.getElapsed())
+
+  // --------------------------------------------------------------------------
+  function cancel()
+    cancelToken()
+    destroy this
+
+  // --------------------------------------------------------------------------
+  function update()
+    let t = parameterize01(0, max(m_duration - TUNNEL_OPERATION_FX_DURATION_OFFSET, 0), m_timer.getElapsed())
+    if (t < 1.0)
+      let dir = m_tunnelEnd.getPos() - m_tunnelStart.getPos()
+      let yaw = m_tunnelStart.getPos().angleBetween(m_tunnelEnd.getPos())
+      createBurrowDirtClump(m_tunnelStart.getPos() + dir * t, yaw)
+
+  // --------------------------------------------------------------------------
+  protected static function hideTravelingUnit(unit travelingUnit)
+    // Log.info("hideTravelingUnit")
+    travelingUnit.suspend()
+    travelingUnit.hide()
+
+  // --------------------------------------------------------------------------
+  protected static function moveAndShowTravelingUnit(unit travelingUnit, vec2 pos)
+    // Log.info("moveAndShowTravelingUnit")
+    travelingUnit.setPos(pos)
+    travelingUnit.unsuspend()
+    travelingUnit.show()
+
+  // --------------------------------------------------------------------------
+  private function cancelToken()
+    if (m_cancellationToken != null)
+      m_cancellationToken.cancel()
+      m_cancellationToken.release()
+    m_cancellationToken = null
+
+// ============================================================================
+class TunnelTravelOperation extends TunnelOperation
+
+  // --------------------------------------------------------------------------
+  construct(unit travelingUnit, unit tunnelStart, unit tunnelEnd, real duration)
+    super(travelingUnit, tunnelStart, tunnelEnd, duration)
+
+    hideTravelingUnit(travelingUnit)
+
+    doAfter(m_cancellationToken, duration, () -> onTravelFinish())
+
+  // --------------------------------------------------------------------------
+  private function onTravelFinish()
+    moveAndShowTravelingUnit(m_travelingUnit, m_tunnelEnd.getPos())
+    destroy this
+
+  // --------------------------------------------------------------------------
+  override function cancel()
+    // Log.info("cancel")
+
+    if (getProgress01() < 1.0)
+      moveAndShowTravelingUnit(m_travelingUnit, m_tunnelStart.getPos())
+
+    super.cancel()
+
+// ============================================================================
+class TunnelDigOperation extends TunnelOperation
+
+  // --------------------------------------------------------------------------
+  construct(unit diggingUnit, unit tunnelStart, unit tunnelEnd, real duration)
+    super(diggingUnit, tunnelStart, tunnelEnd, duration)
+
+    startDig(diggingUnit, tunnelStart, tunnelEnd)
+
+    doAfter(m_cancellationToken, duration) () ->
+      endDig(diggingUnit, tunnelStart, tunnelEnd)
+      destroy this
+
+  // --------------------------------------------------------------------------
+  protected static function startDig(unit travelingUnit, unit tunnelStart, unit tunnelEnd)
+    // Log.info("startDig")
+
+    hideTravelingUnit(travelingUnit)
+    tunnelStart.issueImmediateOrderById(TlsUnitIds.tunnelEntrance_trainUnit)
+
+    tunnelStart.getTunnelEntranceComponent().onTunnelDigStart()
+    tunnelEnd.getTunnelEntranceComponent().onTunnelDigStart()
+
+  // --------------------------------------------------------------------------
+  protected static function endDig(unit travelingUnit, unit tunnelStart, unit tunnelEnd)
+    // Log.info("endDig")
+
+    moveAndShowTravelingUnit(travelingUnit, tunnelEnd.getPos())
+
+    tunnelStart.getTunnelEntranceComponent().onTunnelDigFinish(tunnelEnd)
+    tunnelEnd.getTunnelEntranceComponent().onTunnelDigFinish(tunnelStart)
+
+  // --------------------------------------------------------------------------
+  override function cancel()
+    // Log.info("cancel")
+
+    if (getProgress01() < 1.0)
+      moveAndShowTravelingUnit(m_travelingUnit, m_tunnelStart.getPos())
+      nullTimer(() -> m_tunnelStart.issueTargetOrderById(OrderIds.load, m_travelingUnit))
+
+    m_tunnelStart.getTunnelEntranceComponent().onTunnelDigCancel()
+    m_tunnelEnd.getTunnelEntranceComponent().onTunnelDigCancel()
+
+    super.cancel()
+
+// ============================================================================
+public class TunnelEntranceComponent extends UnitComponent
+  protected unit m_connectedTunnelEntrance = null
+  private unit m_diggingTunnelTarget = null
+  private unit m_diggingUnit = null
+  
+  private group m_awaitingTravelGroup = null
+  private CallbackPeriodic m_loadTimer = null
+
+  // --------------------------------------------------------------------------
+  construct(IUnitMetadata owner)
+    super(owner)
+    m_awaitingTravelGroup = CreateGroup()
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    m_awaitingTravelGroup.destr()
+
+  // --------------------------------------------------------------------------
+  function hasConnectedTunnelEntrance() returns bool
+    return m_connectedTunnelEntrance != null
+
+  // --------------------------------------------------------------------------
+  function getConnectedTunnelEntrance() returns TunnelEntranceComponent
+    return m_connectedTunnelEntrance.getComponent(TunnelEntranceComponent.typeId) castTo TunnelEntranceComponent
+
+  // --------------------------------------------------------------------------
+  function getConnectedTunnelEntranceUnit() returns unit
+    return m_connectedTunnelEntrance
+
+  // --------------------------------------------------------------------------
+  function getIsDiggingTunnel() returns bool
+    return m_diggingTunnelTarget != null
+
+  // --------------------------------------------------------------------------
+  function getDiggingUnit() returns unit
+    return m_diggingUnit
+    
+  // --------------------------------------------------------------------------
+  function tryStartDig(unit targetEntrance) returns bool
+    if (m_diggingUnit == null or m_diggingTunnelTarget != null)
+      return false
+    m_diggingTunnelTarget = targetEntrance
+    unloadUnits()
+    return true
+
+  // --------------------------------------------------------------------------
+  function tryStartTravel(unit travelingUnit)
+    startTravelOperation(travelingUnit, getOwnerUnit(), m_connectedTunnelEntrance, TRAVEL_DURATION)
+    m_awaitingTravelGroup.removeUnit(travelingUnit)
+
+  // --------------------------------------------------------------------------
+  function addSmartMoveUnit(unit orderedUnit)
+
+    if (hasConnectedTunnelEntrance() == false)
+      return
+
+    if (m_awaitingTravelGroup.contains(orderedUnit))
+      return
+
+    m_awaitingTravelGroup.addUnit(orderedUnit)
+    g_tunnelWaitingGroup.addUnit(orderedUnit)
+    //Log.info("TEC", "addSmartMoveUnit", "", "unit added to waiting group")
+
+    if (m_awaitingTravelGroup.size() == 1)
+      startLoadTimer()
+      //Log.info("TEC", "addSmartMoveUnit", "", "trigger enabled")
+
+  // --------------------------------------------------------------------------
+  function removeSmartMoveUnit(unit orderedUnit)
+
+    if (m_awaitingTravelGroup.contains(orderedUnit) == false)
+      return
+
+    m_awaitingTravelGroup.removeUnit(orderedUnit)
+    g_tunnelWaitingGroup.removeUnit(orderedUnit)
+    //Log.info("TEC", "removeSmartMoveUnit", "", "unit removed from waiting group")
+
+    if (m_awaitingTravelGroup.size() == 0)
+      stopLoadTimer()
+      //Log.info("TEC", "removeSmartMoveUnit", "", "trigger disabled")
+
+  // --------------------------------------------------------------------------
+  protected override function onEnabled()
+    super.onEnabled()
+
+    g_tunnelEntrances.addUnit(getOwnerUnit())
+
+    //doPeriodically(1.0) (CallbackPeriodic cb) ->
+    //  if (m_awaitingTravelGroup.size() > 0)
+    //    Log.info("ag: " + m_awaitingTravelGroup.size().toString())
+
+  // --------------------------------------------------------------------------
+  protected override function onDisabled()
+    super.onDisabled()
+
+    cancelTunnelOperations(getOwnerUnit())
+
+    let otherEntrance = getConnectedTunnelEntrance()
+    if (otherEntrance != null)
+      otherEntrance.m_connectedTunnelEntrance = null
+      otherEntrance.setupLoadForBuilder()
+    
+    g_tunnelEntrances.removeUnit(getOwnerUnit())
+
+  // --------------------------------------------------------------------------
+  protected function onUnitEnterTunnel(unit enteringUnit)
+    // Log.info("onUnitEnterTunnel")
+
+    if (enteringUnit.getTypeId() == TlsUnitIds.Survivors.defenseBuilder1 and not hasConnectedTunnelEntrance())
+      onDiggingUnitEnterTunnel(enteringUnit)
+      return
+
+  // --------------------------------------------------------------------------
+  protected function onUnitExitTunnel(unit exitingUnit)
+    // Log.info("onUnitExitTunnel")
+
+    if (exitingUnit.getTypeId() == TlsUnitIds.Survivors.defenseBuilder1 and not hasConnectedTunnelEntrance())
+      onDiggingUnitExitTunnel()
+      return
+
+    error("Unexpected unit exiting tunnel")
+
+  // --------------------------------------------------------------------------
+  private function onDiggingUnitEnterTunnel(unit exitingUnit)
+    m_diggingUnit = exitingUnit
+    getOwnerUnit().addAbility(TlsAbilityIds.tunnelEntrance_digTunnel)
+
+  // --------------------------------------------------------------------------
+  private function onDiggingUnitExitTunnel()
+
+    if (m_diggingTunnelTarget != null)
+      startDigOperation(m_diggingUnit, getOwnerUnit(), m_diggingTunnelTarget, TUNNEL_ENTRANCE_BUILD_DURATION)
+    else
+      m_diggingUnit = null
+
+    getOwnerUnit().removeAbility(TlsAbilityIds.tunnelEntrance_digTunnel)
+
+  // --------------------------------------------------------------------------
+  protected function onTunnelDigStart()
+    // Log.info("onTunnelDigStart")
+    m_connectedTunnelEntrance = null
+    setupLoadForTravel()
+
+  // --------------------------------------------------------------------------
+  protected function onTunnelDigFinish(unit otherEntrance)
+    // Log.info("onTunnelDigFinish")
+
+    m_connectedTunnelEntrance = otherEntrance
+    m_diggingTunnelTarget = null
+    m_diggingUnit = null
+
+    setupLoadForTravel()
+
+  // --------------------------------------------------------------------------
+  protected function onTunnelDigCancel()
+    // Log.info("onTunnelDigCancel")
+
+    m_connectedTunnelEntrance = null
+    m_diggingTunnelTarget = null
+    m_diggingUnit = null
+
+    setupLoadForBuilder()
+
+  // --------------------------------------------------------------------------
+  private function unloadUnits()
+
+    if (getOwnerUnit().issueImmediateOrderById(OrderIds.unloadallinstant) == false)
+      error("Unable to issue unload order")
+
+  // --------------------------------------------------------------------------
+  private function setupLoadForBuilder()
+    let ownerUnit = getOwnerUnit()
+
+    ownerUnit
+    ..removeAbility(TlsAbilityIds.tunnelEntrance_loadSmartMoveUnit)
+    ..addAbility(TlsAbilityIds.tunnelEntrance_cargoHoldBuilder)
+    ..addAbility(TlsAbilityIds.tunnelEntrance_loadBuilder)
+    ..addAbility(AbilityIds.unloadInstant)
+    ..addAnimationProperties("alternate", false)
+
+    if (m_diggingUnit != null)
+      ownerUnit.addAbility(TlsAbilityIds.tunnelEntrance_digTunnel)
+
+  // --------------------------------------------------------------------------
+  private function setupLoadForTravel()
+    getOwnerUnit()
+    ..removeAbility(TlsAbilityIds.tunnelEntrance_digTunnel)
+    ..removeAbility(TlsAbilityIds.tunnelEntrance_cargoHoldBuilder)
+    ..removeAbility(TlsAbilityIds.tunnelEntrance_loadBuilder)
+    ..removeAbility(AbilityIds.unloadInstant)
+    ..addAbility(TlsAbilityIds.tunnelEntrance_loadSmartMoveUnit)
+    ..addAnimationProperties("alternate", m_connectedTunnelEntrance != null)
+
+  // --------------------------------------------------------------------------
+  private function startLoadTimer()
+    if (m_loadTimer != null)
+      return
+    let ownerUnit = getOwnerUnit()
+    m_loadTimer = doPeriodically(0.1, (CallbackPeriodic cb) -> tryCastLoad(ownerUnit)) 
+
+  // --------------------------------------------------------------------------
+  private function stopLoadTimer()
+    if (m_loadTimer == null)
+      return
+    destroy m_loadTimer
+    m_loadTimer = null
+
+  // --------------------------------------------------------------------------
+  private static function tryCastLoad(unit caster)
+    let comp = caster.getTunnelEntranceComponent()
+    if (comp != null)
+      comp.tryCastLoad()
+
+  // --------------------------------------------------------------------------
+  private function tryCastLoad()
+    let ownerUnit = getOwnerUnit()
+    let ownerPos = ownerUnit.getPos()
+    let closestUnit = m_awaitingTravelGroup.getClosestUnit(ownerPos)
+    if (closestUnit == null)
+      return
+    m_awaitingTravelGroup.removeUnit(closestUnit)
+    ownerUnit.issueTargetOrderById(OrderIds.load, closestUnit)
+    //if (ownerUnit.issueTargetOrderById(OrderIds.load, closestUnit))
+    //  Log.info("TEC", "tryCastLoad", "", "issued load order")
+    //else
+    //  Log.info("TEC", "tryCastLoad", "", "failed to issue load order")
+
+// ============================================================================
+public function unit.getTunnelEntranceComponent() returns TunnelEntranceComponent
+  if (this == null)
+    return null
+  let metadata = this.getMetadata()
+  if (metadata == null)
+    return null
+  return metadata.getComponent(TunnelEntranceComponent.typeId) castTo TunnelEntranceComponent
+
+// ============================================================================
+public function IUnitMetadata.getTunnelEntranceComponent() returns TunnelEntranceComponent
+  return this.getComponent(TunnelEntranceComponent.typeId) castTo TunnelEntranceComponent
+
+// ============================================================================
+public function IUnitMetadata.getOrAddTunnelEntranceComponentgetTunnelEntranceComponent() returns TunnelEntranceComponent
+  var component = this.getTunnelEntranceComponent()
+  if (component == null)
+    component = this.addComponent(new TunnelEntranceComponent(this)) castTo TunnelEntranceComponent
+  return component
+
+// ============================================================================
+function startTravelOperation(unit travelingUnit, unit tunnelStart, unit tunnelEnd, real duration)
+  new TunnelTravelOperation(travelingUnit, tunnelStart, tunnelEnd, duration)
+
+// ============================================================================
+function startDigOperation(unit diggingUnit, unit tunnelStart, unit tunnelEnd, real duration)
+  new TunnelDigOperation(diggingUnit, tunnelStart, tunnelEnd, duration)
+
+// ============================================================================
+function cancelTunnelOperations(unit tunnelEntrance)
+  for op in g_activeTravelOperations
+    if (op.m_tunnelStart == tunnelEntrance or op.m_tunnelEnd == tunnelEntrance)
+      op.cancel()
+
+// ============================================================================
+function onUnitLoaded()
+  let transportUnit = GetTransportUnit()
+  if (transportUnit.getTypeId() != TlsUnitIds.tunnelEntrance)
+    return
+  
+  let entrance = transportUnit.getTunnelEntranceComponent()
+  if (entrance != null)
+    entrance.onUnitEnterTunnel(GetLoadedUnit())
+
+// ============================================================================
+function onUnitUnloaded()
+  let unloadedUnit = getUnloadedUnit()
+  let transportUnit = getTransportUnit(unloadedUnit)
+
+  if (transportUnit.getTypeId() != TlsUnitIds.tunnelEntrance)
+    return
+  
+  let entrance = transportUnit.getTunnelEntranceComponent()
+  if (entrance != null)
+    entrance.onUnitExitTunnel(unloadedUnit)
+
+// ============================================================================
+function tryDigTunnel(unit tunnelStart, unit tunnelEnd) returns bool
+  let tunnelStartOwner = tunnelStart.getOwner()
+  let tunnelEndOwner = tunnelEnd.getOwner()
+
+  let tunnelStartEntrance = tunnelStart.getTunnelEntranceComponent()
+  if (tunnelStartEntrance == null)
+    error("Tunnel does not have a TunnelEntranceComponent")
+    return false
+
+  if (tunnelStartEntrance.hasConnectedTunnelEntrance())
+    error("Tunnel has already been dug")
+    return false
+
+  if (tunnelStartEntrance.getIsDiggingTunnel())
+    error("Tunnel is in the process of being dug")
+    return false
+
+  if (tunnelStartOwner != tunnelEndOwner)
+    displayErrorToPlayer(tunnelStartOwner, "Dig Failed", "Both tunnel entrances must be owned by the same player.")
+    return false
+
+  let tunnelEndEntrance = tunnelEnd.getTunnelEntranceComponent()
+  if (tunnelEndEntrance == null)
+    displayErrorToPlayer(tunnelStartOwner, "Dig Failed", "Select a tunnel entrance to dig a Tunnel.")
+    return false
+
+  if (tunnelStart == tunnelEnd)
+    displayErrorToPlayer(tunnelStartOwner, "Dig Failed", "Select a different tunnel entrance to dig a Tunnel.")
+    return false
+
+  if (tunnelEndEntrance.hasConnectedTunnelEntrance())
+    displayErrorToPlayer(tunnelStartOwner, "Dig Failed", "Cannot select a tunnel entrance that has already been dug.")
+    return false
+
+  if (tunnelEndEntrance.getIsDiggingTunnel())
+    displayErrorToPlayer(tunnelStartOwner, "Dig Failed", "Cannot select a tunnel entrance that is in the process of being dug.")
+    return false
+
+  if (tunnelEndEntrance.getDiggingUnit() != null)
+    displayErrorToPlayer(tunnelStartOwner, "Dig Failed", "Cannot dig tunnel to occupied entrance.")
+    return false
+
+  if (tunnelStart.getPos().distanceTo(tunnelEnd.getPos()) < TUNNEL_MIN_DISTANCE)
+    displayErrorToPlayer(tunnelStartOwner, "Dig Failed", "Entrance is too close to dig a tunnel.")
+    return false
+
+  return tunnelStartEntrance.tryStartDig(tunnelEnd)
+
+// ============================================================================
+function onDigTunnel()
+  let caster = GetSpellAbilityUnit()
+  let target = GetSpellTargetUnit()
+  tryDigTunnel(caster, target)
+
+// ============================================================================
+function onRecycle()
+  let caster = GetSpellAbilityUnit()
+  caster.setAnimation("death")
+  caster.kill()
+
+// ============================================================================
+function onLoadSmartMoveUnit()
+  let caster = GetSpellAbilityUnit()
+  let target = GetSpellTargetUnit()
+  let tunnelEntranceComp = caster.getTunnelEntranceComponent()
+  if (tunnelEntranceComp != null)
+    tunnelEntranceComp.tryStartTravel(target)
+
+// ============================================================================
+function onUnitTrainFinish()
+  let trainedUnit = GetTrainedUnit()
+  if (trainedUnit.getTypeId() == TlsUnitIds.tunnelEntrance_trainUnit)
+    trainedUnit.remove()
+
+// ============================================================================
+function onUnitTrainCancel()
+  let tunnelEntranceUnit = GetTriggerUnit()
+  if (tunnelEntranceUnit.getTypeId() == TlsUnitIds.tunnelEntrance)
+    cancelTunnelOperations(tunnelEntranceUnit)
+
+// ============================================================================
+function onUnitIssuedOrder()
+  let orderedUnit = GetOrderedUnit()
+  //let issuedOrder = GetIssuedOrderId()
+  //Log.info("Unit " + orderedUnit.getName() + " ordered: " + OrderId2String(issuedOrder))
+
+  removeSmartMoveUnitFromTunnelEntrances(orderedUnit)
+
+// ============================================================================
+function onUnitIssuedTargetOrder()
+  let orderedUnit = GetOrderedUnit()
+  let issuedOrder = GetIssuedOrderId()
+  let targetUnit = GetOrderTargetUnit()
+  // Log.info("Unit " + orderedUnit.getName() + " ordered: " + OrderId2String(issuedOrder) + " " + targetUnit.getName())
+
+  if (issuedOrder == OrderIds.smart and targetUnit.getTypeId() == TlsUnitIds.tunnelEntrance)
+    onSmartMoveToTunnelEntrance(orderedUnit, targetUnit)
+    return
+
+  removeSmartMoveUnitFromTunnelEntrances(orderedUnit)
+
+// ============================================================================
+function removeSmartMoveUnitFromTunnelEntrances(unit orderedUnit)
+  if (g_tunnelWaitingGroup.contains(orderedUnit) == false)
+    return
+
+  for tunnelEntrance in g_tunnelEntrances
+    let comp = tunnelEntrance.getTunnelEntranceComponent()
+    if (comp != null)
+      comp.removeSmartMoveUnit(orderedUnit)
+
+// ============================================================================
+function onSmartMoveToTunnelEntrance(unit orderedUnit, unit tunnelEntrance)
+
+  let tunnelEntranceComp = tunnelEntrance.getTunnelEntranceComponent()
+  if (tunnelEntranceComp == null)
+    return
+
+  tunnelEntranceComp.addSmartMoveUnit(orderedUnit)
+
+// ============================================================================
+function createBurrowDirtClump(vec2 pos, real yaw) returns BurrowDirtClump
+  for clump in g_activeDirtClumps
+    if (not clump.getIsActive())
+      clump.reset(pos, yaw)
+      return clump
+  let clump2 = new BurrowDirtClump()
+  clump2.reset(pos, yaw)
+  g_activeDirtClumps.add(clump2)
+  return clump2
+
+// ============================================================================
+class BurrowDirtClump
+  private effect m_effect
+  private bool m_isActive
+
+  // --------------------------------------------------------------------------
+  construct()
+    m_isActive = false
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    if (m_effect != null)
+      m_effect.destr()
+      m_effect = null
+
+  // --------------------------------------------------------------------------
+  function getIsActive() returns bool
+    return m_isActive
+
+  // --------------------------------------------------------------------------
+  function reset(vec2 pos, real yaw)
+    m_isActive = true
+
+    m_effect = AddSpecialEffect(EFFECT_PATH, pos.x, pos.y)
+    ..setScale(EFFECT_SCALE * GetRandomReal(0.9, 1.1))
+    ..setColor(EFFECT_COLOR)
+    ..setYaw(yaw)
+    ..setHeight(0)
+    ..setTimeScale(2.0)
+
+    m_effect.setPos(pos.withTerrainZ())
+
+    doAfter(EFFECT_LIFETIME) () ->
+      m_effect.destr()
+      m_effect = null
+      m_isActive = false
+
+// ============================================================================
+function updateTunnelOperations()
+  for op in g_activeTravelOperations
+    op.update()
+
+// ============================================================================
+init
+
+  doPeriodically(0.2, (CallbackPeriodic cb) -> updateTunnelOperations())
+
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_LOADED, function onUnitLoaded)
+  registerUnitUnloadedEvent(function onUnitUnloaded)
+  registerSpellEffectEvent(TlsAbilityIds.tunnelEntrance_digTunnel, function onDigTunnel)
+  registerSpellEffectEvent(TlsAbilityIds.tunnelEntrance_loadSmartMoveUnit, function onLoadSmartMoveUnit)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_TRAIN_FINISH, function onUnitTrainFinish)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_TRAIN_CANCEL, function onUnitTrainCancel)
+  
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ISSUED_ORDER, function onUnitIssuedOrder)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ISSUED_POINT_ORDER, function onUnitIssuedOrder)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ISSUED_TARGET_ORDER, function onUnitIssuedTargetOrder)
