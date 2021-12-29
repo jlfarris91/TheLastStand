@@ -1,0 +1,111 @@
+package SpawningDebugger
+import ClosureTimers
+import Frame
+import Wave
+import GameInstance
+import Time
+import SpawnWave
+import Math
+import RealExtensions
+import ProjectConstants
+import DebuggerDialog
+
+// ============================================================================
+class SpawnWaveDebugger extends Frame
+  private player m_selectedPlayer
+
+  // --------------------------------------------------------------------------
+  construct()
+    super(createFrame("TEXTAREA", "SPWNDebugger", GAME_UI, "", 0))
+
+    doPeriodically(0.1) (CallbackPeriodic cb) ->
+      update()
+
+  // --------------------------------------------------------------------------
+  function setContext(player context)
+    m_selectedPlayer = context
+
+  // --------------------------------------------------------------------------
+  private function getWave() returns Wave
+    let wavesOwner = getPlayer()
+    if (wavesOwner == null)
+      return null
+    
+    let waves = g_GameInstance.getWaves()
+    if (waves == null)
+      return null
+
+    let playerWaves = waves.getOrCreatePlayerWaves(wavesOwner)
+
+    if (isDay())
+      let dayWaves = playerWaves.getDayWaves()
+      return dayWaves.getLatestWave(g_GameInstance.getDay())
+    
+    if (isNight())
+      let nightWaves = playerWaves.getNightWaves()
+      return nightWaves.getLatestWave(g_GameInstance.getNight())
+    
+    return null
+
+  // --------------------------------------------------------------------------
+  function update()
+
+    let frameHandle = getFrameHandle()
+
+    if (frameHandle.isVisible() == false)
+      return
+
+    if (m_selectedPlayer == null)
+      BlzFrameSetText(frameHandle, "Selected Player: null")
+      return
+
+    BlzFrameSetText(frameHandle, "Selected Player: " + m_selectedPlayer.getName())
+    
+    let wave = getWave()
+    if (wave == null)
+      BlzFrameAddText(frameHandle, "No Wave found")
+      return
+    
+    for spawnWave in wave.getSpawnWaves()
+      printSpawnWaveInfo(spawnWave)    
+
+  // --------------------------------------------------------------------------
+  function printSpawnWaveInfo(SpawnWave spawnWave)
+    let frameHandle = getFrameHandle()
+
+    let spawnWaveContext = spawnWave.getContext()
+    let numSpawned = spawnWave.getSpawnedCount()
+
+    let spawnWaveDefinition = spawnWave.getDefinition()
+    let spawnCountMax = spawnWaveDefinition.getMaxSpawnCount(spawnWaveContext)
+    let aliveCountMax = spawnWaveDefinition.getMaxAliveCount(spawnWaveContext)
+    let numAlive = spawnWave.getAliveCount()
+    let spawnsPerActivation = spawnWaveDefinition.getSpawnsPerActivation(spawnWaveContext)
+    let spawnGroupingFactor = spawnWaveDefinition.getSpawnGroupingFactor(spawnWaveContext)
+    let numSpawnGroups = max(R2I(I2R(spawnsPerActivation) * (1.0 - spawnGroupingFactor)), 1)
+    let spawnGroupSize = max(R2I(I2R(spawnsPerActivation) * spawnGroupingFactor), 1)
+    let goldReward = spawnWaveDefinition.getGoldReward(spawnWaveContext)
+    let goldAwarded = spawnWave.getGoldAwarded()
+
+    BlzFrameAddText(frameHandle, "=== {0} {1} ===".format(spawnWaveDefinition.getName(), spawnWave.getStatusString()))
+    BlzFrameAddText(frameHandle, "Progress: " + spawnWaveContext.getWaveProgress01().toPercentageString01())
+    BlzFrameAddText(frameHandle, "Spawns: " + I2S(numSpawned) + "/" + (spawnCountMax == UNLIMITED ? "Unlimited" : I2S(spawnCountMax)))
+    BlzFrameAddText(frameHandle, "Alive: " + I2S(numAlive) + "/" + (aliveCountMax == UNLIMITED ? "Unlimited" : I2S(aliveCountMax)))
+    BlzFrameAddText(frameHandle, "Spawns Per Activation: " + I2S(spawnsPerActivation))
+    BlzFrameAddText(frameHandle, "Spawn Group Factor: " + R2S(spawnGroupingFactor))
+    BlzFrameAddText(frameHandle, "Groups: " + I2S(numSpawnGroups))
+    BlzFrameAddText(frameHandle, "Group Size: " + I2S(spawnGroupSize))
+    BlzFrameAddText(frameHandle, "Gold: " + goldAwarded.toString() + "/" + goldReward.toString())
+    BlzFrameAddText(frameHandle, "Difficulty: " + spawnWaveContext.getPlayerDifficulty01().toString() + " - " + spawnWaveContext.getGameDifficulty01().toString())
+    BlzFrameAddText(frameHandle, "Game Progress: " + spawnWaveContext.getGameProgress01().toPercentageString01())
+    BlzFrameAddText(frameHandle, "Tier Chances: {0} {1} {2}".format(spawnWaveContext.getTierChance01(0).toPercentageString01(), spawnWaveContext.getTierChance01(1).toPercentageString01(), spawnWaveContext.getTierChance01(2).toPercentageString01()))
+    BlzFrameAddText(frameHandle, "Unit Modifiers: " + spawnWaveContext.getUnitModifierGameProgress01().toPercentageString01() + " - " + spawnWaveContext.getUnitModifierDifficultyScalar01().toPercentageString01())
+    BlzFrameAddText(frameHandle, "State: " + spawnWave.getDebugState())
+    BlzFrameAddText(frameHandle, "")
+
+// ============================================================================
+init
+
+  if (DEV_ENVIRONMENT)
+    doAfter(2) () ->
+      DebuggerDialog.registerFrame("SPWN", new SpawnWaveDebugger()..setContext(localPlayer))
