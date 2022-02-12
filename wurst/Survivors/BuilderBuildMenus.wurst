@@ -1,0 +1,125 @@
+package BuilderBuildMenus
+import TechAvailabilityGroup
+import TlsUnitIds
+import ClosureFrames
+import StandardTooltip
+import ClosureTimers
+import Math
+import SubgroupSelection
+import FramehandleExtensions
+import LinkedList
+import HumanPlayers
+import LoadToc
+
+constant int BLDG_ID_PAGES = 3
+TechAvailabilityGroup array g_builderTechPages = [
+  new TechAvailabilityGroup(),
+  new TechAvailabilityGroup(),
+  new TechAvailabilityGroup()
+]
+LinkedList<BuildingPageManager> g_pageManagers = new LinkedList<BuildingPageManager>()
+  
+// ============================================================================
+class BuildingPageManager
+  private player m_player
+  private int m_pageIndex
+  private framehandle m_nextPageButton
+  private framehandle m_prevPageButton
+  private framehandle m_pageTextBackdrop
+  private framehandle m_pageText
+
+  // --------------------------------------------------------------------------
+  construct (player _player)
+    m_player = _player
+
+    let buildCommandBar = getOriginFrame(ORIGIN_FRAME_COMMAND_BUTTON, 8).getParent()
+
+    // This frame blocks input to the page nav buttons. Resize it so that it doesn't.
+    getOriginFrame(ORIGIN_FRAME_SIMPLE_UI_PARENT).getChild(5).setHeight(0.129)
+
+    createFrame("BuildPageNavTemplate")
+    ..setAbsPoint(FRAMEPOINT_BOTTOMLEFT, SCREEN_BOTTOMRIGHT + vec2(-buildCommandBar.getWidth(), buildCommandBar.getHeight()) + vec2(-0.008, 0.008))
+    
+    m_nextPageButton = getFrame("NextPageButton")
+    ..onClick(() -> onNextPageButtonClicked())
+    ..onMouseEnter(() -> StandardTooltip.show("Next Build Menu Page", "There are multiple pages in this unit's build menu.|nPressing this button will move to the next build menu page.", m_player))
+    ..onMouseLeave(() -> StandardTooltip.hide(m_player))
+    ..setLevel(999)
+
+    m_prevPageButton = getFrame("PrevPageButton")
+    ..onClick(() -> onPrevPageButtonClicked())
+    ..onMouseEnter(() -> StandardTooltip.show("Previous Build Menu Page", "There are multiple pages in this unit's build menu.|nPressing this button will move to the previous build menu page.", m_player))
+    ..onMouseLeave(() -> StandardTooltip.hide(m_player))
+    ..setLevel(999)
+
+    m_pageTextBackdrop = getFrame("PageTextBackdrop")
+    m_pageText = getFrame("PageText")
+
+    updateAvailableTech()
+
+  // --------------------------------------------------------------------------
+  function setPageIndex(int value)
+    m_pageIndex = clamp(value, 0, BLDG_ID_PAGES-1)
+    updateAvailableTech()
+
+  // --------------------------------------------------------------------------
+  function incrementPageIndex()
+    setPageIndex(wrap(m_pageIndex + 1, 0, BLDG_ID_PAGES-1))
+
+  // --------------------------------------------------------------------------
+  function decrementPageIndex()
+    setPageIndex(wrap(m_pageIndex - 1, 0, BLDG_ID_PAGES-1))
+
+  // --------------------------------------------------------------------------
+  function updateAvailableTech()
+    for i = 0 to BLDG_ID_PAGES-1
+      g_builderTechPages[i].setEnabled(m_player, i == m_pageIndex)
+
+  // --------------------------------------------------------------------------
+  function updateButtonVisibility()
+    let buttonVisible = m_player.getSelectedSubgroupUnitTypeId() == TlsUnitIds.Survivors.builder1
+    m_prevPageButton.setVisible(buttonVisible)
+    m_nextPageButton.setVisible(buttonVisible)
+    m_pageTextBackdrop.setVisible(buttonVisible)
+    m_pageText.setText((m_pageIndex + 1).toString())
+    m_pageText.setVisible(buttonVisible)
+
+  // --------------------------------------------------------------------------
+  private function onPrevPageButtonClicked()
+    m_prevPageButton.clearFocus()
+    decrementPageIndex()
+    if (m_player == localPlayer)
+      ForceUIKey("B")
+
+  // --------------------------------------------------------------------------
+  private function onNextPageButtonClicked()
+    m_nextPageButton.clearFocus()
+    incrementPageIndex()
+    if (m_player == localPlayer)
+      ForceUIKey("B")
+
+// ============================================================================
+init
+
+  ensureTocIsLoaded()
+
+  g_builderTechPages[0].addTech(TlsUnitIds.workshop)
+  g_builderTechPages[0].addTech(TlsUnitIds.scoutTower)
+  g_builderTechPages[0].addTech(TlsUnitIds.guardTower)
+  g_builderTechPages[0].addTech(TlsUnitIds.tunnelEntrance)
+  
+  g_builderTechPages[1].addTech(TlsUnitIds.blacksmith)
+  g_builderTechPages[1].addTech(TlsUnitIds.spearmansTent)
+  g_builderTechPages[1].addTech(TlsUnitIds.munitionsDepot)
+  g_builderTechPages[1].addTech(TlsUnitIds.chapel)
+  g_builderTechPages[1].addTech(TlsUnitIds.rangedTarget)
+    
+  for p in g_PlayingHumanPlayers
+    g_pageManagers.add(new BuildingPageManager(p))
+    for i = 0 to BLDG_ID_PAGES-1
+      g_builderTechPages[i].setEnabled(p, i == 0)
+
+  doPeriodically(0.1) (CallbackPeriodic cb) ->
+    for manager in g_pageManagers
+      manager.updateButtonVisibility()
+    

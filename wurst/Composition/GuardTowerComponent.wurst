@@ -8,11 +8,12 @@ import Unit_GuardTower
 import TooltipBuilder
 import Range
 import GameConstants
+import Dice
 
 constant int        ACTIVE_SIGHT_ABILITY_ID               = compiletime(ABIL_ID_GEN.next())
 
 constant rangeInt   GUARD_TOWER_ATTACK_RANGE              = rangeInt(400, 800)
-constant rangeReal  GUARD_TOWER_ATTACK_SPEED              = rangeReal(2, 0.5)
+constant rangeReal  GUARD_TOWER_ATTACK_COOLDOWN           = rangeReal(2, 0.25)
 
 constant int        GUARD_TOWER_ACTIVE_ICON_ABILITY_ID    = compiletime(ABIL_ID_GEN.next())
 constant int        GUARD_TOWER_INACTIVE_ICON_ABILITY_ID  = compiletime(ABIL_ID_GEN.next())
@@ -22,8 +23,18 @@ function getActiveAttackRange(int level) returns int
   return GUARD_TOWER_ATTACK_RANGE.lerp(RANGE_ONE_TO_TEN.parameterize01(level)).toInt()
 
 // ============================================================================
-function getActiveAttackSpeed(int level) returns real
-  return GUARD_TOWER_ATTACK_SPEED.lerp(RANGE_ONE_TO_TEN.parameterize01(level))
+function getAttackCooldown(int level) returns real
+  return GUARD_TOWER_ATTACK_COOLDOWN.lerp(RANGE_ONE_TO_TEN.parameterize01(level))
+
+// ============================================================================
+function getDice(int _) returns dice
+  return dice(22, 1, 5)
+
+// ============================================================================
+function getDPSRange(int level) returns rangeInt
+  let attacksPerSecond = 1.0 / getAttackCooldown(level)
+  let guardTowerDamageDice = getDice(level)
+  return rangeInt(guardTowerDamageDice.min(), guardTowerDamageDice.max()) * attacksPerSecond
 
 // ============================================================================
 @compiletime function createAbility()
@@ -33,9 +44,9 @@ function getActiveAttackSpeed(int level) returns real
   let activeWorkstationIconTooltipBuilder = new WorkstationIconTooltipBuilder(true)..setDescription(g_guardTowerDefinition.getDescription())
   let inactiveWorkstationIconTooltipBuilder = new WorkstationIconTooltipBuilder(false)..setDescription(g_guardTowerDefinition.getDescription())
 
-  let properties = new TooltipItem("[Operator Bonuses]")
-  ..addValue(lvl -> "{0}m attack range".format((getActiveAttackRange(lvl) * WORLD_TO_METERS).toString()))
-  ..addValue(lvl -> "{0}s attack cooldown".format(getActiveAttackSpeed(lvl).toString()))
+  let properties = new WorkstationOperatorBonusTooltipItem()
+  ..addValue(lvl -> "{0}m range".format((getActiveAttackRange(lvl) * WORLD_TO_METERS).toInt().toString()))
+  ..addValue(lvl -> "{0} dps".format(getDPSRange(lvl).toDamageRangeString()))
   activeWorkstationIconTooltipBuilder.addItem(properties)
 
   new AbilityActiveWorkstationIconDefinition(GUARD_TOWER_ACTIVE_ICON_ABILITY_ID)
@@ -51,9 +62,9 @@ function getActiveAttackSpeed(int level) returns real
 
 // ============================================================================
 public class GuardTowerComponent extends UnitComponent
-  private _handle m_workedEnteredCallback = HANDLE_INVALID
-  private _handle m_workedExitedCallback = HANDLE_INVALID
-  private _handle m_workedLeveledCallback = HANDLE_INVALID
+  private _handle m_workedEnteredCallback = INVALID_HANDLE
+  private _handle m_workedExitedCallback = INVALID_HANDLE
+  private _handle m_workedLeveledCallback = INVALID_HANDLE
   private bool m_activated = false
 
   // --------------------------------------------------------------------------
@@ -100,7 +111,7 @@ public class GuardTowerComponent extends UnitComponent
   // --------------------------------------------------------------------------
   private function getNumberOfWorkers() returns int
     let workstationComponent = getOwner().getWorkstationComponent()
-    return workstationComponent != null ? workstationComponent.getWorkerUnitCount() : 0
+    return workstationComponent != null ? workstationComponent.getLoadedUnitCount() : 0
 
   // --------------------------------------------------------------------------
   private function activate()
@@ -136,7 +147,7 @@ public class GuardTowerComponent extends UnitComponent
       if (workstationComponent != null)
         operatorLevel = workstationComponent.getMaxOperatorLevel()
 
-    ownerUnit.setFieldWeapon(UNIT_WEAPON_RF_ATTACK_BASE_COOLDOWN, 0, getActiveAttackSpeed(operatorLevel))
+    ownerUnit.setFieldWeapon(UNIT_WEAPON_RF_ATTACK_BASE_COOLDOWN, 0, getAttackCooldown(operatorLevel))
 
     if (m_activated)
       ownerUnit.removeAbility(GUARD_TOWER_INACTIVE_ICON_ABILITY_ID)
