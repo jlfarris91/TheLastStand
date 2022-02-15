@@ -18,9 +18,13 @@ import DamageEvent
 import Damage
 import DisplayTextToPlayer
 import HumanPlayerComponent
+import UnitExtensions
+import Elites
+import BuildingUndeadTarget
 
 constant rangeInt   SCOUT_TOWER_SIGHT_RANGE                     = rangeInt(800, 1800)
 constant real       SCOUT_TOWER_SIGHT_RANGE_PER_LEVEL           = SCOUT_TOWER_SIGHT_RANGE.getLength() / 10.0
+constant real       SCOUT_TOWER_MAX_SIGHT_RANGE_SQ              = (SCOUT_TOWER_SIGHT_RANGE.max * SCOUT_TOWER_SIGHT_RANGE.max).toReal()
 
 constant rangeInt   SCOUT_TOWER_ARMOR_DEC_RANGE                 = rangeInt(1, 3)
 constant real       SCOUT_TOWER_ARMOR_DEC_RANGE_PERC_PER_LEVEL  = SCOUT_TOWER_ARMOR_DEC_RANGE.getLength() / 10.0
@@ -32,6 +36,9 @@ constant int        SCOUT_TOWER_INACTIVE_ICON_ABILITY_ID        = compiletime(AB
 constant string     MARKED_TARGET_FX = "Abilities\\Spells\\Items\\AIco\\CrownOfCmndTarget.mdl"
 
 HashMap<unit, unit> g_markedTargetToScoutTowerMap = new HashMap<unit, unit>()
+group g_tempGroup = CreateGroup()
+boolexpr g_validTargetFilter = Condition(function isFilterUnitValidTargetForMarking)
+player g_validTargetOwner
 
 // ============================================================================
 function getActiveSightRadius(int level) returns int
@@ -40,6 +47,11 @@ function getActiveSightRadius(int level) returns int
 // ============================================================================
 function getActiveTargetArmorReduction(int level) returns int
   return SCOUT_TOWER_ARMOR_DEC_RANGE.lerp(RANGE_ONE_TO_TEN.parameterize01(level)).toInt()
+
+// ============================================================================
+function isFilterUnitValidTargetForMarking() returns bool
+  let filterUnit = GetFilterUnit()
+  return not filterUnit.isStructure() and filterUnit.getOwner().isEnemyOf(g_validTargetOwner) and not g_markedTargetToScoutTowerMap.has(filterUnit)
 
 // ============================================================================
 @compiletime function createAbility()
@@ -148,11 +160,63 @@ public class ScoutTowerComponent extends RealtimeUnitComponent
 
     destroyMarkedTargetFX()
 
+    if (m_activated)
+      tryFindNextTargetLater()
+
   // --------------------------------------------------------------------------
   private function destroyMarkedTargetFX()
     if (m_markedTargetFx != null)
       m_markedTargetFx.destr()
       m_markedTargetFx = null
+
+  // --------------------------------------------------------------------------
+  private function tryFindNextTarget()
+
+    if (m_markedTarget != null or not m_activated)
+      return
+
+    let ownerUnit = getOwnerUnit()
+    let ownerUnitPos = ownerUnit.getPos()
+    let sightRadiusLevel = ownerUnit.getAbilityLevel(SCOUT_TOWER_ACTIVE_ICON_ABILITY_ID)
+
+    g_validTargetOwner = ownerUnit.getOwner()
+    g_tempGroup.enumUnitsInRange(ownerUnitPos, getActiveSightRadius(sightRadiusLevel).toReal(), g_validTargetFilter)
+    g_validTargetOwner = null
+
+    // Try again later
+    if (not g_tempGroup.hasNext())
+      tryFindNextTargetLater()
+      return
+
+    unit bestTarget = null
+    var bestScore = REAL_MAX
+
+    for u in g_tempGroup
+    //{
+      real score
+      let dd = u.getPos().distanceToSq(ownerUnitPos)
+      if (u.isBoss())
+        score = dd
+      else if (u.isElite())
+        score = SCOUT_TOWER_MAX_SIGHT_RANGE_SQ + dd
+      else
+        score = 2 * SCOUT_TOWER_MAX_SIGHT_RANGE_SQ + dd
+      if (score < bestScore)
+        bestScore = score
+        bestTarget = u
+    //}
+
+    g_tempGroup.clear()
+
+    if (bestTarget == null)
+      tryFindNextTargetLater()
+      return
+
+    markTarget(bestTarget)
+
+  // --------------------------------------------------------------------------
+  private function tryFindNextTargetLater()
+    doAfter(1.0, () -> tryFindNextTarget())
 
   // --------------------------------------------------------------------------
   override function realtimeUpdate(real _dt)
@@ -196,15 +260,18 @@ public class ScoutTowerComponent extends RealtimeUnitComponent
     updateState()
 
   // --------------------------------------------------------------------------
-  private function updateState()
-    let ownerUnit = getOwnerUnit()
-
-    var operatorLevel = 1
-
+  private function getOperatorLevel() returns int
     if (m_activated)
       let workstationComponent = getOwner().getWorkstationComponent()
       if (workstationComponent != null)
-        operatorLevel = workstationComponent.getMaxOperatorLevel()
+        return workstationComponent.getMaxOperatorLevel()
+    return 1
+
+  // --------------------------------------------------------------------------
+  private function updateState()
+    let ownerUnit = getOwnerUnit()
+
+    let operatorLevel = getOperatorLevel()
 
     for i = 1 to 10
       if (m_activated and operatorLevel == i)
@@ -222,7 +289,9 @@ public class ScoutTowerComponent extends RealtimeUnitComponent
       ownerUnit.removeAbility(SCOUT_TOWER_ACTIVE_ICON_ABILITY_ID)
       ownerUnit.addAbility(SCOUT_TOWER_INACTIVE_ICON_ABILITY_ID)
 
-    if (m_activated == false and m_markedTarget != null)
+    if (m_activated)
+      tryFindNextTarget()
+    else if (m_markedTarget != null)
       onMarkedTargetLost(m_markedTarget)
 
 // ============================================================================
@@ -266,13 +335,15 @@ function onUnitKilled()
 
 // ============================================================================
 function onDamageEventRelative()
+  if (DamageEvent.getSource().isBuildingUndeadTarget())
+    return
   let target = DamageEvent.getTarget()
   if (not g_markedTargetToScoutTowerMap.has(target))
     return
   let scoutTower = g_markedTargetToScoutTowerMap.get(target)
   let playerComp = scoutTower.getOwner().getMetadata().getHumanPlayerComponent()
   let scale = playerComp.markedTargetDamageScalePerc01.getValue()
-  DamageEvent.addAmount(DamageEvent.getAmount() * scale)
+  DamageEvent.addAmount(DamageEvent.getOriginalAmount() * scale)
 
 // ============================================================================
 init
