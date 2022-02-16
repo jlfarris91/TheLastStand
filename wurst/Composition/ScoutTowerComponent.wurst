@@ -21,6 +21,8 @@ import HumanPlayerComponent
 import UnitExtensions
 import Elites
 import BuildingUndeadTarget
+import BuffObjEditing
+import StandardTextTags
 
 constant rangeInt   SCOUT_TOWER_SIGHT_RANGE                     = rangeInt(800, 1800)
 constant real       SCOUT_TOWER_SIGHT_RANGE_PER_LEVEL           = SCOUT_TOWER_SIGHT_RANGE.getLength() / 10.0
@@ -32,8 +34,7 @@ constant real       SCOUT_TOWER_ARMOR_DEC_RANGE_PERC_PER_LEVEL  = SCOUT_TOWER_AR
 constant int array  SCOUT_TOWER_ACTIVE_SIGHT_ABILITY_ID         = [compiletime(ABIL_ID_GEN.next()), compiletime(ABIL_ID_GEN.next()), compiletime(ABIL_ID_GEN.next()), compiletime(ABIL_ID_GEN.next()), compiletime(ABIL_ID_GEN.next()), compiletime(ABIL_ID_GEN.next()), compiletime(ABIL_ID_GEN.next()), compiletime(ABIL_ID_GEN.next()), compiletime(ABIL_ID_GEN.next()), compiletime(ABIL_ID_GEN.next())]
 constant int        SCOUT_TOWER_ACTIVE_ICON_ABILITY_ID          = compiletime(ABIL_ID_GEN.next())
 constant int        SCOUT_TOWER_INACTIVE_ICON_ABILITY_ID        = compiletime(ABIL_ID_GEN.next())
-
-constant string     MARKED_TARGET_FX = "Abilities\\Spells\\Items\\AIco\\CrownOfCmndTarget.mdl"
+constant buffTuple  MARKED_TARGET_BUFF                          = compiletime(createDummyBuffObject("Marked", "This unit is marked; it takes additional damage", Icons.bTNReveal, "Abilities\\Marked\\Marked.mdl", "overhead"))
 
 HashMap<unit, unit> g_markedTargetToScoutTowerMap = new HashMap<unit, unit>()
 group g_tempGroup = CreateGroup()
@@ -103,7 +104,6 @@ public class ScoutTowerComponent extends RealtimeUnitComponent
   private _handle m_workedLeveledCallback = INVALID_HANDLE
   private bool m_activated = false
   private unit m_markedTarget
-  private effect m_markedTargetFx
 
   // --------------------------------------------------------------------------
   construct (IUnitMetadata metadata)
@@ -131,12 +131,7 @@ public class ScoutTowerComponent extends RealtimeUnitComponent
       workstationComponent.workerLeveled.unregister(m_workedLeveledCallback)
 
     deactivate()
-
-    if (m_markedTarget != null)
-      g_markedTargetToScoutTowerMap.remove(m_markedTarget)
-      m_markedTarget = null
-
-    destroyMarkedTargetFX()
+    onMarkedTargetLost()
 
   // --------------------------------------------------------------------------
   function markTarget(unit target)
@@ -146,28 +141,31 @@ public class ScoutTowerComponent extends RealtimeUnitComponent
     m_markedTarget = target
     this.registerForRealtimeUpdate(RealtimeUpdatePriority.Background)
 
-    destroyMarkedTargetFX()
-    
-    m_markedTargetFx = addEffect(MARKED_TARGET_FX, m_markedTarget, "overhead")
+    m_markedTarget.addAbility(MARKED_TARGET_BUFF.abilId)
 
   // --------------------------------------------------------------------------
   protected function onMarkedTargetLost(unit target)
     if (m_markedTarget != target)
       return
-    this.unregisterForRealtimeUpdate()
-    g_markedTargetToScoutTowerMap.remove(target)
-    m_markedTarget = null
-
-    destroyMarkedTargetFX()
+    
+    onMarkedTargetLost()
 
     if (m_activated)
       tryFindNextTargetLater()
 
   // --------------------------------------------------------------------------
-  private function destroyMarkedTargetFX()
-    if (m_markedTargetFx != null)
-      m_markedTargetFx.destr()
-      m_markedTargetFx = null
+  private function onMarkedTargetLost()
+
+    if (m_markedTarget == null)
+      return
+
+    this.unregisterForRealtimeUpdate()
+
+    m_markedTarget.removeAbility(MARKED_TARGET_BUFF.abilId)
+    m_markedTarget.removeAbility(MARKED_TARGET_BUFF.buffId)
+
+    g_markedTargetToScoutTowerMap.remove(m_markedTarget)
+    m_markedTarget = null
 
   // --------------------------------------------------------------------------
   private function tryFindNextTarget()
@@ -177,10 +175,10 @@ public class ScoutTowerComponent extends RealtimeUnitComponent
 
     let ownerUnit = getOwnerUnit()
     let ownerUnitPos = ownerUnit.getPos()
-    let sightRadiusLevel = ownerUnit.getAbilityLevel(SCOUT_TOWER_ACTIVE_ICON_ABILITY_ID)
+    let sightRadius = getSightRadius()
 
     g_validTargetOwner = ownerUnit.getOwner()
-    g_tempGroup.enumUnitsInRange(ownerUnitPos, getActiveSightRadius(sightRadiusLevel).toReal(), g_validTargetFilter)
+    g_tempGroup.enumUnitsInRange(ownerUnitPos, sightRadius, g_validTargetFilter)
     g_validTargetOwner = null
 
     // Try again later
@@ -219,9 +217,16 @@ public class ScoutTowerComponent extends RealtimeUnitComponent
     doAfter(1.0, () -> tryFindNextTarget())
 
   // --------------------------------------------------------------------------
+  private function getSightRadius() returns real
+    let sightRadiusLevel = getOwnerUnit().getAbilityLevel(SCOUT_TOWER_ACTIVE_ICON_ABILITY_ID)
+    return getActiveSightRadius(sightRadiusLevel).toReal()
+
+  // --------------------------------------------------------------------------
   override function realtimeUpdate(real _dt)
 
-    if (m_markedTarget.getPos().distanceToSq(getOwnerUnit().getPos()) > SCOUT_TOWER_SIGHT_RANGE.max*SCOUT_TOWER_SIGHT_RANGE.max)
+    let sightRadius = getSightRadius()
+
+    if (m_markedTarget.getPos().distanceToSq(getOwnerUnit().getPos()) > sightRadius*sightRadius)
       let markedTarget = m_markedTarget
       nullTimer(() -> onMarkedTargetLost(markedTarget))
     
@@ -346,7 +351,18 @@ function onDamageEventRelative()
   DamageEvent.addAmount(DamageEvent.getOriginalAmount() * scale)
 
 // ============================================================================
+function onDamageEventFinal()
+  let target = DamageEvent.getTarget()
+  if (not g_markedTargetToScoutTowerMap.has(target))
+    return
+  let source = DamageEvent.getSource()
+  let damageAmount = DamageEvent.getAmount().floor()
+  if (damageAmount > 0)
+    createCriticalStrikeTextTag(source, damageAmount)
+
+// ============================================================================
 init
   EventListener.onTargetCast(TlsAbilityIds.scoutTowerMarkTargets, (unit caster, unit target) -> onMarkTargetAbilCast(caster, target))
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_DEATH, function onUnitKilled)
   DamageEvent.addListener(DAMAGE_EVENT_PRIO_RELATIVE, () -> onDamageEventRelative())
+  DamageEvent.addListener(DAMAGE_EVENT_PRIO_FINAL, () -> onDamageEventFinal())
