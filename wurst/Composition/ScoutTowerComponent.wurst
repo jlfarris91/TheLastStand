@@ -23,6 +23,10 @@ import Elites
 import BuildingUndeadTarget
 import BuffObjEditing
 import StandardTextTags
+import TlsUnitIds
+import RealExtensions
+import DefenseUpgrades
+import SmartReal
 
 constant rangeInt   SCOUT_TOWER_SIGHT_RANGE                     = rangeInt(800, 1800)
 constant real       SCOUT_TOWER_SIGHT_RANGE_PER_LEVEL           = SCOUT_TOWER_SIGHT_RANGE.getLength() / 10.0
@@ -38,16 +42,13 @@ constant buffTuple  MARKED_TARGET_BUFF                          = compiletime(cr
 
 HashMap<unit, unit> g_markedTargetToScoutTowerMap = new HashMap<unit, unit>()
 group g_tempGroup = CreateGroup()
-boolexpr g_validTargetFilter = Condition(function isFilterUnitValidTargetForMarking)
 player g_validTargetOwner
+boolexpr g_validTargetFilter = Condition(function isFilterUnitValidTargetForMarking)
+boolexpr g_filterUnitIsScoutTower = Condition(function filterUnitIsScoutTower)
 
 // ============================================================================
 function getActiveSightRadius(int level) returns int
   return SCOUT_TOWER_SIGHT_RANGE.lerp(RANGE_ONE_TO_TEN.parameterize01(level)).toInt()
-
-// ============================================================================
-function getActiveTargetArmorReduction(int level) returns int
-  return SCOUT_TOWER_ARMOR_DEC_RANGE.lerp(RANGE_ONE_TO_TEN.parameterize01(level)).toInt()
 
 // ============================================================================
 function isFilterUnitValidTargetForMarking() returns bool
@@ -67,7 +68,7 @@ function isFilterUnitValidTargetForMarking() returns bool
 
   let properties = new WorkstationOperatorBonusTooltipItem()
   ..addValue(lvl -> "{0}m sight radius".format((getActiveSightRadius(lvl) * WORLD_TO_METERS).toString()))
-  ..addValue(lvl -> "Target armor is reduced by {0}".format(getActiveTargetArmorReduction(lvl).toString()))
+  ..addValue(lvl -> "Marked Targets take {0} more damage".format(getMarkedTargetDamageScalePerc01(lvl).toPercentageString01()))
   activeWorkstationIconTooltipBuilder.addItem(properties)
 
   new AbilityActiveWorkstationIconDefinition(SCOUT_TOWER_ACTIVE_ICON_ABILITY_ID)
@@ -103,20 +104,29 @@ public class ScoutTowerComponent extends RealtimeUnitComponent
   private _handle m_workedExitedCallback = INVALID_HANDLE
   private _handle m_workedLeveledCallback = INVALID_HANDLE
   private bool m_activated = false
-  private unit m_markedTarget
+  private group m_markedTargets = CreateGroup()
+  private SmartRealValue m_maxTargets
 
   // --------------------------------------------------------------------------
   construct (IUnitMetadata metadata)
     super(metadata)
 
   // --------------------------------------------------------------------------
+  ondestroy
+    m_markedTargets.destr()
+
+  // --------------------------------------------------------------------------
   override function onEnabled()
     super.onEnabled()
     
     let workstationComponent = getOwner().getOrAddWorkstationComponent()
-    m_workedEnteredCallback = workstationComponent.workerEntered.registerDispatched(this, () -> onWorkerEntered())
-    m_workedExitedCallback = workstationComponent.workerExited.registerDispatched(this, () -> onWorkedExited())
-    m_workedLeveledCallback = workstationComponent.workerLeveled.registerDispatched(this, () -> onWorkerLeveled())
+    m_workedEnteredCallback = workstationComponent.onWorkedEntered().registerDispatched(this, () -> onWorkerEntered())
+    m_workedExitedCallback = workstationComponent.onWorkedExited().registerDispatched(this, () -> onWorkedExited())
+    m_workedLeveledCallback = workstationComponent.onWorkedLeveled().registerDispatched(this, () -> onWorkerLeveled())
+
+    let humanOwnerComp = getOwnerUnit().getOwnerHumanPlayerComponent()
+    if (humanOwnerComp != null)
+      m_maxTargets = humanOwnerComp.scoutTowerMaxTargets.attach(this)
 
     updateState()
 
@@ -126,51 +136,64 @@ public class ScoutTowerComponent extends RealtimeUnitComponent
 
     let workstationComponent = getOwner().getWorkstationComponent()
     if (workstationComponent != null)
-      workstationComponent.workerEntered.unregister(m_workedEnteredCallback)
-      workstationComponent.workerExited.unregister(m_workedExitedCallback)
-      workstationComponent.workerLeveled.unregister(m_workedLeveledCallback)
+      workstationComponent.onWorkedEntered().unregister(m_workedEnteredCallback)
+      workstationComponent.onWorkedExited().unregister(m_workedExitedCallback)
+      workstationComponent.onWorkedLeveled().unregister(m_workedLeveledCallback)
+
+    if (m_maxTargets != null)
+      destroy m_maxTargets
+      m_maxTargets = null
 
     deactivate()
-    onMarkedTargetLost()
+    clearMarkedTargets()
+
+  // --------------------------------------------------------------------------
+  function getMaxTargets() returns int
+    return m_maxTargets != null ? m_maxTargets.getValue().toInt() : 0
 
   // --------------------------------------------------------------------------
   function markTarget(unit target)
-    if (m_markedTarget == target)
+    if (m_markedTargets.contains(target))
       return
-    g_markedTargetToScoutTowerMap.put(target, getOwnerUnit())
-    m_markedTarget = target
-    this.registerForRealtimeUpdate(RealtimeUpdatePriority.Background)
 
-    m_markedTarget.addAbility(MARKED_TARGET_BUFF.abilId)
+    if (m_markedTargets.size() == getMaxTargets())
+      onMarkedTargetLost(m_markedTargets.getUnitAt(0), false)
+
+    g_markedTargetToScoutTowerMap.put(target, getOwnerUnit())
+    m_markedTargets.addUnit(target)
+
+    if (m_markedTargets.size() == 1)
+      this.registerForRealtimeUpdate(RealtimeUpdatePriority.Background)
+
+    target.addAbility(MARKED_TARGET_BUFF.abilId)
 
   // --------------------------------------------------------------------------
-  protected function onMarkedTargetLost(unit target)
-    if (m_markedTarget != target)
+  protected function onMarkedTargetLost(unit target, bool tryFindNextTarget)
+    if (not m_markedTargets.contains(target))
       return
-    
-    onMarkedTargetLost()
 
-    if (m_activated)
+    target.removeAbility(MARKED_TARGET_BUFF.abilId)
+    target.removeAbility(MARKED_TARGET_BUFF.buffId)
+
+    g_markedTargetToScoutTowerMap.remove(target)
+    m_markedTargets.removeUnit(target)
+
+    if (m_markedTargets.isEmpty())
+      this.unregisterForRealtimeUpdate()
+
+    if (m_activated and tryFindNextTarget)
       tryFindNextTargetLater()
 
   // --------------------------------------------------------------------------
-  private function onMarkedTargetLost()
+  private function clearMarkedTargets()
 
-    if (m_markedTarget == null)
-      return
-
-    this.unregisterForRealtimeUpdate()
-
-    m_markedTarget.removeAbility(MARKED_TARGET_BUFF.abilId)
-    m_markedTarget.removeAbility(MARKED_TARGET_BUFF.buffId)
-
-    g_markedTargetToScoutTowerMap.remove(m_markedTarget)
-    m_markedTarget = null
+    while (m_markedTargets.isEmpty() == false)
+      onMarkedTargetLost(m_markedTargets.getUnitAt(0), false)
 
   // --------------------------------------------------------------------------
   private function tryFindNextTarget()
 
-    if (m_markedTarget != null or not m_activated)
+    if (not m_activated or m_markedTargets.size() == getMaxTargets())
       return
 
     let ownerUnit = getOwnerUnit()
@@ -212,6 +235,9 @@ public class ScoutTowerComponent extends RealtimeUnitComponent
 
     markTarget(bestTarget)
 
+    if (m_markedTargets.size() < getMaxTargets())
+      tryFindNextTargetLater()
+
   // --------------------------------------------------------------------------
   private function tryFindNextTargetLater()
     doAfter(1.0, () -> tryFindNextTarget())
@@ -226,9 +252,9 @@ public class ScoutTowerComponent extends RealtimeUnitComponent
 
     let sightRadius = getSightRadius()
 
-    if (m_markedTarget.getPos().distanceToSq(getOwnerUnit().getPos()) > sightRadius*sightRadius)
-      let markedTarget = m_markedTarget
-      nullTimer(() -> onMarkedTargetLost(markedTarget))
+    for target in m_markedTargets
+      if (target.getPos().distanceToSq(getOwnerUnit().getPos()) > sightRadius*sightRadius)
+        nullTimer(() -> onMarkedTargetLost(target, true))
     
   // --------------------------------------------------------------------------
   private function onWorkerEntered()
@@ -273,7 +299,7 @@ public class ScoutTowerComponent extends RealtimeUnitComponent
     return 1
 
   // --------------------------------------------------------------------------
-  private function updateState()
+  protected function updateState()
     let ownerUnit = getOwnerUnit()
 
     let operatorLevel = getOperatorLevel()
@@ -296,8 +322,8 @@ public class ScoutTowerComponent extends RealtimeUnitComponent
 
     if (m_activated)
       tryFindNextTarget()
-    else if (m_markedTarget != null)
-      onMarkedTargetLost(m_markedTarget)
+    else
+      clearMarkedTargets()
 
 // ============================================================================
 public function IUnitMetadata.getScoutTowerComponent() returns ScoutTowerComponent
@@ -336,7 +362,12 @@ function onUnitKilled()
   if (scoutTowerUnit == null)
     error("Scout Tower unit is null")
   let comp = scoutTowerUnit.getMetadata().getScoutTowerComponent()
-  comp.onMarkedTargetLost(dyingUnit)
+  comp.onMarkedTargetLost(dyingUnit, true)
+
+// ============================================================================
+function filterUnitIsScoutTower() returns bool
+  let filterUnit = GetFilterUnit()
+  return filterUnit.getTypeId() == TlsUnitIds.scoutTower and filterUnit.isAlive()
 
 // ============================================================================
 function onDamageEventRelative()
@@ -346,8 +377,8 @@ function onDamageEventRelative()
   if (not g_markedTargetToScoutTowerMap.has(target))
     return
   let scoutTower = g_markedTargetToScoutTowerMap.get(target)
-  let playerComp = scoutTower.getOwner().getMetadata().getHumanPlayerComponent()
-  let scale = playerComp.markedTargetDamageScalePerc01.getValue()
+  let playerComp = scoutTower.getOwnerHumanPlayerComponent()
+  let scale = playerComp.scoutTowerMarkedTargetDamageScalar01.getValue()
   DamageEvent.addAmount(DamageEvent.getOriginalAmount() * scale)
 
 // ============================================================================
