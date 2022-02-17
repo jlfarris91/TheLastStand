@@ -27,6 +27,7 @@ import TlsUnitIds
 import RealExtensions
 import DefenseUpgrades
 import SmartReal
+import LinkedList
 
 constant rangeInt   SCOUT_TOWER_SIGHT_RANGE                     = rangeInt(800, 1800)
 constant real       SCOUT_TOWER_SIGHT_RANGE_PER_LEVEL           = SCOUT_TOWER_SIGHT_RANGE.getLength() / 10.0
@@ -104,7 +105,7 @@ public class ScoutTowerComponent extends RealtimeUnitComponent
   private _handle m_workedExitedCallback = INVALID_HANDLE
   private _handle m_workedLeveledCallback = INVALID_HANDLE
   private bool m_activated = false
-  private group m_markedTargets = CreateGroup()
+  private LinkedList<unit> m_markedTargets = new LinkedList<unit>()
   private SmartRealValue m_maxTargets
 
   // --------------------------------------------------------------------------
@@ -113,7 +114,7 @@ public class ScoutTowerComponent extends RealtimeUnitComponent
 
   // --------------------------------------------------------------------------
   ondestroy
-    m_markedTargets.destr()
+    destroy m_markedTargets
 
   // --------------------------------------------------------------------------
   override function onEnabled()
@@ -153,14 +154,15 @@ public class ScoutTowerComponent extends RealtimeUnitComponent
 
   // --------------------------------------------------------------------------
   function markTarget(unit target)
-    if (m_markedTargets.contains(target))
+    if (m_markedTargets.has(target))
       return
 
-    if (m_markedTargets.size() == getMaxTargets())
-      onMarkedTargetLost(m_markedTargets.getUnitAt(0), false)
+    let numMarkedTargets = m_markedTargets.size()
+    if (numMarkedTargets == getMaxTargets())
+      onMarkedTargetLost(m_markedTargets.getFirst(), false)
 
     g_markedTargetToScoutTowerMap.put(target, getOwnerUnit())
-    m_markedTargets.addUnit(target)
+    m_markedTargets.add(target)
 
     if (m_markedTargets.size() == 1)
       this.registerForRealtimeUpdate(RealtimeUpdatePriority.Background)
@@ -169,14 +171,14 @@ public class ScoutTowerComponent extends RealtimeUnitComponent
 
   // --------------------------------------------------------------------------
   protected function onMarkedTargetLost(unit target, bool tryFindNextTarget)
-    if (not m_markedTargets.contains(target))
+    if (not m_markedTargets.has(target))
       return
 
     target.removeAbility(MARKED_TARGET_BUFF.abilId)
     target.removeAbility(MARKED_TARGET_BUFF.buffId)
 
     g_markedTargetToScoutTowerMap.remove(target)
-    m_markedTargets.removeUnit(target)
+    m_markedTargets.remove(target)
 
     if (m_markedTargets.isEmpty())
       this.unregisterForRealtimeUpdate()
@@ -188,7 +190,7 @@ public class ScoutTowerComponent extends RealtimeUnitComponent
   private function clearMarkedTargets()
 
     while (m_markedTargets.isEmpty() == false)
-      onMarkedTargetLost(m_markedTargets.getUnitAt(0), false)
+      onMarkedTargetLost(m_markedTargets.getFirst(), false)
 
   // --------------------------------------------------------------------------
   private function tryFindNextTarget()
