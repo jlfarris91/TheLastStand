@@ -1,0 +1,297 @@
+package Sprint
+import UnitComponent
+import ChannelAbilityPreset
+import Icons
+import RealtimeUpdate
+import Meters
+import DummyCaster
+import Orders
+import SmartValue
+import ClosureEvents
+import BuffObjEditing
+import RealExtensions
+import Math
+import ColorUtility
+import Handle
+import TlsAbilityIds
+
+constant int SPRINT_ON_ABIL_ID = compiletime(ABIL_ID_GEN.next())
+constant int SPRINT_OFF_ABIL_ID = compiletime(ABIL_ID_GEN.next())
+constant int EXHAUST_ABIL_ID = compiletime(ABIL_ID_GEN.next())
+constant int EXHAUST_BUFF_ID = compiletime(BUFF_ID_GEN.next())
+constant int LEARN_SPRINTING_MAX_LEVEL = 3
+
+constant buffTuple SPRINT_BUFF = compiletime(createDummyBuffObject("Sprinting", "This unit is sprinting; it has increased movement speed.", Icons.bTNBootsOfSpeed))
+
+constant int TEST_UNIT_ID = compiletime(HERO_ID_GEN.next())
+
+// ============================================================================
+@compiletime function createObjects()
+
+  new ChannelAbilityPreset(TlsAbilityIds.Hero.sprint, 3, true)
+    ..setHeroAbility(true)
+    ..setButtonPositionResearchX(2)
+    ..setButtonPositionResearchY(0)
+    ..setButtonPositionNormalX(0)
+    ..setButtonPositionNormalY(-11)
+    ..setName("Learn Sprint")
+    ..setTooltipLearn("Learn Sprint - [|cffffcc00Level %d|r]")
+    ..setTooltipLearnExtended("Increases movement speed at the cost of mana lost while moving.|n|n|cffffcc00Level 1|r - Movement speed is increased by {0}|n|cffffcc00Level 2|r - Movement speed is increased by {1}|n|cffffcc00Level 3|r - Movement speed is increased by {2}".format(
+      getSprintMovementSpeedFactor(1).toPercentageString01(),
+      getSprintMovementSpeedFactor(2).toPercentageString01(),
+      getSprintMovementSpeedFactor(3).toPercentageString01()))
+    ..setIconResearch(Icons.bTNBootsOfSpeed)
+
+  new AbilityDefinitionBeserk(SPRINT_ON_ABIL_ID)
+    ..setButtonPositionNormalX(2)
+    ..setButtonPositionNormalY(2)
+    ..setArtCaster("")
+    ..setAnimationNames("")
+    ..setLevels(10)
+    ..setName("Start Sprinting")
+    ..presetTooltipNormal(lvl -> "Sprint - [{0}]".format("Level {0}".format(lvl.toString()).colorize(lvl > LEARN_SPRINTING_MAX_LEVEL ? Colors.green : Colors.gold)))
+    ..presetTooltipNormalExtended(lvl -> "Increases movement speed by {0} at the cost of mana lost while moving.".format((getSprintMovementSpeedFactor(lvl)).toPercentageString01().colorize(lvl > LEARN_SPRINTING_MAX_LEVEL ? Colors.green : Colors.gold)))
+    ..setIconNormal(Icons.bTNBootsOfSpeed)
+    ..presetAttackSpeedIncrease(lvl -> 0.0)
+    ..presetDamageTakenIncrease(lvl -> 0.0)
+    ..presetMovementSpeedIncrease(lvl -> 0.0)
+    ..presetCooldown(lvl -> 0.0)
+    ..presetDurationHero(lvl -> 0.1)
+    ..presetDurationNormal(lvl -> 0.1)
+    ..presetBuffs(lvl -> SPRINT_BUFF.buffId.toRawCode())
+    ..presetTargetsAllowed(lvl -> "self")
+
+  new AbilityDefinitionBeserk(SPRINT_OFF_ABIL_ID)
+    ..setButtonPositionNormalX(2)
+    ..setButtonPositionNormalY(2)
+    ..setArtCaster("")
+    ..setAnimationNames("")
+    ..setName("Stop Sprinting")
+    ..presetTooltipNormal(lvl -> "Stop Sprinting")
+    ..presetTooltipNormalExtended(lvl -> "Stop sprinting.")
+    ..setIconNormal(Icons.bTNCancel)
+    ..presetAttackSpeedIncrease(lvl -> 0.0)
+    ..presetDamageTakenIncrease(lvl -> 0.0)
+    ..presetMovementSpeedIncrease(lvl -> 0.0)
+    ..presetCooldown(lvl -> 0.0)
+    ..presetDurationHero(lvl -> 0.1)
+    ..presetDurationNormal(lvl -> 0.1)
+    ..presetBuffs(lvl -> SPRINT_BUFF.buffId.toRawCode())
+    ..presetTargetsAllowed(lvl -> "self")
+
+  new BuffDefinition(EXHAUST_BUFF_ID, 'Bslo')
+    ..setTooltipNormal(1, "Exhausted")
+    ..setTooltipNormalExtended(1, "This unit is exhausted; it's movement speed and attack rate are temporarily reduced.")
+
+  new AbilityDefinitionSlowCreep(EXHAUST_ABIL_ID)
+    ..presetManaCost(lvl -> 0)
+    ..presetCooldown(lvl -> 0)
+    ..presetCastRange(lvl -> 9999)
+    ..setLevels(10)
+    ..presetDurationHero(lvl -> getExhaustDuration(lvl))
+    ..presetDurationNormal(lvl -> getExhaustDuration(lvl))
+    ..presetAttackSpeedFactor(lvl -> getExhaustAttackSpeedFactor(lvl))
+    ..presetMovementSpeedFactor(lvl -> getExhaustMovementSpeedFactor(lvl))
+    ..presetTargetsAllowed(lvl -> "ground,air")
+    ..setArtCaster("")
+    ..presetBuffs(lvl -> EXHAUST_BUFF_ID.toRawCode())
+
+// ============================================================================
+function getSprintMovementSpeedFactor(int level) returns real
+  return min(lerp(0.2, 0.4, parameterize(1, LEARN_SPRINTING_MAX_LEVEL, level)), 1.0)
+
+// ============================================================================
+function getExhaustDuration(int level) returns real
+  return min(lerp(5.0, 10.0, parameterize(1, LEARN_SPRINTING_MAX_LEVEL, level)), 12.0)
+
+// ============================================================================
+function getExhaustAttackSpeedFactor(int level) returns real
+  return max(lerp(0.4, 0.2, parameterize(1, LEARN_SPRINTING_MAX_LEVEL, level)), 0.01)
+
+// ============================================================================
+function getExhaustMovementSpeedFactor(int level) returns real
+  return max(lerp(0.6, 0.3, parameterize(1, LEARN_SPRINTING_MAX_LEVEL, level)), 0.1)
+
+// ============================================================================
+function getSprintManaCostPerMeter(int level) returns real
+  return lerp(2.0, 4.0, parameterize(1, LEARN_SPRINTING_MAX_LEVEL, level))
+
+// ============================================================================
+public class SprintComponent extends UnitComponent implements IRealtimeListener
+  private bool m_isSprinting
+  private vec2 m_lastPos
+
+  SmartValue sprintLevel = new SmartValue()
+  SmartValue movementSpeedFactor = new SmartValue()
+  SmartValue exhaustLevel = new SmartValue()
+  SmartValue manaCostPerMeter = new SmartValue()
+
+  // --------------------------------------------------------------------------
+  construct (IUnitMetadata owner)
+    super(owner)
+
+    sprintLevel.onValueChanged().registerDispatched(this) () ->
+      updateState()
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    destroy sprintLevel
+    destroy exhaustLevel
+    destroy manaCostPerMeter
+
+  // --------------------------------------------------------------------------
+  function startSprinting()
+    if (m_isSprinting)
+      return
+
+    m_lastPos = getOwnerUnit().getPos()
+    m_isSprinting = true
+    updateState()
+    this.registerForRealtimeUpdate(RealtimeUpdatePriority.Fast)
+
+  // --------------------------------------------------------------------------
+  function stopSprinting()
+    stopSprinting(true)
+
+  // --------------------------------------------------------------------------  
+  protected function stopSprinting(bool _issueOrder)
+    if (not m_isSprinting)
+      return
+
+    m_isSprinting = false
+    updateState()
+    this.unregisterForRealtimeUpdate()
+
+  // --------------------------------------------------------------------------
+  function exhaust()
+    if (m_isSprinting)
+      stopSprinting()
+
+    let ownerUnit = getOwnerUnit()
+    let exhaustLvl = exhaustLevel.getIntValue()
+
+    let caster = new DummyCaster()..origin(ownerUnit.getPos())..delay(2.0)    
+    if (caster.castTarget(EXHAUST_ABIL_ID, exhaustLvl, OrderIds.slow, ownerUnit) == null)
+      Log.error("Failed to cast exhaust!")
+
+    let exhaustLevelValue = exhaustLevel.getIntValue()
+    let exhaustDuration = getExhaustDuration(exhaustLevelValue)
+    if (exhaustDuration > 0.0)
+      BlzStartUnitAbilityCooldown(ownerUnit, SPRINT_ON_ABIL_ID, exhaustDuration)
+
+  // --------------------------------------------------------------------------
+  override protected function onEnabled()
+    super.onEnabled()
+    
+    let ownerUnit = getOwnerUnit()
+    sprintLevel.setBase(ownerUnit.getAbilityLevel(TlsAbilityIds.Hero.sprint))
+    updateState()
+
+  // --------------------------------------------------------------------------
+  override protected function onDisabled()
+    super.onDisabled()
+    this.unregisterForRealtimeUpdate()
+
+  // --------------------------------------------------------------------------
+  override protected function realtimeUpdate(real _)
+    let ownerUnit = getOwnerUnit()
+    let unitPos = ownerUnit.getPos()
+    let dist = unitPos.distanceTo(m_lastPos)
+    let meters = dist * WORLD_TO_METERS
+    let manaCost = meters * manaCostPerMeter.getValue()
+    if (manaCost > 0.0)
+      ownerUnit.subMana(manaCost)
+    if (ownerUnit.getMana() <= 0.0)
+      stopSprinting()
+      exhaust()
+    m_lastPos = unitPos
+
+  // --------------------------------------------------------------------------
+  protected function onSprintSkillLeveled()
+    let sprintAbilityLevel = getOwnerUnit().getAbilityLevel(TlsAbilityIds.Hero.sprint)
+    sprintLevel.setBase(sprintAbilityLevel)
+
+  // --------------------------------------------------------------------------
+  private function updateState()
+    let sprintLevelVal = sprintLevel.getIntValue()
+    
+    exhaustLevel.setBase(sprintLevelVal)
+    manaCostPerMeter.setBase(getSprintManaCostPerMeter(sprintLevelVal))
+    movementSpeedFactor.setBase(getSprintMovementSpeedFactor(sprintLevelVal))
+    
+    let ownerUnit = getOwnerUnit()
+
+    if (sprintLevelVal == 0)
+      ownerUnit.removeAbility(SPRINT_ON_ABIL_ID)
+      ownerUnit.removeAbility(SPRINT_OFF_ABIL_ID)
+      if (m_isSprinting)
+        stopSprinting()
+      return
+
+    if (m_isSprinting)
+    //{
+      ownerUnit.removeAbility(SPRINT_ON_ABIL_ID)
+      ownerUnit.addAbility(SPRINT_OFF_ABIL_ID)
+
+      ownerUnit.addAbility(SPRINT_BUFF.abilId)
+      ownerUnit.setMoveSpeed(clamp(ownerUnit.getDefaultMovespeed() * (1.0 + movementSpeedFactor.getValue()), 1, 522))
+    //}
+    else
+    //{
+      ownerUnit.removeAbility(SPRINT_OFF_ABIL_ID)
+      ownerUnit.addAbility(SPRINT_ON_ABIL_ID)
+      ownerUnit.setAbilityLevel(SPRINT_ON_ABIL_ID, sprintLevelVal)
+
+      ownerUnit.removeAbility(SPRINT_BUFF.abilId)
+      ownerUnit.removeAbility(SPRINT_BUFF.buffId)
+      ownerUnit.setMoveSpeed(ownerUnit.getDefaultMovespeed())
+    //}
+
+// ============================================================================
+public function IUnitMetadata.getSprintComponent() returns SprintComponent
+  return this.getComponent(SprintComponent.typeId) castTo SprintComponent
+
+// ============================================================================
+public function IUnitMetadata.getOrAddSprintComponent() returns SprintComponent
+  var component = this.getSprintComponent()
+  if (component == null)
+    component = this.addComponent(new SprintComponent(this)) castTo SprintComponent
+  return component
+
+// ============================================================================
+public function unit.getSprintComponent() returns SprintComponent
+  let metadata = this.getMetadata()
+  return metadata != null ? metadata.getSprintComponent() : null
+
+// ============================================================================
+public function unit.getOrAddSprintComponent() returns SprintComponent
+  let metadata = this.getMetadata()
+  return metadata != null ? metadata.getOrAddSprintComponent() : null
+
+// ============================================================================
+function onPlayerHeroSkill()
+  let learnedSkill = GetLearnedSkill()
+  if (learnedSkill != TlsAbilityIds.Hero.sprint)
+    return
+
+  let learningUnit = GetLearningUnit()
+  let comp = learningUnit.getSprintComponent()
+  if (comp == null)
+    return
+
+  comp.onSprintSkillLeveled()
+
+// ============================================================================
+init
+  
+  EventListener.onCast(SPRINT_ON_ABIL_ID) (unit caster) ->
+    let comp = caster.getSprintComponent()
+    if (comp != null and comp.getEnabled())
+      comp.startSprinting()
+    
+  EventListener.onCast(SPRINT_OFF_ABIL_ID) (unit caster) ->
+    let comp = caster.getSprintComponent()
+    if (comp != null and comp.getEnabled())
+      comp.stopSprinting()
+    
+  registerPlayerUnitEvent(EVENT_PLAYER_HERO_SKILL, function onPlayerHeroSkill)

@@ -7,8 +7,9 @@ import TlsUnitIds
 import DialogBox
 import HashMap
 import HumanPlayerComponent
+import PlayerSaveData
 
-GameSetup g_GameSetup = new GameSetup()
+public GameSetup g_GameSetup = new GameSetup()
 trigger g_buttonPressedTrigger
 
 dialog g_heroSelectionDialog
@@ -23,7 +24,6 @@ public class GameSetup
   private timer m_timer
   private timerdialog m_timerDialog
   private int m_numPlayersReady
-  private IterableMap<player, DialogBox> m_heroSelectionDialogBoxes = new IterableMap<player, DialogBox>()
   private IterableMap<player, DialogBox> m_heroDifficultyDialogBoxes = new IterableMap<player, DialogBox>()
 
   // --------------------------------------------------------------------------
@@ -35,12 +35,6 @@ public class GameSetup
     if (m_timerDialog != null)
       m_timerDialog.destr()
       m_timerDialog = null
-
-    if (m_heroSelectionDialogBoxes != null)
-      for key in m_heroSelectionDialogBoxes
-        destroy m_heroSelectionDialogBoxes.get(key)
-      destroy m_heroSelectionDialogBoxes
-      m_heroSelectionDialogBoxes = null
 
     if (m_heroDifficultyDialogBoxes != null)
       for key in m_heroDifficultyDialogBoxes
@@ -58,18 +52,7 @@ public class GameSetup
     m_timerDialog.display(true)
 
     for _player in g_PlayingHumanPlayers
-      showHeroSelectionDialogToPlayer(_player)
-
-  // --------------------------------------------------------------------------
-  private function showHeroSelectionDialogToPlayer(player _player)
-    let dialogBox = new DialogBox("Choose Your Hero")
-    ..addButton("Unspecified", () -> onPlayerHeroChosen(_player, TlsUnitIds.heroUnspecified))
-    ..addButton("Defense", () -> onPlayerHeroChosen(_player, TlsUnitIds.heroDefense))
-    ..addButton("Military", () -> onPlayerHeroChosen(_player, TlsUnitIds.heroMilitary))
-    ..addButton("Engineering", () -> onPlayerHeroChosen(_player, TlsUnitIds.heroEngineering))
-    ..addButton("Scouting", () -> onPlayerHeroChosen(_player, TlsUnitIds.heroScout))
-    ..display(_player, true)
-    m_heroSelectionDialogBoxes.put(_player, dialogBox)
+      showDifficultySelectionDialogToPlayer(_player)
 
   // --------------------------------------------------------------------------
   private function showDifficultySelectionDialogToPlayer(player _player)
@@ -89,19 +72,6 @@ public class GameSetup
   // --------------------------------------------------------------------------
   private function onTimerExpired()
     done()
-
-  // --------------------------------------------------------------------------
-  private function onPlayerHeroChosen(player _player, int heroTypeId)
-    if (getHasTimerExpired())
-      return
-
-    let metadata = _player.getHumanPlayerComponent()
-    metadata.setHeroTypeId(heroTypeId)
-
-    destroy m_heroSelectionDialogBoxes.get(_player)
-    m_heroSelectionDialogBoxes.remove(_player)
-
-    showDifficultySelectionDialogToPlayer(_player)
 
   // --------------------------------------------------------------------------
   private function onPlayerDifficultyChosen(player _player, real difficulty)
@@ -133,15 +103,10 @@ public class GameSetup
     //{
       let metadata = _player.getHumanPlayerComponentRequired()
       if (metadata.getHeroTypeId() == 0)
-        metadata.setHeroTypeId(TlsUnitIds.heroUnspecified)
+        metadata.setHeroTypeId(TlsUnitIds.heroDefault)
 
       if (metadata.getDifficulty() == 0)
         metadata.setDifficulty(1)
-
-      // Close the dialog for any players still looking at it
-      if (m_heroSelectionDialogBoxes.has(_player))
-        destroy m_heroSelectionDialogBoxes.get(_player)
-        m_heroSelectionDialogBoxes.remove(_player)
 
       // Close the dialog for any players still looking at it
       if (m_heroDifficultyDialogBoxes.has(_player))
@@ -155,4 +120,8 @@ public class GameSetup
 // ============================================================================
 init
 
-  doAfter(1.0, () -> g_GameSetup.start())
+  PlayerSaveData.onLoadComplete().register() -> 
+    g_GameSetup.start()
+
+  doAfter(1.0) () ->
+    PlayerSaveData.load()
