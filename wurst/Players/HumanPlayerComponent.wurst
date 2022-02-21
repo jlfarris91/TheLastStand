@@ -13,6 +13,10 @@ import DefenseUpgrades
 import PlayerExtensions
 import TlsUnitDefinition
 import FX
+import PlayerSaveData
+import Math
+import Observable
+import ClosureTimers
 
 // ============================================================================
 public class HumanPlayerComponent extends PlayerComponent
@@ -24,12 +28,19 @@ public class HumanPlayerComponent extends PlayerComponent
   private bool m_canPathToHeadquartersOrHero
   private real m_difficulty
   private real array[MAX_ELITE_TIER] m_tierChances
+  private real m_cameraDistance = CAMERA_DISTANCE_DEFAULT
+
+  use Observable
 
   SmartValue lumberRefundPerc01 = new SmartValue()
   SmartValue spikeStunChance01 = new SmartValue()
   SmartValue spikeStunDuration = new SmartValue()
   SmartValue scoutTowerMaxTargets = new SmartValue()
   SmartValue scoutTowerMarkedTargetDamageScalar01 = new SmartValue()
+
+  // --------------------------------------------------------------------------
+  public static class Properties
+    static constant string cameraDistance = "cameraDistance"
 
   // --------------------------------------------------------------------------
   construct(IPlayerMetadata owner)
@@ -162,6 +173,51 @@ public class HumanPlayerComponent extends PlayerComponent
       center += centerContributor.getPos()
     center /= m_campCenterContributors.size().toReal()
     return center
+
+  // --------------------------------------------------------------------------
+  function getCameraDistance() returns real
+    return m_cameraDistance
+
+  // --------------------------------------------------------------------------
+  function setCameraDistance(real value)
+    let clampedValue = clamp(value, CAMERA_DISTANCE_MIN, CAMERA_DISTANCE_MAX)
+    if (m_cameraDistance != clampedValue)
+      m_cameraDistance = clampedValue
+      updateCamera()
+      raisePropertyChangedEvent(Properties.cameraDistance)
+
+  // --------------------------------------------------------------------------
+  function load()
+    load(PlayerSaveData.getPlayerSaveData(getOwnerPlayer()))
+
+  // --------------------------------------------------------------------------
+  function load(IPlayerSaveData saveData)
+    let saveDataVersioned = saveData castTo PlayerSaveData_v800
+    setCameraDistance(saveDataVersioned.cameraDistance)
+
+  // --------------------------------------------------------------------------
+  function save(IPlayerSaveData saveData)
+    let saveDataVersioned = saveData castTo PlayerSaveData_v800
+    saveDataVersioned.cameraDistance = getCameraDistance()
+
+  // --------------------------------------------------------------------------
+  function save()
+    let ownerPlayer = getOwnerPlayer()
+    let playerSaveData = PlayerSaveData.getPlayerSaveData(ownerPlayer)
+    save(playerSaveData)
+    PlayerSaveData.save(ownerPlayer)
+    
+  // --------------------------------------------------------------------------
+  override protected function onEnabled()
+    super.onEnabled()
+    updateCamera()
+
+  // --------------------------------------------------------------------------
+  private function updateCamera()
+    nullTimer() () ->
+      let ownerPlayer = getOwnerPlayer()
+      SetCameraFieldForPlayer(ownerPlayer, CAMERA_FIELD_TARGET_DISTANCE, m_cameraDistance, CAMERA_DISTANCE_SMOOTH)
+      SetCameraFieldForPlayer(ownerPlayer, CAMERA_FIELD_FARZ, CAMERA_FARZ, 0)
 
   // --------------------------------------------------------------------------
   protected function onResearchFinished(unit _researchingUnit, int research)
