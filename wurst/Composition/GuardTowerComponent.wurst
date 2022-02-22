@@ -12,6 +12,8 @@ import Dice
 import Math
 import UnitExtensions
 import ExperienceComponent
+import FX
+import RegisterEvents
 
 constant int        ACTIVE_SIGHT_ABILITY_ID               = compiletime(ABIL_ID_GEN.next())
 
@@ -180,3 +182,28 @@ public function IUnitMetadata.getOrAddGuardTowerComponent() returns GuardTowerCo
   if (component == null)
     component = this.addComponent(new GuardTowerComponent(this)) castTo GuardTowerComponent
   return component
+
+// ============================================================================
+function onUnitKilled()
+  let killingUnit = GetKillingUnit()
+
+  let metadata = killingUnit.getMetadata()
+  if (metadata == null)
+    return
+
+  let comp = metadata.getGuardTowerComponent()
+  if (comp == null or not comp.getEnabled())
+    return
+
+  let xpComp = metadata.getOrAddExperienceComponent()
+  if (xpComp == null or not xpComp.getEnabled())
+    return
+
+  let xp = xpComp.getXpValueForKilledUnit(GetDyingUnit())
+
+  // Just show the FX, the xp will be given to the operator elsewhere since it is the XP target of the tower
+  FX.createGainedXPTag(killingUnit.getPos(), xp, killingUnit.getOwner())
+  
+// ============================================================================
+init
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_DEATH, function onUnitKilled)
