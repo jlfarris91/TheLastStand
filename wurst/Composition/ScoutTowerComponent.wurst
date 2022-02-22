@@ -28,6 +28,8 @@ import RealExtensions
 import DefenseUpgrades
 import SmartValue
 import LinkedList
+import ExperienceComponent
+import FX
 
 constant rangeInt   SCOUT_TOWER_SIGHT_RANGE                     = rangeInt(800, 1800)
 constant real       SCOUT_TOWER_SIGHT_RANGE_PER_LEVEL           = SCOUT_TOWER_SIGHT_RANGE.getLength() / 10.0
@@ -170,6 +172,18 @@ public class ScoutTowerComponent extends RealtimeUnitComponent
     target.addAbility(MARKED_TARGET_BUFF.abilId)
 
   // --------------------------------------------------------------------------
+  protected function onMarkedTargetKilled(unit target)
+
+    onMarkedTargetLost(target, true)
+
+    // Give the operator experience for the kill as well
+    let ownerUnit = getOwnerUnit()
+    let xpComp = getOwner().getOrAddExperienceComponent()
+    let xp = xpComp.getXpValueForKilledUnit(target)
+    xpComp.giveOwnerUnitXp(xp, true)
+    FX.createGainedExpTag(ownerUnit.getPos(), xp, ownerUnit.getOwner())
+
+  // --------------------------------------------------------------------------
   protected function onMarkedTargetLost(unit target, bool tryFindNextTarget)
     if (not m_markedTargets.has(target))
       return
@@ -260,11 +274,18 @@ public class ScoutTowerComponent extends RealtimeUnitComponent
     
   // --------------------------------------------------------------------------
   private function onWorkerEntered()
+
+    let workstationComponent = getOwner().getOrAddWorkstationComponent()
+    getOwnerUnit().setXpTarget(workstationComponent.getLoadedUnitAt(0))
+
     if (getNumberOfWorkers() == 1)
       activate()
 
   // --------------------------------------------------------------------------
   private function onWorkedExited()
+
+    getOwnerUnit().clearXpTarget()
+
     if (getNumberOfWorkers() == 0)
       deactivate()
 
@@ -364,7 +385,7 @@ function onUnitKilled()
   if (scoutTowerUnit == null)
     error("Scout Tower unit is null")
   let comp = scoutTowerUnit.getMetadata().getScoutTowerComponent()
-  comp.onMarkedTargetLost(dyingUnit, true)
+  comp.onMarkedTargetKilled(dyingUnit)
 
 // ============================================================================
 function filterUnitIsScoutTower() returns bool

@@ -1,4 +1,4 @@
-package XpReceiverComponent
+package ExperienceComponent
 import UnitComponent
 import RegisterEvents
 import Elites
@@ -8,6 +8,7 @@ import Math
 import GroupUtils
 import UnitExtensions
 import ErrorHandling
+import SmartValue
 
 constant real DEFAULT_AOE_XP_RANGE = 320.0
 HashMap<unit, unit> g_xpSourceToTargetMap = new HashMap<unit, unit>()
@@ -22,30 +23,16 @@ unit array[g_giveXpUnitStackMaxDepth] g_giveXpUnitStack
 int g_giveXpUnitStackCount
 
 // ============================================================================
-public class XpReceiverComponent extends UnitComponent
-  private int m_expPerKill = 4
-  private int m_expPerEliteKill = 10
+public class ExperienceComponent extends UnitComponent
   private real m_aoeXpPercent01 = 0.0
+
+  SmartValue expPerKill = new SmartValue(4)
+  SmartValue expPerEliteKill = new SmartValue(10)
+  SmartValue expPerBossKill = new SmartValue(25)
 
   // --------------------------------------------------------------------------
   construct(IUnitMetadata owner)
     super(owner)
-
-  // --------------------------------------------------------------------------
-  function getExpPerKill() returns int
-    return m_expPerKill
-
-  // --------------------------------------------------------------------------
-  function setExpPerKill(int exp)
-    m_expPerKill = exp
-
-  // --------------------------------------------------------------------------
-  function getExpPerEliteKill() returns int
-    return m_expPerEliteKill
-
-  // --------------------------------------------------------------------------
-  function setExpPerEliteKill(int exp)
-    m_expPerEliteKill = exp
 
   // --------------------------------------------------------------------------
   function getGiveXpAreaPercent01() returns real
@@ -54,10 +41,6 @@ public class XpReceiverComponent extends UnitComponent
   // --------------------------------------------------------------------------
   function setGiveXpAreaPercent01(real percent)
     m_aoeXpPercent01 = percent
-
-  // --------------------------------------------------------------------------
-  function scaleXp(int xp) returns int
-    return xp
 
   // --------------------------------------------------------------------------
   function giveOwnerUnitXp(int xp, bool showEyeCandy) returns bool
@@ -72,21 +55,20 @@ public class XpReceiverComponent extends UnitComponent
     pushGiveXpStackUnit(ownerUnit)
     //log("giveOwnerUnitXp", "pushed unit onto stack : " + g_giveXpUnitStackCount.toString() +"/"+g_giveXpUnitStackMaxDepth.toString())
   
-    let adjustedXp = scaleXp(xp)
-    var selfXp = adjustedXp
+    var selfXp = xp
 
     // Spread the love to nearby heroes
     if (m_aoeXpPercent01 > 0.0)
-      let aoeXp = (adjustedXp.toReal() * clamp01(m_aoeXpPercent01)).floor()
+      let aoeXp = (xp.toReal() * clamp01(m_aoeXpPercent01)).floor()
       //log("giveOwnerUnitXp", "aoe xp to give : " + aoeXp.toString())
       if (aoeXp > 0 and giveAoeXp(aoeXp, showEyeCandy))
-        selfXp = adjustedXp - aoeXp
+        selfXp = xp - aoeXp
       //log("giveOwnerUnitXp", "remaining self xp : " + selfXp.toString())
     
     // Give the remaining amount to this unit
     if (selfXp > 0 and ownerUnit.isHero())
       //log("giveOwnerUnitXp", "self xp > 0 : " + selfXp.toString())
-      ownerUnit.addXp(adjustedXp, showEyeCandy)
+      ownerUnit.addXp(selfXp, showEyeCandy)
 
     popGiveXpStackUnit()
     //log("giveOwnerUnitXp", "popped unit from stack : " + g_giveXpUnitStackCount.toString() +"/"+g_giveXpUnitStackMaxDepth.toString())
@@ -101,10 +83,12 @@ public class XpReceiverComponent extends UnitComponent
       if (comp != null)
         return comp.getExpValue()
 
+    if (killedUnit.isBoss())
+      return expPerBossKill.getIntValue()
     if (killedUnit.isElite())
-      return getExpPerEliteKill()
+      return expPerEliteKill.getIntValue()
     else
-      return getExpPerKill()
+      return expPerKill.getIntValue()
 
   // --------------------------------------------------------------------------
   private function giveAoeXp(int xp, bool showEyeCandy) returns bool
@@ -157,26 +141,26 @@ public class XpReceiverComponent extends UnitComponent
   //   Log.info("XpReceiverComponent", funcName, ownerUnit.getName() + ":" + ownerUnit.getHandleId().toString(), message)
 
 // ============================================================================
-public function setXpSource(unit source, unit target)
-  g_xpSourceToTargetMap.put(source, target)
+public function unit.setXpTarget(unit target)
+  g_xpSourceToTargetMap.put(this, target)
 
 // ============================================================================
-public function clearXpSource(unit source)
-  g_xpSourceToTargetMap.remove(source)
+public function unit.clearXpTarget()
+  g_xpSourceToTargetMap.remove(this)
 
 // ============================================================================
-public function getXpTarget(unit source) returns unit
-  return g_xpSourceToTargetMap.get(source)
+public function unit.getXpTarget() returns unit
+  return g_xpSourceToTargetMap.get(this)
 
 // ============================================================================
-public function IUnitMetadata.getXpReceiverComponent() returns XpReceiverComponent
-  return this.getComponent(XpReceiverComponent.typeId) castTo XpReceiverComponent
+public function IUnitMetadata.getExperienceComponent() returns ExperienceComponent
+  return this.getComponent(ExperienceComponent.typeId) castTo ExperienceComponent
 
 // ============================================================================
-public function IUnitMetadata.getOrAddXpReceiverComponent() returns XpReceiverComponent
-  var component = this.getXpReceiverComponent()
+public function IUnitMetadata.getOrAddExperienceComponent() returns ExperienceComponent
+  var component = this.getExperienceComponent()
   if (component == null)
-    component = this.addComponent(new XpReceiverComponent(this)) castTo XpReceiverComponent
+    component = this.addComponent(new ExperienceComponent(this)) castTo ExperienceComponent
   return component
 
 // ============================================================================
@@ -188,29 +172,32 @@ function onUnitKilled()
   if (not dyingUnit.isEnemyOf(killingUnit))
     return
 
-  var xpRecipient = getXpTarget(killingUnit)
-  if (xpRecipient == null)
-    xpRecipient = killingUnit
-
-  let metadata = xpRecipient.getMetadata()
+  let metadata = killingUnit.getMetadata()
   if (metadata == null)
     return
 
-  let gainXpComp = metadata.getXpReceiverComponent()
+  let gainXpComp = metadata.getExperienceComponent()
   if (gainXpComp == null or not gainXpComp.getEnabled())
     return
 
-  xpRecipient.addUnitAdjustedXp(gainXpComp.getXpValueForKilledUnit(dyingUnit), true)
+  killingUnit.addUnitAdjustedXp(gainXpComp.getXpValueForKilledUnit(dyingUnit), true)
 
 // ============================================================================
 public function unit.addUnitAdjustedXp(int xp, bool showEyeCandy) returns bool
+
+  // If this unit has an XP target then we give the target unit the xp instead
+  var xpRecipient = this.getXpTarget()
+  if (xpRecipient == null)
+    xpRecipient = this
+
   // If the unit has an xp receiver component let it handle adding the xp
-  let metadata = this.getMetadataRequired()
-  let comp = metadata.getXpReceiverComponent()
-  if (comp != null)
+  let metadata = xpRecipient.getMetadataRequired()
+  let comp = metadata.getExperienceComponent()
+  if (comp != null and comp.getEnabled())
     return comp.giveOwnerUnitXp(xp, showEyeCandy)
+
   // This unit does not have the xp receiver component so just add xp regularly
-  this.addXp(xp, showEyeCandy)
+  xpRecipient.addXp(xp, showEyeCandy)
   return true
 
 // ============================================================================

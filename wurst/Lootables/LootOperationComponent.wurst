@@ -17,6 +17,7 @@ import LootableTypes
 import RegisterEvents
 import ProgressBar
 import Math
+import Ability_Search
 
 constant int PROGRESS_BAR_LENGTH = 20
 constant colorA PROGRESS_BAR_FOREGROUND = colorA(0, 170, 0, 255)
@@ -258,10 +259,12 @@ function onSpellChannel()
     return
 
   let scaledSearchDuration = getUnitSearchDuration(lootingUnit, lootable.getSearchDuration())
-  if (canUnitSearchForDuration(lootingUnit, scaledSearchDuration) == false)
+  let manaRemainingAfterSearch = calculateManaRemainingAfterLootOperation(lootingUnit, scaledSearchDuration)
+  if (manaRemainingAfterSearch <= 0)
     lootingUnit.issueImmediateOrderById(Orders.stop)
     lootingUnit.resetAbilityCooldown(TlsAbilityIds.search)
-    displayMessageToPlayer(lootingUnit.getOwner(), "Failed To Search".colorize(Colors.red) + " You do not have enough mana to loot this structure.")
+    let manaNeeded = (lootingUnit.getMana() + manaRemainingAfterSearch.abs()).floor()
+    displayMessageToPlayer(lootingUnit.getOwner(), "Failed To Search".colorize(Colors.red) + " You need {0} mana to loot this structure.".format(manaNeeded.toString()))
     return
 
   let lootOperation = lootableMetadata.getLootOperationComponent()
@@ -293,7 +296,13 @@ function onUnitIssuedUnitOrder()
   // Stop and issue a search order instead
   if (issuedOrder == Orders.smart and targetUnit.isLootable())
     // Log.info("ordered to search instead")
-    orderedUnit.issueTargetOrderById(ABILITY_SEARCH_ORDER, targetUnit)
+    if (not orderedUnit.issueTargetOrder(ABILITY_SEARCH_ORDER, targetUnit))
+      Log.error("Could not issue search order")
+    return
+
+  if (issuedOrder == OrderId(ABILITY_SEARCH_ORDER_HEROACTION) and targetUnit.isLootable())
+    if (not orderedUnit.issueTargetOrder(ABILITY_SEARCH_ORDER, targetUnit))
+      Log.error("Could not issue search order")
     return
 
   let lootingOperation = g_looterToOperationMap.get(orderedUnit) 
@@ -303,7 +312,7 @@ function onUnitIssuedUnitOrder()
 
   // If the order issued was search and its the same target lootable dont cancel the operation here.
   // Instead, we'll resume the loot operation as if nothing happened.
-  if (issuedOrder == ABILITY_SEARCH_ORDER and lootingOperation.getOwnerUnit() == targetUnit)
+  if (issuedOrder == OrderId(ABILITY_SEARCH_ORDER) and lootingOperation.getOwnerUnit() == targetUnit)
     // Log.info("ordered to search same lootable")
     return
 
