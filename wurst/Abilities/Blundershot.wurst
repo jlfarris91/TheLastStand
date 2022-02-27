@@ -1,22 +1,18 @@
 package Blundershot
 import ChannelAbilityPreset
-import UnitIds
 import Math
 import RealExtensions
 import UnitComponent
 import SmartValue
 import DamageEvent
-import ChatCommands
-import LinkedList
-import Handle
-import StringBuilder
 import Range
-import AbilitySphere
 import Action
 import Func
 import Icons
+import HeroAbilities
+import TlsAbilityIds
+import ArcProjectile
 
-constant int ABIL_MAX_LEVEL_COUNT = 3
 constant rangeReal ABIL_DAMAGE_DISTANCE_SCALE = rangeReal(1.0, 0.5)
 
 // ============================================================================
@@ -24,7 +20,7 @@ class Blundershot
 
   // --------------------------------------------------------------------------
   static function getDamageScalar01(int effectiveAbilityLevel) returns real
-    return lerp(10.0, 40.0, parameterize(1, ABIL_MAX_LEVEL_COUNT, effectiveAbilityLevel))
+    return lerp(10.0, 40.0, parameterize(1, 3, effectiveAbilityLevel))
 
   // --------------------------------------------------------------------------
   static function getTooltipNormal(int effectiveAbilityLevel, int learnedAbilityLevel) returns string
@@ -43,7 +39,7 @@ public class BlundershotComponent extends HeroAbilityComponent
 
   // --------------------------------------------------------------------------
   construct (IUnitMetadata owner)
-    super(owner, TlsAbilityIds.blundershot, TlsAbilityIds.blundershot_learn)
+    super(owner, TlsAbilityIds.Hero.blundershot, TlsAbilityIds.Hero.blundershot_learn)
 
   // --------------------------------------------------------------------------
   override protected function updateAbilityState()
@@ -66,19 +62,19 @@ public class BlundershotComponent extends HeroAbilityComponent
     let ownerUnit = getOwnerUnit()
     let ownerPlayer = ownerUnit.getOwner()
 
-    let distance = ownerUnit.getAbility(TlsAbilityIds.blundershot).getField(ABILITY_RLF_CAST_RANGE, ownerUnit.getAbilityLevel(TlsAbilityIds.blundershot))
+    let distance = ownerUnit.getAbility(TlsAbilityIds.Hero.blundershot).getField(ABILITY_RLF_CAST_RANGE, ownerUnit.getAbilityLevel(TlsAbilityIds.Hero.blundershot))
 
     let startPos = ownerUnit.getPos()
     let endPos = startPos + (target.getPos() - startPos).norm() * distance
     let baseDamage = ownerUnit.getBaseDamage(0)
     let finalDamage = baseDamage * damageScale01.getValue()
 
-    Func2<AbilitySphere, unit, bool> unitFilter = (as, u) ->
-      return u.isAlive() and u.getFlyHeight() == 0.0 and u != ownerUnit// and u.isEnemyOf(ownerPlayer)
+    Func2<ArcProjectile, unit, bool> unitFilter = (as, u) ->
+      return u.isAlive() and u.getFlyHeight() == 0.0 and u != ownerUnit and u.isEnemyOf(ownerPlayer)
 
-    Action2<AbilitySphere, unit> callback = (as, u) ->
+    Action2<ArcProjectile, unit> callback = (as, u) ->
       DamageEvent.setNextDamageFromCode()
-      DamageEvent.setNextDamageId(TlsAbilityIds.blundershot)
+      DamageEvent.setNextDamageId(TlsAbilityIds.Hero.blundershot)
       DamageEvent.setNextDamageElement(DAMAGE_ELEMENT_ATTACK)
       let scale = ABIL_DAMAGE_DISTANCE_SCALE.lerp(parameterize(startPos, endPos, u.getPos()))
       ownerUnit.damageTarget(u, finalDamage * scale, true, true, ATTACK_TYPE_CHAOS)
@@ -86,7 +82,7 @@ public class BlundershotComponent extends HeroAbilityComponent
     let fx = addEffect("Abilities\\Spells\\NightElf\\FanOfKnives\\FanOfKnivesMissile.mdl", startPos)
     ..setOrientation(startPos.angleTo(endPos).radians, 0.0, 0.0)
 
-    new AbilitySphere(ownerUnit, fx, startPos, endPos, rangeReal(30.0, 100.0), 1000, 0.05, unitFilter, callback)
+    new ArcProjectile(ownerUnit, fx, startPos, endPos, 0.3.fromRad(), 1000, 0.05, unitFilter, callback)
 
 // ============================================================================
 public function IUnitMetadata.getBlundershotComponent() returns BlundershotComponent
@@ -110,63 +106,9 @@ public function unit.getOrAddBlundershotComponent() returns BlundershotComponent
   return metadata != null ? metadata.getOrAddBlundershotComponent() : null
 
 // ============================================================================
-function addAffectSmartValue()
-  let command = getChatCommand()
-  let valueName = command.getArgument(0).getString()
-  let affectType = command.getArgument(1).getString()
-  let value = command.getArgument(2).getReal()
-  let durationArg = command.getArgument(3)
-
-  var duration = 0.0
-  if (durationArg != null)
-    duration = durationArg.getReal()
-
-  let smartValues = new LinkedList<SmartValue>()
-
-  let selectedUnits = getWorkingGroupUnits(getChatCommandPlayer())
-
-  for u in selectedUnits
-    let comp = u.getBlundershotComponent()
-    if (comp != null)
-      if (valueName == "level")
-        smartValues.add(comp.abilityLevel)
-      else if (valueName == "damage")
-        smartValues.add(comp.damageScale01)
-
-  let affectorIds = new LinkedList<_handle>()
-
-  for smartValue in smartValues
-    if (affectType == "base")
-      affectorIds.add(smartValue.setBase(value, duration))
-    if (affectType == "relative" or affectType == "scale")
-      affectorIds.add(smartValue.scale(value, duration))
-    if (affectType == "absolute" or affectType == "add")
-      affectorIds.add(smartValue.add(value, duration))
-    if (affectType == "sub" or affectType == "subtract")
-      affectorIds.add(smartValue.subtract(value, duration))
-
-  if (affectorIds.isEmpty() == false)
-    let sb = new StringBuilder()
-    for s in smartValues
-      sb.append(s.getValue().toString() + ", ")
-    // Log.info("Values: " + sb.toStringAndDestroy())
-
-  destroy smartValues
-  destroy affectorIds
-
-// ============================================================================
-function clearSmartValueAffects()
-  let selectedUnits = getWorkingGroupUnits(getChatCommandPlayer())
-  for u in selectedUnits
-    let comp = u.getBlundershotComponent()
-    if (comp != null)
-      comp.abilityLevel.clearAffectors()
-      comp.damageScale01.clearAffectors()
-
-// ============================================================================
 @compiletime function createObjects()
 
-  new ChannelAbilityPreset(TlsAbilityIds.blundershot, 10, true)
+  new ChannelAbilityPreset(TlsAbilityIds.Hero.blundershot, 10, true)
     ..setupHeroAbilityGroup(HeroAbilityGroup.Q)
     ..presetTargetTypes(Targettype.UNIT)
     ..presetOption(Option.VISIBLE, true)
@@ -180,7 +122,7 @@ function clearSmartValueAffects()
     ..setAnimationNames("spell,attack,throw")
     ..setIconNormal(Icons.bTNHumanMissileUpTwo)
 
-  new HeroLearnAbilityDefinition(TlsAbilityIds.blundershot_learn, 3)
+  new HeroLearnAbilityDefinition(TlsAbilityIds.Hero.blundershot_learn, 3)
     ..setupHeroAbilityGroup(HeroAbilityGroup.Q)
     ..setName("Blundershot")
     ..setTooltipLearn("Learn [Blundershot |cFFFFCC00 Level %d|r]")
@@ -189,35 +131,3 @@ function clearSmartValueAffects()
       Blundershot.getDamageScalar01(2).toPercentageString01(),
       Blundershot.getDamageScalar01(3).toPercentageString01()))
     ..setIconResearch(Icons.bTNHumanMissileUpTwo)
-
-  new HeroDefinition(UNIT_ID, UnitIds.rifleman)
-    ..setHeroAbilities(commaList(TlsAbilityIds.blundershot_learn))
-
-// ============================================================================
-init
-
-  registerUnitMetadataFactory() (IUnitMetadata metadata) ->
-    if (metadata.getUnit().getTypeId() == UNIT_ID)
-      metadata.addComponent(new BlundershotComponent(metadata))
-    return false
-
-  createUnit(Player(0), UNIT_ID, ZERO2, angle(0))
-
-  createUnit(Player(0), UnitIds.footman, vec2(0, -100), angle(0))
-  createUnit(Player(0), UnitIds.footman, vec2(0, -100), angle(0))
-  createUnit(Player(0), UnitIds.footman, vec2(0, -100), angle(0))
-  createUnit(Player(0), UnitIds.footman, vec2(0, -100), angle(0))
-  createUnit(Player(0), UnitIds.footman, vec2(0, -100), angle(0))
-  createUnit(Player(0), UnitIds.footman, vec2(0, -100), angle(0))
-  createUnit(Player(0), UnitIds.footman, vec2(0, -100), angle(0))
-  createUnit(Player(0), UnitIds.footman, vec2(0, -100), angle(0))
-  createUnit(Player(0), UnitIds.footman, vec2(0, -100), angle(0))
-  createUnit(Player(0), UnitIds.footman, vec2(0, -100), angle(0))
-
-  g_commandHandler.registerCommandDefinition("addAffect", function addAffectSmartValue)
-    ..addStringArgument("VALUE_NAME", false)
-    ..addStringArgument("AFFECT_TYPE", false)
-    ..addRealArgument("VALUE", false)
-    ..addRealArgument("DURATION", true)
-  g_commandHandler.registerCommandDefinition("clearAffects", function clearSmartValueAffects)
-    
