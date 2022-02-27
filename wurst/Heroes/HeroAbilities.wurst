@@ -3,11 +3,19 @@ import TechAvailabilityGroup
 import HashMap
 import ErrorHandling
 import LinkedList
-import ObjectIds
+import SmartValue
+import ClosureEvents
+import ColorUtility
+import ChannelAbilityPreset
+import UnitComponent
+
+@configurable colorA HERO_ABILITY_COLOR = Colors.gold
+@configurable colorA HERO_ABILITY_OVER_LEVELED_COLOR = Colors.green
 
 TechAvailabilityGroup array[4] g_abilityGroup = [ new TechAvailabilityGroup(), new TechAvailabilityGroup(), new TechAvailabilityGroup(), new TechAvailabilityGroup() ]
 int array[4] g_abilityGroupDefault = [ 0, 0, 0, 0 ]
 HashMap<int, HeroAbilityGroup> g_abilIdToGroup = new HashMap<int, HeroAbilityGroup>()
+HashMap<int, int> g_abilityIdToComponentTypeMap = new HashMap<int, int>()
 
 // ============================================================================
 public enum HeroAbilityGroup
@@ -72,4 +80,185 @@ public class HeroAbilities
       g_abilityGroup[i].disable(_player)
 
 // ============================================================================
+public abstract class HeroAbilityComponent extends UnitComponent
+  private int m_abilityId
+  private int m_abilityLearnId
+
+  SmartValue abilityLevel = new SmartValue()
+
+  // --------------------------------------------------------------------------
+  construct (IUnitMetadata owner, int abilityId, int abilityLearnId)
+    super(owner)
+
+    m_abilityId = abilityId
+    m_abilityLearnId = abilityLearnId
+
+    registerAbilityEvents(abilityId, abilityLearnId)
+
+    abilityLevel.onValueChanged().registerDispatched(this) () ->
+      Log.info("Ability level: " + abilityLevel.getIntValue().toString())
+      updateAbilityState()
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    destroy abilityLevel
+
+  // --------------------------------------------------------------------------
+  function getAbilityLevel() returns int
+    return getOwnerUnit().getAbilityLevel(m_abilityId)
+
+  // --------------------------------------------------------------------------
+  function getEffectiveAbilityLevel() returns int
+    return abilityLevel.getIntValue()
+
+  // --------------------------------------------------------------------------
+  function getLearnedAbilityLevel() returns int
+    return getOwnerUnit().getAbilityLevel(m_abilityLearnId)
+
+  // --------------------------------------------------------------------------
+  override function onEnabled()
+    super.onEnabled()
+    updateAbilityState()
+
+  // --------------------------------------------------------------------------
+  protected function onCast(int _abilityId)
+    skip
+
+  // --------------------------------------------------------------------------
+  protected function onCastTarget(int _abilityId, unit _target)
+    skip
+
+  // --------------------------------------------------------------------------
+  protected function onCastPoint(int _abilityId, vec2 _target)
+    skip
+
+  // --------------------------------------------------------------------------
+  protected function updateAbilityState()
+    let ownerUnit = getOwnerUnit()
+    
+    let learnedAbilityLevel = getLearnedAbilityLevel()
+    let effectiveAbilityLevel = getEffectiveAbilityLevel()
+
+    if (effectiveAbilityLevel == 0)
+      if (ownerUnit.hasAbility(m_abilityId))
+        ownerUnit.removeAbility(m_abilityId)
+    else
+      if (not ownerUnit.hasAbility(m_abilityId))
+        ownerUnit.addAbility(m_abilityId)
+
+      let abil = ownerUnit.getAbility(m_abilityId)
+      if (abil != null)
+        ownerUnit.setAbilityLevel(m_abilityId, effectiveAbilityLevel + 1)
+        ownerUnit.getOwner().setAbilityTooltip(m_abilityId, getTooltipNormal(effectiveAbilityLevel, learnedAbilityLevel), effectiveAbilityLevel - 1)
+        ownerUnit.getOwner().setAbilityExtendedTooltip(m_abilityId, getTooltipNormalExtended(effectiveAbilityLevel, learnedAbilityLevel), effectiveAbilityLevel - 1)
+        ownerUnit.setAbilityLevel(m_abilityId, effectiveAbilityLevel)
+
+  // --------------------------------------------------------------------------
+  protected function onUnitLearnedSkill()
+    abilityLevel.setBase(getOwnerUnit().getAbilityLevel(m_abilityLearnId))
+
+  // --------------------------------------------------------------------------
+  protected abstract function getTooltipNormal(int effectiveAbilityLevel, int learnedAbilityLevel) returns string
+
+  // --------------------------------------------------------------------------
+  protected abstract function getTooltipNormalExtended(int effectiveAbilityLevel, int learnedAbilityLevel) returns string
+
+  // --------------------------------------------------------------------------
+  protected function registerAbilityEvents(vararg int abilityIds)
+    for abilityId in abilityIds
+      if (not g_abilityIdToComponentTypeMap.has(abilityId))
+        g_abilityIdToComponentTypeMap.put(abilityId, this.typeId)
+        EventListener.onPointCast(abilityId, (unit caster, vec2 target) -> onHeroAbilityCastPoint(caster, target, this.typeId))
+        EventListener.onTargetCast(abilityId, (unit caster, unit target) -> onHeroAbilityCastTarget(caster, target, this.typeId))
+        EventListener.onCast(abilityId, (unit caster) -> onHeroAbilityCast(caster, this.typeId))
+
+// ============================================================================
+function onUnitLearnedSkill()
+  let learnedSkill = GetLearnedSkill()
+
+  if (not g_abilityIdToComponentTypeMap.has(learnedSkill))
+    return
+
+  let componentTypeId = g_abilityIdToComponentTypeMap.get(learnedSkill)
+
+  let learningUnit = GetLearningUnit()
+  let comp = learningUnit.getComponent(componentTypeId) castTo HeroAbilityComponent
+  if (comp == null or not comp.getEnabled())
+    return
+
+  comp.onUnitLearnedSkill()
+
+// ============================================================================
+function onHeroAbilityCastTarget(unit caster, unit target, int componentTypeId)
+  let comp = caster.getComponent(componentTypeId) castTo HeroAbilityComponent
+  if (comp != null and comp.getEnabled())
+    comp.onCastTarget(GetSpellAbilityId(), target)
+
+// ============================================================================
+function onHeroAbilityCastPoint(unit caster, vec2 target, int componentTypeId)
+  let comp = caster.getComponent(componentTypeId) castTo HeroAbilityComponent
+  if (comp != null and comp.getEnabled())
+    comp.onCastPoint(GetSpellAbilityId(), target)
+
+// ============================================================================
+function onHeroAbilityCast(unit caster, int componentTypeId)
+  let comp = caster.getComponent(componentTypeId) castTo HeroAbilityComponent
+  if (comp != null and comp.getEnabled())
+    comp.onCast(GetSpellAbilityId())
+
+// ============================================================================
+public function string.colorizeTooltipForHeroAbility(int effectiveAbilityLevel, int maxLearnedAbilityLevel) returns string
+  return this.colorize(effectiveAbilityLevel > maxLearnedAbilityLevel ? HERO_ABILITY_OVER_LEVELED_COLOR : HERO_ABILITY_COLOR)
+
+// ============================================================================
+public class HeroLearnAbilityDefinition extends ChannelAbilityPreset
+
+  // --------------------------------------------------------------------------
+  construct(int learnAbilityId, int levels)
+    super(learnAbilityId, levels, true)
+    presetOption(Option.VISIBLE, true)
+    setHeroAbility(true)
+    setButtonPositionNormalX(0)
+    setButtonPositionNormalY(-11)
+
+// ============================================================================
+public function AbilityDefinition.setupHeroAbilityGroup(HeroAbilityGroup heroAbilityGroup)
+  switch (heroAbilityGroup)
+    case HeroAbilityGroup.Q
+      this.setButtonPositionNormalX(0)
+      this.setButtonPositionNormalY(2)
+    case HeroAbilityGroup.W
+      this.setButtonPositionNormalX(1)
+      this.setButtonPositionNormalY(2)
+    case HeroAbilityGroup.E
+      this.setButtonPositionNormalX(2)
+      this.setButtonPositionNormalY(2)
+    case HeroAbilityGroup.R
+      this.setButtonPositionNormalX(3)
+      this.setButtonPositionNormalY(2)
+    default
+      error("Invalid argument heroAbilityGroup " + (heroAbilityGroup castTo int).toString())
+
+// ============================================================================
+public function HeroLearnAbilityDefinition.setupHeroAbilityGroup(HeroAbilityGroup heroAbilityGroup)
+  this.setButtonPositionNormalX(0)
+  this.setButtonPositionNormalY(-11)
+  switch (heroAbilityGroup)
+    case HeroAbilityGroup.Q
+      this.setButtonPositionResearchX(0)
+      this.setButtonPositionResearchY(0)
+    case HeroAbilityGroup.W
+      this.setButtonPositionResearchX(1)
+      this.setButtonPositionResearchY(0)
+    case HeroAbilityGroup.E
+      this.setButtonPositionResearchX(2)
+      this.setButtonPositionResearchY(0)
+    case HeroAbilityGroup.R
+      this.setButtonPositionResearchX(3)
+      this.setButtonPositionResearchY(0)
+    default
+      error("Invalid argument heroAbilityGroup " + (heroAbilityGroup castTo int).toString())
+
+// ============================================================================
 init
+  registerPlayerUnitEvent(EVENT_PLAYER_HERO_SKILL, function onUnitLearnedSkill)
