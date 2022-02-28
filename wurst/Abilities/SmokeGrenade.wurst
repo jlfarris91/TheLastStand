@@ -1,0 +1,214 @@
+package SmokeGrenade
+import RealExtensions
+import ChannelAbilityPreset
+import Icons
+import UnitIds
+import UnitIndexer
+import ErrorHandling
+import DummyCaster
+import Math
+import Orders
+import BuffObjEditing
+import HeroAbilities
+import UnitComponent
+import TlsAbilityIds
+
+constant int DUMMY_ID = compiletime(UNIT_ID_GEN.next())
+constant real DUMMY_SPAWN_THRESHOLD = 8.0
+constant real DUMMY_SPAWN_THRESHOLD_SQ = DUMMY_SPAWN_THRESHOLD*DUMMY_SPAWN_THRESHOLD
+public constant int CLOUD_ABIL_ID = compiletime(ABIL_ID_GEN.next())
+constant int CLOUD_BUFF_ID = compiletime(BUFF_ID_GEN.next())
+
+group g_castingSmokeGrenades = CreateGroup()
+
+// ============================================================================
+class SmokeGrenade
+
+  static constant int ABILITY_ID = TlsAbilityIds.Hero.smokeGrenade
+  static constant int ABILITY_LEARN_ID = TlsAbilityIds.Hero.smokeGrenade_learn
+
+  // --------------------------------------------------------------------------
+  static function getChanceToMissPercentage01(int effectiveAbilityLevel) returns real
+    return clamp01(lerp(0.3, 1.0, parameterize(1, 3, effectiveAbilityLevel)))
+
+  // --------------------------------------------------------------------------
+  static function getAttackSpeedModifier(int effectiveAbilityLevel) returns real
+    return lerp(-0.1, -0.3, parameterize(1, 3, effectiveAbilityLevel))
+
+  // --------------------------------------------------------------------------
+  static function getMovementSpeedModifier(int effectiveAbilityLevel) returns real
+    return lerp(-0.1, -0.3, parameterize(1, 3, effectiveAbilityLevel))
+
+  // --------------------------------------------------------------------------
+  static function getTooltipNormal(int effectiveAbilityLevel, int learnedAbilityLevel) returns string
+    return "Smoke Grenade - [{0}]".format("Level {0}".format(
+      effectiveAbilityLevel.toString()).colorizeTooltipForHeroAbility(effectiveAbilityLevel, learnedAbilityLevel))
+
+  // --------------------------------------------------------------------------
+  static function getTooltipNormalExtended(int effectiveAbilityLevel, int learnedAbilityLevel) returns string
+    return "Throws a smoke grenade at a target area causing all enemies within to have a {0} chance to miss attacks and have {1} reduced attack speed for 15 seconds.".format(
+      getChanceToMissPercentage01(effectiveAbilityLevel).toPercentageString01().colorizeTooltipForHeroAbility(effectiveAbilityLevel, learnedAbilityLevel),
+      (-getAttackSpeedModifier(effectiveAbilityLevel)).toPercentageString01().colorizeTooltipForHeroAbility(effectiveAbilityLevel, learnedAbilityLevel))
+
+// ============================================================================
+public class SmokeGrenadeComponent extends HeroAbilityComponent
+  protected vec2 m_lastTargetPoint
+  
+  // --------------------------------------------------------------------------
+  construct(IUnitMetadata owner)
+    super(owner, SmokeGrenade.ABILITY_ID, SmokeGrenade.ABILITY_LEARN_ID)
+
+  // --------------------------------------------------------------------------
+  override protected function onDisabled()
+    super.onDisabled()
+    g_castingSmokeGrenades.removeUnit(getOwnerUnit())
+
+  // --------------------------------------------------------------------------
+  override protected function onCastPoint(int _abilityId, vec2 target)
+    m_lastTargetPoint = target
+    g_castingSmokeGrenades.addUnit(getOwnerUnit())
+
+  // --------------------------------------------------------------------------
+  protected function onMissileLanded(vec2 target)
+    m_lastTargetPoint = ZERO2
+    let ownerUnit = getOwnerUnit()
+    g_castingSmokeGrenades.removeUnit(ownerUnit)
+
+    let caster = new DummyCaster()
+      ..owner(ownerUnit.getOwner())
+      ..origin(target)
+      ..delay(15.0)
+  
+    if (caster.castPoint(CLOUD_ABIL_ID, getEffectiveAbilityLevel(), OrderIds.cloudoffog, target) == null)
+      error("Failed to cast cloud ability")
+
+  // --------------------------------------------------------------------------
+  protected override function getTooltipNormal(int effectiveAbilityLevel, int learnedAbilityLevel) returns string
+    return SmokeGrenade.getTooltipNormal(effectiveAbilityLevel, learnedAbilityLevel)
+    
+  // --------------------------------------------------------------------------
+  protected override function getTooltipNormalExtended(int effectiveAbilityLevel, int learnedAbilityLevel) returns string
+    return SmokeGrenade.getTooltipNormalExtended(effectiveAbilityLevel, learnedAbilityLevel)
+
+// ============================================================================
+public function IUnitMetadata.getSmokeGrenadeComponent() returns SmokeGrenadeComponent
+  return this.getComponent(SmokeGrenadeComponent.typeId) castTo SmokeGrenadeComponent
+
+// ============================================================================
+public function IUnitMetadata.getOrAddSmokeGrenadeComponent() returns SmokeGrenadeComponent
+  var component = this.getSmokeGrenadeComponent()
+  if (component == null)
+    component = this.addComponent(new SmokeGrenadeComponent(this)) castTo SmokeGrenadeComponent
+  return component
+
+// ============================================================================
+public function unit.getSmokeGrenadeComponent() returns SmokeGrenadeComponent
+  let metadata = this.getMetadata()
+  return metadata != null ? metadata.getSmokeGrenadeComponent() : null
+
+// ============================================================================
+public function unit.getOrAddSmokeGrenadeComponent() returns SmokeGrenadeComponent
+  let metadata = this.getMetadata()
+  return metadata != null ? metadata.getOrAddSmokeGrenadeComponent() : null
+
+// ============================================================================
+function onUnitIndexed()
+  let indexingUnit = getIndexingUnit()
+  if (indexingUnit.getTypeId() != DUMMY_ID)
+    return
+
+  let dummyUnitPos = indexingUnit.getPos()
+
+  real closestDistance = REAL_MAX
+  unit closestCaster = null
+    
+  for castingUnit in g_castingSmokeGrenades
+    let comp = castingUnit.getSmokeGrenadeComponent()
+    if (comp != null and comp.getEnabled())
+      let dd = dummyUnitPos.distanceToSq(comp.m_lastTargetPoint)
+      if (dd < closestDistance)
+        closestDistance = dd
+        closestCaster = castingUnit
+  
+  if (closestCaster == null)
+    error("Not sure who smoke grenade dummy unit belongs to")
+
+  closestCaster.getSmokeGrenadeComponent().onMissileLanded(dummyUnitPos)
+
+// ============================================================================
+@compiletime function createObjects()
+
+  new UnitDefinition(DUMMY_ID, UnitIds.wisp)
+    ..setScalingValue(0.01)
+    ..setNormalAbilities(commaList(AbilityIds.invulnerable, AbilityIds.locust))
+    ..setSightRadiusDay(1)
+    ..setSightRadiusNight(1)
+    ..setArtSpecial("")
+    ..setModelFile("dummy.mdl")
+    ..setCollisionSize(0.0)
+    ..setFoodCost(0)
+    ..setFoodProduced(0)
+    ..setAttacksEnabled(0)
+
+  new BuffDefinition(CLOUD_BUFF_ID, 'bclf')
+    ..setName("Smoke Grenade")
+    ..setTooltipNormal(1, "Smoke Grenade")
+    ..setTooltipNormalExtended(1, "This unit is inside of a thick cloud of smoke causing it to miss attacks.")
+  
+  new AbilityDefinitionCloudofFog(CLOUD_ABIL_ID)
+    ..setLevels(10)
+    ..setItemAbility(false)
+    ..presetAreaofEffect(lvl -> 300.0)
+    ..presetAttackSpeedModifier(lvl -> SmokeGrenade.getAttackSpeedModifier(lvl))
+    ..presetAttacksPrevented(lvl -> 0)
+    ..presetChanceToMiss(lvl -> SmokeGrenade.getChanceToMissPercentage01(lvl))
+    ..presetMovementSpeedModifier(lvl -> SmokeGrenade.getMovementSpeedModifier(lvl))
+    ..presetBuffs(lvl -> CLOUD_BUFF_ID.toRawCode())
+    ..presetTargetsAllowed(lvl -> "ground,vulnerable,invulnerable")
+    ..presetDurationHero(lvl -> 15.0)
+    ..presetDurationNormal(lvl -> 15.0)
+    ..presetManaCost(lvl -> 0)
+    ..presetCooldown(lvl -> 0)
+    ..setRequirements("")
+
+  new AbilityDefinitionTinkererSummonFactoryLevel0(SmokeGrenade.ABILITY_ID)
+    ..setLevels(10)
+    ..setupHeroAbilityGroup(HeroAbilityGroup.E)
+    ..setName("Smoke Grenade")
+    ..presetTooltipNormal(lvl -> SmokeGrenade.getTooltipNormal(lvl, lvl))
+    ..presetTooltipNormalExtended(lvl -> SmokeGrenade.getTooltipNormalExtended(lvl, lvl))
+    ..presetCastingTime(lvl -> (5. / 30.) * 1.267)
+    ..presetCastRange(lvl -> 900)
+    ..presetAreaofEffect(lvl -> 300.0)
+    ..presetTargetsAllowed(lvl -> "")
+    ..setAnimationNames("spell,attack,throw")
+    ..setIconNormal(Icons.bTNCloudOfFog)
+    ..setMissileArt("Abilities\\Spells\\Other\\AcidBomb\\BottleMissile.mdl")
+    ..setMissileSpeed(300)
+    ..setMissileArc(0.5)
+    ..presetFactoryUnitID(lvl -> DUMMY_ID.toRawCode())
+    ..presetLeashRange(lvl -> 0.0)
+    ..presetSpawnInterval(lvl -> 0.0)
+    ..presetSpawnUnitDuration(lvl -> 0.0)
+    ..presetSpawnUnitID(lvl -> "")
+    ..presetSpawnUnitOffset(lvl -> 0.0)
+    ..presetBuffs(lvl -> "")
+    ..presetCastRange(lvl -> 900)
+    ..presetManaCost(lvl -> 0)
+    ..presetDurationHero(lvl -> 0.02)
+    ..presetDurationNormal(lvl -> 0.02)
+    ..presetCooldown(lvl -> 30)
+
+  new HeroLearnAbilityDefinition(SmokeGrenade.ABILITY_LEARN_ID, 3)
+    ..setupHeroAbilityGroup(HeroAbilityGroup.E)
+    ..setName("Smoke Grenade")
+    ..setTooltipLearn("Learn [Smoke Grenade |cFFFFCC00 Level %d|r]")
+    ..setTooltipLearnExtended("Throws a smoke grenade at a target area causing all enemies within to miss attacks for 15 seconds.|n|n|cFFFFCC00Level 1|r - {0} chance to miss and attack speed is reduced by {1}|n|cFFFFCC00Level 2|r - {2} chance to miss and attack speed is reduced by {3}|n|cFFFFCC00Level 3|r - {4} chance to miss and attack speed is reduced by {5}".format(
+      SmokeGrenade.getChanceToMissPercentage01(1).toPercentageString01(), (-SmokeGrenade.getAttackSpeedModifier(1)).toPercentageString01(),
+      SmokeGrenade.getChanceToMissPercentage01(2).toPercentageString01(), (-SmokeGrenade.getAttackSpeedModifier(2)).toPercentageString01(),
+      SmokeGrenade.getChanceToMissPercentage01(3).toPercentageString01(), (-SmokeGrenade.getAttackSpeedModifier(3)).toPercentageString01()))
+    ..setIconResearch(Icons.bTNCloudOfFog)
+
+// ============================================================================
+init
+  onUnitIndex(() -> onUnitIndexed())
