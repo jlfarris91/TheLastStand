@@ -9,6 +9,12 @@ import HashMap
 import HumanPlayerComponent
 import PlayerSaveData
 import PlayerSetup
+import IProgress
+import Preload
+import Handle
+import Tasks
+import ProgressBar
+import ColorUtility
 
 public GameSetup g_GameSetup = new GameSetup()
 trigger g_buttonPressedTrigger
@@ -28,6 +34,11 @@ public class GameSetup
   private timerdialog m_timerDialog
   private int m_numPlayersReady
   private IterableMap<player, DialogBox> m_heroDifficultyDialogBoxes = new IterableMap<player, DialogBox>()
+  private _handle m_onPlayerLoadCompleteHandler
+  private _handle m_onLoadCompleteHandler
+  private Progress m_progress
+  private ProgressBar m_progressBarFrame
+  private Task m_preloaderTask
 
   // --------------------------------------------------------------------------
   ondestroy
@@ -46,10 +57,71 @@ public class GameSetup
       m_heroDifficultyDialogBoxes = null
 
   // --------------------------------------------------------------------------
+  function load()
+
+    m_progress = new Progress()
+
+    m_progressBarFrame = new ProgressBar()
+    ..setProgress(m_progress)
+    ..setBarColor(Colors.cornflowerBlue)
+    ..setAbsArea(FRAMEPOINT_CENTER, SCREEN_CENTER, vec2(0.25, 0.025))
+
+    preload()
+
+  // --------------------------------------------------------------------------
+  private function preload()
+
+    m_progress.report(0.0, "Preloading assets...")
+
+    m_preloaderTask = Preload.runPreloader(m_progress)
+    ..onCompleted(task -> nullTimer(() -> loadPlayerSaveData(m_progress)))
+    ..setDestroyOnCompletion(true)
+
+  // --------------------------------------------------------------------------
+  private function loadPlayerSaveData(IProgressReporter progress)
+
+    progress.report(0.0, "Loading player save data...")
+
+    let totalSteps = g_PlayingHumanPlayerCount
+    var steps = 0
+
+    m_onPlayerLoadCompleteHandler = PlayerSaveData.onPlayerLoadComplete().register() (p) ->
+      steps++
+      progress.report(steps / totalSteps.toReal())
+
+    m_onLoadCompleteHandler = PlayerSaveData.onLoadComplete().register() -> 
+      g_GameSetup.loadPlayerSaveDataComplete()
+
+    PlayerSaveData.load()
+
+  // --------------------------------------------------------------------------
+  private function loadPlayerSaveDataComplete()
+
+    PlayerSaveData.onPlayerLoadComplete().unregister(m_onPlayerLoadCompleteHandler)
+    m_onPlayerLoadCompleteHandler = INVALID_HANDLE
+
+    PlayerSaveData.onLoadComplete().unregister(m_onLoadCompleteHandler)
+    m_onLoadCompleteHandler = INVALID_HANDLE
+
+    m_progress.report(1.0, "Done Loading!")
+
+    doAfter(2.0, () -> loadComplete())
+
+  // --------------------------------------------------------------------------
+  private function loadComplete()
+
+    destroy m_progressBarFrame
+    destroy m_progress
+
+    start()
+
+  // --------------------------------------------------------------------------
   function start()
 
     m_timer = getTimer()
-    m_timer.doAfter(30, () -> onTimerExpired())
+    m_timer.doAfter(30) () ->
+      onTimerExpired()
+      m_timer = null
 
     m_timerDialog = CreateTimerDialogBJ(m_timer, "Game starts in... ")
     m_timerDialog.display(true)
@@ -100,8 +172,9 @@ public class GameSetup
     m_timerDialog.destr()
     m_timerDialog = null
 
-    m_timer.release()
-    m_timer = null
+    if (m_timer != null)
+      m_timer.release()
+      m_timer = null
 
     // Assign the default hero to any players who still haven't decided
     for _player in g_PlayingHumanPlayers
@@ -128,8 +201,5 @@ public class GameSetup
 // ============================================================================
 init
 
-  PlayerSaveData.onLoadComplete().register() -> 
-    g_GameSetup.start()
-
   doAfter(1.0) () ->
-    PlayerSaveData.load()
+    g_GameSetup.load()
