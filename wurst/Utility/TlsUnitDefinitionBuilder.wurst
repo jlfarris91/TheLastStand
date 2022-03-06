@@ -1,0 +1,104 @@
+package TlsUnitDefinitionBuilder
+import public TooltipBuilder
+import TlsUnitDefinition
+import HashList
+import ColorUtility
+import HashListExtensions
+import TlsUnitDefinitionExtensions
+import Range
+import BuildingUndeadTarget
+import LinkedList
+import public Classification
+import Action
+
+constant string UNIT_NAME_FORMAT_STRING = "{1} {0}"
+constant string UNIT_TOOLTIP_EX_FORMAT_STRING = "{0}|n|n{1}"
+
+// ============================================================================
+public class TlsUnitDefinitionBuilder
+  private LinkedList<TlsUnitClassification> m_unitClassifications
+  private string m_description
+  private string m_tooltipExtended
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    if (m_unitClassifications != null)
+      destroy m_unitClassifications
+      m_unitClassifications = null
+
+  // --------------------------------------------------------------------------
+  function addUnitClassification(TlsUnitClassification value)
+    if (m_unitClassifications == null)
+      m_unitClassifications = new LinkedList<TlsUnitClassification>()
+    m_unitClassifications.add(value)
+
+  // --------------------------------------------------------------------------
+  function setDescription(string value)
+    m_description = value
+
+  // --------------------------------------------------------------------------
+  function setTooltipExtended(string value)
+    m_tooltipExtended = value
+
+  // --------------------------------------------------------------------------
+  function apply(ITlsUnitDefinition definition, Action1<TooltipBuilder> tooltipBuilder)
+
+    if (tooltipBuilder != null)
+      tooltipBuilder.acquire()
+
+    m_unitClassifications.sortWith() (TlsUnitClassification o1, TlsUnitClassification o2) ->
+      return (o1 castTo int) - (o2 castTo int)
+
+    let symbolString = m_unitClassifications.getUnitClassSymbolsColored()
+    definition.setName(UNIT_NAME_FORMAT_STRING.format(symbolString, definition.getName()))
+
+    let builder = new TooltipBuilder()
+
+    builder.setDescription(m_description)
+    
+    let isBuildingUndeadTarget = definition.isBuildingUndeadTarget()
+
+    let attacksEnabled = definition.getAttacksEnabled()
+    let allTargetsAllowed = new HashList<string>()
+    if (attacksEnabled.bitAnd(0x1) != 0)
+      allTargetsAllowed.addAll(definition.getAttack1Targets())
+    if (attacksEnabled.bitAnd(0x2) != 0)
+      allTargetsAllowed.addAll(definition.getAttack2Targets())
+
+    if (attacksEnabled == 0 or isBuildingUndeadTarget)
+      builder.addItem("Does not attack!".colorize(Colors.red))
+    else if (not allTargetsAllowed.has("Air"))
+      builder.addItem("Attacks ground only!".colorize(Colors.red))
+
+    builder.addItem("Health: ", definition.calculateHealthMaximum(1).toString())
+
+    if (attacksEnabled != 0 and not isBuildingUndeadTarget)
+    //{
+      let attackRange = definition.getAttack1Range()
+      // 150 is an arbitrary minimum distance to be considered "melee"
+      if (definition.getAttack1Range() < 150)
+        builder.addItem("Range: ", "Melee")
+      else
+        builder.addItem("Range: ", attackRange.toString())
+
+      builder.addItem("Damage: ", "{0} ({1})".format(
+        definition.calculateDamageRange(0, 1).toDamageRangeString(),
+        definition.calculateApproximateDPS(0, 1).toApproxDPSString()))
+      
+      builder.addItem("Attack: ", definition.getAttack1AttackType().toString())
+
+      if (not allTargetsAllowed.isEmpty())
+        builder.addItem("Targets: ", allTargetsAllowed.joinBy(", "))
+    //}
+
+    destroy allTargetsAllowed
+    
+    builder.addItem("Armor: ", definition.getArmorType().toString())
+
+    if (tooltipBuilder != null)
+      tooltipBuilder.call(builder)
+      tooltipBuilder.release()
+
+    definition.setTooltipExtended(builder.getTooltipExtended())
+
+    destroy builder

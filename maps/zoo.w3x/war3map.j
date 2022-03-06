@@ -326,13 +326,13 @@ function CreateUnitsForPlayer8 takes nothing returns nothing
     local trigger t
     local real life
 
-    set u=BlzCreateUnitWithSkin(p, 'n00E', - 845.5, 1873.1, 283.663, 'n00E')
-    set u=BlzCreateUnitWithSkin(p, 'n00D', - 750.2, 1872.7, 270.777, 'n00D')
+    set u=BlzCreateUnitWithSkin(p, 'n00E', - 845.5, 1873.1, 90.000, 'n00E')
+    set u=BlzCreateUnitWithSkin(p, 'n00D', - 750.2, 1872.7, 90.000, 'n00D')
     set u=BlzCreateUnitWithSkin(p, 'nmdm', - 1103.7, 2374.9, 271.704, 'nmdm')
     set u=BlzCreateUnitWithSkin(p, 'hphx', - 769.3, 2410.1, 267.997, 'hphx')
     set u=BlzCreateUnitWithSkin(p, 'nndk', - 945.1, 2404.3, 271.235, 'nndk')
     set u=BlzCreateUnitWithSkin(p, 'h00N', - 203.6, - 1810.5, 267.670, 'h00N')
-    set u=BlzCreateUnitWithSkin(p, 'n00F', - 650.2, 1872.7, 257.177, 'n00F')
+    set u=BlzCreateUnitWithSkin(p, 'n00F', - 650.2, 1872.7, 90.000, 'n00F')
 endfunction
 
 //===========================================================================
