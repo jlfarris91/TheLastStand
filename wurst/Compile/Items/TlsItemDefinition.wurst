@@ -6,8 +6,13 @@ import public TlsAbilityIds
 import public MainItemLibrary
 import public TlsObjEditingCommons
 import HashMap
+import public Classification
+import Flags
 import LinkedList
-import Classification
+import StringUtils
+
+constant string ITEM_DESC_FORMAT_STRING = "|cffffcc00Requires|r {0}|n|n{1}"
+constant string ITEM_TOOLTIP_EX_FORMAT_STRING = "|cffffcc00Requires|r {0}|n|n{1}"
 
 HashMap<int, TlsItemDefinition> g_itemIdToDefinitionMap = new HashMap<int, TlsItemDefinition>()
 
@@ -28,7 +33,9 @@ public class TlsItemDefinition extends ItemDefinition
   private int m_goldCost
   private int m_lumberCost
   private string m_iconPath
-  private LinkedList<TlsUnitClassification> m_tlsUnitClassifications
+  private bool m_activelyUsed
+  private int m_unitClassRequirements = 0
+  private LinkedList<int> m_abilities = new LinkedList<int>()
 
   // --------------------------------------------------------------------------
   construct (int newId, int baseId)
@@ -53,9 +60,7 @@ public class TlsItemDefinition extends ItemDefinition
 
   // --------------------------------------------------------------------------
   ondestroy
-    if (m_tlsUnitClassifications != null)
-      destroy m_tlsUnitClassifications
-      m_tlsUnitClassifications = null
+    destroy m_abilities
 
   // --------------------------------------------------------------------------
   function getName() returns string
@@ -94,6 +99,19 @@ public class TlsItemDefinition extends ItemDefinition
     m_tooltipExtended = value
 
   // --------------------------------------------------------------------------
+  override function setAbilities(string value)
+    super.setAbilities(value)
+    m_abilities.clear()
+    let abilRawCodes = value.split(",")
+    for rawCode in abilRawCodes
+      if (rawCode != "")
+        m_abilities.add(rawCode.fromRawCode())
+
+  // --------------------------------------------------------------------------
+  function getAbilities() returns LinkedList<int>
+    return m_abilities
+
+  // --------------------------------------------------------------------------
   function getGoldCost() returns int
     return m_goldCost
 
@@ -129,7 +147,36 @@ public class TlsItemDefinition extends ItemDefinition
     m_iconPath = value
 
   // --------------------------------------------------------------------------
-  function getTlsUnitClassifications() returns LinkedList<TlsUnitClassification>
-    if (m_tlsUnitClassifications == null)
-      m_tlsUnitClassifications = new LinkedList<TlsUnitClassification>()
-    return m_tlsUnitClassifications
+  function getActivelyUsed() returns bool
+    return m_activelyUsed
+
+  // --------------------------------------------------------------------------
+  override function setActivelyUsed(bool value)
+    super.setActivelyUsed(value)
+    m_activelyUsed = value
+
+  // --------------------------------------------------------------------------
+  function getTlsUnitClassRequirements() returns int
+    return m_unitClassRequirements
+
+  // --------------------------------------------------------------------------
+  function addTlsUnitClassifications(vararg TlsUnitClassification values)
+    for c in values
+      m_unitClassRequirements = m_unitClassRequirements.setBit(c castTo int)
+
+  // --------------------------------------------------------------------------
+  function hasTlsUnitClassRequirement(vararg TlsUnitClassification values) returns bool
+    for c in values
+      if (not m_unitClassRequirements.isBitSet(c castTo int))
+        return false
+    return true
+
+// ============================================================================
+public function TlsItemDefinition.build()
+
+  let unitClassRequirements = this.getTlsUnitClassRequirements()
+
+  if (unitClassRequirements != 0)
+    let symbolString = unitClassRequirements.getTlsUnitClassSymbolsColored()
+    this.setDescription(ITEM_DESC_FORMAT_STRING.format(symbolString, this.getDescription()))
+    this.setTooltipExtended(ITEM_TOOLTIP_EX_FORMAT_STRING.format(symbolString, this.getTooltipExtended()))

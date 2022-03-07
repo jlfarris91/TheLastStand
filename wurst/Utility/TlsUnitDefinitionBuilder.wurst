@@ -15,79 +15,63 @@ constant string UNIT_NAME_FORMAT_STRING = "{1} {0}"
 constant string UNIT_TOOLTIP_EX_FORMAT_STRING = "{0}|n|n{1}"
 
 // ============================================================================
-public class TlsUnitDefinitionBuilder
-  private string m_description
-  private string m_tooltipExtended
+public function ITlsUnitDefinition.build(string description, Action1<TooltipBuilder> tooltipBuilder)
 
-  // --------------------------------------------------------------------------
-  function setDescription(string value)
-    m_description = value
+  if (tooltipBuilder != null)
+    tooltipBuilder.acquire()
 
-  // --------------------------------------------------------------------------
-  function setTooltipExtended(string value)
-    m_tooltipExtended = value
+  let unitClass = this.getTlsUnitClass()
 
-  // --------------------------------------------------------------------------
-  function apply(ITlsUnitDefinition definition, Action1<TooltipBuilder> tooltipBuilder)
+  let symbolString = unitClass.getTlsUnitClassSymbolsColored()
+  this.setName(UNIT_NAME_FORMAT_STRING.format(symbolString, this.getName()))
 
-    if (tooltipBuilder != null)
-      tooltipBuilder.acquire()
+  let builder = new TooltipBuilder()
 
-    let tlsUnitClassifications = definition.getTlsUnitClassifications()
+  builder.setDescription(description)
+  
+  let isBuildingUndeadTarget = this.isBuildingUndeadTarget()
 
-    tlsUnitClassifications.sortWith() (TlsUnitClassification o1, TlsUnitClassification o2) ->
-      return (o1 castTo int) - (o2 castTo int)
+  let attacksEnabled = this.getAttacksEnabled()
+  let allTargetsAllowed = new HashList<string>()
+  if (attacksEnabled.bitAnd(0x1) != 0)
+    allTargetsAllowed.addAll(this.getAttack1Targets())
+  if (attacksEnabled.bitAnd(0x2) != 0)
+    allTargetsAllowed.addAll(this.getAttack2Targets())
 
-    let symbolString = tlsUnitClassifications.getUnitClassSymbolsColored()
-    definition.setName(UNIT_NAME_FORMAT_STRING.format(symbolString, definition.getName()))
+  if (attacksEnabled == 0 or isBuildingUndeadTarget)
+    builder.addItem("Does not attack!".colorize(Colors.red))
+  else if (not allTargetsAllowed.has("Air"))
+    builder.addItem("Attacks ground only!".colorize(Colors.red))
 
-    let builder = new TooltipBuilder()
+  builder.addItem("Health: ", this.calculateHealthMaximum(1).toString())
 
-    builder.setDescription(m_description)
+  if (attacksEnabled != 0 and not isBuildingUndeadTarget)
+  //{
+    let attackRange = this.getAttack1Range()
+    // 150 is an arbitrary minimum distance to be considered "melee"
+    if (this.getAttack1Range() < 150)
+      builder.addItem("Range: ", "Melee")
+    else
+      builder.addItem("Range: ", attackRange.toString())
+
+    builder.addItem("Damage: ", "{0} ({1})".format(
+      this.calculateDamageRange(0, 1).toDamageRangeString(),
+      this.calculateApproximateDPS(0, 1).toApproxDPSString()))
     
-    let isBuildingUndeadTarget = definition.isBuildingUndeadTarget()
+    builder.addItem("Attack: ", this.getAttack1AttackType().toString())
 
-    let attacksEnabled = definition.getAttacksEnabled()
-    let allTargetsAllowed = new HashList<string>()
-    if (attacksEnabled.bitAnd(0x1) != 0)
-      allTargetsAllowed.addAll(definition.getAttack1Targets())
-    if (attacksEnabled.bitAnd(0x2) != 0)
-      allTargetsAllowed.addAll(definition.getAttack2Targets())
+    if (not allTargetsAllowed.isEmpty())
+      builder.addItem("Targets: ", allTargetsAllowed.joinBy(", "))
+  //}
 
-    if (attacksEnabled == 0 or isBuildingUndeadTarget)
-      builder.addItem("Does not attack!".colorize(Colors.red))
-    else if (not allTargetsAllowed.has("Air"))
-      builder.addItem("Attacks ground only!".colorize(Colors.red))
+  destroy allTargetsAllowed
+  
+  builder.addItem("Armor: ", this.getArmorType().toString())
 
-    builder.addItem("Health: ", definition.calculateHealthMaximum(1).toString())
+  if (tooltipBuilder != null)
+    tooltipBuilder.call(builder)
+    tooltipBuilder.release()
 
-    if (attacksEnabled != 0 and not isBuildingUndeadTarget)
-    //{
-      let attackRange = definition.getAttack1Range()
-      // 150 is an arbitrary minimum distance to be considered "melee"
-      if (definition.getAttack1Range() < 150)
-        builder.addItem("Range: ", "Melee")
-      else
-        builder.addItem("Range: ", attackRange.toString())
+  this.setTooltipExtended(builder.getTooltipExtended())
 
-      builder.addItem("Damage: ", "{0} ({1})".format(
-        definition.calculateDamageRange(0, 1).toDamageRangeString(),
-        definition.calculateApproximateDPS(0, 1).toApproxDPSString()))
-      
-      builder.addItem("Attack: ", definition.getAttack1AttackType().toString())
-
-      if (not allTargetsAllowed.isEmpty())
-        builder.addItem("Targets: ", allTargetsAllowed.joinBy(", "))
-    //}
-
-    destroy allTargetsAllowed
-    
-    builder.addItem("Armor: ", definition.getArmorType().toString())
-
-    if (tooltipBuilder != null)
-      tooltipBuilder.call(builder)
-      tooltipBuilder.release()
-
-    definition.setTooltipExtended(builder.getTooltipExtended())
-
-    destroy builder
+  destroy builder

@@ -67,6 +67,7 @@ constant string COMMAND_UPDATEREPUTATION = "updaterep"
 constant string COMMAND_SPAWNALLITEMS = "spawnitems"
 constant string COMMAND_UNITPROPS = "showprops"
 constant string COMMAND_SETUNITPROP = "setprop"
+constant string COMMAND_CLEARUNITPROP = "clearprop"
 constant string COMMAND_SETHEALTH = "sethp"
 constant string COMMAND_SETMANA = "setmana"
 constant string COMMAND_PAUSE = "pause"
@@ -624,7 +625,9 @@ function setSelectedUnitProperty()
   let command = getChatCommand()
   let commandPlayer = getChatCommandPlayer()
   let propName = command.getArgument(0).getString()
-  let propValue = command.getArgument(1).getReal()
+  let op = command.getArgument(1).getString()
+  let value = command.getArgument(2).getReal()
+  let durationArg = command.getArgument(3)
 
   let selectedUnits = getWorkingGroupUnits(commandPlayer)
   if (selectedUnits.isEmpty())
@@ -632,25 +635,61 @@ function setSelectedUnitProperty()
     destroy selectedUnits
     return
 
+  let unitProp = UnitProperties.getPropertyByShortName(propName)
+  if (unitProp == UnitProperty.__COUNT)
+    chatCommandPrintToPlayer(commandPlayer, "Could not find unit property with name " + propName + ". Try instead: ")
+    for i = 0 to UnitProperties.count - 1
+      chatCommandPrintToPlayer(commandPlayer, UnitProperties.getPropertyShortName(i castTo UnitProperty))
+    return
+
+  let duration = durationArg != null ? durationArg.getReal() : 0.0
+
   for u in selectedUnits
   //{
     let metadata = u.getMetadata()
     if (metadata != null)
       let comp = metadata.getOrAddUnitPropertiesComponent()
+      if (comp != null)
+        let smartValue = comp.getProperty(unitProp)
 
-      switch (propName)
-        case "critchance"
-          comp.setCritChancePercentage(propValue)
-        case "critmult"
-          comp.setCritDamageMultiplier(propValue)
-        case "critbonus"
-          comp.setCritBonusDamage(propValue)
-        case "evade"
-          comp.setEvadeChancePercentage(propValue)
-        case "lifesteal"
-          comp.setLifeStealPercentage(propValue)
+        switch (op)
+          case "base"
+            smartValue.affectBase(value, duration)
+          case "scale"
+            smartValue.affectScale(value, duration)
+          case "add"
+            smartValue.affectAdd(value, duration)
+          case "sub"
+            smartValue.affectSub(value, duration)
 
-      comp.printDebug((message) -> chatCommandPrintToPlayer(commandPlayer, message))
+        comp.printDebug((message) -> chatCommandPrintToPlayer(commandPlayer, message))
+  //}
+
+  destroy selectedUnits
+
+// ============================================================================
+function clearSelectedUnitProperty()
+  let commandPlayer = getChatCommandPlayer()
+
+  let selectedUnits = getWorkingGroupUnits(commandPlayer)
+  if (selectedUnits.isEmpty())
+    chatCommandPrintToPlayer(commandPlayer, "Must have at least one unit selected")
+    destroy selectedUnits
+    return
+  
+  for u in selectedUnits
+  //{
+    let metadata = u.getMetadata()
+    if (metadata != null)
+      let comp = metadata.getOrAddUnitPropertiesComponent()
+      if (comp != null)
+      
+        for i = 0 to UnitProperties.count - 1
+          let prop = i castTo UnitProperty
+          if (comp.hasProperty(prop))
+            comp.getProperty(prop).clearAffectors()
+
+        comp.printDebug((message) -> chatCommandPrintToPlayer(commandPlayer, message))
   //}
 
   destroy selectedUnits
@@ -1273,11 +1312,19 @@ function registerDebugCommands()
   g_commandHandler.registerCommandDefinition(COMMAND_UNITPROPS, function showSelectedUnitStats)
     ..setDescription("Prints the stats of a selected unit")
   
+  let unitPropNameArg = new ChatCommandArgument("PROP_NAME", ChatCommandArgumentType.STRING, false)
+  for i = 0 to UnitProperties.count - 1
+    unitPropNameArg.addStringOption(UnitProperties.getPropertyShortName(i castTo UnitProperty))
+
   g_commandHandler.registerCommandDefinition(COMMAND_SETUNITPROP, function setSelectedUnitProperty)
     ..setDescription("Sets the property of a selected unit")
-    ..addArgument(new ChatCommandArgument("PROP_NAME", ChatCommandArgumentType.STRING, false)
-      ..setStringOptions("critchance", "critmult", "critbonus", "evade", "lifesteal"))
-    ..addRealArgument("PROP_VALUE", false)
+    ..addArgument(unitPropNameArg)
+    ..addArgument(new ChatCommandArgument("OP", ChatCommandArgumentType.STRING, false)..setStringOptions("base", "scale", "add", "sub"))
+    ..addRealArgument("VALUE", false)
+    ..addRealArgument("DURATION", true)
+
+  g_commandHandler.registerCommandDefinition(COMMAND_CLEARUNITPROP, function clearSelectedUnitProperty)
+    ..setDescription("Clears all affectors from the given property of a selected unit")
   
   g_commandHandler.registerCommandDefinition(COMMAND_SETHEALTH, function setSelectedUnitHealth)
     ..setDescription("Sets the health of the selected unit")

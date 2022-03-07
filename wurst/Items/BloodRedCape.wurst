@@ -11,6 +11,7 @@ import GroupUtils
 import ItemEffectComponent
 import UnitExtensions
 import HumanPlayers
+import Handle
 
 constant real BLOODREDCAPE_LIFESTEAL = 5.0
 constant real BLOODREDCAPE_DURATION = 10.0
@@ -28,6 +29,7 @@ class BloodRedCapeComponent extends ItemEffectComponent
   private CallbackSingle m_destroyCallback
   private effect m_fx
   private bool m_playedSound
+  private _handle m_propertyAffectorHandle = INVALID_HANDLE
 
   // --------------------------------------------------------------------------
   construct (IUnitMetadata owner)
@@ -66,7 +68,7 @@ class BloodRedCapeComponent extends ItemEffectComponent
       return
 
     let comp = getOwner().getOrAddUnitPropertiesComponent()
-    comp.setLifeStealPercentage(comp.getLifeStealPercentage() + stacks * BLOODREDCAPE_LIFESTEAL)
+    m_propertyAffectorHandle = comp.getProperty(UnitProperty.LIFE_STEAL_PERC).affectAdd(stacks * BLOODREDCAPE_LIFESTEAL)
 
   // --------------------------------------------------------------------------
   protected override function onReverted(int stacks)
@@ -75,8 +77,11 @@ class BloodRedCapeComponent extends ItemEffectComponent
     if (stacks == 0)
       return
 
-    let comp = getOwner().getOrAddUnitPropertiesComponent()
-    comp.setLifeStealPercentage(comp.getLifeStealPercentage() - stacks * BLOODREDCAPE_LIFESTEAL)
+    let comp = getOwner().getUnitPropertiesComponent()
+    if (comp != null)
+      comp.getProperty(UnitProperty.LIFE_STEAL_PERC).remove(m_propertyAffectorHandle)
+
+    m_propertyAffectorHandle = INVALID_HANDLE
 
   // --------------------------------------------------------------------------
   override function apply()
@@ -183,7 +188,7 @@ function IUnitMetadata.getOrAddBloodRedCapeComponent() returns BloodRedCapeCompo
 
 // ============================================================================
 init
-  g_itemIdToComponentFactoryMap.put(TlsItemIds.bloodRedCape) _unit ->
+  ItemEffectComponent.registerComponentFactory(TlsItemIds.bloodRedCape) _unit ->
   //{
     let metadata = _unit.getMetadata()
     ItemEffectComponent comp = null

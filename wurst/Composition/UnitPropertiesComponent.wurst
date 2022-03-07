@@ -7,35 +7,90 @@ import DamageEvent
 import FX
 import Damage
 import Elites
+import SmartValue
+import RealExtensions
+import Func
+import RegisterEvents
 
 constant int ABILITY_ID_CRIT = compiletime(ABIL_ID_GEN.next())
 constant int ABILITY_ID_EVASION = compiletime(ABIL_ID_GEN.next())
 
 // ============================================================================
-@compiletime function createAbilities()
-  
-  new AbilityDefinitionCriticalStrikecreep(ABILITY_ID_CRIT)
-  ..setName("STAT_CRIT")
-  ..setLevels(2)
-  ..setChancetoCriticalStrike(1, 0.0)
-  ..setDamageMultiplier(1, 0.0)
-  ..setDamageBonus(1, 0.0)
-  
-  new AbilityDefinitionEvasioncreep(ABILITY_ID_EVASION)
-  ..setName("STAT_EVASION")
-  ..setLevels(2)
-  ..setChancetoEvade(1, 0.0)
+public enum UnitProperty
+  CRIT_CHANCE
+  CRIT_DAMAGE_SCALAR
+  CRIT_DAMAGE_BONUS
+  EVADE_CHANCE
+  LIFE_STEAL_PERC
+  DAMAGE_SCALAR_NORMAL
+  DAMAGE_SCALAR_ELITE
+  DAMAGE_SCALAR_BOSS
+  OPERATOR_LEVEL
+  LOOT_DURATION_SCALE
+  LOOT_TWICE_CHANCE
+  LOOT_MANA_COST_SCALE
+  __COUNT
+
+// Must match number of items in UnitProperties enum
+public constant int UNIT_PROPERTY_COUNT = 12
+
+// ============================================================================
+tuple unitPropertyMetadata(real defaultValue, bool triggersUpdate, string friendlyName, string shortName, Func1<real, string> stringifier)
+Func1<real, string> g_toString = (real v) -> v.toString()
+Func1<real, string> g_toIntString = (real v) -> v.toInt().toString()
+Func1<real, string> g_toScalarString = (real v) -> v.toString() + "x"
+Func1<real, string> g_toPercentageString01 = (real v) -> v.toPercentageString01()
+
+// ============================================================================
+public class UnitProperties
+
+  static constant int count = UNIT_PROPERTY_COUNT
+
+  protected static constant unitPropertyMetadata array[count] PROPERTY_METADATA = [
+    /* CRIT_CHANCE          */  unitPropertyMetadata(0.0, true,   "Crit Chance",          "critchance",     g_toPercentageString01.acquire()),
+    /* CRIT_DAMAGE_SCALAR   */  unitPropertyMetadata(2.0, true,   "Crit Damage Mult",     "critmult",       g_toScalarString.acquire()),
+    /* CRIT_DAMAGE_BONUS    */  unitPropertyMetadata(0.0, true,   "Crit Damage Bonus",    "critbonus",      g_toString.acquire()),
+    /* EVADE_CHANCE         */  unitPropertyMetadata(0.0, true,   "Evade Chance",         "evade",          g_toPercentageString01.acquire()),
+    /* LIFE_STEAL_PERC      */  unitPropertyMetadata(0.0, false,  "Life Steal",           "lifesteal",      g_toPercentageString01.acquire()),
+    /* DAMAGE_SCALAR_NORMAL */  unitPropertyMetadata(1.0, false,  "Damage Scalar Normal", "dmgscalenormal", g_toPercentageString01.acquire()),
+    /* DAMAGE_SCALAR_ELITE  */  unitPropertyMetadata(1.0, false,  "Damage Scalar Elite",  "dmgscaleelite",  g_toPercentageString01.acquire()),
+    /* DAMAGE_SCALAR_BOSS   */  unitPropertyMetadata(1.0, false,  "Damage Scalar Boss",   "dmgscaleboss",   g_toPercentageString01.acquire()),
+    /* OPERATOR_LEVEL       */  unitPropertyMetadata(1.0, false,  "Operator Level",       "oplevel",        g_toIntString.acquire()),
+    /* LOOT_DURATION_SCALAR */  unitPropertyMetadata(1.0, false,  "Loot Duration",        "lootdur",        g_toPercentageString01.acquire()),
+    /* LOOT_TWICE_CHANCE    */  unitPropertyMetadata(0.0, false,  "Loot Twice Chance",    "loottwice",      g_toPercentageString01.acquire()),
+    /* LOOT_MANA_COST_SCALE */  unitPropertyMetadata(1.0, false,  "Loot Mana Cost",       "lootcost",       g_toPercentageString01.acquire())
+  ]
+
+  // --------------------------------------------------------------------------
+  static function getPropertyDefaultValue(UnitProperty property) returns real
+    return PROPERTY_METADATA[property castTo int].defaultValue
+
+  // --------------------------------------------------------------------------
+  static function getPropertyFriendlyName(UnitProperty property) returns string
+    return PROPERTY_METADATA[property castTo int].friendlyName
+
+  // --------------------------------------------------------------------------
+  static function getPropertyShortName(UnitProperty property) returns string
+    return PROPERTY_METADATA[property castTo int].shortName
+
+  // --------------------------------------------------------------------------
+  static function formatPropertyValue(UnitProperty property, real value) returns string
+    let stringifier = PROPERTY_METADATA[property castTo int].stringifier
+    return stringifier != null ? stringifier.call(value) : value.toString()
+
+  // --------------------------------------------------------------------------
+  // Returns UnitProperty.__COUNT if no matching property could be found
+  static function getPropertyByShortName(string shortName) returns UnitProperty
+    for i = 0 to count - 1
+      if (PROPERTY_METADATA[i].shortName == shortName)
+        return i castTo UnitProperty
+    return UnitProperty.__COUNT
 
 // ============================================================================
 public class UnitPropertiesComponent extends UnitComponent
-  private real m_critChancePercentage = 0.0
-  private real m_critDamageMultiplierPercentage = 2.0
-  private real m_critBonusDamage = 0.0
-  private real m_evadeChancePercentage = 0.0
-  private real m_lifeStealPercentage = 0.0
-  private real m_normalDamageMultiplier = 100.0
-  private real m_eliteDamageMultiplier = 100.0
-  private real m_bossDamageMultiplier = 100.0
+
+  private SmartValue array[UNIT_PROPERTY_COUNT] m_smartValues
+
   private ability m_abilCritStrike
   private ability m_abilEvasion
 
@@ -44,84 +99,36 @@ public class UnitPropertiesComponent extends UnitComponent
     super(owner)
 
   // --------------------------------------------------------------------------
-  // Gets the critical chance percentage e.g. 100.0%
-  function getCritChancePercentage() returns real
-    return m_critChancePercentage
+  ondestroy
+    for i = 0 to UnitProperties.count - 1
+      if (m_smartValues[i] != null)
+        destroy m_smartValues[i]
+        m_smartValues[i] = null
 
   // --------------------------------------------------------------------------
-  // Sets the critical chance percentage e.g. 100.0%
-  function setCritChancePercentage(real value)
-    m_critChancePercentage = value
-    update()
+  function hasProperty(UnitProperty property) returns bool
+    return m_smartValues[property castTo int] != null
 
   // --------------------------------------------------------------------------
-  // Gets the damage multiplier applied when the unit crits e.g. 2.0
-  function getCritDamageMultiplier() returns real
-    return m_critDamageMultiplierPercentage
+  function getProperty(UnitProperty property) returns SmartValue
+    let propertyIndex = property castTo int
+    if (m_smartValues[propertyIndex] == null)
+      m_smartValues[propertyIndex] = new SmartValue(UnitProperties.getPropertyDefaultValue(property))
+      if (UnitProperties.PROPERTY_METADATA[propertyIndex].triggersUpdate)
+        m_smartValues[propertyIndex].onValueChanged().register(() -> update())
+    return m_smartValues[propertyIndex]
 
   // --------------------------------------------------------------------------
-  // Sets the damage multiplier applied when the unit crits e.g. 2.0
-  function setCritDamageMultiplier(real value)
-    m_critDamageMultiplierPercentage = value
-    update()
+  function getPropertyValue(UnitProperty property) returns real
+    return hasProperty(property) ? getProperty(property).getValue() : UnitProperties.getPropertyDefaultValue(property)
 
   // --------------------------------------------------------------------------
-  // Gets the evade chance percentage e.g. 100.0%
-  function getEvadeChancePercentage() returns real
-    return m_evadeChancePercentage
+  function getPropertyIntValue(UnitProperty property) returns int
+    return getPropertyValue(property).toInt()
 
   // --------------------------------------------------------------------------
-  // Sets the evade chance percentage e.g. 100.0%
-  function setEvadeChancePercentage(real value)
-    m_evadeChancePercentage = value
-    update()
-
-  // --------------------------------------------------------------------------
-  function getCritBonusDamage() returns real
-    return m_critBonusDamage
-
-  // --------------------------------------------------------------------------
-  function setCritBonusDamage(real value)
-    m_critBonusDamage = value
-    update()
-
-  // --------------------------------------------------------------------------
-  function getLifeStealPercentage() returns real
-    return m_lifeStealPercentage
-
-  // --------------------------------------------------------------------------
-  function setLifeStealPercentage(real value)
-    m_lifeStealPercentage = value
-
-  // --------------------------------------------------------------------------
-  // Gets the damage amount done to normal enemies e.g. 100.0%
-  function getNormalDamagePercentage() returns real
-    return m_normalDamageMultiplier
-
-  // --------------------------------------------------------------------------
-  // Sets the damage amount done to normal enemies e.g. 100.0%
-  function setNormalDamagePercentage(real value)
-    m_normalDamageMultiplier = value
-
-  // --------------------------------------------------------------------------
-  // Gets the damage amount done to elite enemies e.g. 100.0%
-  function getEliteDamagePercentage() returns real
-    return m_eliteDamageMultiplier
-
-  // --------------------------------------------------------------------------
-  // Sets the damage amount done to elite enemies e.g. 100.0%
-  function setEliteDamagePercentage(real value)
-    m_eliteDamageMultiplier = value
-
-  // --------------------------------------------------------------------------
-  // Gets the damage amount done to boss enemies e.g. 100.0%
-  function getBossDamagePercentage() returns real
-    return m_bossDamageMultiplier
-
-  // --------------------------------------------------------------------------
-  // Sets the damage amount done to boss enemies e.g. 100.0%
-  function setBossDamagePercentage(real value)
-    m_bossDamageMultiplier = value
+  function getPropertyValueAsString(UnitProperty property) returns string
+    return UnitProperties.formatPropertyValue(property, getPropertyValue(property))
 
   // --------------------------------------------------------------------------
   override function onEnabled()
@@ -154,6 +161,10 @@ public class UnitPropertiesComponent extends UnitComponent
     m_abilEvasion = null
 
   // --------------------------------------------------------------------------
+  protected function onUnitLeveled()
+    update()
+
+  // --------------------------------------------------------------------------
   private function update()
 
     let ownerUnit = getOwnerUnit()
@@ -161,16 +172,19 @@ public class UnitPropertiesComponent extends UnitComponent
     if (m_abilCritStrike != null)
       let lvl = 0
       ownerUnit.setAbilityLevel(ABILITY_ID_CRIT, lvl + 1)
-      setAbilityField(m_abilCritStrike, ABILITY_RLF_CHANCE_TO_CRITICAL_STRIKE, lvl, m_critChancePercentage)
-      setAbilityField(m_abilCritStrike, ABILITY_RLF_DAMAGE_MULTIPLIER_OCR2, lvl, m_critDamageMultiplierPercentage)
-      setAbilityField(m_abilCritStrike, ABILITY_RLF_DAMAGE_BONUS_OCR3, lvl, m_critBonusDamage)
+      setAbilityField(m_abilCritStrike, ABILITY_RLF_CHANCE_TO_CRITICAL_STRIKE, lvl, getPropertyValue(UnitProperty.CRIT_CHANCE))
+      setAbilityField(m_abilCritStrike, ABILITY_RLF_DAMAGE_MULTIPLIER_OCR2, lvl, getPropertyValue(UnitProperty.CRIT_DAMAGE_SCALAR))
+      setAbilityField(m_abilCritStrike, ABILITY_RLF_DAMAGE_BONUS_OCR3, lvl, getPropertyValue(UnitProperty.CRIT_DAMAGE_BONUS))
       ownerUnit.setAbilityLevel(ABILITY_ID_CRIT, lvl)
 
     if (m_abilEvasion != null)
       let lvl = 0
       ownerUnit.setAbilityLevel(ABILITY_ID_EVASION, lvl + 1)
-      setAbilityField(m_abilEvasion, ABILITY_RLF_CHANCE_TO_EVADE_EEV1, lvl, m_evadeChancePercentage / 100.0)
+      setAbilityField(m_abilEvasion, ABILITY_RLF_CHANCE_TO_EVADE_EEV1, lvl, getPropertyValue(UnitProperty.EVADE_CHANCE))
       ownerUnit.setAbilityLevel(ABILITY_ID_EVASION, lvl)
+
+    if (hasProperty(UnitProperty.OPERATOR_LEVEL))
+      getProperty(UnitProperty.OPERATOR_LEVEL).setBase(ownerUnit.getLevel())
 
   // --------------------------------------------------------------------------
   private function setAbilityField(ability _ability, abilityreallevelfield field, int lvl, real value)
@@ -211,11 +225,8 @@ public function UnitPropertiesComponent.printDebug(Action1<string> print)
   print.acquire()
   let ownerUnit = this.getOwnerUnit()
   print.call("===== Unit Properties for {0}: =====".format(ownerUnit.getName()))
-  print.call("Crit Chance : {0}%".format(this.getCritChancePercentage().toString()))
-  print.call("Crit Damage Multiplier : {0}x".format(this.getCritDamageMultiplier().toString()))
-  print.call("Crit Bonus Damage : {0}".format(this.getCritBonusDamage().toString()))
-  print.call("Evade Chance : {0}%".format(this.getEvadeChancePercentage().toString()))
-  print.call("Life Steal : {0}%".format((this.getLifeStealPercentage()).toString()))
+  for i = 0 to UnitProperties.count - 1
+    print.call("{0} : {1}".format(UnitProperties.getPropertyFriendlyName(i castTo UnitProperty), this.getPropertyValueAsString(i castTo UnitProperty)))
   print.release()
 
 // ============================================================================
@@ -228,6 +239,16 @@ public function IUnitMetadata.getOrAddUnitPropertiesComponent() returns UnitProp
   if (component == null)
     component = this.addComponent(new UnitPropertiesComponent(this)) castTo UnitPropertiesComponent
   return component
+
+// ============================================================================
+public function unit.getUnitPropertiesComponent() returns UnitPropertiesComponent
+  let metadata = this.getMetadata()
+  return metadata != null ? metadata.getUnitPropertiesComponent() : null
+
+// ============================================================================
+public function unit.getOrAddUnitPropertiesComponent() returns UnitPropertiesComponent
+  let metadata = this.getMetadata()
+  return metadata != null ? metadata.getOrAddUnitPropertiesComponent() : null
 
 // ============================================================================
 function onDamageEventRelative()
@@ -248,11 +269,11 @@ function onDamageEventRelative()
 
   if (target.isElite())
     if (target.isBoss())
-      DamageEvent.setAmount(DamageEvent.getAmount() * comp.getBossDamagePercentage() / 100.0)
+      DamageEvent.setAmount(DamageEvent.getAmount() * comp.getPropertyValue(UnitProperty.DAMAGE_SCALAR_BOSS))
     else
-      DamageEvent.setAmount(DamageEvent.getAmount() * comp.getEliteDamagePercentage() / 100.0)
+      DamageEvent.setAmount(DamageEvent.getAmount() * comp.getPropertyValue(UnitProperty.DAMAGE_SCALAR_ELITE))
   else
-    DamageEvent.setAmount(DamageEvent.getAmount() * comp.getNormalDamagePercentage() / 100.0)
+    DamageEvent.setAmount(DamageEvent.getAmount() * comp.getPropertyValue(UnitProperty.DAMAGE_SCALAR_NORMAL))
 
 // ============================================================================
 function onDamageEventFinal()
@@ -272,17 +293,39 @@ function onDamageEventFinal()
   let target = DamageEvent.getTarget()
 
   // Apply lifesteal
-  let lifesteal = comp.getLifeStealPercentage()
+  let lifesteal = comp.getPropertyValue(UnitProperty.LIFE_STEAL_PERC)
   if (lifesteal != 0.0)
     let damageDone = min(DamageEvent.getAmount(), target.getHP())
-    let hpStolen = damageDone * (comp.getLifeStealPercentage() / 100.0)
+    let hpStolen = damageDone * lifesteal
     source.addHP(hpStolen)
     let amountHealed = max(source.getMaxHP() - source.getHP(), 0.0)
     if (amountHealed > 0.0)
       FX.createEffectOneShot("Abilities\\Spells\\Undead\\VampiricAura\\VampiricAuraTarget.mdl", source.getPos())
 
 // ============================================================================
+function onHeroLeveled()
+  let comp = GetLevelingUnit().getUnitPropertiesComponent()
+  if (comp != null)
+    comp.onUnitLeveled()
+
+// ============================================================================
+@compiletime function createCompiledObjects()
+  
+  new AbilityDefinitionCriticalStrikecreep(ABILITY_ID_CRIT)
+  ..setName("STAT_CRIT")
+  ..setLevels(2)
+  ..setChancetoCriticalStrike(1, 0.0)
+  ..setDamageMultiplier(1, 0.0)
+  ..setDamageBonus(1, 0.0)
+  
+  new AbilityDefinitionEvasioncreep(ABILITY_ID_EVASION)
+  ..setName("STAT_EVASION")
+  ..setLevels(2)
+  ..setChancetoEvade(1, 0.0)
+
+// ============================================================================
 init
   DamageEvent.addListener(DAMAGE_EVENT_PRIO_RELATIVE, () -> onDamageEventRelative())
   DamageEvent.addListener(DAMAGE_EVENT_PRIO_FINAL, () -> onDamageEventFinal())
+  registerPlayerUnitEvent(EVENT_PLAYER_HERO_LEVEL, function onHeroLeveled)
     

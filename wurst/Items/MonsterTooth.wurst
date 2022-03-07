@@ -1,60 +1,50 @@
 package MonsterTooth
-import TlsItemIds
 import UnitMetadata
 import UnitPropertiesComponent
 import ItemEffectComponent
+import ItemAcquiredPropertyAffectComponent
+import SmartValue
+import TlsItemDefinition
+import Icons
+import RealExtensions
 
-constant real LIFESTEAL_AMOUNT = 10.0
+constant real LIFESTEAL_AMOUNT = 0.1
 
 // ============================================================================
-public class MonsterToothItemEffectComponent extends ItemEffectComponent
+class MonsterToothComponent extends ItemAcquiredPropertyAffectComponent
 
   // --------------------------------------------------------------------------
   construct (IUnitMetadata owner)
-    super(owner)
-
-    setMode(ItemEffectApplication.ACQUIRED)
-    setItemTypeId(TlsItemIds.monsterTooth)
-    setDestroyOnDrop(true)
-
+    super(owner, TlsItemIds.monsterTooth, UnitProperty.LIFE_STEAL_PERC, AffectorType.ABSOLUTE)
+  
   // --------------------------------------------------------------------------
-  protected override function onApplied(int stacks)
-    super.onApplied(stacks)
-
-    if (stacks == 0)
-      return
-
-    let comp = getOwner().getOrAddUnitPropertiesComponent()
-    comp.setLifeStealPercentage(comp.getLifeStealPercentage() + stacks * LIFESTEAL_AMOUNT)
-
-  // --------------------------------------------------------------------------
-  protected override function onReverted(int stacks)
-    super.onReverted(stacks)
-
-    if (stacks == 0)
-      return
-
-    let comp = getOwner().getOrAddUnitPropertiesComponent()
-    comp.setLifeStealPercentage(comp.getLifeStealPercentage() - stacks * LIFESTEAL_AMOUNT)
+  override function getUnitPropertyAffectorValue(int stacks) returns real
+    return stacks * LIFESTEAL_AMOUNT
 
 // ============================================================================
-function IUnitMetadata.getMonsterToothItemEffectComponent() returns MonsterToothItemEffectComponent
-  return this.getComponent(MonsterToothItemEffectComponent.typeId) castTo MonsterToothItemEffectComponent
+@compiletime function createItem()
 
-// ============================================================================
-function IUnitMetadata.getOrAddMonsterToothItemEffectComponent() returns MonsterToothItemEffectComponent
-  var component = this.getMonsterToothItemEffectComponent()
-  if (component == null)
-    component = this.addComponent(new MonsterToothItemEffectComponent(this)) castTo MonsterToothItemEffectComponent
-  return component
+  new TlsItemDefinition(TlsItemIds.monsterTooth, 'kybl')
+  ..setName("Monster Tooth")
+  ..setDescription("It's huge and stained with blood.")
+  ..setTooltipBasic("Purchase Monster Tooth")
+  ..setTooltipExtended("The holder of this item recovers hit points equal to {0} of attack damage dealt per stack.".format(LIFESTEAL_AMOUNT.toPercentageString01()))
+  ..setAbilities("")
+  ..setInterfaceIcon(Icons.bTNVampiricAura)
+  ..setGoldCost(6)
+  ..setNumberofCharges(1)
+  ..addTlsUnitClassifications(TlsUnitClassification.HUMAN)
+  ..build()
 
 // ============================================================================
 init
-  g_itemIdToComponentFactoryMap.put(TlsItemIds.monsterTooth) _unit ->
+  ItemEffectComponent.registerComponentFactory(TlsItemIds.monsterTooth) _unit ->
   //{
     let metadata = _unit.getMetadata()
     ItemEffectComponent comp = null
     if (metadata != null)
-      comp = metadata.getOrAddMonsterToothItemEffectComponent()
+      comp = metadata.getComponent(MonsterToothComponent.typeId) castTo MonsterToothComponent
+      if (comp == null)
+        comp = metadata.addComponent(new MonsterToothComponent(metadata)) castTo MonsterToothComponent
     return comp
   //}

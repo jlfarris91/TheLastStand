@@ -16,6 +16,8 @@ import ChannelAbilityPreset
 import TlsAbilityIds
 import ClosureEvents
 import BuffObjEditing
+import UnitPropertiesComponent
+import HashMap
 
 constant SoundDefinition g_loadingSoundDef = new SoundDefinition(Sounds.loading, false, true)
 
@@ -30,6 +32,7 @@ public class WorkstationComponent extends UnitComponent
   private Event m_workerEntered = null
   private Event m_workerExited = null
   private Event m_workerLeveled = null
+  private HashMap<unit, _handle> m_unitPropertyEventHandles = new HashMap<unit, _handle>()
 
   // --------------------------------------------------------------------------
   construct (IUnitMetadata owner)
@@ -60,6 +63,9 @@ public class WorkstationComponent extends UnitComponent
     if (m_workerLeveled != null)
       destroy m_workerLeveled
       m_workerLeveled = null
+
+    destroy m_unitPropertyEventHandles
+    m_unitPropertyEventHandles = null
 
   // --------------------------------------------------------------------------
   function onWorkedEntered() returns IEvent
@@ -110,10 +116,25 @@ public class WorkstationComponent extends UnitComponent
 
   // --------------------------------------------------------------------------
   function getMaxOperatorLevel() returns int
-    var level = 1
+    var operatorLevel = 1
+
     for _unit in m_loadedUnits
-      level = max(level, _unit.getLevel())
-    return level
+    //{
+      var unitOperatorLevel = _unit.getLevel()
+
+      let unitProps = _unit.getUnitPropertiesComponent()
+      if (unitProps != null)
+        unitOperatorLevel = unitProps.getPropertyIntValue(UnitProperty.OPERATOR_LEVEL)
+
+      operatorLevel = max(operatorLevel, unitOperatorLevel)
+    //}
+    
+    // The workstation can add to the operator level, too
+    let workstationProps = getOwnerUnit().getUnitPropertiesComponent()
+    if (workstationProps != null and workstationProps.hasProperty(UnitProperty.OPERATOR_LEVEL))
+      operatorLevel += workstationProps.getPropertyIntValue(UnitProperty.OPERATOR_LEVEL) - 1
+    
+    return operatorLevel
 
   // --------------------------------------------------------------------------
   function loadUnit(unit u) returns bool
@@ -167,6 +188,12 @@ public class WorkstationComponent extends UnitComponent
     u.suspend()
     playSound()
 
+    let unitPropsComp = u.getUnitPropertiesComponent()
+    if (unitPropsComp != null)
+      let handler = unitPropsComp.getProperty(UnitProperty.OPERATOR_LEVEL)
+                      .onValueChanged().registerDispatched(this, () -> onWorkerLeveled(u))
+      m_unitPropertyEventHandles.put(u, handler)
+
     if (m_workerEntered != null)
       m_workerEntered.call()
     
@@ -182,6 +209,12 @@ public class WorkstationComponent extends UnitComponent
     u.setInvulnerable(false)
     u.show()
     playSound()
+
+    let unitPropsComp = u.getUnitPropertiesComponent()
+    if (unitPropsComp != null)
+      let handler = m_unitPropertyEventHandles.get(u)
+      m_unitPropertyEventHandles.remove(u)
+      unitPropsComp.getProperty(UnitProperty.OPERATOR_LEVEL).onValueChanged().unregister(handler)      
 
     if (m_workerExited != null)
       m_workerExited.call()
