@@ -3,7 +3,6 @@ import Func
 import Grid
 import Bounds
 import ColorUtility
-import LinkedList
 import ISpawnPointProvider
 import SpawnRegion
 import RegionExtensions
@@ -14,12 +13,13 @@ import FX
 import Range
 import Vector
 import SpawnPointCollection
+import CircularBuffer
 
 constant int COLUMNS = 16 
 constant int ROWS = 16
 constant int NUM_SPAWN_AREAS = COLUMNS * ROWS 
-constant int MAX_ATTEMPTS_PER_REQUEST = 10
-constant int MAX_ATTEMPTS_PER_LOOP = 10
+constant int MAX_ATTEMPTS_PER_REQUEST = 3
+constant int MAX_ATTEMPTS_PER_LOOP = 3
 constant int MAX_REQUEUES_PER_REQUEST = 5
 
 constant group g_testGroup = CreateGroup()
@@ -30,7 +30,7 @@ constant Vector<int> g_tempSpawnPointAreaIndices = new Vector<int>()
 // ============================================================================
 public class GCSM
   static constant Grid mapGrid = new Grid(playableBounds, COLUMNS, ROWS)
-  static constant LinkedList<SpawnAreaUpdateRequest> updateRequests = new LinkedList<SpawnAreaUpdateRequest>()
+  static constant CircularBuffer<SpawnAreaUpdateRequest> updateRequests = new CircularBuffer<SpawnAreaUpdateRequest>(NUM_SPAWN_AREAS * 2)
   static int totalRequestsProcessed = 0
   static int totalUpdateSpawnAreaAttempts = 0
   static int mostAttempts = 0
@@ -38,7 +38,7 @@ public class GCSM
   static int totalAbandoned = 0
   static int totalRequeues = 0
 
-tuple debugData(effect fx, colorA color)
+tuple debugData(effect fx, colorA color, effect bounds)
 tuple spawnArea(cell cell, bounds bounds, vec2 pos, bool valid, bool processingRequest, debugData debug)
 
 // ============================================================================
@@ -105,8 +105,11 @@ public class GridCachedSpawnManager implements ISpawnPointProvider
         m_areaData[i].processingRequest = false
         m_areaData[i].debug.color = debugColor
         m_areaData[i].debug.fx = FX.createEffect("UI\\Feedback\\WaypointFlags\\WaypointFlag.mdl", m_areaData[i].bounds.center())
-          ..setColor(m_areaData[i].debug.color)
+          ..setColor(Colors.clear)
           ..setScale(2.0)
+        m_areaData[i].debug.bounds = FX.createEffect("square.mdl", m_areaData[i].bounds.center())
+          ..setColor(Colors.clear)
+          ..setScale(m_areaData[i].bounds.size().x / 64.0)
       //}
 
     invalidateSpawnPoints()
@@ -219,6 +222,9 @@ public class GridCachedSpawnManager implements ISpawnPointProvider
   protected function finishRequest(int index)
     m_areaData[index].processingRequest = false
 
+    if (m_showDebugEffects)
+      PingMinimap(m_areaData[index].pos.x, m_areaData[index].pos.y, 3.0)
+
   // --------------------------------------------------------------------------
   function isSpawnPointValid(vec2 pos) returns bool
     if (not g_spawnRegion.containsPoint(pos))
@@ -241,14 +247,14 @@ public class GridCachedSpawnManager implements ISpawnPointProvider
   // --------------------------------------------------------------------------
   function invalidateSpawnPoints(bounds bounds)
 
-    let span = GCSM.mapGrid.getArea(bounds.center(), bounds.getHalfExtents())
+    let span = GCSM.mapGrid.getArea(bounds)
 
     for r = span.min.row to span.max.row
       for c = span.min.column to span.max.column
         let index = GCSM.mapGrid.getIndex(cell(r, c))
         if (m_areaData[index].valid or not m_areaData[index].processingRequest)
           invalidateSpawnArea(index)
-          updateEffects()
+          updateEffects(index)
 
   // --------------------------------------------------------------------------
   private function invalidateSpawnArea(int index)
@@ -256,19 +262,22 @@ public class GridCachedSpawnManager implements ISpawnPointProvider
 
     if (not m_areaData[index].processingRequest)
       m_areaData[index].processingRequest = true
-      GCSM.updateRequests.add(new SpawnAreaUpdateRequest(this, index))
+      GCSM.updateRequests.enqueue(new SpawnAreaUpdateRequest(this, index))
     
     updateEffects(index)
 
   // --------------------------------------------------------------------------
   private function updateEffects()
-    for i = 0 to NUM_SPAWN_AREAS-1
-      updateEffects(i)
+    if (m_showDebugEffects)
+      for i = 0 to NUM_SPAWN_AREAS-1
+        updateEffects(i)
 
   // --------------------------------------------------------------------------
   private function updateEffects(int index)
-    m_areaData[index].debug.fx.setColor((m_showDebugEffects and m_areaData[index].valid) ? m_areaData[index].debug.color : Colors.clear)
-    m_areaData[index].debug.fx.setPos(m_areaData[index].pos)
+    if (m_showDebugEffects)
+      m_areaData[index].debug.fx.setColor(m_areaData[index].valid ? m_areaData[index].debug.color : Colors.clear)
+      m_areaData[index].debug.fx.setPos(m_areaData[index].pos)
+      m_areaData[index].debug.bounds.setColor(m_areaData[index].valid ? m_areaData[index].debug.color : Colors.clear)
 
 // ============================================================================
 function processRequests()
@@ -314,7 +323,7 @@ function processRequests()
       else if (request.getRequeues() < MAX_REQUEUES_PER_REQUEST)
         request.incrementRequeues()
         GCSM.totalRequeues++
-        GCSM.updateRequests.add(request)
+        GCSM.updateRequests.enqueue(request)
         if (g_enableGCSMLogging)
           Log.debug("Requeuing request {0}:{1} after {2} attempts".format(
             spawnManager.getId(),
@@ -334,4 +343,4 @@ function processRequests()
 
 // ============================================================================
 init
-  doPeriodically(0.5, (CallbackPeriodic cb) -> processRequests())
+  doPeriodically(0.1, (CallbackPeriodic cb) -> processRequests())
