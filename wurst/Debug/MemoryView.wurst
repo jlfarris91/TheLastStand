@@ -21,6 +21,7 @@ import HashList
 import Tasks
 import IterativeQuickSort
 import RealExtensions
+import ProjectConstants
 
 LinkedList<TypeInfo> g_typeInfos = new LinkedList<TypeInfo>()
 HashMap<int, TypeInfo> g_typeInfoLookup = new HashMap<int, TypeInfo>()
@@ -623,31 +624,33 @@ class UpdateSnapshotTaskContext
 init
   Meta.register("MemoryView", registrar -> registerPackageMetadata(registrar))    
 
-  for i = 0 to g_typeNameCharString.length() - 1
-    g_typeNameCharSet.add(g_typeNameCharString.charAt(i).getHash())
+  if (DEV_ENVIRONMENT)
+  //{
+    for i = 0 to g_typeNameCharString.length() - 1
+      g_typeNameCharSet.add(g_typeNameCharString.charAt(i).getHash())
 
-  g_typeId = 1
-  let maxTypeId = maxTypeId()
-  executeWhile(100, () -> g_typeId < maxTypeId) ->
-    if (typeIdToTypeName(g_typeId).contains("ObjEdit") == false)
-      let typeInfo = new TypeInfo(g_typeId)
-      g_typeInfoLookup.put(g_typeId, typeInfo)
-      g_typeInfos.add(typeInfo)
-    g_typeId++
+    g_typeId = 1
+    let maxTypeId = maxTypeId()
+    executeWhile(100, () -> g_typeId < maxTypeId) ->
+      if (typeIdToTypeName(g_typeId).contains("ObjEdit") == false)
+        let typeInfo = new TypeInfo(g_typeId)
+        g_typeInfoLookup.put(g_typeId, typeInfo)
+        g_typeInfos.add(typeInfo)
+      g_typeId++
 
-  g_takeSnapshotTaskDef = new ExecuteWhileTask2Definition<UpdateSnapshotTaskContext>(
-    null, "UpdateTypeInfos", 0.01, 1, (Task task, UpdateSnapshotTaskContext snapshot) -> snapshot.updateTypeInfoBatch())
+    g_takeSnapshotTaskDef = new ExecuteWhileTask2Definition<UpdateSnapshotTaskContext>(
+      null, "UpdateTypeInfos", 0.01, 1, (Task task, UpdateSnapshotTaskContext snapshot) -> snapshot.updateTypeInfoBatch())
 
-  g_sortSnapshotTaskDef = TaskDefinition.build(
-    builder -> begin
-      builder
-      ..forEachWhile2<SortSnapshotTaskContext, TypeInfo>("FilterTypeInfos", 0.01, 100, (Task task, SortSnapshotTaskContext snapshot) -> snapshot.getTypeInfos(), (Task task, SortSnapshotTaskContext snapshot, TypeInfo typeInfo) -> snapshot.filterTypeInfo(typeInfo))
-      ..executeWhile2<SortSnapshotTaskContext>("FilterSwapInPlace", 0.01, 1, (Task task, SortSnapshotTaskContext snapshot) -> snapshot.filterSwapInPlace())
-      ..executeWhile2<SortSnapshotTaskContext>("SortItemSource", 0.01, 1, (Task task, SortSnapshotTaskContext snapshot) -> snapshot.sort())
-    end)
+    g_sortSnapshotTaskDef = TaskDefinition.build(
+      builder -> begin
+        builder
+        ..forEachWhile2<SortSnapshotTaskContext, TypeInfo>("FilterTypeInfos", 0.01, 100, (Task task, SortSnapshotTaskContext snapshot) -> snapshot.getTypeInfos(), (Task task, SortSnapshotTaskContext snapshot, TypeInfo typeInfo) -> snapshot.filterTypeInfo(typeInfo))
+        ..executeWhile2<SortSnapshotTaskContext>("FilterSwapInPlace", 0.01, 1, (Task task, SortSnapshotTaskContext snapshot) -> snapshot.filterSwapInPlace())
+        ..executeWhile2<SortSnapshotTaskContext>("SortItemSource", 0.01, 1, (Task task, SortSnapshotTaskContext snapshot) -> snapshot.sort())
+      end)
 
-  doAfter(2) () ->
-    DebuggerDialog.registerFrame("MEM", new MemoryView("MEM"))
+    nullTimer(() -> DebuggerDialog.registerFrame("MEM", new MemoryView("MEM")))
+  //}
 
 ///////////////////////////////////////////////////////////////////////////////
 function registerPackageMetadata(MetaRegistrar registrar)
