@@ -4,7 +4,6 @@ import ChannelAbilityPreset
 import Icons
 import UnitIds
 import UnitIndexer
-import ErrorHandling
 import DummyCaster
 import Math
 import Orders
@@ -12,6 +11,7 @@ import BuffObjEditing
 import ClosureTimers
 import HeroAbilities
 import TlsAbilityIds
+import Execute
 
 constant int DUMMY_ID = compiletime(UNIT_ID_GEN.next())
 constant int CLOUD_ABIL_ID = compiletime(ABIL_ID_GEN.next())
@@ -36,6 +36,14 @@ class SmokeGrenade
   // --------------------------------------------------------------------------
   static function getMovementSpeedModifier(int effectiveAbilityLevel) returns real
     return lerp(-0.1, -0.3, parameterize(1, 3, effectiveAbilityLevel))
+
+  // --------------------------------------------------------------------------
+  static function getManaCost(int effectiveAbilityLevel) returns int
+    return lerpInt(150, 350, parameterize(1, 3, effectiveAbilityLevel))
+
+  // --------------------------------------------------------------------------
+  static function getCooldown(int effectiveAbilityLevel) returns real
+    return lerp(40.0, 25.0, parameterize(1, 3, effectiveAbilityLevel))
 
   // --------------------------------------------------------------------------
   static function getTooltipNormal(int effectiveAbilityLevel, int learnedAbilityLevel) returns string
@@ -75,25 +83,35 @@ public class SmokeGrenadeComponent extends HeroAbilityComponent
       ..delay(2.0)
   
     if (dummy.castPoint(DUMMY_PROJECTILE_ABIL_ID, 1, OrderIds.summonfactory, target) == null)
-      error("Dummy failed to cast projectile ability")
+      // Refund since the ability failed to cast
+      ownerUnit.resetAbilityCooldown(TlsAbilityIds.Hero.smokeGrenade)
+      ownerUnit.addMana(SmokeGrenade.getManaCost(getEffectiveAbilityLevel()).toReal())
 
   // --------------------------------------------------------------------------
   protected function onMissileLanded()
     let ownerUnit = getOwnerUnit()
 
-    let caster = new DummyCaster()
-      ..owner(ownerUnit.getOwner())
-      ..origin(m_lastTargetPoint)
-      ..delay(CLOUD_DURATION)
-  
-    if (caster.castPoint(CLOUD_ABIL_ID, getEffectiveAbilityLevel(), OrderIds.cloudoffog, m_lastTargetPoint) == null)
-      error("Failed to cast cloud ability")
+    try() () -> 
+    //{
+      let caster = new DummyCaster()
+        ..owner(ownerUnit.getOwner())
+        ..origin(m_lastTargetPoint)
+        ..delay(CLOUD_DURATION)
 
-    let circlefx = addEffect("circle.mdl", m_lastTargetPoint)
-      ..setPos(m_lastTargetPoint)
-      ..setScale(CLOUD_AOE / 64.0)
-      ..setColor(colorA(150, 150, 150, 100))
-    doAfter(CLOUD_DURATION, () -> circlefx.destr())
+      let effectiveAbilityLevel = getEffectiveAbilityLevel()
+    
+      if (caster.castPoint(CLOUD_ABIL_ID, effectiveAbilityLevel, OrderIds.cloudoffog, m_lastTargetPoint) == null)
+        Log.error("Failed to cast cloud ability")
+        // Refund since the ability failed to cast
+        ownerUnit.resetAbilityCooldown(TlsAbilityIds.Hero.smokeGrenade)
+        ownerUnit.addMana(SmokeGrenade.getManaCost(effectiveAbilityLevel).toReal())
+
+      let circlefx = addEffect("circle.mdl", m_lastTargetPoint)
+        ..setPos(m_lastTargetPoint)
+        ..setScale(CLOUD_AOE / 64.0)
+        ..setColor(colorA(150, 150, 150, 100))
+      doAfter(CLOUD_DURATION, () -> circlefx.destr())
+    //}
 
     m_lastTargetPoint = ZERO2
     g_castingSmokeGrenades.removeUnit(ownerUnit)
@@ -203,17 +221,18 @@ function onUnitIndexed()
     ..presetMovementSpeedModifier(lvl -> 0.0)
     ..presetBuffs(lvl -> "")
     ..presetTargetsAllowed(lvl -> "")
-    ..presetDurationHero(lvl -> 0.02)
-    ..presetDurationNormal(lvl -> 0.02)
-    ..presetManaCost(lvl -> 0)
-    ..presetCooldown(lvl -> 0)
+    ..presetDurationHero(lvl -> 0.1)
+    ..presetDurationNormal(lvl -> 0.1)
+    ..presetManaCost(lvl -> SmokeGrenade.getManaCost(lvl))
+    ..presetCooldown(lvl -> SmokeGrenade.getCooldown(lvl))
+    ..presetCastRange(lvl -> 900)
     ..setRequirements("")
 
   new AbilityDefinitionTinkererSummonFactoryLevel0(DUMMY_PROJECTILE_ABIL_ID)
     ..setLevels(1)
     ..setName("Smoke Grenade")
     ..presetCastRange(lvl -> 900)
-    ..presetAreaofEffect(lvl -> 0.01)
+    ..presetAreaofEffect(lvl -> 1.0)
     ..presetTargetsAllowed(lvl -> "")
     ..setAnimationNames("spell,attack,throw")
     ..setIconNormal(Icons.bTNCloudOfFog)
@@ -229,8 +248,8 @@ function onUnitIndexed()
     ..presetBuffs(lvl -> "")
     ..presetCastRange(lvl -> 900)
     ..presetManaCost(lvl -> 0)
-    ..presetDurationHero(lvl -> 0.02)
-    ..presetDurationNormal(lvl -> 0.02)
+    ..presetDurationHero(lvl -> 0.1)
+    ..presetDurationNormal(lvl -> 0.1)
     ..presetCooldown(lvl -> 0.0)
 
   new HeroLearnAbilityDefinition(TlsAbilityIds.Hero.smokeGrenade_learn, 3)
@@ -243,6 +262,8 @@ function onUnitIndexed()
       SmokeGrenade.getChanceToMissPercentage01(3).toPercentageString01(), (-SmokeGrenade.getAttackSpeedModifier(3)).toPercentageString01(),
       CLOUD_DURATION.toInt().toString()))
     ..setIconResearch(Icons.bTNCloudOfFog)
+    ..presetManaCost(lvl -> SmokeGrenade.getManaCost(lvl))
+    ..presetCooldown(lvl -> SmokeGrenade.getCooldown(lvl))
 
 // ============================================================================
 init
