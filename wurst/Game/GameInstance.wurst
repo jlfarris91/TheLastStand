@@ -5,7 +5,6 @@ import HumanPlayers
 import HumanPlayerComponent
 import Heroes
 import ClosureTimers
-import TlsSounds
 import BaseUnitsRectProvider
 import Time
 import RandomWeatherPlayer
@@ -14,21 +13,23 @@ import ColorUtility
 import Bases
 import Execute
 import ErrorHandling
+import Range
+import PlayerSaveData
 
 import initlater PlayerWaves
 import initlater IWaveGenerator
-import initlater DayWave
-import initlater NightWave
-import initlater NormalDayWaveGenerator
 import initlater GameStatsMultiboard
 import initlater NightWaveGenerator
-import Range
-import PlayerSaveData
+import initlater DayWaveGenerator
 
 public GameInstance g_GameInstance = new GameInstance()
 
 constant real TIME_OF_DAY_INITIAL = 5.5
 constant real GAME_SPEED_INITIAL = 100.0
+
+//                                           1      2      3      4      5      6      7      8      9     10     11     12     13     14     15     16
+constant real array g_dayTodScalars =   [ 50.0,  87.5, 125.0, 125.0, 125.0, 125.0, 125.0, 125.0, 125.0, 125.0, 125.0, 125.0, 125.0, 125.0, 125.0, 125.0]
+constant real array g_nightTodScalars = [250.0, 250.0, 250.0, 250.0, 250.0, 250.0, 250.0, 250.0, 250.0, 250.0, 250.0, 250.0, 250.0, 250.0, 250.0, 250.0]
 
 // ============================================================================
 public class GameInstance
@@ -40,11 +41,14 @@ public class GameInstance
   private real m_gameSpeedScale = 1.0
   private real m_unscaledTimeOfDaySpeedScale = 1.0
   private PlayerWavesMap m_playerWaves
-  private IWaveGenerator<DayWave> m_dayWaveGenerator
-  private IWaveGenerator<NightWave> m_nightWaveGenerator
+  private IDayWaveGenerator m_normalDayWaveGenerator
+  private IDayWaveGenerator m_hardPlusDayWaveGenerator
+  private INightWaveGenerator m_normalNightWaveGenerator
+  private INightWaveGenerator m_hardPlusNightWaveGenerator
   private RandomWeatherPlayer m_weatherPlayer
   private time m_startTime
   private time m_endTime
+  private bool m_hasStarted = false
 
   // --------------------------------------------------------------------------
   ondestroy
@@ -189,12 +193,19 @@ public class GameInstance
 
     m_updateGracePeriod = true
 
+    SetTimeOfDayScale(0.0)
+    SetTimeOfDay(TIME_OF_DAY - 0.5)
+
+    m_hasStarted = true
+
     m_startTime = makeTime(getGameTime().getDay(), TIME_OF_DAY.floor(), 0)
     m_endTime = m_startTime + makeTimespan(TOTAL_NIGHTS, 0, 0)
 
     // These should move to a place that sets up the GameInstance
-    m_dayWaveGenerator = new NormalDayWaveGenerator()
-    m_nightWaveGenerator = new NightWaveGenerator()
+    m_normalDayWaveGenerator = new NormalDayWaveGenerator()
+    m_hardPlusDayWaveGenerator = new HardPlusDayWaveGenerator()
+    m_normalNightWaveGenerator = new NormalNightWaveGenerator()
+    m_hardPlusNightWaveGenerator = new HardPlusNightWaveGenerator()
     m_weatherPlayer = new RandomWeatherPlayer()
 
     m_weatherPlayer.start()
@@ -216,13 +227,21 @@ public class GameInstance
     destroy m_playerWaves
     m_playerWaves = null
 
-    if (m_nightWaveGenerator != null)
-      destroy m_nightWaveGenerator
-      m_nightWaveGenerator = null
+    if (m_normalNightWaveGenerator != null)
+      destroy m_normalNightWaveGenerator
+      m_normalNightWaveGenerator = null
 
-    if (m_dayWaveGenerator != null)
-      destroy m_dayWaveGenerator
-      m_dayWaveGenerator = null
+    if (m_hardPlusNightWaveGenerator != null)
+      destroy m_hardPlusNightWaveGenerator
+      m_hardPlusNightWaveGenerator = null
+
+    if (m_normalDayWaveGenerator != null)
+      destroy m_normalDayWaveGenerator
+      m_normalDayWaveGenerator = null
+
+    if (m_hardPlusDayWaveGenerator != null)
+      destroy m_hardPlusDayWaveGenerator
+      m_hardPlusDayWaveGenerator = null
 
   // --------------------------------------------------------------------------
   private function postStart()
@@ -262,11 +281,12 @@ public class GameInstance
 
   // --------------------------------------------------------------------------
   function startDay()
+    if (not m_hasStarted)
+      return
+
     m_day++
 
     Log.debug("Starting day {0}...".format(m_day.toString()))
-
-    PlaySoundBJ(TlsSounds.questCompleted)
 
     if (GameSettings.allowRespawn and m_gracePeriod)
       respawnDeadPlayers()
@@ -277,6 +297,8 @@ public class GameInstance
     // Show the player's multiboards on day 1
     if (m_day == 1)
       showMultiboardsForPlayers()
+
+    doAfter(0.1, () -> setTimeOfDayScalePercent(g_dayTodScalars[m_day]))
 
     // Start day waves for players
     for p in g_PlayingHumanPlayers
@@ -306,9 +328,15 @@ public class GameInstance
 
   // --------------------------------------------------------------------------
   function startNight()
+
+    if (not m_hasStarted)
+      return
+
     m_night++
 
     Log.debug("Starting night {0}...".format(m_night.toString()))
+
+    doAfter(0.1, () -> setTimeOfDayScalePercent(g_nightTodScalars[m_night]))
 
     // Start night waves for players
     for p in g_PlayingHumanPlayers
@@ -365,20 +393,35 @@ public class GameInstance
       argumentNullError("_player")
 
     let playerWaves = m_playerWaves.getOrCreatePlayerWaves(_player)
+    let playerDifficulty = _player.getHumanPlayerComponentRequired().getDifficulty()
+    let playerNightWaveGenerator = getNightWaveGenerator(playerDifficulty)
+    let playerDayWaveGenerator = getDayWaveGenerator(playerDifficulty)
 
     execute() () ->
       Log.debug("Generating night waves for player " + _player.getName() + " ...")
       let nightWaves = playerWaves.getNightWaves()
-      if (m_nightWaveGenerator != null)
-        m_nightWaveGenerator.generateWavesForPlayer(_player, nightWaves)
+      playerNightWaveGenerator.generateWavesForPlayer(_player, nightWaves)
 
     execute() () ->
       Log.debug("Generating day waves for player " + _player.getName() + " ...")
       let dayWaves = playerWaves.getDayWaves()
-      if (m_dayWaveGenerator != null)
-        m_dayWaveGenerator.generateWavesForPlayer(_player, dayWaves)
+      playerDayWaveGenerator.generateWavesForPlayer(_player, dayWaves)
 
     return true
+
+  // --------------------------------------------------------------------------
+  private function getNightWaveGenerator(real difficulty) returns INightWaveGenerator
+    if (difficulty.floor() == 1)
+      return m_normalNightWaveGenerator
+    else
+      return m_hardPlusNightWaveGenerator
+
+  // --------------------------------------------------------------------------
+  private function getDayWaveGenerator(real difficulty) returns IDayWaveGenerator
+    if (difficulty.floor() == 1)
+      return m_normalDayWaveGenerator
+    else
+      return m_hardPlusDayWaveGenerator
 
   // --------------------------------------------------------------------------
   private function initializeAlliances()  
@@ -434,6 +477,3 @@ function onNightStart()
 init
   registerDayEvent(function onDayStart)
   registerNightEvent(function onNightStart)
-
-  doAfter(0.1) ->
-    g_GameInstance.start()

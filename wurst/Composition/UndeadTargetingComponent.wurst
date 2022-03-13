@@ -20,10 +20,9 @@ import TimerUtils
 import ProjectConstants
 import GroupExtensions
 import BuildingUndeadTarget
-import PlayerSpawnPointProviders
-import ISpawnPointProvider
 import DebuggerDialog
 import Frame
+import LeashComponent
 
 constant rangeReal ATTACK_TIMER_DURATION_RANGE = rangeReal(1.0, 3.0)
 constant real ATTACK_TIMER_DISTANCE_THRESHOLD = 128.0
@@ -86,7 +85,7 @@ public class UndeadTargetingComponent extends UnitComponent
   protected bool m_preferOrganicTargets
   protected CallbackManual m_attackTimer
   protected real m_baseAttackRange
-
+  protected LeashComponent m_leashComponent = null
   protected string m_orderFailedReason
   protected Vector<string> m_notes
   protected int m_numberOfTimesFailedOrder = 0
@@ -119,6 +118,7 @@ public class UndeadTargetingComponent extends UnitComponent
     super.onEnabled()
     m_baseAttackRange = getOwnerUnit().getFieldWeapon(UNIT_WEAPON_RF_ATTACK_RANGE, 0)
     m_lastPos = getOwnerUnit().getPos()
+    m_leashComponent = getOwner().getOrAddLeashComponent()
 
   // --------------------------------------------------------------------------
   override function onDisabled()
@@ -360,6 +360,7 @@ public class UndeadTargetingComponent extends UnitComponent
       unregisterTargetedUnit(m_targetUnit, getOwnerUnit())
 
     m_targetUnit = targetUnit
+    m_leashComponent.setTargetUnit(targetUnit)
 
     if (m_targetUnit != null)
       recordNote("sTU_i", "Target unit is not null : " + m_targetUnit.getName())
@@ -462,27 +463,7 @@ public class UndeadTargetingComponent extends UnitComponent
 
   // --------------------------------------------------------------------------
   private function tryTeleportCloserToTargetUnit() returns bool
-    if (m_targetUnit == null or not m_targetUnit.isAlive())
-      return false
-    let targetUnitPos = m_targetUnit.getPos()
-    if (targetUnitPos == ZERO2)
-      return false
-    let ownerUnit = getOwnerUnit()
-    if (targetUnitPos.distanceToSq(ownerUnit.getPos()) < TELEPORT_DISTANCE_THRESHOLD_SQ)
-      return false
-    let spawnPointProvider = getHostileSpawnPointProviderForPlayer(m_targetPlayer)
-    if (spawnPointProvider != null)
-      let spawnPointResult = spawnPointProvider.getRandomSpawnPointInRange(targetUnitPos, SpawnRange.CLOSE.toRangeReal())
-      if (spawnPointResult.succeeded)
-        recordNote("onAttackTimer", "Teleporting to the target")
-        ownerUnit.fadeIn()
-        //dispatch(0.1) (UndeadTargetingComponent comp) ->
-        ownerUnit.setPos(spawnPointResult.spawnPoint)
-        m_lastPos = ownerUnit.getPos()
-        return true
-      else
-        recordNote("onAttackTimer", "Wants to teleport but found no spawn point near target")
-    return false
+    return m_leashComponent.tryTeleportCloserToTargetUnit()
 
   // --------------------------------------------------------------------------
   protected function restartAttackTimer()

@@ -1,0 +1,128 @@
+package LeashComponent
+import UnitComponent
+import ISpawnPointProvider
+import GameConstants
+import Range
+import UnitExtensions
+import Func
+import PlayerSpawnPointProviders
+import RealtimeUpdate
+
+constant real TELEPORT_DISTANCE_THRESHOLD = SPAWN_RANGE_FAR.max
+constant real TELEPORT_DISTANCE_THRESHOLD_SQ = TELEPORT_DISTANCE_THRESHOLD * TELEPORT_DISTANCE_THRESHOLD
+
+Func1<unit, ISpawnPointProvider> g_defaultSpawnPointProviderFactory
+
+// ============================================================================
+public class LeashComponent extends UnitComponent implements IRealtimeListener
+  private unit m_target = null
+  private Func1<unit, ISpawnPointProvider> m_spawnPointProviderFactory = g_defaultSpawnPointProviderFactory.acquire()
+  private ISpawnPointProvider m_spawnPointProvider = null
+  private real m_teleportDistanceThresholdSq = TELEPORT_DISTANCE_THRESHOLD_SQ
+  private SpawnRange m_spawnRange = SpawnRange.CLOSE
+
+  // --------------------------------------------------------------------------
+  construct (IUnitMetadata owner)
+    super(owner)
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    if (m_spawnPointProviderFactory != null)
+      m_spawnPointProviderFactory.release()
+
+  // --------------------------------------------------------------------------
+  function setTargetUnit(unit target)
+    if (target == m_target)
+      return
+    m_target = target
+    m_spawnPointProvider = m_spawnPointProviderFactory.call(target)
+
+  // --------------------------------------------------------------------------
+  function setSpawnPointProviderFactory(Func1<unit, ISpawnPointProvider> value)
+    if (m_spawnPointProviderFactory == value)
+      return
+    if (value != null)
+      value.acquire()
+    if (m_spawnPointProviderFactory != null)
+      m_spawnPointProviderFactory.release()
+    m_spawnPointProviderFactory = value
+
+  // --------------------------------------------------------------------------
+  function setTeleportDistanceThreshold(real value)
+    m_teleportDistanceThresholdSq = value * value
+
+  // --------------------------------------------------------------------------
+  function setSpawnRange(SpawnRange value)
+    m_spawnRange = value
+
+  // --------------------------------------------------------------------------
+  function update()
+    if (m_target == null)
+      return
+    if (getOwnerUnit().getPos().distanceToSq(m_target.getPos()) > m_teleportDistanceThresholdSq)
+      tryTeleportCloserToTargetUnit()
+
+  // --------------------------------------------------------------------------
+  override function realtimeUpdate(real _dt)
+    update()
+
+  // --------------------------------------------------------------------------
+  override protected function onEnabled()
+    super.onEnabled()
+    this.registerForRealtimeUpdate(RealtimeUpdatePriority.Background)
+
+  // --------------------------------------------------------------------------
+  override protected function onDisabled()
+    super.onDisabled()
+    this.unregisterForRealtimeUpdate()
+
+  // --------------------------------------------------------------------------
+  function tryTeleportCloserToTargetUnit() returns bool
+    if (m_target == null or not m_target.isAlive() or m_spawnPointProvider == null)
+      return false
+    
+    let targetUnitPos = m_target.getPos()
+    
+    if (targetUnitPos == ZERO2)
+      return false
+    
+    let ownerUnit = getOwnerUnit()
+    
+    if (targetUnitPos.distanceToSq(ownerUnit.getPos()) < m_teleportDistanceThresholdSq)
+      return false
+
+    let spawnPointResult = m_spawnPointProvider.getRandomSpawnPointInRange(targetUnitPos, SpawnRange.CLOSE.toRangeReal())
+    if (not spawnPointResult.succeeded)
+      return false
+
+    ownerUnit.fadeIn()
+    
+    ownerUnit.setPos(spawnPointResult.spawnPoint)
+
+    return true
+
+// ============================================================================
+public function IUnitMetadata.getLeashComponent() returns LeashComponent
+  return this.getComponent(LeashComponent.typeId) castTo LeashComponent
+
+// ============================================================================
+public function IUnitMetadata.getOrAddLeashComponent() returns LeashComponent
+  var component = this.getLeashComponent()
+  if (component == null)
+    component = this.addComponent(new LeashComponent(this), false) castTo LeashComponent
+  return component
+
+// ============================================================================
+public function unit.getLeashComponent() returns LeashComponent
+  let metadata = this.getMetadata()
+  return metadata != null ? metadata.getLeashComponent() : null
+
+// ============================================================================
+public function unit.getOrAddLeashComponent() returns LeashComponent
+  let metadata = this.getMetadata()
+  return metadata != null ? metadata.getOrAddLeashComponent() : null
+
+// ============================================================================
+init
+  g_defaultSpawnPointProviderFactory = target -> (target != null ? getHostileSpawnPointProviderForPlayer(target.getOwner()) : (0 castTo ISpawnPointProvider))
+  g_defaultSpawnPointProviderFactory.acquire()

@@ -27,6 +27,9 @@ import Spawning
 import UnitExtensions
 import TlsUnitDefinition
 import Action
+import SoundUtils
+import MinimapIconComponent
+import Elites
 
 constant real PROCESS_SPAWN_REQUEST_INTERVAL = 0.3
 constant int MAX_SPAWNS_PER_PROCESS = 1
@@ -49,6 +52,8 @@ public class SpawnWave extends Runnable
   private _handle m_onDefProgressChangedEventHandler
   private LinkedList<unit> m_aliveSpawnedUnits
   private int m_numSpawned
+  private int m_numSpawnedInGroup
+  private int m_groupId
   private string m_id
   private player m_targetPlayer
   private int m_totalGoldAwarded
@@ -66,6 +71,8 @@ public class SpawnWave extends Runnable
     m_definition = def
     m_aliveSpawnedUnits = new LinkedList<unit>()
     m_numSpawned = 0
+    m_numSpawnedInGroup = 0
+    m_groupId = 0
     m_totalGoldAwarded = 0
     m_id = def.getName()
     m_debugState = ""
@@ -113,6 +120,7 @@ public class SpawnWave extends Runnable
     // Update context
     let playerMetadata = m_targetPlayer.getHumanPlayerComponentRequired()
     m_context.playerDifficulty = playerMetadata.getDifficulty()
+    m_context.tier = m_context.getRandomTier()
     for i = 0 to MAX_ELITE_TIER-1
       m_context.tierChances[i] = playerMetadata.getTierChance(i)
 
@@ -144,6 +152,15 @@ public class SpawnWave extends Runnable
       if (runnableProgress != null)
         runnableProgress.complete()
     //}
+
+    // Show minimap icons for whatever units are left
+    for u in m_aliveSpawnedUnits
+      if (u.getMinimapIconComponent() == null)
+        let iconPath = getMinimapIconPath(u.getTypeId())
+        if (iconPath != null)
+          let iconComp = u.getOrAddMinimapIconComponent()
+          iconComp.update(iconPath, getMinimapIconColor(u.getTypeId()))
+          iconComp.showOnlyFor(m_targetPlayer)
 
   // --------------------------------------------------------------------------
   override function getProgress() returns real
@@ -192,6 +209,7 @@ public class SpawnWave extends Runnable
       return false
 
     m_context.waveProgress = getProgress()
+    m_context.groupId = m_groupId
 
     let aliveCountMax = m_definition.getMaxAliveCount(m_context)
     let spawnCountMax = m_definition.getMaxSpawnCount(m_context)
@@ -248,7 +266,14 @@ public class SpawnWave extends Runnable
             break
 
           if (spawnSingleUnit(unitType, sp, facingAngleRange.getRandom()))
+          //{
             numberOfUnitsSpawned++
+
+            m_numSpawnedInGroup++
+            if (m_numSpawnedInGroup >= spawnGroupSize)
+              m_numSpawnedInGroup = 0
+              m_groupId++
+          //}
 
           numSpawnsAvailable = getNumSpawnsAvailable(aliveCountMax, spawnCountMax)
         //}
@@ -354,6 +379,23 @@ public class SpawnWave extends Runnable
       spawnedUnit.fadeIn(unitDef.getVertexColor())
     else
       spawnedUnit.fadeIn()
+
+    if (m_definition.getMinimapIconPath() != null)
+      spawnedUnit.getOrAddMinimapIconComponent()
+      ..update(m_definition.getMinimapIconPath(), m_definition.getMinimapIconColor())
+      ..showOnlyFor(m_targetPlayer)
+
+    // First spawn of the next group
+    if (m_numSpawnedInGroup == 0)
+    //{
+      let playSoundOnGroupSpawn = m_definition.getPlaySoundOnGroupSpawn()
+      if (playSoundOnGroupSpawn != null)
+        playSoundOnGroupSpawn.playForPlayer(m_targetPlayer)
+
+      if (m_definition.getPingOnGroupSpawn())
+        let color = m_definition.getPingOnGroupSpawnColor()
+        PingMinimapEx(pos.x, pos.y, 3.0, color.red, color.green, color.blue, true)
+    //}
 
     return true
 

@@ -1,0 +1,202 @@
+package DayWaveGenerator
+import IWaveGenerator
+import DayWave
+import SpawnWaveDefinition
+import GameConstants
+import WaveCollection
+import SpawnDefinitionTags
+import IProgress
+import TimeOfDayProgress
+import Time
+import PeriodicWaveActivator
+import ISpawnPointProvider
+import Preload
+import TlsUnitIds
+import HumanPlayers
+import ISpawnWave
+import WaveGeneratorCommon
+import FuncUnitTypeProvider
+import Vector
+import SpawnWave
+import Math
+import SoundUtils
+import Elites
+
+constant timespan WAVE_DAY_LENGTH = DAY_LENGTH * 0.75
+constant int MAX_SPAWN_WAVES = 2
+
+// ============================================================================
+public class DayWaveGeneratorBase implements IDayWaveGenerator
+  private constant int SPAWN_WAVE_DEF_COUNT = (TOTAL_DAYS + 1) * MAX_SPAWN_WAVES
+  private SpawnWaveDefinition array[SPAWN_WAVE_DEF_COUNT] m_spawnWaveDefinitions
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    for i = 0 to SPAWN_WAVE_DEF_COUNT - 1
+      if (m_spawnWaveDefinitions[i] != null)
+        destroy m_spawnWaveDefinitions[i]
+        m_spawnWaveDefinitions[i] = null
+
+  // --------------------------------------------------------------------------
+  function setSpawnWaveDef(int night, int spawnWaveIndex, SpawnWaveDefinition def)
+    m_spawnWaveDefinitions[night * MAX_SPAWN_WAVES + spawnWaveIndex] = def
+
+  // --------------------------------------------------------------------------
+  function getSpawnWaveDef(int night, int spawnWaveIndex) returns SpawnWaveDefinition
+    return m_spawnWaveDefinitions[night * MAX_SPAWN_WAVES + spawnWaveIndex]
+
+  // --------------------------------------------------------------------------
+  override function generateWavesForPlayer(player targetPlayer, WaveCollection<DayWave> waves)
+
+    for dayIndex = 1 to TOTAL_DAYS
+      let wave = waves.getOrCreateWave(dayIndex)
+      ..setId("Day:{0}".format(dayIndex.toString()))
+
+      for spawnWaveIndex = 0 to MAX_SPAWN_WAVES - 1
+        let def = getSpawnWaveDef(dayIndex, spawnWaveIndex)
+        if (def != null)
+          wave.addSpawnWave(new SpawnWave(targetPlayer, dayIndex, def))
+          wave.setXpReward(50 * dayIndex)
+
+          if (def.getPlaySoundOnStart() != null)
+            wave.playSoundOnStart(def.getPlaySoundOnStart())
+
+          if (def.getPlaySoundOnComplete() != null)
+            wave.playSoundOnComplete(def.getPlaySoundOnComplete())
+
+// ============================================================================
+public class NormalDayWaveGenerator extends DayWaveGeneratorBase
+
+  // --------------------------------------------------------------------------
+  construct()
+
+    setSpawnWaveDef(4, 0, createSpawnWave_Raiders(4))
+    setSpawnWaveDef(7, 0, createSpawnWave_Raiders(7))
+    setSpawnWaveDef(10, 0, createSpawnWave_Raiders(10))
+
+// ============================================================================
+public class HardPlusDayWaveGenerator extends DayWaveGeneratorBase
+
+  // --------------------------------------------------------------------------
+  construct()
+
+    var dayIndex = GetRandomInt(2, 5)
+    setSpawnWaveDef(dayIndex, 0, createSpawnWave_Raiders(dayIndex))
+
+    dayIndex = GetRandomInt(6, 10)
+    setSpawnWaveDef(dayIndex, 0, createSpawnWave_Raiders(dayIndex))
+
+    dayIndex = GetRandomInt(11, 15)
+    setSpawnWaveDef(dayIndex, 0, createSpawnWave_Raiders(dayIndex))
+
+constant int RAIDER_GROUP_COUNT = 3                                        //              4  6  8                6  8  10                 8  10  12
+constant int array[MAX_ELITE_TIER * RAIDER_GROUP_COUNT] s_fallenBandit =     [/* Tier I */ 3, 4, 4, /* Tier II */ 3, 4,  4, /* Tier III */ 4,  4,  4]
+constant int array[MAX_ELITE_TIER * RAIDER_GROUP_COUNT] s_fallenMarksman =   [/* Tier I */ 1, 2, 3, /* Tier II */ 2, 2,  3, /* Tier III */ 2,  3,  4]
+constant int array[MAX_ELITE_TIER * RAIDER_GROUP_COUNT] s_fallenWizard =     [/* Tier I */ 0, 0, 0, /* Tier II */ 1, 2,  2, /* Tier III */ 2,  3,  3]
+constant int array[MAX_ELITE_TIER * RAIDER_GROUP_COUNT] s_fallenBanditLord = [/* Tier I */ 0, 0, 1, /* Tier II */ 0, 0,  1, /* Tier III */ 0,  0,  1]
+
+constant int array[RAIDER_GROUP_COUNT] s_groupUnitCounts = [
+  s_fallenBandit[0] + s_fallenMarksman[0] + s_fallenWizard[0] + s_fallenBanditLord[0],
+  s_fallenBandit[1] + s_fallenMarksman[1] + s_fallenWizard[1] + s_fallenBanditLord[1],
+  s_fallenBandit[2] + s_fallenMarksman[2] + s_fallenWizard[2] + s_fallenBanditLord[2]
+]
+
+constant int s_groupUnitCountTotal = s_groupUnitCounts[0] + s_groupUnitCounts[1] + s_groupUnitCounts[2]
+
+SoundDefinition s_warHornSoundDef
+
+// ============================================================================
+function createSpawnWave_Raiders(int nightIndex) returns SpawnWaveDefinition
+  let def = new SpawnWaveDefinition("Fallen Raiders")
+  ..setTags(SpawnDefinitionTags.grouped, SpawnDefinitionTags.melee, SpawnDefinitionTags.piercing)
+  ..setProgress(getProgressForSpawnWave(nightIndex))
+  ..setActivator(new PeriodicWaveActivator(15.0))
+  ..setSpawnRange(SpawnRange.FAR)
+  ..setGoldReward(context -> getStandardGoldRewardForWave(context))
+  ..playSoundOnGroupSpawn(s_warHornSoundDef)
+  ..setSpawnGroupingFactor(context -> 1.0)
+  ..setWaitForFullSpawnGroup(true)
+  ..setSpawnsPerActivation(context -> s_groupUnitCounts[clamp(context.getGroupId(), 0, RAIDER_GROUP_COUNT-1)])
+  ..setMaxAliveCount(context -> s_groupUnitCounts[clamp(context.getGroupId(), 0, RAIDER_GROUP_COUNT-1)])
+  ..setMaxSpawnCount(context -> s_groupUnitCountTotal)
+  ..setupForElite()
+  ..showMinimapIcon(MINIMAP_ICON_PATH_ELITE, MINIMAP_ICON_COLOR_ELITE)
+  ..pingOnGroupSpawn(MINIMAP_ICON_COLOR_ELITE)
+
+  def.setUnitTypeProvider(new FuncUnitTypeProvider((ISpawnWaveContext context, Vector<int> result) -> begin
+    let tier = context.getTier()
+    let groupId = clamp(context.getGroupId(), 0, RAIDER_GROUP_COUNT-1)
+    for i = 0 to s_fallenBandit[tier * RAIDER_GROUP_COUNT + groupId]
+      result.add(TlsUnitIds.Undead.fallenBandit[tier])
+    for i = 0 to s_fallenMarksman[tier * RAIDER_GROUP_COUNT + groupId]
+      result.add(TlsUnitIds.Undead.fallenMarksman[tier])
+    for i = 0 to s_fallenWizard[tier * RAIDER_GROUP_COUNT + groupId]
+      result.add(TlsUnitIds.Undead.fallenWizard[tier])
+    for i = 0 to s_fallenBanditLord[tier * RAIDER_GROUP_COUNT + groupId]
+      result.add(TlsUnitIds.Undead.fallenBanditLord[tier])
+  end))
+
+  for tier = 0 to MAX_ELITE_TIER-1
+  //{
+    def.setUnitModifier(TlsUnitIds.Undead.fallenBandit[tier]) (unit u, ISpawnWaveContext context) ->
+    //{
+      g_eliteMeleeModifiers.apply(context, u)
+    //}
+
+    def.setUnitModifier(TlsUnitIds.Undead.fallenMarksman[tier]) (unit u, ISpawnWaveContext context) ->
+    //{
+      g_eliteRangedModifiers.apply(context, u)
+    //}
+
+    def.setUnitModifier(TlsUnitIds.Undead.fallenWizard[tier]) (unit u, ISpawnWaveContext context) ->
+    //{
+      g_eliteRangedModifiers.apply(context, u)
+    //}
+
+    def.setUnitModifier(TlsUnitIds.Undead.fallenBanditLord[tier]) (unit u, ISpawnWaveContext context) ->
+    //{
+      g_eliteMeleeModifiers.apply(context, u)
+    //}
+  //}
+
+  return def
+
+// ============================================================================
+function getProgressForSpawnWave(int index) returns IProgress
+  return new TimeOfDayProgress()
+    ..setSpecificDay(index)
+    ..setStartTime(DAY_TIME)
+    ..setDuration(WAVE_DAY_LENGTH)
+
+// ============================================================================
+init
+
+  s_warHornSoundDef = new SoundDefinition("Sound\\war-horn.flac", false, false)
+  // s_warHornSoundDef.minDist = SpawnRange.MID.toRangeReal().min * 2
+  // s_warHornSoundDef.maxDist = SpawnRange.MID.toRangeReal().max * 2
+  // s_warHornSoundDef.cutDist = 10000
+  // s_warHornSoundDef.stopOnLeaveRange = false
+
+  // Add unit recyclers to preloader
+  for tier = 0 to MAX_ELITE_TIER-1
+  //{
+    var maxCount = 0
+    for groupIdx = 0 to RAIDER_GROUP_COUNT-1
+      maxCount = max(maxCount, s_fallenBandit[tier * RAIDER_GROUP_COUNT + groupIdx])
+    Preload.registerUnitRecycler(TlsUnitIds.Undead.fallenBandit[tier], g_PlayingHumanPlayerCount * maxCount)
+
+    maxCount = 0
+    for groupIdx = 0 to RAIDER_GROUP_COUNT-1
+      maxCount = max(maxCount, s_fallenMarksman[tier * RAIDER_GROUP_COUNT + groupIdx])
+    Preload.registerUnitRecycler(TlsUnitIds.Undead.fallenMarksman[tier], g_PlayingHumanPlayerCount * maxCount)
+
+    maxCount = 0
+    for groupIdx = 0 to RAIDER_GROUP_COUNT-1
+      maxCount = max(maxCount, s_fallenWizard[tier * RAIDER_GROUP_COUNT + groupIdx])
+    Preload.registerUnitRecycler(TlsUnitIds.Undead.fallenWizard[tier], g_PlayingHumanPlayerCount * maxCount)
+
+    maxCount = 0
+    for groupIdx = 0 to RAIDER_GROUP_COUNT-1
+      maxCount = max(maxCount, s_fallenBanditLord[tier * RAIDER_GROUP_COUNT + groupIdx])
+    Preload.registerUnitRecycler(TlsUnitIds.Undead.fallenBanditLord[tier], g_PlayingHumanPlayerCount * maxCount)
+  //}

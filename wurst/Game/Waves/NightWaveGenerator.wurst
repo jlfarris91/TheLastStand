@@ -32,42 +32,18 @@ import TombstoneComponent
 import PlayerSpawnPointProviders
 import Preload
 import HumanPlayers
+import LinkedList
+import FuncUnitTypeProvider
+import Vector
+import WaveGeneratorCommon
 
 constant timespan WAVE_NIGHT_LENGTH = NIGHT_LENGTH * 0.75
-constant time NIGHT_WAVE_START_TIME = NIGHT_TIME
-constant time NIGHT_WAVE_END_TIME = NIGHT_WAVE_START_TIME + WAVE_NIGHT_LENGTH
 constant int MAX_SPAWN_WAVES = 2
-
-// Ground
-SpawnWaveDefinition g_zombies
-SpawnWaveDefinition g_darkMinions
-SpawnWaveDefinition g_skeletonArchers
-SpawnWaveDefinition g_necromancers
-SpawnWaveDefinition g_cryptFiends
-SpawnWaveDefinition g_cultists
-SpawnWaveDefinition g_ghosts
-SpawnWaveDefinition g_meatWagons
-
-// Air
-SpawnWaveDefinition g_crows
-SpawnWaveDefinition g_gargoyles
-SpawnWaveDefinition g_frostWyrms
-
-// Lesser Bosses
-SpawnWaveDefinition g_abominations
-
-// Final Bosses
-SpawnWaveDefinition g_forbiddenOne
 
 WeightedSet<Func1<int, SpawnWaveDefinition>> g_waves234
 WeightedSet<Func1<int, SpawnWaveDefinition>> g_waves6789
 WeightedSet<Func1<int, SpawnWaveDefinition>> g_waves11121314
 
-SpawnWaveDefinition array[TOTAL_NIGHTS * MAX_SPAWN_WAVES] g_spawnWaveDefinitions
-
-StandardUnitModifiers g_zombieMeleeModifiers
-StandardUnitModifiers g_eliteMeleeModifiers
-StandardUnitModifiers g_eliteRangedModifiers
 StandardUnitModifiers g_necromancerSkeletonWarriorModifiers
 StandardUnitModifiers g_necromancerSkeletonMageModifiers
 StandardUnitModifiers g_necromancerSkeletonChampionModifiers
@@ -76,48 +52,920 @@ StandardUnitModifiers g_tombstoneDarkMinionModifiers
 StandardUnitModifiers g_tombstoneGreaterDarkMinionModifiers
 
 // ============================================================================
-function setSpawnWaveDef(int night, int spawnWaveIndex, SpawnWaveDefinition def)
-  g_spawnWaveDefinitions[night * MAX_SPAWN_WAVES + spawnWaveIndex] = def
+public class NightWaveGenerator implements INightWaveGenerator
+  private constant int SPAWN_WAVE_DEF_COUNT = (TOTAL_NIGHTS + 1) * MAX_SPAWN_WAVES
+  private SpawnWaveDefinition array[SPAWN_WAVE_DEF_COUNT] m_spawnWaveDefinitions
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    for i = 0 to SPAWN_WAVE_DEF_COUNT - 1
+      if (m_spawnWaveDefinitions[i] != null)
+        destroy m_spawnWaveDefinitions[i]
+        m_spawnWaveDefinitions[i] = null
+
+  // --------------------------------------------------------------------------
+  function setSpawnWaveDef(int night, int spawnWaveIndex, SpawnWaveDefinition def)
+    m_spawnWaveDefinitions[night * MAX_SPAWN_WAVES + spawnWaveIndex] = def
+
+  // --------------------------------------------------------------------------
+  function getSpawnWaveDef(int night, int spawnWaveIndex) returns SpawnWaveDefinition
+    return m_spawnWaveDefinitions[night * MAX_SPAWN_WAVES + spawnWaveIndex]
+
+  // --------------------------------------------------------------------------
+  override function generateWavesForPlayer(player targetPlayer, WaveCollection<NightWave> waves)
+ 
+    for nightIndex = 1 to TOTAL_NIGHTS
+      let wave = waves.getOrCreateWave(nightIndex)
+      ..setId("Night:{0}".format(nightIndex.toString()))
+      ..setXpReward(50 * nightIndex)
+
+      for spawnWaveIndex = 0 to MAX_SPAWN_WAVES - 1
+        let def = getSpawnWaveDef(nightIndex, spawnWaveIndex)
+        if (def != null)
+          wave.addSpawnWave(new SpawnWave(targetPlayer, nightIndex, def))
+
+          if (def.getPlaySoundOnStart() != null)
+            wave.playSoundOnStart(def.getPlaySoundOnStart())
+
+          if (def.getPlaySoundOnComplete() != null)
+            wave.playSoundOnComplete(def.getPlaySoundOnComplete())
 
 // ============================================================================
-function getSpawnWaveDef(int night, int spawnWaveIndex) returns SpawnWaveDefinition
-  return g_spawnWaveDefinitions[night * MAX_SPAWN_WAVES + spawnWaveIndex]
+public class NormalNightWaveGenerator extends NightWaveGenerator
+
+  // --------------------------------------------------------------------------
+  construct()
+
+    // Zombies spawn every night
+    for nightIndex = 1 to TOTAL_NIGHTS
+      setSpawnWaveDef(nightIndex, 0, createSpawnWave_Zombies(nightIndex))
+
+    let waves = new LinkedList<Func1<int, SpawnWaveDefinition>>()
+    //
+    ..add((nightIndex) -> createSpawnWave_SkeletonArchers(nightIndex))
+    ..add((nightIndex) -> createSpawnWave_Tombstones(nightIndex))
+    ..add((nightIndex) -> createSpawnWave_Crows(nightIndex))
+    ..add((nightIndex) -> createSpawnWave_Abominations(nightIndex)) // Boss
+    //
+    ..add((nightIndex) -> createSpawnWave_Cultists(nightIndex))
+    ..add((nightIndex) -> createSpawnWave_Necromancers(nightIndex))
+    ..add((nightIndex) -> createSpawnWave_OrcSkeletons(nightIndex))
+    ..add((nightIndex) -> createSpawnWave_Gargoyles(nightIndex))
+    ..add((nightIndex) -> createSpawnWave_CryptFiends(nightIndex)) // Boss
+    //
+    ..add((nightIndex) -> createSpawnWave_Raiders(nightIndex))
+    ..add((nightIndex) -> createSpawnWave_Ghosts(nightIndex))
+    ..add((nightIndex) -> createSpawnWave_MeatWagons(nightIndex))
+    ..add((nightIndex) -> createSpawnWave_Wyrms(nightIndex))
+    ..add((nightIndex) -> createSpawnWave_ForbiddenOne(nightIndex)) // Boss
+    ..add((nightIndex) -> createSpawnWave_Archimonde(nightIndex)) // Boss
+
+    for nightIndex = 2 to TOTAL_NIGHTS
+      let func = waves.get(nightIndex - 2).acquire()
+      setSpawnWaveDef(nightIndex, 1, func.call(nightIndex))
+      func.release()
+
+    destroy waves
 
 // ============================================================================
-function defineSpawnWaves()
+public class HardPlusNightWaveGenerator extends NightWaveGenerator
 
-  g_zombieMeleeModifiers = new StandardUnitModifiers()
-  g_zombieMeleeModifiers.healthRange = rangeInt(120, 2000)
-  g_zombieMeleeModifiers.armorRange = rangeReal(0.0, 5.0)
-  g_zombieMeleeModifiers.attack1MinDamageRange = rangeInt(8, 12)
-  g_zombieMeleeModifiers.attack1MaxDamageRange = rangeInt(240, 260)
-  g_zombieMeleeModifiers.attack1Cooldown = rangeReal(2.0, 0.5)
-  g_zombieMeleeModifiers.attack1Range = MELEE_UNIT_ATTACK_RANGE.toReal()
-  g_zombieMeleeModifiers.coinDropChanceRange = REAL_RANGE_ZERO
-  g_zombieMeleeModifiers.sightRange = ELITE_SIGHT_RANGE
-  g_zombieMeleeModifiers.preferOrganicTargets = false
+  // --------------------------------------------------------------------------
+  construct()
 
-  g_eliteMeleeModifiers = new StandardUnitModifiers()
-  g_eliteMeleeModifiers.healthRange = rangeInt(480, 8000)
-  g_eliteMeleeModifiers.armorRange = rangeReal(2.0, 6.0)
-  g_eliteMeleeModifiers.attack1MinDamageRange = rangeInt(16, 24)
-  g_eliteMeleeModifiers.attack1MaxDamageRange = rangeInt(280, 300)
-  g_eliteMeleeModifiers.attack1Cooldown = rangeReal(2.0, 0.5)
-  g_eliteMeleeModifiers.attack1Range = MELEE_UNIT_ATTACK_RANGE.toReal()
-  g_eliteMeleeModifiers.coinDropChanceRange = COIN_CHANCE_RANGE
-  g_eliteMeleeModifiers.sightRange = ELITE_SIGHT_RANGE
-  g_eliteMeleeModifiers.preferOrganicTargets = false
-  
-  g_eliteRangedModifiers = new StandardUnitModifiers()
-  g_eliteRangedModifiers.healthRange = rangeInt(480, 8000)
-  g_eliteRangedModifiers.armorRange = rangeReal(1.0, 3.0)
-  g_eliteRangedModifiers.attack1MinDamageRange = rangeInt(16, 32)
-  g_eliteRangedModifiers.attack1MaxDamageRange = rangeInt(128, 140)
-  g_eliteRangedModifiers.attack1Cooldown = rangeReal(2.0, 0.5)
-  g_eliteRangedModifiers.attack1Range = RANGED_UNIT_ATTACK_RANGE.toReal()
-  g_eliteRangedModifiers.coinDropChanceRange = COIN_CHANCE_RANGE
-  g_eliteRangedModifiers.sightRange = ELITE_SIGHT_RANGE
-  g_eliteRangedModifiers.preferOrganicTargets = true
+    let waves234 = new WeightedSet<Func1<int, SpawnWaveDefinition>>()
+    ..add((nightIndex) -> createSpawnWave_SkeletonArchers(nightIndex), 1.0)
+    ..add((nightIndex) -> createSpawnWave_Tombstones(nightIndex), 1.0)
+    ..add((nightIndex) -> createSpawnWave_Crows(nightIndex), 1.0)
+
+    let waves6789 = new WeightedSet<Func1<int, SpawnWaveDefinition>>()
+    ..add((nightIndex) -> createSpawnWave_Cultists(nightIndex), 1.0)
+    ..add((nightIndex) -> createSpawnWave_Necromancers(nightIndex), 1.0)
+    ..add((nightIndex) -> createSpawnWave_OrcSkeletons(nightIndex), 1.0)
+    ..add((nightIndex) -> createSpawnWave_Gargoyles(nightIndex), 1.0)
+
+    let waves11121314 = new WeightedSet<Func1<int, SpawnWaveDefinition>>()
+    ..add((nightIndex) -> createSpawnWave_Raiders(nightIndex), 1.0)
+    ..add((nightIndex) -> createSpawnWave_Ghosts(nightIndex), 1.0)
+    ..add((nightIndex) -> createSpawnWave_MeatWagons(nightIndex), 1.0)
+    ..add((nightIndex) -> createSpawnWave_Wyrms(nightIndex), 1.0)
+
+    // Zombies spawn every night
+    for nightIndex = 1 to TOTAL_NIGHTS
+      setSpawnWaveDef(nightIndex, 0, createSpawnWave_Zombies(nightIndex))
+
+    for nightIndex = 2 to 4
+      let func = waves234.popRandom().acquire()
+      setSpawnWaveDef(nightIndex, 1, func.call(nightIndex))
+      func.release()
+
+    setSpawnWaveDef(5, 1, createSpawnWave_Abominations(5))
+
+    for nightIndex = 6 to 9
+      let func = waves6789.popRandom().acquire()
+      setSpawnWaveDef(nightIndex, 1, func.call(nightIndex))
+      func.release()
+
+    setSpawnWaveDef(10, 1, createSpawnWave_CryptFiends(10))
+
+    for nightIndex = 11 to 14
+      let func = waves11121314.popRandom().acquire()
+      setSpawnWaveDef(nightIndex, 1, func.call(nightIndex))
+      func.release()
+
+    setSpawnWaveDef(15, 1, createSpawnWave_ForbiddenOne(15))
+    setSpawnWaveDef(16, 1, createSpawnWave_Archimonde(16))
+
+// ============================================================================
+function createSpawnWave_Zombies(int nightIndex) returns SpawnWaveDefinition
+  let def = new SpawnWaveDefinition("Zombies")
+  ..setTags(SpawnDefinitionTags.ground, SpawnDefinitionTags.melee, SpawnDefinitionTags.normal)
+  ..setProgress(getProgressForSpawnWave(nightIndex))
+  ..setMaxAliveCount(wavecontext -> 10)
+  ..setSpawnsPerActivation(wavecontext -> 6)
+  ..setSpawnGroupingFactor(wavecontext -> 0.25)
+  ..setActivator(new PeriodicWaveActivator(3.0))
+  ..setSpawnRange(SpawnRange.CLOSE)
+
+  let unitTypeProvider = new TieredUnitTypeProvider()
+  for i = 0 to MAX_ELITE_TIER-1
+    unitTypeProvider.setUnitType(i, TlsUnitIds.Undead.zombiesNight[i])
+  def.setUnitTypeProvider(unitTypeProvider)
+
+  def.setCommonUnitModifier() (unit u, ISpawnWaveContext context) ->
+  //{
+    g_zombieMeleeModifiers.apply(context, u)
+    u.setMoveSpeed(lerp(80, 250, context.getGameProgress01()))
+    u.setDefenseType(ArmorType.Unarmored)
+    u.preferStructureTargets()
+  //}
+
+  /*
+  def.setUnitModifier(TlsUnitIds.Undead.zombiesNight[0]) (unit u, ISpawnWaveContext context) ->
+  //{
+  //}
+
+  def.setUnitModifier(TlsUnitIds.Undead.zombiesNight[1]) (unit u, ISpawnWaveContext context) ->
+  //{
+  //}
+
+  def.setUnitModifier(TlsUnitIds.Undead.zombiesNight[2]) (unit u, ISpawnWaveContext context) ->
+  //{
+  //}
+  */
+
+  return def
+
+// ============================================================================
+function createSpawnWave_SkeletonArchers(int nightIndex) returns SpawnWaveDefinition
+  let def = new SpawnWaveDefinition("Skeleton Archers")
+  ..setTags(SpawnDefinitionTags.ranged, SpawnDefinitionTags.normal)
+  ..setProgress(getProgressForSpawnWave(nightIndex))
+  ..setMaxAliveCount(context -> 2)
+  ..setMaxSpawnCount(context -> 6)
+  ..setSpawnsPerActivation(context -> 2)
+  ..setSpawnGroupingFactor(context -> 0.5)
+  ..setActivator(new PeriodicWaveActivator(5.0))
+  ..setSpawnRange(SpawnRange.MID)
+  ..setGoldReward(context -> getStandardGoldRewardForWave(context))
+  ..setupForElite()
+
+  let unitTypeProvider = new TieredUnitTypeProvider()
+  for i = 0 to MAX_ELITE_TIER-1
+    unitTypeProvider.setUnitType(i, TlsUnitIds.Undead.skeletonArchers[i])
+  def.setUnitTypeProvider(unitTypeProvider)
+
+  def.setCommonUnitModifier() (unit u, ISpawnWaveContext context) ->
+  //{
+    g_eliteRangedModifiers.apply(context, u)
+    u.setDefenseType(ArmorType.Medium)
+  //}
+
+  /*
+  def.setUnitModifier(TlsUnitIds.Undead.skeletonArchers[0]) (unit u, ISpawnWaveContext context) ->
+  //{
+  //}
+
+  def.setUnitModifier(TlsUnitIds.Undead.skeletonArchers[1]) (unit u, ISpawnWaveContext context) ->
+  //{
+  //}
+
+  def.setUnitModifier(TlsUnitIds.Undead.skeletonArchers[2]) (unit u, ISpawnWaveContext context) ->
+  //{
+  //}
+  */
+
+  return def
+
+// ============================================================================
+function createSpawnWave_Crows(int nightIndex) returns SpawnWaveDefinition
+  let def = new SpawnWaveDefinition("Crows")
+  ..setTags(SpawnDefinitionTags.flying, SpawnDefinitionTags.ranged, SpawnDefinitionTags.magic)
+  ..setProgress(getProgressForSpawnWave(nightIndex))
+  ..setMaxAliveCount(context -> 2)
+  ..setSpawnsPerActivation(context -> 1)
+  ..setSpawnGroupingFactor(context -> 0.0)
+  ..setActivator(new PeriodicWaveActivator(3.0))
+  ..setSpawnRange(SpawnRange.MID)
+  ..setGoldReward(context -> getStandardGoldRewardForWave(context))
+  ..setupForElite()
+
+  let unitTypeProvider = new TieredUnitTypeProvider()
+  for i = 0 to MAX_ELITE_TIER-1
+    unitTypeProvider.setUnitType(i, TlsUnitIds.Undead.crows[i])
+  def.setUnitTypeProvider(unitTypeProvider)
+
+  def.setCommonUnitModifier() (unit u, ISpawnWaveContext context) ->
+  //{
+    g_eliteRangedModifiers.apply(context, u)
+    u.setDefenseType(ArmorType.Small)
+    u.setMoveSpeed(300)
+  //}
+
+  /*
+  def.setUnitModifier(TlsUnitIds.Undead.crows[0]) (unit u, ISpawnWaveContext context) ->
+  //{
+  //}
+
+  def.setUnitModifier(TlsUnitIds.Undead.crows[1]) (unit u, ISpawnWaveContext context) ->
+  //{
+  //}
+
+  def.setUnitModifier(TlsUnitIds.Undead.crows[2]) (unit u, ISpawnWaveContext context) ->
+  //{
+  //}
+  */
+
+  return def
+
+// ============================================================================
+function createSpawnWave_Gargoyles(int nightIndex) returns SpawnWaveDefinition
+  let def = new SpawnWaveDefinition("Gargoyles")
+  ..setTags(SpawnDefinitionTags.flying, SpawnDefinitionTags.melee, SpawnDefinitionTags.normal)
+  ..setProgress(getProgressForSpawnWave(nightIndex))
+  ..setMaxAliveCount(context -> 2)
+  ..setSpawnsPerActivation(context -> 1)
+  ..setSpawnGroupingFactor(context -> 0.0)
+  ..setActivator(new PeriodicWaveActivator(3.0))
+  ..setSpawnRange(SpawnRange.MID)
+  ..setGoldReward(context -> getStandardGoldRewardForWave(context))
+  ..setupForElite()
+
+  let unitTypeProvider = new TieredUnitTypeProvider()
+  for i = 0 to MAX_ELITE_TIER-1
+    unitTypeProvider.setUnitType(i, TlsUnitIds.Undead.gargoyles[i])
+  def.setUnitTypeProvider(unitTypeProvider)
+
+  def.setCommonUnitModifier() (unit u, ISpawnWaveContext context) ->
+  //{
+    g_eliteMeleeModifiers.apply(context, u)
+    u.setDefenseType(ArmorType.Medium)
+    u.setMoveSpeed(300)
+  //}
+
+  /*
+  def.setUnitModifier(TlsUnitIds.Undead.crows[0]) (unit u, ISpawnWaveContext context) ->
+  //{
+  //}
+
+  def.setUnitModifier(TlsUnitIds.Undead.crows[1]) (unit u, ISpawnWaveContext context) ->
+  //{
+  //}
+
+  def.setUnitModifier(TlsUnitIds.Undead.crows[2]) (unit u, ISpawnWaveContext context) ->
+  //{
+  //}
+  */
+
+  return def
+
+// ============================================================================
+function createSpawnWave_Wyrms(int nightIndex) returns SpawnWaveDefinition
+  let def = new SpawnWaveDefinition("Wyrms")
+  ..setTags(SpawnDefinitionTags.flying, SpawnDefinitionTags.ranged, SpawnDefinitionTags.magic)
+  ..setProgress(getProgressForSpawnWave(nightIndex))
+  ..setMaxAliveCount(context -> 2)
+  ..setSpawnsPerActivation(context -> 1)
+  ..setSpawnGroupingFactor(context -> 0.0)
+  ..setActivator(new PeriodicWaveActivator(3.0))
+  ..setSpawnRange(SpawnRange.MID)
+  ..setGoldReward(context -> getStandardGoldRewardForWave(context))
+  ..setupForElite()
+
+  let unitTypeProvider = new TieredUnitTypeProvider()
+  for i = 0 to MAX_ELITE_TIER-1
+    unitTypeProvider.setUnitType(i, TlsUnitIds.Undead.wyrms[i])
+  def.setUnitTypeProvider(unitTypeProvider)
+
+  def.setCommonUnitModifier() (unit u, ISpawnWaveContext context) ->
+  //{
+    g_eliteRangedModifiers.apply(context, u)
+    u.setDefenseType(ArmorType.Medium)
+    u.setMoveSpeed(200)
+  //}
+
+  /*
+  def.setUnitModifier(TlsUnitIds.Undead.crows[0]) (unit u, ISpawnWaveContext context) ->
+  //{
+  //}
+
+  def.setUnitModifier(TlsUnitIds.Undead.crows[1]) (unit u, ISpawnWaveContext context) ->
+  //{
+  //}
+
+  def.setUnitModifier(TlsUnitIds.Undead.crows[2]) (unit u, ISpawnWaveContext context) ->
+  //{
+  //}
+  */
+
+  return def
+
+// ============================================================================
+function createSpawnWave_Cultists(int nightIndex) returns SpawnWaveDefinition
+  let def = new SpawnWaveDefinition("Fallen Cultists")
+  ..setTags(SpawnDefinitionTags.invade, SpawnDefinitionTags.melee, SpawnDefinitionTags.piercing)
+  ..setProgress(getProgressForSpawnWave(nightIndex))
+  ..setMaxAliveCount(context -> 2)
+  ..setSpawnsPerActivation(context -> 1)
+  ..setSpawnGroupingFactor(context -> 0.0)
+  ..setActivator(new PeriodicWaveActivator(3.0))
+  ..setSpawnRange(SpawnRange.MID)
+  ..setGoldReward(context -> getStandardGoldRewardForWave(context))
+  ..setupForElite()
+
+  let unitTypeProvider = new TieredUnitTypeProvider()
+  for i = 0 to MAX_ELITE_TIER-1
+    unitTypeProvider.setUnitType(i, TlsUnitIds.Undead.cultists[i])
+  def.setUnitTypeProvider(unitTypeProvider)
+
+  def.setCommonUnitModifier() (unit u, ISpawnWaveContext context) ->
+  //{
+    g_eliteMeleeModifiers.apply(context, u)
+  //}
+
+  /*
+  def.setUnitModifier(TlsUnitIds.Undead.crows[0]) (unit u, ISpawnWaveContext context) ->
+  //{
+  //}
+
+  def.setUnitModifier(TlsUnitIds.Undead.crows[1]) (unit u, ISpawnWaveContext context) ->
+  //{
+  //}
+
+  def.setUnitModifier(TlsUnitIds.Undead.crows[2]) (unit u, ISpawnWaveContext context) ->
+  //{
+  //}
+  */
+
+  return def
+
+constant int RAIDER_GROUP_COUNT = 3                                        //              4  6  8                6  8  10                 8  10  12
+constant int array[MAX_ELITE_TIER * RAIDER_GROUP_COUNT] s_fallenBandit =     [/* Tier I */ 3, 4, 4, /* Tier II */ 3, 4,  4, /* Tier III */ 4,  4,  4]
+constant int array[MAX_ELITE_TIER * RAIDER_GROUP_COUNT] s_fallenMarksman =   [/* Tier I */ 1, 2, 3, /* Tier II */ 2, 2,  3, /* Tier III */ 2,  3,  4]
+constant int array[MAX_ELITE_TIER * RAIDER_GROUP_COUNT] s_fallenWizard =     [/* Tier I */ 0, 0, 0, /* Tier II */ 1, 2,  2, /* Tier III */ 2,  3,  3]
+constant int array[MAX_ELITE_TIER * RAIDER_GROUP_COUNT] s_fallenBanditLord = [/* Tier I */ 0, 0, 1, /* Tier II */ 0, 0,  1, /* Tier III */ 0,  0,  1]
+
+// ============================================================================
+function createSpawnWave_Raiders(int nightIndex) returns SpawnWaveDefinition
+  let def = new SpawnWaveDefinition("Fallen Raiders")
+  ..setTags(SpawnDefinitionTags.grouped, SpawnDefinitionTags.melee, SpawnDefinitionTags.piercing)
+  ..setProgress(getProgressForSpawnWave(nightIndex))
+  ..setActivator(new PeriodicWaveActivator(10.0))
+  ..setSpawnRange(SpawnRange.MID)
+  ..setGoldReward(context -> getStandardGoldRewardForWave(context))
+  ..setSpawnGroupingFactor(context -> 1.0)
+  ..setWaitForFullSpawnGroup(true)
+  ..setSpawnsPerActivation(context -> begin
+    let groupId = context.getGroupId()
+    return s_fallenBandit[groupId] + s_fallenMarksman[groupId] + s_fallenWizard[groupId] + s_fallenBanditLord[groupId]
+  end)
+  ..setMaxAliveCount(context -> begin
+    let groupId = context.getGroupId()
+    return s_fallenBandit[groupId] + s_fallenMarksman[groupId] + s_fallenWizard[groupId] + s_fallenBanditLord[groupId]
+  end)
+  ..setupForElite()
+
+  def.setUnitTypeProvider(new FuncUnitTypeProvider((ISpawnWaveContext context, Vector<int> result) -> begin
+    let tier = context.getTier()
+    let groupId = context.getGroupId()
+    for i = 0 to s_fallenBandit[tier * RAIDER_GROUP_COUNT + groupId]
+      result.add(TlsUnitIds.Undead.fallenBandit[tier])
+    for i = 0 to s_fallenMarksman[tier * RAIDER_GROUP_COUNT + groupId]
+      result.add(TlsUnitIds.Undead.fallenMarksman[tier])
+    for i = 0 to s_fallenWizard[tier * RAIDER_GROUP_COUNT + groupId]
+      result.add(TlsUnitIds.Undead.fallenWizard[tier])
+    for i = 0 to s_fallenBanditLord[tier * RAIDER_GROUP_COUNT + groupId]
+      result.add(TlsUnitIds.Undead.fallenBanditLord[tier])
+  end))
+
+  for tier = 0 to MAX_ELITE_TIER-1
+  //{
+    def.setUnitModifier(TlsUnitIds.Undead.fallenBandit[tier]) (unit u, ISpawnWaveContext context) ->
+    //{
+      g_eliteMeleeModifiers.apply(context, u)
+    //}
+
+    def.setUnitModifier(TlsUnitIds.Undead.fallenMarksman[tier]) (unit u, ISpawnWaveContext context) ->
+    //{
+      g_eliteRangedModifiers.apply(context, u)
+    //}
+
+    def.setUnitModifier(TlsUnitIds.Undead.fallenWizard[tier]) (unit u, ISpawnWaveContext context) ->
+    //{
+      g_eliteRangedModifiers.apply(context, u)
+    //}
+
+    def.setUnitModifier(TlsUnitIds.Undead.fallenBanditLord[tier]) (unit u, ISpawnWaveContext context) ->
+    //{
+      g_eliteMeleeModifiers.apply(context, u)
+    //}    
+  //}
+
+  return def
+
+
+// ============================================================================
+function createSpawnWave_Necromancers(int nightIndex) returns SpawnWaveDefinition
+  let def = new SpawnWaveDefinition("Necromancers")
+  ..setTags(SpawnDefinitionTags.summoner, SpawnDefinitionTags.ranged, SpawnDefinitionTags.magic)
+  ..setProgress(getProgressForSpawnWave(nightIndex))
+  ..setMaxAliveCount(context -> 3)
+  ..setSpawnsPerActivation(context -> 1)
+  ..setSpawnGroupingFactor(context -> 0.0)
+  ..setActivator(new PeriodicWaveActivator(10.0)..setActivateOnStart(false))
+  ..setSpawnRange(SpawnRange.MID)
+  ..setGoldReward(context -> getStandardGoldRewardForWave(context))
+  ..setupForElite()
+
+  let unitTypeProvider = new TieredUnitTypeProvider()
+  for i = 0 to MAX_ELITE_TIER-1
+    unitTypeProvider.setUnitType(i, TlsUnitIds.Undead.necromancers[i])
+  def.setUnitTypeProvider(unitTypeProvider)
+
+  // NOTE: Can't use common modifer here since summoned units would also share it
+
+  def.setUnitModifier(TlsUnitIds.Undead.necromancers[0]) (unit u, ISpawnWaveContext context) ->
+  //{
+    g_eliteRangedModifiers.apply(context, u)
+    u.setDefenseType(ArmorType.Unarmored)
+    u.setupNecromancer(context)
+    u.setDefenseType(ArmorType.Small)
+    u.setMoveSpeed(300)
+  //}
+
+  def.setUnitModifier(TlsUnitIds.Undead.necromancers[1]) (unit u, ISpawnWaveContext context) ->
+  //{
+    g_eliteRangedModifiers.apply(context, u)
+    u.setDefenseType(ArmorType.Unarmored)
+    u.setupNecromancer(context)
+    u.setDefenseType(ArmorType.Small)
+    u.setMoveSpeed(300)
+  //}
+
+  def.setUnitModifier(TlsUnitIds.Undead.necromancers[2]) (unit u, ISpawnWaveContext context) ->
+  //{
+    g_eliteRangedModifiers.apply(context, u)
+    u.setDefenseType(ArmorType.Unarmored)
+    u.setupNecromancer(context)
+    u.setDefenseType(ArmorType.Small)
+    u.setMoveSpeed(300)
+  //}
+
+  // SUMMONS - Skeleton Warrior
+  def.setUnitModifier(TlsUnitIds.Undead.skeletonWarrior) (unit u, ISpawnWaveContext context) ->
+  //{
+    g_necromancerSkeletonWarriorModifiers.apply(context, u)
+  //}
+
+  // SUMMONS - Skeleton Mage
+  def.setUnitModifier(TlsUnitIds.Undead.skeletonMage) (unit u, ISpawnWaveContext context) ->
+  //{
+    g_necromancerSkeletonMageModifiers.apply(context, u)
+  //}
+
+  // SUMMONS - Skeleton Champion
+  def.setUnitModifier(TlsUnitIds.Undead.skeletonChampion) (unit u, ISpawnWaveContext context) ->
+  //{
+    g_necromancerSkeletonChampionModifiers.apply(context, u)
+  //}
+
+  return def
+
+// ============================================================================
+function createSpawnWave_Tombstones(int nightIndex) returns SpawnWaveDefinition
+  let def = new SpawnWaveDefinition("Dark Minions")
+  ..setTags(SpawnDefinitionTags.grouped, SpawnDefinitionTags.melee, SpawnDefinitionTags.normal)
+  ..setProgress(getProgressForSpawnWave(nightIndex))
+  ..setMaxAliveCount(context -> (4 + context.getPlayerDifficulty01()).floor())
+  ..setMaxSpawnCount(context -> (6 + context.getPlayerDifficulty01()).floor())
+  ..setSpawnsPerActivation(context -> 1)
+  ..setSpawnGroupingFactor(context -> 0.0)
+  ..setActivator(new PeriodicWaveActivator(1.0))
+  ..setSpawnRange(SpawnRange.CLOSE)
+  ..setGoldReward(context -> getStandardGoldRewardForWave(context))
+  ..setFacingAngleRange(rangeReal(270.0, 360.0))
+  ..setSpawnPointProviderType(SpawnPointProviderType.DYNAMIC_FRIENDLY)
+  ..setupForElite()
+
+  // NOTE: Can't use common modifer here since summoned units would also share it
+
+  let unitTypeProvider = new TieredUnitTypeProvider()
+  for i = 0 to MAX_ELITE_TIER-1
+    unitTypeProvider.setUnitType(i, TlsUnitIds.Undead.tombstones[i])
+  def.setUnitTypeProvider(unitTypeProvider)
+
+  def.setUnitModifier(TlsUnitIds.Undead.tombstones[0]) (unit u, ISpawnWaveContext context) ->
+  //{
+    g_eliteMeleeModifiers.applyHealth(context, u, 0.25)
+    g_eliteMeleeModifiers.applyArmor(context, u, 0.25)
+    // g_eliteMeleeModifiers.applyGoldCoinDropChance(context, u, 1.0)
+    u.getOrAddTombstoneComponent().setSpawnedContext(context)
+
+    // Play the birth animation once
+    u.queueAnimation("birth")
+  //}
+
+  def.setUnitModifier(TlsUnitIds.Undead.tombstones[1]) (unit u, ISpawnWaveContext context) ->
+  //{
+    g_eliteMeleeModifiers.applyHealth(context, u, 0.5)
+    g_eliteMeleeModifiers.applyArmor(context, u, 0.5)
+    // g_eliteMeleeModifiers.applyGoldCoinDropChance(context, u, 1.0)
+    u.getOrAddTombstoneComponent().setSpawnedContext(context)
+
+    // Play the birth animation once
+    u.queueAnimation("birth")
+  //}
+
+  def.setUnitModifier(TlsUnitIds.Undead.tombstones[2]) (unit u, ISpawnWaveContext context) ->
+  //{
+    g_eliteMeleeModifiers.applyHealth(context, u, 0.75)
+    g_eliteMeleeModifiers.applyArmor(context, u, 0.75)
+    // g_eliteMeleeModifiers.applyGoldCoinDropChance(context, u, 1.0)
+    u.getOrAddTombstoneComponent().setSpawnedContext(context)
+
+    // Play the birth animation once
+    u.queueAnimation("birth")
+  //}
+
+  let summonEffectPath = "Abilities\\Spells\\Undead\\AnimateDead\\AnimateDeadTarget.mdl"
+
+  def.setUnitModifier(TlsUnitIds.Undead.darkMinions[0]) (unit u, ISpawnWaveContext context) ->
+  //{
+    g_tombstoneLesserDarkMinionModifiers.apply(context, u)
+    FX.createEffectOneShot(summonEffectPath, u.getPos())
+  //}
+
+  def.setUnitModifier(TlsUnitIds.Undead.darkMinions[1]) (unit u, ISpawnWaveContext context) ->
+  //{
+    g_tombstoneDarkMinionModifiers.apply(context, u)
+    FX.createEffectOneShot(summonEffectPath, u.getPos())
+  //}
+
+  def.setUnitModifier(TlsUnitIds.Undead.darkMinions[2]) (unit u, ISpawnWaveContext context) ->
+  //{
+    g_tombstoneGreaterDarkMinionModifiers.apply(context, u)
+    FX.createEffectOneShot(summonEffectPath, u.getPos())
+  //}
+
+  return def
+
+// ============================================================================
+function createSpawnWave_Ghosts(int nightIndex) returns SpawnWaveDefinition
+  let def = new SpawnWaveDefinition("Ghosts")
+  ..setTags(SpawnDefinitionTags.invade, SpawnDefinitionTags.ethereal, SpawnDefinitionTags.melee, SpawnDefinitionTags.magic)
+  ..setProgress(getProgressForSpawnWave(nightIndex))
+  ..setMaxAliveCount(context -> 2)
+  ..setSpawnsPerActivation(context -> 2)
+  ..setSpawnGroupingFactor(context -> 0.0)
+  ..setActivator(new PeriodicWaveActivator(5.0))
+  ..setSpawnRange(SpawnRange.MID)
+  ..setGoldReward(context -> getStandardGoldRewardForWave(context))
+  ..setupForElite()
+
+  let unitTypeProvider = new TieredUnitTypeProvider()
+  for i = 0 to MAX_ELITE_TIER-1
+    unitTypeProvider.setUnitType(i, TlsUnitIds.Undead.ghosts[i])
+  def.setUnitTypeProvider(unitTypeProvider)
+
+  def.setCommonUnitModifier() (unit u, ISpawnWaveContext context) ->
+  //{
+    g_eliteRangedModifiers.apply(context, u)
+    g_eliteRangedModifiers.applyHealth(context, u, 0.5)
+    u.setDefenseType(ArmorType.Medium)
+  //}
+
+  /*
+  def.setUnitModifier(TlsUnitIds.Undead.ghosts[0]) (unit u, ISpawnWaveContext context) ->
+  //{
+    g_eliteMeleeModifiers.apply(context, u)
+  //}
+
+  def.setUnitModifier(TlsUnitIds.Undead.ghosts[1]) (unit u, ISpawnWaveContext context) ->
+  //{
+    g_eliteMeleeModifiers.apply(context, u)
+  //}
+
+  def.setUnitModifier(TlsUnitIds.Undead.ghosts[2]) (unit u, ISpawnWaveContext context) ->
+  //{
+    g_eliteMeleeModifiers.apply(context, u)
+  //}
+  */
+
+  return def
+
+// ============================================================================
+function createSpawnWave_OrcSkeletons(int nightIndex) returns SpawnWaveDefinition
+  let def = new SpawnWaveDefinition("Orc Skeletons")
+  ..setTags(SpawnDefinitionTags.grouped, SpawnDefinitionTags.melee, SpawnDefinitionTags.heavy, SpawnDefinitionTags.normal)
+  ..setProgress(getProgressForSpawnWave(nightIndex))
+  ..setMaxAliveCount(context -> 4)
+  ..setSpawnsPerActivation(context -> 2)
+  ..setSpawnGroupingFactor(context -> 0.0)
+  ..setActivator(new PeriodicWaveActivator(5.0))
+  ..setSpawnRange(SpawnRange.MID)
+  ..setGoldReward(context -> getStandardGoldRewardForWave(context))
+  ..setupForElite()
+
+  let unitTypeProvider = new TieredUnitTypeProvider()
+  for i = 0 to MAX_ELITE_TIER-1
+    unitTypeProvider.setUnitType(i, TlsUnitIds.Undead.skeletonOrcs[i])
+  def.setUnitTypeProvider(unitTypeProvider)
+
+  def.setCommonUnitModifier() (unit u, ISpawnWaveContext context) ->
+  //{
+    g_eliteMeleeModifiers.apply(context, u)
+    u.setDefenseType(ArmorType.Large)
+  //}
+
+  /*
+  def.setUnitModifier(TlsUnitIds.Undead.skeletonOrcs[0]) (unit u, ISpawnWaveContext context) ->
+  //{
+    g_eliteMeleeModifiers.apply(context, u)
+  //}
+
+  def.setUnitModifier(TlsUnitIds.Undead.skeletonOrcs[1]) (unit u, ISpawnWaveContext context) ->
+  //{
+    g_eliteMeleeModifiers.apply(context, u)
+  //}
+
+  def.setUnitModifier(TlsUnitIds.Undead.skeletonOrcs[2]) (unit u, ISpawnWaveContext context) ->
+  //{
+    g_eliteMeleeModifiers.apply(context, u)
+  //}
+  */
+
+  return def
+
+// ============================================================================
+function createSpawnWave_MeatWagons(int nightIndex) returns SpawnWaveDefinition
+  let def = new SpawnWaveDefinition("Meat Wagons")
+  ..setTags(SpawnDefinitionTags.ranged, SpawnDefinitionTags.siege)
+  ..setProgress(getProgressForSpawnWave(nightIndex))
+  ..setMaxAliveCount(context -> 4)
+  ..setSpawnsPerActivation(context -> 2)
+  ..setSpawnGroupingFactor(context -> 0.0)
+  ..setActivator(new PeriodicWaveActivator(5.0))
+  ..setSpawnRange(SpawnRange.MID)
+  ..setGoldReward(context -> getStandardGoldRewardForWave(context))
+  ..setupForElite()
+
+  let unitTypeProvider = new TieredUnitTypeProvider()
+  for i = 0 to MAX_ELITE_TIER-1
+    unitTypeProvider.setUnitType(i, TlsUnitIds.Undead.wagons[i])
+  def.setUnitTypeProvider(unitTypeProvider)
+
+  def.setCommonUnitModifier() (unit u, ISpawnWaveContext context) ->
+  //{
+    g_eliteRangedModifiers.apply(context, u)
+    u.setDefenseType(ArmorType.Large)
+  //}
+
+  /*
+  def.setUnitModifier(TlsUnitIds.Undead.wagons[0]) (unit u, ISpawnWaveContext context) ->
+  //{
+    g_eliteRangedModifiers.apply(context, u)
+  //}
+
+  def.setUnitModifier(TlsUnitIds.Undead.wagons[1]) (unit u, ISpawnWaveContext context) ->
+  //{
+    g_eliteRangedModifiers.apply(context, u)
+  //}
+
+  def.setUnitModifier(TlsUnitIds.Undead.wagons[2]) (unit u, ISpawnWaveContext context) ->
+  //{
+    g_eliteRangedModifiers.apply(context, u)
+  //}
+  */
+
+  return def
+
+// ============================================================================
+function createSpawnWave_Mutants(int nightIndex) returns SpawnWaveDefinition
+  let def = new SpawnWaveDefinition("Mutants")
+  ..setTags(SpawnDefinitionTags.ranged, SpawnDefinitionTags.puller, SpawnDefinitionTags.chaos)
+  ..setProgress(getProgressForSpawnWave(nightIndex))
+  ..setMaxAliveCount(context -> 2)
+  ..setSpawnsPerActivation(context -> 2)
+  ..setSpawnGroupingFactor(context -> 0.0)
+  ..setActivator(new PeriodicWaveActivator(5.0))
+  ..setSpawnRange(SpawnRange.MID)
+  ..setGoldReward(context -> getStandardGoldRewardForWave(context))
+  ..setupForElite()
+
+  let unitTypeProvider = new TieredUnitTypeProvider()
+  for i = 0 to MAX_ELITE_TIER-1
+    unitTypeProvider.setUnitType(i, TlsUnitIds.Undead.mutants[i])
+  def.setUnitTypeProvider(unitTypeProvider)
+
+  def.setCommonUnitModifier() (unit u, ISpawnWaveContext context) ->
+  //{
+    g_eliteRangedModifiers.apply(context, u)
+    u.setDefenseType(ArmorType.Unarmored)
+  //}
+
+  /*
+  def.setUnitModifier(TlsUnitIds.Undead.mutants[0]) (unit u, ISpawnWaveContext context) ->
+  //{
+    g_eliteRangedModifiers.apply(context, u)
+  //}
+
+  def.setUnitModifier(TlsUnitIds.Undead.mutants[1]) (unit u, ISpawnWaveContext context) ->
+  //{
+    g_eliteRangedModifiers.apply(context, u)
+  //}
+
+  def.setUnitModifier(TlsUnitIds.Undead.mutants[2]) (unit u, ISpawnWaveContext context) ->
+  //{
+    g_eliteRangedModifiers.apply(context, u)
+  //}
+  */
+
+  return def
+
+// ============================================================================
+function createSpawnWave_Abominations(int nightIndex) returns SpawnWaveDefinition
+  let def = new SpawnWaveDefinition("Abominations")
+  ..setTags(SpawnDefinitionTags.leader, SpawnDefinitionTags.heavy, SpawnDefinitionTags.siege)
+  ..setProgress(getProgressForSpawnWave(nightIndex))
+  ..setMaxAliveCount(context -> 1)
+  ..setMaxSpawnCount(context -> 1)
+  ..setActivator(new PeriodicWaveActivator(10.0))
+  ..setSpawnRange(SpawnRange.MID)
+  ..setupForBoss()
+
+  let unitTypeProvider = new TieredUnitTypeProvider()
+  for i = 0 to MAX_ELITE_TIER-1
+    unitTypeProvider.setUnitType(i, TlsUnitIds.Undead.abominations[i])
+  def.setUnitTypeProvider(unitTypeProvider)
+
+  def.setCommonUnitModifier() (unit u, ISpawnWaveContext context) ->
+  //{
+    g_eliteMeleeModifiers.applyHealth(context, u, 8.0)
+    g_eliteMeleeModifiers.applyArmor(context, u, 3.0)
+    g_eliteMeleeModifiers.applyAttack1DamageRange(context, u, 4.0)
+    g_eliteMeleeModifiers.applyAttack1Cooldown(context, u, 1.0)
+    g_eliteMeleeModifiers.applyGoldCoinDropChance(context, u, 1.0)
+    u.guaranteeGrantCoinsOnDeath(TlsItemIds.coinEpic, context.getWaveNumber())
+    u.awardXpOnDeath(100)
+    u.setDefenseType(ArmorType.Large)
+    u.setAcquisitionRange(ELITE_SIGHT_RANGE)
+    u.setSightRadius(ELITE_SIGHT_RANGE)
+    u.setMoveSpeed(125.0)
+    u.awardItemOnDeath(g_MainItemLibrary.epicSet, TlsJobItemIds.acolyte1)
+    u.preferStructureTargets()
+  //}
+
+  /*
+  def.setUnitModifier(TlsUnitIds.Undead.abominations[0]) (unit u, ISpawnWaveContext context) ->
+  //{
+  //}
+
+  def.setUnitModifier(TlsUnitIds.Undead.abominations[1]) (unit u, ISpawnWaveContext context) ->
+  //{
+  //}
+
+  def.setUnitModifier(TlsUnitIds.Undead.abominations[2]) (unit u, ISpawnWaveContext context) ->
+  //{
+  //}
+  */
+
+  return def
+
+// ============================================================================
+function createSpawnWave_CryptFiends(int nightIndex) returns SpawnWaveDefinition
+  let def = new SpawnWaveDefinition("Crypt Fiends")
+  ..setTags(SpawnDefinitionTags.invade, SpawnDefinitionTags.ranged, SpawnDefinitionTags.magic)
+  ..setProgress(getProgressForSpawnWave(nightIndex))
+  ..setMaxAliveCount(context -> 1)
+  ..setMaxSpawnCount(context -> 1)
+  ..setSpawnsPerActivation(context -> 1)
+  ..setSpawnGroupingFactor(context -> 0.0)
+  ..setActivator(new PeriodicWaveActivator(10.0))
+  ..setSpawnRange(SpawnRange.MID)
+  ..setGoldReward(context -> getStandardGoldRewardForWave(context))
+  ..setupForBoss()
+
+  let unitTypeProvider = new TieredUnitTypeProvider()
+  for i = 0 to MAX_ELITE_TIER-1
+    unitTypeProvider.setUnitType(i, TlsUnitIds.Undead.fiends[i])
+  def.setUnitTypeProvider(unitTypeProvider)
+
+  def.setCommonUnitModifier() (unit u, ISpawnWaveContext context) ->
+  //{
+    g_eliteRangedModifiers.apply(context, u)
+    g_eliteRangedModifiers.applyHealth(context, u, 0.5)
+    g_eliteRangedModifiers.applyAttack1DamageRange(context, u, 2.0)
+    u.setDefenseType(ArmorType.Medium)
+  //}
+
+  /*
+  def.setUnitModifier(TlsUnitIds.Undead.fiends[0]) (unit u, ISpawnWaveContext context) ->
+  //{
+    g_eliteRangedModifiers.apply(context, u)
+  //}
+
+  def.setUnitModifier(TlsUnitIds.Undead.fiends[1]) (unit u, ISpawnWaveContext context) ->
+  //{
+    g_eliteRangedModifiers.apply(context, u)
+  //}
+
+  def.setUnitModifier(TlsUnitIds.Undead.fiends[2]) (unit u, ISpawnWaveContext context) ->
+  //{
+    g_eliteRangedModifiers.apply(context, u)
+  //}
+  */
+
+  return def
+
+// ============================================================================
+function createSpawnWave_ForbiddenOne(int nightIndex) returns SpawnWaveDefinition
+  let def = new SpawnWaveDefinition("Forbidden One")
+  ..setTags(SpawnDefinitionTags.boss, SpawnDefinitionTags.ranged, SpawnDefinitionTags.chaos, SpawnDefinitionTags.hero, SpawnDefinitionTags.summoner)
+  ..setProgress(getProgressForSpawnWave(nightIndex))
+  ..setMaxAliveCount(wavecontext -> 1)
+  ..setMaxSpawnCount(wavecontext -> 1)
+  ..setSpawnsPerActivation(wavecontext -> 1)
+  ..setSpawnGroupingFactor(wavecontext -> 0.0)
+  ..setActivator(new PeriodicWaveActivator(5.0))
+  ..setSpawnRange(SpawnRange.FAR)
+  ..setGoldReward(context -> getStandardGoldRewardForWave(context))
+  ..setupForBoss()
+
+  let unitTypeProvider = new TieredUnitTypeProvider()
+  for i = 0 to MAX_ELITE_TIER-1
+    unitTypeProvider.setUnitType(i, TlsUnitIds.Undead.forgottenOnes[i])
+  def.setUnitTypeProvider(unitTypeProvider)
+
+  def.setCommonUnitModifier() (unit u, ISpawnWaveContext context) ->
+    g_eliteMeleeModifiers.applyHealth(context, u, 4.0)
+    g_eliteMeleeModifiers.applyArmor(context, u, 1.0)
+    g_eliteMeleeModifiers.applyAttack1Cooldown(context, u, 1.5)
+    u.setDamageRange(0, rangeInt(200, 220))
+    u.setAttackRange(0, RANGED_UNIT_ATTACK_RANGE.toReal())
+    u.setAcquisitionRange(ELITE_SIGHT_RANGE)
+    u.setSightRadius(ELITE_SIGHT_RANGE)
+    u.preferStructureTargets()
+
+  return def
+
+// ============================================================================
+function createSpawnWave_Archimonde(int nightIndex) returns SpawnWaveDefinition
+  let def = new SpawnWaveDefinition("Archimonde")
+  ..setTags(SpawnDefinitionTags.boss, SpawnDefinitionTags.ranged, SpawnDefinitionTags.chaos, SpawnDefinitionTags.hero, SpawnDefinitionTags.summoner)
+  ..setProgress(getProgressForSpawnWave(nightIndex))
+  ..setMaxAliveCount(wavecontext -> 1)
+  ..setMaxSpawnCount(wavecontext -> 1)
+  ..setSpawnsPerActivation(wavecontext -> 1)
+  ..setSpawnGroupingFactor(wavecontext -> 0.0)
+  ..setActivator(new PeriodicWaveActivator(5.0))
+  ..setSpawnRange(SpawnRange.MID)
+  ..setUnitTypeProvider(new SingleUnitTypeProvider(TlsUnitIds.Undead.archimonde))
+  ..setGoldReward(context -> getStandardGoldRewardForWave(context))
+  ..setupForBoss()
+
+  def.setCommonUnitModifier() (unit u, ISpawnWaveContext context) ->
+    g_eliteMeleeModifiers.applyHealth(context, u, 4.0)
+    g_eliteMeleeModifiers.applyArmor(context, u, 1.0)
+    g_eliteMeleeModifiers.applyAttack1Cooldown(context, u, 1.5)
+    u.setDamageRange(0, rangeInt(200, 220))
+    u.setAttackRange(0, RANGED_UNIT_ATTACK_RANGE.toReal())
+    u.setAcquisitionRange(ELITE_SIGHT_RANGE)
+    u.setSightRadius(ELITE_SIGHT_RANGE)
+    u.preferStructureTargets()
+
+    u.setupArchimonde()
+
+  return def
+
+// ============================================================================
+function getProgressForSpawnWave(int index) returns IProgress
+  return new TimeOfDayProgress()
+    ..setSpecificDay(index)
+    ..setStartTime(NIGHT_TIME)
+    ..setDuration(WAVE_NIGHT_LENGTH)
+
+// ============================================================================
+init
 
   // Skeleton Warriors
   g_necromancerSkeletonWarriorModifiers = new StandardUnitModifiers()
@@ -191,665 +1039,48 @@ function defineSpawnWaves()
   g_tombstoneGreaterDarkMinionModifiers.sightRange = ELITE_SIGHT_RANGE
   g_tombstoneGreaterDarkMinionModifiers.preferOrganicTargets = false
 
-  g_waves234 = new WeightedSet<Func1<int, SpawnWaveDefinition>>()
-  ..add((nightIndex) -> createSpawnWave_DarkMinions(nightIndex), 1.0)
-  ..add((nightIndex) -> createSpawnWave_SkeletonArchers(nightIndex), 1.0)
-  ..add((nightIndex) -> createSpawnWave_Crows(nightIndex), 1.0)
-  // ..add((nightIndex) -> createSpawnWave_Cultists(nightIndex), 1.0)  
-
-  g_waves6789 = new WeightedSet<Func1<int, SpawnWaveDefinition>>()
-  ..add((nightIndex) -> createSpawnWave_Necromancers(nightIndex), 1.0)
-  ..add((nightIndex) -> createSpawnWave_Mutants(nightIndex), 1.0)
-  ..add((nightIndex) -> createSpawnWave_Ghosts(nightIndex), 1.0)
-  ..add((nightIndex) -> createSpawnWave_CryptFiends(nightIndex), 1.0)
-
-  g_waves11121314 = new WeightedSet<Func1<int, SpawnWaveDefinition>>()
-  ..add((nightIndex) -> createSpawnWave_MeatWagons(nightIndex), 1.0)
-  ..add((nightIndex) -> createSpawnWave_OrcSkeletons(nightIndex), 1.0)
-  ..add((nightIndex) -> createSpawnWave_Necromancers(nightIndex), 1.0)
-  ..add((nightIndex) -> createSpawnWave_Ghosts(nightIndex), 1.0)
-
-  // Zombies spawn every night
-  for nightIndex = 1 to TOTAL_NIGHTS
-    setSpawnWaveDef(nightIndex, 0, createSpawnWave_Zombies(nightIndex))
-
-  for nightIndex = 2 to 4
-    let func = g_waves234.popRandom()
-    setSpawnWaveDef(nightIndex, 1, func.call(nightIndex))
-
-  setSpawnWaveDef(5, 1, createSpawnWave_Abominations(5))
-
-  for nightIndex = 6 to 9
-    let func = g_waves6789.popRandom()
-    setSpawnWaveDef(nightIndex, 1, func.call(nightIndex))
-
-  setSpawnWaveDef(10, 1, createSpawnWave_Abominations(10))
-
-  for nightIndex = 11 to 14
-    let func = g_waves11121314.popRandom()
-    setSpawnWaveDef(nightIndex, 1, func.call(nightIndex))
-
-  setSpawnWaveDef(15, 1, createSpawnWave_Archimonde(15))
-
-// ============================================================================
-public class NightWaveGenerator implements IWaveGenerator<NightWave>
-
-  // --------------------------------------------------------------------------
-  override function generateWavesForPlayer(player targetPlayer, WaveCollection<NightWave> waves)
- 
-    for nightIndex = 1 to TOTAL_NIGHTS
-      let wave = waves.getOrCreateWave(nightIndex)
-      ..setId("Normal:Night:{0}".format(nightIndex.toString()))
-      ..setXpReward(50 * nightIndex)
-
-      for spawnWaveIndex = 0 to MAX_SPAWN_WAVES - 1
-        let def = getSpawnWaveDef(nightIndex, spawnWaveIndex)
-        if (def != null)
-          wave.addSpawnWave(new SpawnWave(targetPlayer, nightIndex, def))
-
-// ============================================================================
-function createSpawnWave_Zombies(int nightIndex) returns SpawnWaveDefinition
-  let def = new SpawnWaveDefinition("Zombies")
-  ..setTags(SpawnDefinitionTags.ground, SpawnDefinitionTags.melee, SpawnDefinitionTags.normal)
-  ..setProgress(getProgressForSpawnWave(nightIndex))
-  ..setMaxAliveCount(wavecontext -> 10)
-  ..setSpawnsPerActivation(wavecontext -> 6)
-  ..setSpawnGroupingFactor(wavecontext -> 0.25)
-  ..setActivator(new PeriodicWaveActivator(3.0))
-  ..setSpawnRange(SpawnRange.CLOSE)
-
-  let unitTypeProvider = new TieredUnitTypeProvider()
-  for i = 0 to MAX_ELITE_TIER-1
-    unitTypeProvider.setUnitType(i, TlsUnitIds.Undead.zombiesNight[i])
-  def.setUnitTypeProvider(unitTypeProvider)
-
-  def.setCommonUnitModifier() (unit u, ISpawnWaveContext context) ->
+  // Add unit recyclers to preloader
+  for tier = 0 to MAX_ELITE_TIER-1
   //{
-    g_zombieMeleeModifiers.apply(context, u)
-    u.setMoveSpeed(lerp(80, 250, context.getGameProgress01()))
-    u.setDefenseType(ArmorType.Unarmored)
-    u.preferStructureTargets()
+    Preload.registerUnitRecycler(TlsUnitIds.Undead.skeletonArchers[tier], g_PlayingHumanPlayerCount * 6)
+    Preload.registerUnitRecycler(TlsUnitIds.Undead.crows[tier], g_PlayingHumanPlayerCount * 2)
+    Preload.registerUnitRecycler(TlsUnitIds.Undead.gargoyles[tier], g_PlayingHumanPlayerCount * 2)
+    Preload.registerUnitRecycler(TlsUnitIds.Undead.wyrms[tier], g_PlayingHumanPlayerCount * 2)
+    Preload.registerUnitRecycler(TlsUnitIds.Undead.cultists[tier], g_PlayingHumanPlayerCount * 2)
+    Preload.registerUnitRecycler(TlsUnitIds.Undead.abominations[tier], g_PlayingHumanPlayerCount * 1)
+    Preload.registerUnitRecycler(TlsUnitIds.Undead.tombstones[tier], g_PlayingHumanPlayerCount * 6)
+    Preload.registerUnitRecycler(TlsUnitIds.Undead.darkMinions[tier], g_PlayingHumanPlayerCount * 6)
+    Preload.registerUnitRecycler(TlsUnitIds.Undead.ghosts[tier], g_PlayingHumanPlayerCount * 2)
+    Preload.registerUnitRecycler(TlsUnitIds.Undead.skeletonOrcs[tier], g_PlayingHumanPlayerCount * 4)
+    Preload.registerUnitRecycler(TlsUnitIds.Undead.wagons[tier], g_PlayingHumanPlayerCount * 4)
+    Preload.registerUnitRecycler(TlsUnitIds.Undead.mutants[tier], g_PlayingHumanPlayerCount * 2)
+    Preload.registerUnitRecycler(TlsUnitIds.Undead.fiends[tier], g_PlayingHumanPlayerCount * 2)
+    Preload.registerUnitRecycler(TlsUnitIds.Undead.forgottenOnes[tier], g_PlayingHumanPlayerCount * 1)
+    Preload.registerUnitRecycler(TlsUnitIds.Undead.archimonde, g_PlayingHumanPlayerCount * 1)
+    Preload.registerUnitRecycler(TlsUnitIds.Undead.zombiesNight[tier], g_PlayingHumanPlayerCount * 10)
+    Preload.registerUnitRecycler(TlsUnitIds.Undead.necromancers[tier], g_PlayingHumanPlayerCount * 3)
+
+    var maxCount = 0
+    for groupIdx = 0 to RAIDER_GROUP_COUNT-1
+      maxCount = max(maxCount, s_fallenBandit[tier * RAIDER_GROUP_COUNT + groupIdx])
+    Preload.registerUnitRecycler(TlsUnitIds.Undead.fallenBandit[tier], g_PlayingHumanPlayerCount * maxCount)
+
+    maxCount = 0
+    for groupIdx = 0 to RAIDER_GROUP_COUNT-1
+      maxCount = max(maxCount, s_fallenMarksman[tier * RAIDER_GROUP_COUNT + groupIdx])
+    Preload.registerUnitRecycler(TlsUnitIds.Undead.fallenMarksman[tier], g_PlayingHumanPlayerCount * maxCount)
+
+    maxCount = 0
+    for groupIdx = 0 to RAIDER_GROUP_COUNT-1
+      maxCount = max(maxCount, s_fallenWizard[tier * RAIDER_GROUP_COUNT + groupIdx])
+    Preload.registerUnitRecycler(TlsUnitIds.Undead.fallenWizard[tier], g_PlayingHumanPlayerCount * maxCount)
+
+    maxCount = 0
+    for groupIdx = 0 to RAIDER_GROUP_COUNT-1
+      maxCount = max(maxCount, s_fallenBanditLord[tier * RAIDER_GROUP_COUNT + groupIdx])
+    Preload.registerUnitRecycler(TlsUnitIds.Undead.fallenBanditLord[tier], g_PlayingHumanPlayerCount * maxCount)
   //}
-
-  for i = 0 to MAX_ELITE_TIER-1
-    Preload.registerUnitRecycler(TlsUnitIds.Undead.zombiesNight[i], g_PlayingHumanPlayerCount * 10)
-
-  /*
-  def.setUnitModifier(TlsUnitIds.Undead.zombiesNight[0]) (unit u, ISpawnWaveContext context) ->
-  //{
-  //}
-
-  def.setUnitModifier(TlsUnitIds.Undead.zombiesNight[1]) (unit u, ISpawnWaveContext context) ->
-  //{
-  //}
-
-  def.setUnitModifier(TlsUnitIds.Undead.zombiesNight[2]) (unit u, ISpawnWaveContext context) ->
-  //{
-  //}
-  */
-
-  return def
-
-// ============================================================================
-function createSpawnWave_SkeletonArchers(int nightIndex) returns SpawnWaveDefinition
-  let def = new SpawnWaveDefinition("Skeleton Archers")
-  ..setTags(SpawnDefinitionTags.ranged, SpawnDefinitionTags.normal)
-  ..setProgress(getProgressForSpawnWave(nightIndex))
-  ..setMaxAliveCount(context -> 2)
-  ..setMaxSpawnCount(context -> 6)
-  ..setSpawnsPerActivation(context -> 2)
-  ..setSpawnGroupingFactor(context -> 0.5)
-  ..setActivator(new PeriodicWaveActivator(5.0))
-  ..setSpawnRange(SpawnRange.MID)
-  ..setGoldReward(context -> getStandardGoldRewardForWave(context))
-
-  let unitTypeProvider = new TieredUnitTypeProvider()
-  for i = 0 to MAX_ELITE_TIER-1
-    unitTypeProvider.setUnitType(i, TlsUnitIds.Undead.skeletonArchers[i])
-  def.setUnitTypeProvider(unitTypeProvider)
-
-  def.setCommonUnitModifier() (unit u, ISpawnWaveContext context) ->
-  //{
-    g_eliteRangedModifiers.apply(context, u)
-    u.setDefenseType(ArmorType.Medium)
-  //}
-
-  /*
-  def.setUnitModifier(TlsUnitIds.Undead.skeletonArchers[0]) (unit u, ISpawnWaveContext context) ->
-  //{
-  //}
-
-  def.setUnitModifier(TlsUnitIds.Undead.skeletonArchers[1]) (unit u, ISpawnWaveContext context) ->
-  //{
-  //}
-
-  def.setUnitModifier(TlsUnitIds.Undead.skeletonArchers[2]) (unit u, ISpawnWaveContext context) ->
-  //{
-  //}
-  */
-
-  for i = 0 to MAX_ELITE_TIER-1
-    Preload.registerUnitRecycler(TlsUnitIds.Undead.skeletonArchers[i], g_PlayingHumanPlayerCount * 6)
-
-  return def
-
-// ============================================================================
-function createSpawnWave_Crows(int nightIndex) returns SpawnWaveDefinition
-  let def = new SpawnWaveDefinition("Crows")
-  ..setTags(SpawnDefinitionTags.flying, SpawnDefinitionTags.ranged, SpawnDefinitionTags.magic)
-  ..setProgress(getProgressForSpawnWave(nightIndex))
-  ..setMaxAliveCount(context -> 2)
-  ..setSpawnsPerActivation(context -> 1)
-  ..setSpawnGroupingFactor(context -> 0.0)
-  ..setActivator(new PeriodicWaveActivator(3.0))
-  ..setSpawnRange(SpawnRange.MID)
-  ..setGoldReward(context -> getStandardGoldRewardForWave(context))
-
-  let unitTypeProvider = new TieredUnitTypeProvider()
-  for i = 0 to MAX_ELITE_TIER-1
-    unitTypeProvider.setUnitType(i, TlsUnitIds.Undead.crows[i])
-  def.setUnitTypeProvider(unitTypeProvider)
-
-  def.setCommonUnitModifier() (unit u, ISpawnWaveContext context) ->
-  //{
-    g_eliteRangedModifiers.apply(context, u)
-    u.setDefenseType(ArmorType.Small)
-    u.setMoveSpeed(300)
-  //}
-
-  /*
-  def.setUnitModifier(TlsUnitIds.Undead.crows[0]) (unit u, ISpawnWaveContext context) ->
-  //{
-  //}
-
-  def.setUnitModifier(TlsUnitIds.Undead.crows[1]) (unit u, ISpawnWaveContext context) ->
-  //{
-  //}
-
-  def.setUnitModifier(TlsUnitIds.Undead.crows[2]) (unit u, ISpawnWaveContext context) ->
-  //{
-  //}
-  */
-
-  for i = 0 to MAX_ELITE_TIER-1
-    Preload.registerUnitRecycler(TlsUnitIds.Undead.skeletonArchers[i], g_PlayingHumanPlayerCount * 2)
-
-  return def
-
-// ============================================================================
-function createSpawnWave_Necromancers(int nightIndex) returns SpawnWaveDefinition
-  let def = new SpawnWaveDefinition("Necromancers")
-  ..setTags(SpawnDefinitionTags.summoner, SpawnDefinitionTags.ranged, SpawnDefinitionTags.magic)
-  ..setProgress(getProgressForSpawnWave(nightIndex))
-  ..setMaxAliveCount(context -> 3)
-  ..setSpawnsPerActivation(context -> 1)
-  ..setSpawnGroupingFactor(context -> 0.0)
-  ..setActivator(new PeriodicWaveActivator(10.0)..setActivateOnStart(false))
-  ..setSpawnRange(SpawnRange.MID)
-  ..setGoldReward(context -> getStandardGoldRewardForWave(context))
-
-  let unitTypeProvider = new TieredUnitTypeProvider()
-  for i = 0 to MAX_ELITE_TIER-1
-    unitTypeProvider.setUnitType(i, TlsUnitIds.Undead.necromancers[i])
-  def.setUnitTypeProvider(unitTypeProvider)
-
-  // NOTE: Can't use common modifer here since summoned units would also share it
-
-  def.setUnitModifier(TlsUnitIds.Undead.necromancers[0]) (unit u, ISpawnWaveContext context) ->
-  //{
-    g_eliteRangedModifiers.apply(context, u)
-    u.setDefenseType(ArmorType.Unarmored)
-    u.setupNecromancer(context)
-    u.setDefenseType(ArmorType.Small)
-    u.setMoveSpeed(300)
-  //}
-
-  def.setUnitModifier(TlsUnitIds.Undead.necromancers[1]) (unit u, ISpawnWaveContext context) ->
-  //{
-    g_eliteRangedModifiers.apply(context, u)
-    u.setDefenseType(ArmorType.Unarmored)
-    u.setupNecromancer(context)
-    u.setDefenseType(ArmorType.Small)
-    u.setMoveSpeed(300)
-  //}
-
-  def.setUnitModifier(TlsUnitIds.Undead.necromancers[2]) (unit u, ISpawnWaveContext context) ->
-  //{
-    g_eliteRangedModifiers.apply(context, u)
-    u.setDefenseType(ArmorType.Unarmored)
-    u.setupNecromancer(context)
-    u.setDefenseType(ArmorType.Small)
-    u.setMoveSpeed(300)
-  //}
-
-  // SUMMONS - Skeleton Warrior
-  def.setUnitModifier(TlsUnitIds.Undead.skeletonWarrior) (unit u, ISpawnWaveContext context) ->
-  //{
-    g_necromancerSkeletonWarriorModifiers.apply(context, u)
-  //}
-
-  // SUMMONS - Skeleton Mage
-  def.setUnitModifier(TlsUnitIds.Undead.skeletonMage) (unit u, ISpawnWaveContext context) ->
-  //{
-    g_necromancerSkeletonMageModifiers.apply(context, u)
-  //}
-
-  // SUMMONS - Skeleton Champion
-  def.setUnitModifier(TlsUnitIds.Undead.skeletonChampion) (unit u, ISpawnWaveContext context) ->
-  //{
-    g_necromancerSkeletonChampionModifiers.apply(context, u)
-  //}
-
-  for i = 0 to MAX_ELITE_TIER-1
-    Preload.registerUnitRecycler(TlsUnitIds.Undead.necromancers[i], g_PlayingHumanPlayerCount * 3)
 
   Preload.registerUnitRecycler(TlsUnitIds.Undead.skeletonWarrior, g_PlayingHumanPlayerCount * 3)
   Preload.registerUnitRecycler(TlsUnitIds.Undead.skeletonMage, g_PlayingHumanPlayerCount * 3)
   Preload.registerUnitRecycler(TlsUnitIds.Undead.skeletonChampion, g_PlayingHumanPlayerCount * 3)
-
-  return def
-
-// ============================================================================
-function createSpawnWave_Abominations(int nightIndex) returns SpawnWaveDefinition
-  let def = new SpawnWaveDefinition("Abominations")
-  ..setTags(SpawnDefinitionTags.leader, SpawnDefinitionTags.heavy, SpawnDefinitionTags.siege)
-  ..setProgress(getProgressForSpawnWave(nightIndex))
-  ..setMaxAliveCount(context -> 1)
-  ..setMaxSpawnCount(context -> 1)
-  ..setActivator(new PeriodicWaveActivator(10.0))
-  ..setSpawnRange(SpawnRange.MID)
-
-  let unitTypeProvider = new TieredUnitTypeProvider()
-  for i = 0 to MAX_ELITE_TIER-1
-    unitTypeProvider.setUnitType(i, TlsUnitIds.Undead.abominations[i])
-  def.setUnitTypeProvider(unitTypeProvider)
-
-  def.setCommonUnitModifier() (unit u, ISpawnWaveContext context) ->
-  //{
-    g_eliteMeleeModifiers.applyHealth(context, u, 8.0)
-    g_eliteMeleeModifiers.applyArmor(context, u, 3.0)
-    g_eliteMeleeModifiers.applyAttack1DamageRange(context, u, 4.0)
-    g_eliteMeleeModifiers.applyAttack1Cooldown(context, u, 1.0)
-    g_eliteMeleeModifiers.applyGoldCoinDropChance(context, u, 1.0)
-    u.guaranteeGrantCoinsOnDeath(TlsItemIds.coinEpic, context.getWaveNumber())
-    u.awardXpOnDeath(100)
-    u.setDefenseType(ArmorType.Large)
-    u.setAcquisitionRange(ELITE_SIGHT_RANGE)
-    u.setSightRadius(ELITE_SIGHT_RANGE)
-    u.setMoveSpeed(125.0)
-    u.awardItemOnDeath(g_MainItemLibrary.epicSet, TlsJobItemIds.acolyte1)
-    u.preferStructureTargets()
-  //}
-
-  /*
-  def.setUnitModifier(TlsUnitIds.Undead.abominations[0]) (unit u, ISpawnWaveContext context) ->
-  //{
-  //}
-
-  def.setUnitModifier(TlsUnitIds.Undead.abominations[1]) (unit u, ISpawnWaveContext context) ->
-  //{
-  //}
-
-  def.setUnitModifier(TlsUnitIds.Undead.abominations[2]) (unit u, ISpawnWaveContext context) ->
-  //{
-  //}
-  */
-
-  for i = 0 to MAX_ELITE_TIER-1
-    Preload.registerUnitRecycler(TlsUnitIds.Undead.abominations[i], g_PlayingHumanPlayerCount * 1)
-
-  return def
-
-// ============================================================================
-function createSpawnWave_DarkMinions(int nightIndex) returns SpawnWaveDefinition
-  let def = new SpawnWaveDefinition("Dark Minions")
-  ..setTags(SpawnDefinitionTags.grouped, SpawnDefinitionTags.melee, SpawnDefinitionTags.normal)
-  ..setProgress(getProgressForSpawnWave(nightIndex))
-  ..setMaxAliveCount(context -> (4 + context.getPlayerDifficulty01()).floor())
-  ..setMaxSpawnCount(context -> (6 + context.getPlayerDifficulty01()).floor())
-  ..setSpawnsPerActivation(context -> 1)
-  ..setSpawnGroupingFactor(context -> 0.0)
-  ..setActivator(new PeriodicWaveActivator(1.0))
-  ..setSpawnRange(SpawnRange.CLOSE)
-  ..setGoldReward(context -> getStandardGoldRewardForWave(context))
-  ..setFacingAngleRange(rangeReal(270.0, 360.0))
-  ..setSpawnPointProviderType(SpawnPointProviderType.DYNAMIC_FRIENDLY)
-
-  // NOTE: Can't use common modifer here since summoned units would also share it
-
-  let unitTypeProvider = new TieredUnitTypeProvider()
-  for i = 0 to MAX_ELITE_TIER-1
-    unitTypeProvider.setUnitType(i, TlsUnitIds.Undead.tombstones[i])
-  def.setUnitTypeProvider(unitTypeProvider)
-
-  def.setUnitModifier(TlsUnitIds.Undead.tombstones[0]) (unit u, ISpawnWaveContext context) ->
-  //{
-    g_eliteMeleeModifiers.applyHealth(context, u, 0.25)
-    g_eliteMeleeModifiers.applyArmor(context, u, 0.25)
-    // g_eliteMeleeModifiers.applyGoldCoinDropChance(context, u, 1.0)
-    u.getOrAddTombstoneComponent().setSpawnedContext(context)
-
-    // Play the birth animation once
-    u.queueAnimation("birth")
-  //}
-
-  def.setUnitModifier(TlsUnitIds.Undead.tombstones[1]) (unit u, ISpawnWaveContext context) ->
-  //{
-    g_eliteMeleeModifiers.applyHealth(context, u, 0.5)
-    g_eliteMeleeModifiers.applyArmor(context, u, 0.5)
-    // g_eliteMeleeModifiers.applyGoldCoinDropChance(context, u, 1.0)
-    u.getOrAddTombstoneComponent().setSpawnedContext(context)
-
-    // Play the birth animation once
-    u.queueAnimation("birth")
-  //}
-
-  def.setUnitModifier(TlsUnitIds.Undead.tombstones[2]) (unit u, ISpawnWaveContext context) ->
-  //{
-    g_eliteMeleeModifiers.applyHealth(context, u, 0.75)
-    g_eliteMeleeModifiers.applyArmor(context, u, 0.75)
-    // g_eliteMeleeModifiers.applyGoldCoinDropChance(context, u, 1.0)
-    u.getOrAddTombstoneComponent().setSpawnedContext(context)
-
-    // Play the birth animation once
-    u.queueAnimation("birth")
-  //}
-
-  let summonEffectPath = "Abilities\\Spells\\Undead\\AnimateDead\\AnimateDeadTarget.mdl"
-
-  def.setUnitModifier(TlsUnitIds.Undead.darkMinions[0]) (unit u, ISpawnWaveContext context) ->
-  //{
-    g_tombstoneLesserDarkMinionModifiers.apply(context, u)
-    FX.createEffectOneShot(summonEffectPath, u.getPos())
-  //}
-
-  def.setUnitModifier(TlsUnitIds.Undead.darkMinions[1]) (unit u, ISpawnWaveContext context) ->
-  //{
-    g_tombstoneDarkMinionModifiers.apply(context, u)
-    FX.createEffectOneShot(summonEffectPath, u.getPos())
-  //}
-
-  def.setUnitModifier(TlsUnitIds.Undead.darkMinions[2]) (unit u, ISpawnWaveContext context) ->
-  //{
-    g_tombstoneGreaterDarkMinionModifiers.apply(context, u)
-    FX.createEffectOneShot(summonEffectPath, u.getPos())
-  //}
-
-  for i = 0 to MAX_ELITE_TIER-1
-    Preload.registerUnitRecycler(TlsUnitIds.Undead.tombstones[i], g_PlayingHumanPlayerCount * 6)
-    Preload.registerUnitRecycler(TlsUnitIds.Undead.darkMinions[i], g_PlayingHumanPlayerCount * 6)
-
-  return def
-
-// ============================================================================
-function createSpawnWave_Ghosts(int nightIndex) returns SpawnWaveDefinition
-  let def = new SpawnWaveDefinition("Ghosts")
-  ..setTags(SpawnDefinitionTags.invade, SpawnDefinitionTags.ethereal, SpawnDefinitionTags.melee, SpawnDefinitionTags.magic)
-  ..setProgress(getProgressForSpawnWave(nightIndex))
-  ..setMaxAliveCount(context -> 2)
-  ..setSpawnsPerActivation(context -> 2)
-  ..setSpawnGroupingFactor(context -> 0.0)
-  ..setActivator(new PeriodicWaveActivator(5.0))
-  ..setSpawnRange(SpawnRange.MID)
-  ..setGoldReward(context -> getStandardGoldRewardForWave(context))
-
-  let unitTypeProvider = new TieredUnitTypeProvider()
-  for i = 0 to MAX_ELITE_TIER-1
-    unitTypeProvider.setUnitType(i, TlsUnitIds.Undead.ghosts[i])
-  def.setUnitTypeProvider(unitTypeProvider)
-
-  def.setCommonUnitModifier() (unit u, ISpawnWaveContext context) ->
-  //{
-    g_eliteRangedModifiers.apply(context, u)
-    g_eliteRangedModifiers.applyHealth(context, u, 0.5)
-    u.setDefenseType(ArmorType.Medium)
-  //}
-
-  /*
-  def.setUnitModifier(TlsUnitIds.Undead.ghosts[0]) (unit u, ISpawnWaveContext context) ->
-  //{
-    g_eliteMeleeModifiers.apply(context, u)
-  //}
-
-  def.setUnitModifier(TlsUnitIds.Undead.ghosts[1]) (unit u, ISpawnWaveContext context) ->
-  //{
-    g_eliteMeleeModifiers.apply(context, u)
-  //}
-
-  def.setUnitModifier(TlsUnitIds.Undead.ghosts[2]) (unit u, ISpawnWaveContext context) ->
-  //{
-    g_eliteMeleeModifiers.apply(context, u)
-  //}
-  */
-
-  for i = 0 to MAX_ELITE_TIER-1
-    Preload.registerUnitRecycler(TlsUnitIds.Undead.ghosts[i], g_PlayingHumanPlayerCount * 2)
-
-  return def
-
-// ============================================================================
-function createSpawnWave_OrcSkeletons(int nightIndex) returns SpawnWaveDefinition
-  let def = new SpawnWaveDefinition("Orc Skeletons")
-  ..setTags(SpawnDefinitionTags.grouped, SpawnDefinitionTags.melee, SpawnDefinitionTags.heavy, SpawnDefinitionTags.normal)
-  ..setProgress(getProgressForSpawnWave(nightIndex))
-  ..setMaxAliveCount(context -> 4)
-  ..setSpawnsPerActivation(context -> 2)
-  ..setSpawnGroupingFactor(context -> 0.0)
-  ..setActivator(new PeriodicWaveActivator(5.0))
-  ..setSpawnRange(SpawnRange.MID)
-  ..setGoldReward(context -> getStandardGoldRewardForWave(context))
-
-  let unitTypeProvider = new TieredUnitTypeProvider()
-  for i = 0 to MAX_ELITE_TIER-1
-    unitTypeProvider.setUnitType(i, TlsUnitIds.Undead.skeletonOrcs[i])
-  def.setUnitTypeProvider(unitTypeProvider)
-
-  def.setCommonUnitModifier() (unit u, ISpawnWaveContext context) ->
-  //{
-    g_eliteMeleeModifiers.apply(context, u)
-    u.setDefenseType(ArmorType.Large)
-  //}
-
-  /*
-  def.setUnitModifier(TlsUnitIds.Undead.skeletonOrcs[0]) (unit u, ISpawnWaveContext context) ->
-  //{
-    g_eliteMeleeModifiers.apply(context, u)
-  //}
-
-  def.setUnitModifier(TlsUnitIds.Undead.skeletonOrcs[1]) (unit u, ISpawnWaveContext context) ->
-  //{
-    g_eliteMeleeModifiers.apply(context, u)
-  //}
-
-  def.setUnitModifier(TlsUnitIds.Undead.skeletonOrcs[2]) (unit u, ISpawnWaveContext context) ->
-  //{
-    g_eliteMeleeModifiers.apply(context, u)
-  //}
-  */
-
-  for i = 0 to MAX_ELITE_TIER-1
-    Preload.registerUnitRecycler(TlsUnitIds.Undead.skeletonOrcs[i], g_PlayingHumanPlayerCount * 4)
-
-  return def
-
-// ============================================================================
-function createSpawnWave_MeatWagons(int nightIndex) returns SpawnWaveDefinition
-  let def = new SpawnWaveDefinition("Meat Wagons")
-  ..setTags(SpawnDefinitionTags.ranged, SpawnDefinitionTags.siege)
-  ..setProgress(getProgressForSpawnWave(nightIndex))
-  ..setMaxAliveCount(context -> 4)
-  ..setSpawnsPerActivation(context -> 2)
-  ..setSpawnGroupingFactor(context -> 0.0)
-  ..setActivator(new PeriodicWaveActivator(5.0))
-  ..setSpawnRange(SpawnRange.MID)
-  ..setGoldReward(context -> getStandardGoldRewardForWave(context))
-
-  let unitTypeProvider = new TieredUnitTypeProvider()
-  for i = 0 to MAX_ELITE_TIER-1
-    unitTypeProvider.setUnitType(i, TlsUnitIds.Undead.wagons[i])
-  def.setUnitTypeProvider(unitTypeProvider)
-
-  def.setCommonUnitModifier() (unit u, ISpawnWaveContext context) ->
-  //{
-    g_eliteRangedModifiers.apply(context, u)
-    u.setDefenseType(ArmorType.Large)
-  //}
-
-  /*
-  def.setUnitModifier(TlsUnitIds.Undead.wagons[0]) (unit u, ISpawnWaveContext context) ->
-  //{
-    g_eliteRangedModifiers.apply(context, u)
-  //}
-
-  def.setUnitModifier(TlsUnitIds.Undead.wagons[1]) (unit u, ISpawnWaveContext context) ->
-  //{
-    g_eliteRangedModifiers.apply(context, u)
-  //}
-
-  def.setUnitModifier(TlsUnitIds.Undead.wagons[2]) (unit u, ISpawnWaveContext context) ->
-  //{
-    g_eliteRangedModifiers.apply(context, u)
-  //}
-  */
-
-  for i = 0 to MAX_ELITE_TIER-1
-    Preload.registerUnitRecycler(TlsUnitIds.Undead.wagons[i], g_PlayingHumanPlayerCount * 4)
-
-  return def
-
-// ============================================================================
-function createSpawnWave_Mutants(int nightIndex) returns SpawnWaveDefinition
-  let def = new SpawnWaveDefinition("Mutants")
-  ..setTags(SpawnDefinitionTags.ranged, SpawnDefinitionTags.puller, SpawnDefinitionTags.chaos)
-  ..setProgress(getProgressForSpawnWave(nightIndex))
-  ..setMaxAliveCount(context -> 2)
-  ..setSpawnsPerActivation(context -> 2)
-  ..setSpawnGroupingFactor(context -> 0.0)
-  ..setActivator(new PeriodicWaveActivator(5.0))
-  ..setSpawnRange(SpawnRange.MID)
-  ..setGoldReward(context -> getStandardGoldRewardForWave(context))
-
-  let unitTypeProvider = new TieredUnitTypeProvider()
-  for i = 0 to MAX_ELITE_TIER-1
-    unitTypeProvider.setUnitType(i, TlsUnitIds.Undead.mutants[i])
-  def.setUnitTypeProvider(unitTypeProvider)
-
-  def.setCommonUnitModifier() (unit u, ISpawnWaveContext context) ->
-  //{
-    g_eliteRangedModifiers.apply(context, u)
-    u.setDefenseType(ArmorType.Unarmored)
-  //}
-
-  /*
-  def.setUnitModifier(TlsUnitIds.Undead.mutants[0]) (unit u, ISpawnWaveContext context) ->
-  //{
-    g_eliteRangedModifiers.apply(context, u)
-  //}
-
-  def.setUnitModifier(TlsUnitIds.Undead.mutants[1]) (unit u, ISpawnWaveContext context) ->
-  //{
-    g_eliteRangedModifiers.apply(context, u)
-  //}
-
-  def.setUnitModifier(TlsUnitIds.Undead.mutants[2]) (unit u, ISpawnWaveContext context) ->
-  //{
-    g_eliteRangedModifiers.apply(context, u)
-  //}
-  */
-
-  for i = 0 to MAX_ELITE_TIER-1
-    Preload.registerUnitRecycler(TlsUnitIds.Undead.mutants[i], g_PlayingHumanPlayerCount * 2)
-
-  return def
-
-// ============================================================================
-function createSpawnWave_CryptFiends(int nightIndex) returns SpawnWaveDefinition
-  let def = new SpawnWaveDefinition("Crypt Fiends")
-  ..setTags(SpawnDefinitionTags.invade, SpawnDefinitionTags.ranged, SpawnDefinitionTags.magic)
-  ..setProgress(getProgressForSpawnWave(nightIndex))
-  ..setMaxAliveCount(context -> 2)
-  ..setSpawnsPerActivation(context -> 1)
-  ..setSpawnGroupingFactor(context -> 0.0)
-  ..setActivator(new PeriodicWaveActivator(10.0))
-  ..setSpawnRange(SpawnRange.MID)
-  ..setGoldReward(context -> getStandardGoldRewardForWave(context))
-
-  let unitTypeProvider = new TieredUnitTypeProvider()
-  for i = 0 to MAX_ELITE_TIER-1
-    unitTypeProvider.setUnitType(i, TlsUnitIds.Undead.fiends[i])
-  def.setUnitTypeProvider(unitTypeProvider)
-
-  def.setCommonUnitModifier() (unit u, ISpawnWaveContext context) ->
-  //{
-    g_eliteRangedModifiers.apply(context, u)
-    g_eliteRangedModifiers.applyHealth(context, u, 0.5)
-    g_eliteRangedModifiers.applyAttack1DamageRange(context, u, 2.0)
-    u.setDefenseType(ArmorType.Medium)
-  //}
-
-  /*
-  def.setUnitModifier(TlsUnitIds.Undead.fiends[0]) (unit u, ISpawnWaveContext context) ->
-  //{
-    g_eliteRangedModifiers.apply(context, u)
-  //}
-
-  def.setUnitModifier(TlsUnitIds.Undead.fiends[1]) (unit u, ISpawnWaveContext context) ->
-  //{
-    g_eliteRangedModifiers.apply(context, u)
-  //}
-
-  def.setUnitModifier(TlsUnitIds.Undead.fiends[2]) (unit u, ISpawnWaveContext context) ->
-  //{
-    g_eliteRangedModifiers.apply(context, u)
-  //}
-  */
-
-  for i = 0 to MAX_ELITE_TIER-1
-    Preload.registerUnitRecycler(TlsUnitIds.Undead.fiends[i], g_PlayingHumanPlayerCount * 2)
-
-  return def
-
-// ============================================================================
-function createSpawnWave_Archimonde(int nightIndex) returns SpawnWaveDefinition
-  let def = new SpawnWaveDefinition("Archimonde")
-  ..setTags(SpawnDefinitionTags.boss, SpawnDefinitionTags.ranged, SpawnDefinitionTags.chaos, SpawnDefinitionTags.hero, SpawnDefinitionTags.summoner)
-  ..setProgress(getProgressForSpawnWave(nightIndex))
-  ..setMaxAliveCount(wavecontext -> 1)
-  ..setMaxSpawnCount(wavecontext -> 1)
-  ..setSpawnsPerActivation(wavecontext -> 1)
-  ..setSpawnGroupingFactor(wavecontext -> 0.0)
-  ..setActivator(new PeriodicWaveActivator(5.0))
-  ..setSpawnRange(SpawnRange.MID)
-  ..setUnitTypeProvider(new SingleUnitTypeProvider(TlsUnitIds.Undead.archimonde))
-  ..setGoldReward(context -> getStandardGoldRewardForWave(context))
-
-  def.setCommonUnitModifier() (unit u, ISpawnWaveContext context) ->
-    g_eliteMeleeModifiers.applyHealth(context, u, 4.0)
-    g_eliteMeleeModifiers.applyArmor(context, u, 1.0)
-    g_eliteMeleeModifiers.applyAttack1Cooldown(context, u, 1.5)
-    u.setDamageRange(0, rangeInt(200, 220))
-    u.setAttackRange(0, RANGED_UNIT_ATTACK_RANGE.toReal())
-    u.setAcquisitionRange(ELITE_SIGHT_RANGE)
-    u.setSightRadius(ELITE_SIGHT_RANGE)
-    u.preferStructureTargets()
-
-    u.setupArchimonde()
-
-  Preload.registerUnitRecycler(TlsUnitIds.Undead.archimonde, g_PlayingHumanPlayerCount * 1)
-
-  return def
-
-// ============================================================================
-function getProgressForSpawnWave(int index) returns IProgress
-  return new TimeOfDayProgress()
-    ..setSpecificDay(index)
-    ..setStartTime(NIGHT_TIME)
-    ..setDuration(WAVE_NIGHT_LENGTH)
-
-// ============================================================================
-function getStandardGoldRewardForWave(ISpawnWaveContext context) returns int
-  return context.getWaveNumber()
-
-// ============================================================================
-init
-  defineSpawnWaves()
