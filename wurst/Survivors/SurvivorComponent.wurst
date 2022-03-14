@@ -14,6 +14,8 @@ import ColorUtility
 import TlsJobItemIds
 import StatisticsCollection
 import ClosureEvents
+import Handle
+import BitSet
 
 group g_temp = CreateGroup()
 trigger g_onSurvivorJobPreChange = CreateTrigger()
@@ -53,12 +55,15 @@ function raiseSurvivorJobPostChangeEvent(unit preUnit, unit postUnit)
 
 // ============================================================================
 public class SurvivorComponent extends UnitComponent
-  private SurvivorJobDefinition m_activeJob
-  private SurvivorJobDefinition m_lastActiveJob
+  private SurvivorJobType m_activeJob
+  private SurvivorJobType m_lastActiveJob
   private SurvivorJobComponent m_activeJobComponent
   private bool m_changingJobs
   private string m_name
   private StatisticsCollection m_stats
+  private _handle m_onComponentAddedHandler
+  private bitset m_assignedJobs
+  private SurvivorJobComponent array[g_survivorJobCount] m_cachedJobComponents
 
   // --------------------------------------------------------------------------
   construct(IUnitMetadata owner)
@@ -69,6 +74,10 @@ public class SurvivorComponent extends UnitComponent
     m_activeJobComponent = null
     m_activeJob = null
     m_lastActiveJob = null
+    m_assignedJobs = bitset(0)
+
+    for i = 0 to g_survivorJobCount-1
+      m_cachedJobComponents[i] = null
 
   // --------------------------------------------------------------------------
   ondestroy
@@ -89,16 +98,16 @@ public class SurvivorComponent extends UnitComponent
     return m_activeJobComponent
 
   // --------------------------------------------------------------------------
-  function getActiveJob() returns SurvivorJobDefinition
+  function getActiveJob() returns SurvivorJobType
     return m_activeJob
 
   // --------------------------------------------------------------------------
-  function getLastActiveJob() returns SurvivorJobDefinition
+  function getLastActiveJob() returns SurvivorJobType
     return m_lastActiveJob
 
   // --------------------------------------------------------------------------
-  function getJobComponent(SurvivorJobDefinition job) returns SurvivorJobComponent
-    return getOwner().getSurvivorJobComponent(job)
+  function getJobComponent(SurvivorJobType job) returns SurvivorJobComponent
+    return m_cachedJobComponents[job castTo int]
 
   // --------------------------------------------------------------------------
   function getStats() returns StatisticsCollection
@@ -121,6 +130,10 @@ public class SurvivorComponent extends UnitComponent
     return m_changingJobs
 
   // --------------------------------------------------------------------------
+  function getAssignedJobs() returns bitset
+    return m_assignedJobs
+
+  // --------------------------------------------------------------------------
   override function onEnabled()
     super.onEnabled()
 
@@ -130,7 +143,7 @@ public class SurvivorComponent extends UnitComponent
     owner.getOrAddRangedTargetXpRecieverComponent()
 
     // Survivors will always be able to become jobless
-    assignJob(SurvivorJobs.none)
+    assignJob(SurvivorJobType.None)
     
     let ownerUnit = getOwnerUnit()
     if (ownerUnit != null)
@@ -140,9 +153,7 @@ public class SurvivorComponent extends UnitComponent
       if (getName() == null)
         setName(getRandomSurvivorNameForPlayer(owningPlayer))
 
-      let job = getJobDefinitionForUnitType(ownerUnit.getTypeId())
-      if (job == null)
-        Log.error("SurvivorComponent", "onEnabled", ownerUnit.getName(), "Unknown job type!")
+      let job = SurvivorJobs.getJobTypeForUnitType(ownerUnit.getTypeId())
 
       activateJobDirectly(job)
       
@@ -150,8 +161,19 @@ public class SurvivorComponent extends UnitComponent
       updateUnitProperName()
     //}
 
+    m_onComponentAddedHandler = owner.onComponentAdded().register() (o,c) ->
+      for i = 0 to SurvivorJobs.count - 1
+        m_cachedJobComponents[i] = owner.getSurvivorJobComponent(i castTo SurvivorJobType)
+
   // --------------------------------------------------------------------------
-  private function activateJobDirectly(SurvivorJobDefinition job)
+  override function onDisabled()
+    super.onDisabled()
+
+    getOwner().onComponentAdded().unregister(m_onComponentAddedHandler)
+    m_onComponentAddedHandler = INVALID_HANDLE
+
+  // --------------------------------------------------------------------------
+  private function activateJobDirectly(SurvivorJobType job)
 
     if (m_activeJob == job)
       return
@@ -171,30 +193,33 @@ public class SurvivorComponent extends UnitComponent
       m_activeJobComponent.setEnabled(true)
 
   // --------------------------------------------------------------------------
-  function assignJob(SurvivorJobDefinition job)
+  function assignJob(SurvivorJobType job)
     getOwner().getOrAddSurvivorJobComponent(job)..setIsAssigned(true)
+    m_assignedJobs = m_assignedJobs.set(job castTo int)
 
   // --------------------------------------------------------------------------
-  function canActivateJob(SurvivorJobDefinition job) returns bool
+  function canActivateJob(SurvivorJobType job) returns bool
     if (m_changingJobs or m_activeJob == job)
       return false
-    if (job == SurvivorJobs.none)
+    if (job == SurvivorJobType.None)
       return true
     let jobComponent = getJobComponent(job)
     return jobComponent != null and jobComponent.getIsAssigned()
 
   // --------------------------------------------------------------------------
-  function activateJob(SurvivorJobDefinition job) returns bool
+  function activateJob(SurvivorJobType job) returns bool
     let ownerUnit = getOwnerUnit()
     let unitType = ownerUnit.getTypeId()
 
-    if (job.hasUnitType(unitType))
-      displayMessageToPlayer(ownerUnit.getOwner(), "{0} is already a {1}!".format(ownerUnit.getProperName().colorize(COLOR_GOLD), job.getTitle(unitType).colorize(COLOR_GOLD)))
+    let jobDef = SurvivorJobs.getJobDefinition(job)
+
+    if (jobDef.hasUnitType(unitType))
+      displayMessageToPlayer(ownerUnit.getOwner(), "{0} is already a {1}!".format(ownerUnit.getProperName().colorize(COLOR_GOLD), jobDef.getTitle(unitType).colorize(COLOR_GOLD)))
       return false
 
     let jobComponent = getOwner().getOrAddSurvivorJobComponent(job)
     if (jobComponent == null)
-      Log.error("SurvivorComponent", "activateJob", ownerUnit.getName(), "No SurvivorJobComponent exists for job " + job.getId())
+      Log.error("SurvivorComponent", "activateJob", ownerUnit.getName(), "No SurvivorJobComponent exists for job " + jobDef.getId())
       return false
 
     assignJob(job)
@@ -202,7 +227,7 @@ public class SurvivorComponent extends UnitComponent
     preJobChange(ownerUnit)
 
     // The player has learned about this job now that they have assigned the job
-    job.setIsJobKnownToPlayer(ownerUnit.getOwner(), true)
+    jobDef.setIsJobKnownToPlayer(ownerUnit.getOwner(), true)
 
     let replacementUnitId = jobComponent.getUnitId()
     replaceUnit(replacementUnitId, jobComponent.getJob().getTitle(replacementUnitId))
@@ -213,13 +238,13 @@ public class SurvivorComponent extends UnitComponent
   function upgradeActiveJob() returns bool
     let ownerUnit = getOwnerUnit()
     let currentUnitId = ownerUnit.getTypeId()
-    let job = getJobDefinitionForUnitType(currentUnitId)
+    let job = SurvivorJobs.getJobDefinitionForUnitType(currentUnitId)
     
     let nextUnitId = job.getNextUpgrade(currentUnitId)
     if (nextUnitId == -1)
       return false
 
-    let jobComponent = getJobComponent(job)
+    let jobComponent = getJobComponent(job.getType())
     if (jobComponent == null)
       Log.error("SurvivorComponent", "upgradeActiveJob", ownerUnit.getName(), "No SurvivorJobComponent exists for job " + job.getId())
       return false
@@ -245,7 +270,7 @@ public class SurvivorComponent extends UnitComponent
     if (not jobItem.isJobItem())
       return false
 
-    let job = getJobDefinitionForItemType(jobItem.getTypeId())
+    let job = SurvivorJobs.getJobDefinitionForItemType(jobItem.getTypeId())
     if (job == null)
       Log.error("SurvivorComponent", "tryEquipJobItem", getOwnerUnit().getName(), "No job definition found for item type " + jobItem.getName())
       return false
@@ -254,7 +279,7 @@ public class SurvivorComponent extends UnitComponent
       Log.error("SurvivorComponent", "tryEquipJobItem", getOwnerUnit().getName(), "Somehow the job definition is SurvivorJobs.none for item type " + jobItem.getName())
       return false
 
-    let jobComponent = getOwner().getOrAddSurvivorJobComponent(job)
+    let jobComponent = getOwner().getOrAddSurvivorJobComponent(job.getType())
     if (jobComponent.getIsAssigned())
       displayMessageToPlayer(getOwnerUnit().getOwner(), "This survivor has already been assigned this job")
       return false
@@ -262,20 +287,23 @@ public class SurvivorComponent extends UnitComponent
     // Remove the item from the game once it's consumed
     jobItem.remove()
 
-    return activateJob(job)
+    return activateJob(job.getType())
 
   // --------------------------------------------------------------------------
-  function unassignJob(SurvivorJobDefinition job) returns bool
+  function unassignJob(SurvivorJobType job) returns bool
     let ownerUnit = getOwnerUnit()
     let jobComponent = getOwner().getSurvivorJobComponent(job)
     if (jobComponent == null or not jobComponent.getIsAssigned())
       return false
 
+    let jobDef = SurvivorJobs.getJobDefinition(job)
+
     jobComponent.setIsAssigned(false)
-    g_MainItemLibrary.createItemForUnit(ownerUnit, job.getItemType())
+    g_MainItemLibrary.createItemForUnit(ownerUnit, jobDef.getItemType())
+    m_assignedJobs = m_assignedJobs.reset(job castTo int)
     
-    if (canActivateJob(SurvivorJobs.none))
-      if (not activateJob(SurvivorJobs.none))
+    if (canActivateJob(SurvivorJobType.None))
+      if (not activateJob(SurvivorJobType.None))
         Log.error("SurvivorComponent", "tryUnequipJob", ownerUnit.getName(), "Could not activate the none job")
 
     return true
@@ -309,7 +337,7 @@ public class SurvivorComponent extends UnitComponent
     // Log.info("SurvivorComponent", "onPostUnitChanged", newUnit.getName(), "newUnit 1 xp " + newUnit.getXp().toString())
 
     let newUnitId = newUnit.getTypeId()
-    let job = getJobDefinitionForUnitType(newUnitId)
+    let job = SurvivorJobs.getJobTypeForUnitType(newUnitId)
     
     m_activeJob = job
     m_activeJobComponent = getJobComponent(job)
@@ -368,7 +396,7 @@ public function unit.getOrAddSurvivorComponent() returns SurvivorComponent
   return metadata != null ? metadata.getOrAddSurvivorComponent() : null
 
 // ============================================================================
-public function unit.getSurvivorJobComponent(SurvivorJobDefinition jobDef) returns SurvivorJobComponent
+public function unit.getSurvivorJobComponent(SurvivorJobType jobDef) returns SurvivorJobComponent
   let survivor = this.getSurvivorComponent()
   return survivor != null ? survivor.getJobComponent(jobDef) : null
 
@@ -402,7 +430,7 @@ function onOrderIssued()
     return
 
   let currentUnitId = orderedUnit.getTypeId()
-  let job = getJobDefinitionForUnitType(currentUnitId)
+  let job = SurvivorJobs.getJobDefinitionForUnitType(currentUnitId)
   if (job == null)
     return
 
@@ -426,11 +454,12 @@ function onUnitKilled()
     return
 
   // Create an item for each enabled job
-  for job in g_allJobDefinitions
+  for i = 0 to SurvivorJobs.count - 1
   //{
-    let jobComponent = survivor.getJobComponent(job)
+    let jobDef = SurvivorJobs.getJobDefinition(i castTo SurvivorJobType)
+    let jobComponent = survivor.getJobComponent(i castTo SurvivorJobType)
     if (jobComponent != null and jobComponent.getIsAssigned())
-      let jobItemType = job.getItemType()
+      let jobItemType = jobDef.getItemType()
       g_MainItemLibrary.createItem(jobItemType, dyingUnit.getPos())
       jobComponent.setIsAssigned(false)
   //}

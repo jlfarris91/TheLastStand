@@ -4,16 +4,79 @@ import HashMap
 import HashList
 import TlsJobItemIds
 import Vector
-import LinkedList
 import ObjectIds
 import ErrorHandling
 
-public LinkedList<SurvivorJobDefinition> g_allJobDefinitions = new LinkedList<SurvivorJobDefinition>()
-HashMap<int, SurvivorJobDefinition> g_unitTypeToJobMap = new HashMap<int, SurvivorJobDefinition>()
-HashMap<int, SurvivorJobDefinition> g_itemTypeToJobMap = new HashMap<int, SurvivorJobDefinition>()
+HashMap<int, SurvivorJobType> g_unitTypeToJobMap = new HashMap<int, SurvivorJobType>()
+HashMap<int, SurvivorJobType> g_itemTypeToJobMap = new HashMap<int, SurvivorJobType>()
+
+// ============================================================================
+// Don't forget to increment this number when adding new jobs
+// This number must include the None job
+public constant int g_survivorJobCount = 8
+
+public enum SurvivorJobType
+  None
+  Builder
+  Militia
+  Spearman
+  Priest
+  Marksman
+  Engineer
+  Acolyte
+
+// ============================================================================
+public class SurvivorJobs
+
+  static constant count = g_survivorJobCount
+
+  static constant SurvivorJobDefinition none = new SurvivorJobDefinition(SurvivorJobType.None, "none", -1)
+  static constant SurvivorJobDefinition builder = new SurvivorJobDefinition(SurvivorJobType.Builder, "builder", TlsJobItemIds.builder1)
+  static constant SurvivorJobDefinition militia = new SurvivorJobDefinition(SurvivorJobType.Militia, "militia", TlsJobItemIds.militia1)
+  static constant SurvivorJobDefinition spearman = new SurvivorJobDefinition(SurvivorJobType.Spearman, "spearman", TlsJobItemIds.spearman1)
+  static constant SurvivorJobDefinition priest = new SurvivorJobDefinition(SurvivorJobType.Priest, "priest", TlsJobItemIds.priest1)
+  static constant SurvivorJobDefinition marksman = new SurvivorJobDefinition(SurvivorJobType.Marksman, "marksman", TlsJobItemIds.marksman1)
+  static constant SurvivorJobDefinition engineer = new SurvivorJobDefinition(SurvivorJobType.Engineer, "engineer", TlsJobItemIds.engineer1)
+  static constant SurvivorJobDefinition acolyte = new SurvivorJobDefinition(SurvivorJobType.Acolyte, "acolyte", TlsJobItemIds.acolyte1)
+
+  static constant SurvivorJobDefinition array[g_survivorJobCount] allJobDefinitions = [
+    none,
+    builder,
+    militia,
+    spearman,
+    priest,
+    marksman,
+    engineer,
+    acolyte
+  ]
+
+  // --------------------------------------------------------------------------
+  static function getJobDefinition(SurvivorJobType job) returns SurvivorJobDefinition
+    return allJobDefinitions[job castTo int]
+
+  // --------------------------------------------------------------------------
+  static function getJobTypeForUnitType(int unitType) returns SurvivorJobType
+    if (not g_unitTypeToJobMap.has(unitType))
+      error("Could not find survivor job type for unit type {0} ({1})".format(unitType.toRawCode(), unitType.toString()))
+    return g_unitTypeToJobMap.get(unitType)
+
+  // --------------------------------------------------------------------------
+  static function getJobDefinitionForUnitType(int unitType) returns SurvivorJobDefinition
+    return SurvivorJobs.getJobDefinition(getJobTypeForUnitType(unitType))
+
+  // --------------------------------------------------------------------------
+  static function getJobTypeForItemType(int itemType) returns SurvivorJobType
+    if (not g_itemTypeToJobMap.has(itemType))
+      error("Could not find survivor job type for item type {0} ({1})".format(itemType.toRawCode(), itemType.toString()))
+    return g_itemTypeToJobMap.get(itemType)
+
+  // --------------------------------------------------------------------------
+  static function getJobDefinitionForItemType(int itemType) returns SurvivorJobDefinition
+    return SurvivorJobs.getJobDefinition(getJobTypeForItemType(itemType))
 
 // ============================================================================
 public class SurvivorJobDefinition
+  private SurvivorJobType m_type
   private string m_id
   private HashMap<int, string> m_unitTypeToTitleMap
   private int m_itemType
@@ -23,16 +86,16 @@ public class SurvivorJobDefinition
   private HashMap<player, bool> m_jobIsKnownToPlayer
 
   // --------------------------------------------------------------------------
-  construct(string id, int itemType)
+  construct(SurvivorJobType _type, string id, int itemType)
+    m_type = _type
     m_id = id
     m_itemType = itemType
     m_unitTypeToTitleMap = new HashMap<int, string>()
-    g_itemTypeToJobMap.put(itemType, this)
+    g_itemTypeToJobMap.put(itemType, _type)
     m_unitTypes = new Vector<int>(8)
     m_equivalentUnitTypes = new HashList<int>()
     m_upgradeMap = new HashMap<int, int>()
     m_jobIsKnownToPlayer = new HashMap<player, bool>()
-    g_allJobDefinitions.add(this)
 
   // --------------------------------------------------------------------------
   ondestroy
@@ -47,6 +110,10 @@ public class SurvivorJobDefinition
 
     destroy m_jobIsKnownToPlayer
     m_jobIsKnownToPlayer = null
+
+  // --------------------------------------------------------------------------
+  function getType() returns SurvivorJobType
+    return m_type
 
   // --------------------------------------------------------------------------
   function getId() returns string
@@ -71,7 +138,7 @@ public class SurvivorJobDefinition
   // --------------------------------------------------------------------------
   function registerEquivalentUnitType(int unitType)
     m_equivalentUnitTypes.add(unitType)
-    g_unitTypeToJobMap.put(unitType, this)
+    g_unitTypeToJobMap.put(unitType, m_type)
 
   // --------------------------------------------------------------------------
   function registerUpgrade(int unitTypeCurrent, int unitTypeNext)
@@ -125,31 +192,6 @@ public class SurvivorJobDefinition
     if (upgradeUnitType == unitType)
       return tier
     return getUpgradeTierRecursive(upgradeUnitType, unitType, tier + 1)
-
-// ============================================================================
-public class SurvivorJobs
-  static constant SurvivorJobDefinition none = new SurvivorJobDefinition("none", -1)
-  static constant SurvivorJobDefinition engineer = new SurvivorJobDefinition("engineer", TlsJobItemIds.engineer1)
-  static constant SurvivorJobDefinition acolyte = new SurvivorJobDefinition("acolyte", TlsJobItemIds.acolyte1)
-  static constant SurvivorJobDefinition builder = new SurvivorJobDefinition("builder", TlsJobItemIds.builder1)
-  static constant SurvivorJobDefinition militia = new SurvivorJobDefinition("militia", TlsJobItemIds.militia1)
-  static constant SurvivorJobDefinition spearman = new SurvivorJobDefinition("spearman", TlsJobItemIds.spearman1)
-  static constant SurvivorJobDefinition priest = new SurvivorJobDefinition("priest", TlsJobItemIds.priest1)
-  static constant SurvivorJobDefinition marksman = new SurvivorJobDefinition("marksman", TlsJobItemIds.marksman1)
-
-// ============================================================================
-public function getJobDefinitionForUnitType(int unitType) returns SurvivorJobDefinition
-  let jobDef = g_unitTypeToJobMap.get(unitType)
-  if (jobDef == null)
-    error("Could not find job definition for unit type {0} ({1})".format(unitType.toRawCode(), unitType.toString()))
-  return jobDef
-
-// ============================================================================
-public function getJobDefinitionForItemType(int itemType) returns SurvivorJobDefinition
-  let jobDef = g_itemTypeToJobMap.get(itemType)
-  if (jobDef == null)
-    error("Could not find job definition for item type {0} ({1})".format(itemType.toRawCode(), itemType.toString()))
-  return jobDef
 
 // ============================================================================
 init
