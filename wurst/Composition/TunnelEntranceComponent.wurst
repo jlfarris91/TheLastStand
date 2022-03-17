@@ -21,6 +21,7 @@ import TlsAbilityIds
 import Unit_Tunnel
 
 LinkedList<TunnelOperation> g_activeTravelOperations = new LinkedList<TunnelOperation>()
+CallbackPeriodic g_updateTunnelOperations
 Vector<BurrowDirtClump> g_activeDirtClumps = new Vector<BurrowDirtClump>(256)
 group g_tunnelEntrances = CreateGroup()
 group g_tunnelWaitingGroup = CreateGroup()
@@ -54,13 +55,13 @@ abstract class TunnelOperation
     m_cancellationToken = new CancellationToken()..acquire()
     m_timer = getTimer()
     m_timer.start(duration, null)
-    g_activeTravelOperations.add(this)
+    registerTunnelOperation(this)
 
   // --------------------------------------------------------------------------
   ondestroy
     m_timer.release()
     cancelToken()
-    g_activeTravelOperations.remove(this)
+    unregisterTunnelOperation(this)
 
   // --------------------------------------------------------------------------
   function getProgress01() returns real
@@ -628,9 +629,20 @@ function updateTunnelOperations()
     op.update()
 
 // ============================================================================
-init
+function registerTunnelOperation(TunnelOperation op)
+  g_activeTravelOperations.add(op)
+  if (g_activeTravelOperations.size() == 1)
+    g_updateTunnelOperations = doPeriodically(0.2, (CallbackPeriodic cb) -> updateTunnelOperations())
 
-  doPeriodically(0.2, (CallbackPeriodic cb) -> updateTunnelOperations())
+// ============================================================================
+function unregisterTunnelOperation(TunnelOperation op)
+  g_activeTravelOperations.remove(op)
+  if (g_activeTravelOperations.isEmpty() and g_updateTunnelOperations != null)
+    destroy g_updateTunnelOperations
+    g_updateTunnelOperations = null
+
+// ============================================================================
+init
 
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_LOADED, function onUnitLoaded)
   registerUnitUnloadedEvent(function onUnitUnloaded)

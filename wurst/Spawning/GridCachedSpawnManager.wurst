@@ -24,6 +24,7 @@ constant int MAX_REQUEUES_PER_REQUEST = 5
 
 constant group g_testGroup = CreateGroup()
 constant Vector<int> g_tempSpawnPointAreaIndices = new Vector<int>()
+CallbackPeriodic g_processRequests
 
 @configurable public bool g_enableGCSMLogging = false
 
@@ -288,6 +289,13 @@ public class GridCachedSpawnManager implements ISpawnPointProvider
       m_areaData[index].debug.bounds.setColor(m_showDebugEffects and m_areaData[index].valid ? m_areaData[index].debug.color : Colors.clear)
 
 // ============================================================================
+function queueRequest(SpawnAreaUpdateRequest request)
+  GCSM.updateRequests.enqueue(request)
+
+  if (GCSM.updateRequests.getCount() == 1)
+    g_processRequests = doPeriodically(0.1, (CallbackPeriodic cb) -> processRequests())
+
+// ============================================================================
 function processRequests()
   if (GCSM.updateRequests.isEmpty())
     return
@@ -349,6 +357,6 @@ function processRequests()
     //}
   //}
 
-// ============================================================================
-init
-  doPeriodically(0.1, (CallbackPeriodic cb) -> processRequests())
+  if (GCSM.updateRequests.isEmpty() and g_processRequests != null)
+    destroy g_processRequests
+    g_processRequests = null

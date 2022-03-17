@@ -12,7 +12,10 @@ constant int DEATH_ANIMATION_INDEX = 101
 constant int ZERO_ANIMATION_INDEX = 0
 
 LinkedList<WorldProgressBar> g_updateVisuals
+CallbackPeriodic g_updateVisualsCallback
+
 LinkedList<WorldProgressBar> g_updatePositions
+CallbackPeriodic g_updatePositionsCallback
 
 // ============================================================================
 public class WorldProgressBar
@@ -46,8 +49,8 @@ public class WorldProgressBar
   
   // --------------------------------------------------------------------------
   ondestroy
-    unregisterForVisualUpdate()
-    unregisterForPositionUpdate()
+    unregisterForVisualUpdate(this)
+    unregisterForPositionUpdate(this)
     releaseDummyUnit(_bar)
     _bar = null
     _target = null
@@ -64,7 +67,7 @@ public class WorldProgressBar
     if (delta > 0.01)
       _targetValue = percentage01
       _speed = speed
-      registerForVisualUpdate()
+      registerForVisualUpdate(this)
 
   // --------------------------------------------------------------------------
   function setPercentageNow(real percentage01)
@@ -112,14 +115,14 @@ public class WorldProgressBar
   function setColor(colorA color)
     _bar.setVertexColor(color)
     _color = color
-    registerForVisualUpdate()
+    registerForVisualUpdate(this)
 
   // --------------------------------------------------------------------------
   function setTarget(unit u)
     _target = u
     updatePosition()
     if (u != null)
-      registerForPositionUpdate()
+      registerForPositionUpdate(this)
 
   // --------------------------------------------------------------------------
   function getTarget() returns unit
@@ -135,12 +138,12 @@ public class WorldProgressBar
 
   // --------------------------------------------------------------------------
   function fadeIn()
-    registerForVisualUpdate()
+    registerForVisualUpdate(this)
     _targetAlpha = 1.0
 
   // --------------------------------------------------------------------------
   function fadeOut()
-    registerForVisualUpdate()
+    registerForVisualUpdate(this)
     _targetAlpha = 0.0
 
   // --------------------------------------------------------------------------
@@ -172,7 +175,7 @@ public class WorldProgressBar
     let doneUpdatingProgress = updateProgress(dt)
     let doneUpdatingAlpha = updateAlpha(dt)
     if (doneUpdatingProgress and doneUpdatingAlpha)
-      unregisterForVisualUpdate()
+      unregisterForVisualUpdate(this)
     if (_currentAlpha < 0.01)
       hide()
     if (_currentAlpha > 0.01)
@@ -214,24 +217,6 @@ public class WorldProgressBar
     let animationIndex = clamp(R2I(t * 100.0), 0, 100)
     _bar.setAnimation(animationIndex)
 
-  // --------------------------------------------------------------------------
-  private function registerForVisualUpdate()
-    unregisterForVisualUpdate()
-    g_updateVisuals.add(this)
-
-  // --------------------------------------------------------------------------
-  private function unregisterForVisualUpdate()
-    g_updateVisuals.remove(this)
-
-  // --------------------------------------------------------------------------
-  private function registerForPositionUpdate()
-    unregisterForPositionUpdate()
-    g_updatePositions.add(this)
-
-  // --------------------------------------------------------------------------
-  private function unregisterForPositionUpdate()
-    g_updatePositions.remove(this)
-
 // ============================================================================
 function getDummyUnit(int unitId) returns unit
   return createUnitRecycled(PROGRESS_BAR_OWNER, unitId, ZERO2, angle(0))
@@ -240,18 +225,52 @@ function getDummyUnit(int unitId) returns unit
 function releaseDummyUnit(unit u)
   u.setAnimation(DEATH_ANIMATION_INDEX)
   u.stock()
-  
+
+// ============================================================================
+function updateVisuals()
+  for progressBar in g_updateVisuals
+    if (progressBar != null)
+      progressBar.updateVisuals(PROGRESS_BAR_UPDATE_PROGRESS_INTERVAL)
+
+// ============================================================================
+function registerForVisualUpdate(WorldProgressBar progressBar)
+  if (g_updateVisuals.has(progressBar))
+    return
+  g_updateVisuals.add(progressBar)
+  if (g_updateVisuals.size() == 1)
+    g_updateVisualsCallback = doPeriodically(PROGRESS_BAR_UPDATE_PROGRESS_INTERVAL, cb -> updateVisuals())
+
+// ============================================================================
+function unregisterForVisualUpdate(WorldProgressBar progressBar)
+  if (not g_updateVisuals.remove(progressBar))
+    return
+  if (g_updateVisuals.isEmpty())
+    destroy g_updateVisualsCallback
+    g_updateVisualsCallback = null
+
+// ============================================================================
+function updatePositions()
+  for progressBar in g_updatePositions
+    if (progressBar != null)
+      progressBar.updateVisuals(PROGRESS_BAR_UPDATE_POSITION_INTERVAL)
+
+// ============================================================================
+function registerForPositionUpdate(WorldProgressBar progressBar)
+  if (g_updatePositions.has(progressBar))
+    return
+  g_updatePositions.add(progressBar)
+  if (g_updatePositions.size() == 1)
+    g_updatePositionsCallback = doPeriodically(PROGRESS_BAR_UPDATE_POSITION_INTERVAL, cb -> updatePositions())
+
+// ============================================================================
+function unregisterForPositionUpdate(WorldProgressBar progressBar)
+  if (not g_updatePositions.remove(progressBar))
+    return
+  if (g_updatePositions.isEmpty())
+    destroy g_updatePositionsCallback
+    g_updatePositionsCallback = null
+
 // ============================================================================
 init
   g_updateVisuals = new LinkedList<WorldProgressBar>()
   g_updatePositions = new LinkedList<WorldProgressBar>()
-
-  doPeriodically(PROGRESS_BAR_UPDATE_PROGRESS_INTERVAL) (CallbackPeriodic cb) ->
-    for progressBar in g_updateVisuals
-      if (progressBar != null)
-        progressBar.updateVisuals(PROGRESS_BAR_UPDATE_PROGRESS_INTERVAL)
-  
-  doPeriodically(PROGRESS_BAR_UPDATE_POSITION_INTERVAL) (CallbackPeriodic cb) ->
-    for progressBar in g_updatePositions
-      if (progressBar != null)
-        progressBar.updateVisuals(PROGRESS_BAR_UPDATE_POSITION_INTERVAL)
