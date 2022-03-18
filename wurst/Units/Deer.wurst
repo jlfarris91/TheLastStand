@@ -13,6 +13,7 @@ import HumanPlayers
 import ClosureTimers
 import HumanPlayerComponent
 import Spawning
+import UndeadTargetService
 
 // ============================================================================
 function spawnDeerAroundTheMap()
@@ -24,18 +25,7 @@ function spawnDeerNearPlayer(player _player)
   let playerMetadata = _player.getMetadata()
   if (playerMetadata == null or playerMetadata.getHasLostGame() or playerMetadata.getHasLeftGame())
     return
-  let playerHumanComp = _player.getHumanPlayerComponent()
-  if (playerHumanComp == null)
-    return
-  let spawnPointProvider = getFriendlySpawnPointProviderForPlayer(_player)
-  if (spawnPointProvider == null)
-    return
-  let result = spawnPointProvider.getRandomSpawnPointsInRange(playerHumanComp.getCampCenter(), SpawnRange.MID.toRangeReal(), NUMBER_DEER_PER_PLAYER)
-  if (not result.succeeded)
-    return
-  for sp in result.spawnPoints
-    spawnDeer(sp)
-  destroy result.spawnPoints
+  SpawnController.enqueue(new DeerSpawnRequest(_player))
 
 // ============================================================================
 function spawnDeer(vec2 pos)
@@ -52,7 +42,18 @@ function banishAllDeer()
       deer.setInvulnerable(true)
       deer.issuePointOrder("move", playableBounds.getRandomPoint())
       deer.fadeOut()
-      doAfter(UNIT_FADE_DURATION, () -> deer.remove())
+  temp.release()
+
+  doAfter(UNIT_FADE_DURATION, () -> stockAllDeer())
+
+// ============================================================================
+function stockAllDeer()
+  
+  let temp = getGroup()
+  temp.enumUnitsOfType(TlsUnitIds.deer, null)
+  for deer in temp
+    if (deer.isAlive() and not deer.isStocked())
+      deer.stock()
   temp.release()
 
 // ============================================================================
@@ -68,6 +69,54 @@ function onDayStart()
 // ============================================================================
 function onNightStart()
   banishAllDeer()
+
+// ============================================================================
+class DeerSpawnRequest extends SpawnRequestBase
+  private player m_targetPlayer
+  private HumanPlayerComponent m_targetPlayerComp
+  private ISpawnPointProvider m_spawnPointProvider
+  private UndeadTargetProvider m_targetUnitProvider
+  private bool m_hasNext = true
+  private int m_spawned = 0
+
+  // --------------------------------------------------------------------------
+  construct (player targetPlayer)
+    super(10.0)
+    m_targetPlayer = targetPlayer
+    m_targetPlayerComp = m_targetPlayer.getHumanPlayerComponent()
+    m_targetUnitProvider = getUndeadTargetProviderForPlayer(m_targetPlayer)
+    m_spawnPointProvider = getFriendlySpawnPointProviderForPlayer(m_targetPlayer)
+
+  // --------------------------------------------------------------------------
+  override function next() returns int
+
+    let playerMetadata = m_targetPlayer.getMetadata()
+    if (playerMetadata == null or playerMetadata.getHasLostGame() or playerMetadata.getHasLeftGame())
+      m_hasNext = false
+      return 0
+
+    let targetUnit = m_targetUnitProvider.getRandomTargetUnit(false)
+    if (targetUnit == null)
+      return 0
+
+    let result = m_spawnPointProvider.getRandomSpawnPointInRange(targetUnit.getPos(), SpawnRange.MID.toRangeReal())
+    if (not result.succeeded)
+      return 0
+
+    spawnDeer(result.spawnPoint)
+
+    m_spawned++
+    m_hasNext = m_spawned < NUMBER_DEER_PER_PLAYER
+
+    return 1
+  
+  // --------------------------------------------------------------------------
+  override function hasNext() returns bool
+    return m_hasNext
+
+  // --------------------------------------------------------------------------
+  override function getDebuggerStateString() returns string
+    return "Deer P{0} {1}/{2}".format(m_targetPlayer.getId().toString(), m_spawned.toString(), NUMBER_DEER_PER_PLAYER.toString())
 
 // ============================================================================
 init

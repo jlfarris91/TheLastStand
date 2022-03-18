@@ -1,32 +1,49 @@
-package SpawnWaveDefinition
-import ISpawnWave
-import IProgress
-import Math
-import HashMap
+package WaveSpawning
+import Events
 import Vector
+import Runnable
+import IProgress
 import Func
-import Range
-import Spawning
+import GameConstants
+import GameInstance
 import Action
+import Spawning
+import HashMap
+import Range
 import SoundUtils
+import Math
+
+public tuple tierChances(real tier1, real tier2, real tier3)
 
 // ============================================================================
-public class SpawnWaveDefinition implements ISpawnWaveDefinition
+public interface ISpawnWaveUnitTypeProvider
+  function getUnitType(SpawnWaveContext context) returns int
+  function getUnitTypes(SpawnWaveContext context, int count, Vector<int> output) returns int
+
+// ============================================================================
+public interface ISpawnWaveActivator extends IRunnable
+  function getActivatedEvent() returns Event
+  function getTimesActivated() returns int
+  function getActivateOnStart() returns bool
+  function setActivateOnStart(bool value)
+
+// ============================================================================
+public class SpawnWaveDefinition
   private string m_name
   private IProgress m_progress
   private ISpawnWaveActivator m_activator
   private SpawnRange m_spawnRange
   private ISpawnWaveUnitTypeProvider m_unitTypeProvider
-  private Func1<ISpawnWaveContext, int> m_maxSpawnCount
-  private Func1<ISpawnWaveContext, int> m_maxAliveCount
-  private Func1<ISpawnWaveContext, int> m_spawnsPerActivation
-  private Func1<ISpawnWaveContext, real> m_spawnGroupingFactor
-  private Func1<ISpawnWaveContext, int> m_goldReward
-  private Action2<unit, ISpawnWaveContext> m_commonUnitModifier
-  private IterableMap<int, Action2<unit, ISpawnWaveContext>> m_unitModifiers
+  private Func1<SpawnWaveContext, int> m_maxSpawnCount
+  private Func1<SpawnWaveContext, int> m_maxAliveCount
+  private Func1<SpawnWaveContext, int> m_spawnsPerActivation
+  private Func1<SpawnWaveContext, real> m_spawnGroupingFactor
+  private Func1<SpawnWaveContext, int> m_goldReward
+  private Action2<unit, SpawnWaveContext> m_commonUnitModifier
+  private IterableMap<int, Action2<unit, SpawnWaveContext>> m_unitModifiers
   private Vector<string> m_tags
   private bool m_waitForFullSpawnGroup = false
-  private bool m_useUnitRecycler = true
+  private bool m_useUnitRecycler = false
   private rangeReal m_facingAngleRange = rangeReal(0.0, 360.0)
   private SpawnPointProviderType m_spawnPointProviderType = SpawnPointProviderType.CACHED_HOSTILE
   private sound m_playSoundOnStart = null
@@ -90,171 +107,171 @@ public class SpawnWaveDefinition implements ISpawnWaveDefinition
     m_tags = null
 
   // --------------------------------------------------------------------------
-  override function getName() returns string
+  function getName() returns string
     return m_name
 
   // --------------------------------------------------------------------------
-  override function setProgress(IProgress progress)
+  function setProgress(IProgress progress)
     m_progress = progress
 
   // --------------------------------------------------------------------------
-  override function getProgress() returns IProgress
+  function getProgress() returns IProgress
     return m_progress
 
   // --------------------------------------------------------------------------
-  override function setActivator(ISpawnWaveActivator activator)
+  function setActivator(ISpawnWaveActivator activator)
     m_activator = activator
 
   // --------------------------------------------------------------------------
-  override function getActivator() returns ISpawnWaveActivator
+  function getActivator() returns ISpawnWaveActivator
     return m_activator
 
   // --------------------------------------------------------------------------
-  override function setSpawnRange(SpawnRange spawnRange)
+  function setSpawnRange(SpawnRange spawnRange)
     m_spawnRange = spawnRange
 
   // --------------------------------------------------------------------------
-  override function getSpawnRange() returns SpawnRange
+  function getSpawnRange() returns SpawnRange
     return m_spawnRange
 
   // --------------------------------------------------------------------------
-  override function setUnitTypeProvider(ISpawnWaveUnitTypeProvider unitTypeProvider)
+  function setUnitTypeProvider(ISpawnWaveUnitTypeProvider unitTypeProvider)
     m_unitTypeProvider = unitTypeProvider
 
   // --------------------------------------------------------------------------
-  override function getUnitTypeProvider() returns ISpawnWaveUnitTypeProvider
+  function getUnitTypeProvider() returns ISpawnWaveUnitTypeProvider
     return m_unitTypeProvider
 
   // --------------------------------------------------------------------------
-  override function setMaxAliveCount(Func1<ISpawnWaveContext, int> value)
+  function setMaxAliveCount(Func1<SpawnWaveContext, int> value)
     value.acquire()
     if (m_maxAliveCount != null)
       m_maxAliveCount.release()
     m_maxAliveCount = value
 
   // --------------------------------------------------------------------------
-  override function getMaxAliveCount(ISpawnWaveContext context) returns int
+  function getMaxAliveCount(SpawnWaveContext context) returns int
     if (m_maxAliveCount == null)
       return UNLIMITED
     return clamp(m_maxAliveCount.call(context), 0, UNLIMITED)
 
   // --------------------------------------------------------------------------
-  override function setMaxSpawnCount(Func1<ISpawnWaveContext, int> value)
+  function setMaxSpawnCount(Func1<SpawnWaveContext, int> value)
     value.acquire()
     if (m_maxSpawnCount != null)
       m_maxSpawnCount.release()
     m_maxSpawnCount = value
 
   // --------------------------------------------------------------------------
-  override function getMaxSpawnCount(ISpawnWaveContext context) returns int
+  function getMaxSpawnCount(SpawnWaveContext context) returns int
     if (m_maxSpawnCount == null)
       return UNLIMITED
     return clamp(m_maxSpawnCount.call(context), 0, UNLIMITED)
 
   // --------------------------------------------------------------------------
-  override function getSpawnsPerActivation(ISpawnWaveContext context) returns int
+  function getSpawnsPerActivation(SpawnWaveContext context) returns int
     if (m_spawnsPerActivation == null)
       return 1
     return clamp(m_spawnsPerActivation.call(context), 0, 1000)
 
   // --------------------------------------------------------------------------
-  override function setSpawnsPerActivation(Func1<ISpawnWaveContext, int> value)
+  function setSpawnsPerActivation(Func1<SpawnWaveContext, int> value)
     value.acquire()
     if (m_spawnsPerActivation != null)
       m_spawnsPerActivation.release()
     m_spawnsPerActivation = value
 
   // --------------------------------------------------------------------------
-  override function getSpawnGroupingFactor(ISpawnWaveContext context) returns real
+  function getSpawnGroupingFactor(SpawnWaveContext context) returns real
     if (m_spawnGroupingFactor == null)
       return 0.0
     return clamp01(m_spawnGroupingFactor.call(context))
 
   // --------------------------------------------------------------------------
-  override function setSpawnGroupingFactor(Func1<ISpawnWaveContext, real> value)
+  function setSpawnGroupingFactor(Func1<SpawnWaveContext, real> value)
     value.acquire()
     if (m_spawnGroupingFactor != null)
       m_spawnGroupingFactor.release()
     m_spawnGroupingFactor = value
 
   // --------------------------------------------------------------------------
-  override function setCommonUnitModifier(Action2<unit, ISpawnWaveContext> action)
+  function setCommonUnitModifier(Action2<unit, SpawnWaveContext> action)
     action.acquire()
     if (m_commonUnitModifier != null)
       m_commonUnitModifier.release()
     m_commonUnitModifier = action
 
   // --------------------------------------------------------------------------
-  override function getCommonUnitModifier() returns Action2<unit, ISpawnWaveContext>
+  function getCommonUnitModifier() returns Action2<unit, SpawnWaveContext>
     return m_commonUnitModifier
 
   // --------------------------------------------------------------------------
-  override function setUnitModifier(int unitTypeId, Action2<unit, ISpawnWaveContext> action)
+  function setUnitModifier(int unitTypeId, Action2<unit, SpawnWaveContext> action)
     action.acquire()
     if (m_unitModifiers == null)
-      m_unitModifiers = new IterableMap<int, Action2<unit, ISpawnWaveContext>>()
+      m_unitModifiers = new IterableMap<int, Action2<unit, SpawnWaveContext>>()
     let existing = m_unitModifiers.get(unitTypeId)
     if (existing != null)
       existing.release()
     m_unitModifiers.put(unitTypeId, action)
 
   // --------------------------------------------------------------------------
-  override function getUnitModifier(int unitTypeId) returns Action2<unit, ISpawnWaveContext>
+  function getUnitModifier(int unitTypeId) returns Action2<unit, SpawnWaveContext>
     if (m_unitModifiers == null)
       return null
     return m_unitModifiers.get(unitTypeId)
 
   // --------------------------------------------------------------------------
-  override function setTags(vararg string tags)
+  function setTags(vararg string tags)
     m_tags.clear()
     for tag in tags
       m_tags.add(tag)
 
   // --------------------------------------------------------------------------
-  override function getTags() returns Vector<string>
+  function getTags() returns Vector<string>
     return m_tags
 
   // --------------------------------------------------------------------------
-  override function getWaitForFullSpawnGroup() returns bool
+  function getWaitForFullSpawnGroup() returns bool
     return m_waitForFullSpawnGroup
 
   // --------------------------------------------------------------------------
-  override function setWaitForFullSpawnGroup(bool value)
+  function setWaitForFullSpawnGroup(bool value)
     m_waitForFullSpawnGroup = value
 
   // --------------------------------------------------------------------------
-  override function getUseUnitRecycler() returns bool
+  function getUseUnitRecycler() returns bool
     return m_useUnitRecycler
 
   // --------------------------------------------------------------------------
-  override function setUseUnitRecycler(bool value)
+  function setUseUnitRecycler(bool value)
     m_useUnitRecycler = value
 
   // --------------------------------------------------------------------------
-  override function getGoldReward(ISpawnWaveContext context) returns int
+  function getGoldReward(SpawnWaveContext context) returns int
     return m_goldReward != null ? m_goldReward.call(context) : 0
 
   // --------------------------------------------------------------------------
-  override function setGoldReward(Func1<ISpawnWaveContext, int> value)
+  function setGoldReward(Func1<SpawnWaveContext, int> value)
     value.acquire()
     if (m_goldReward != null)
       m_goldReward.release()
     m_goldReward = value
 
   // --------------------------------------------------------------------------
-  override function getFacingAngleRange() returns rangeReal
+  function getFacingAngleRange() returns rangeReal
     return m_facingAngleRange
 
   // --------------------------------------------------------------------------
-  override function setFacingAngleRange(rangeReal range)
+  function setFacingAngleRange(rangeReal range)
     m_facingAngleRange = range
   
   // --------------------------------------------------------------------------
-  override function getSpawnPointProviderType() returns SpawnPointProviderType
+  function getSpawnPointProviderType() returns SpawnPointProviderType
     return m_spawnPointProviderType
   
   // --------------------------------------------------------------------------
-  override function setSpawnPointProviderType(SpawnPointProviderType value)
+  function setSpawnPointProviderType(SpawnPointProviderType value)
     m_spawnPointProviderType = value
 
   // --------------------------------------------------------------------------
@@ -306,3 +323,69 @@ public class SpawnWaveDefinition implements ISpawnWaveDefinition
   // --------------------------------------------------------------------------
   function getPingOnGroupSpawnColor() returns color
     return m_pingOnGroupSpawnColor
+
+// ============================================================================
+public class SpawnWaveContext
+  SpawnWaveDefinition definition
+  int waveNumber
+  real waveProgress
+  real playerDifficulty
+  real array[MAX_ELITE_TIER] tierChances
+  int tier
+  int groupId
+
+  // --------------------------------------------------------------------------
+  construct()
+    definition = null
+    waveNumber = 0
+    waveProgress = 0.0
+    playerDifficulty = 1.0
+    tier = 0
+    groupId = 0
+    for i = 0 to MAX_ELITE_TIER-1
+      tierChances[i] = 0.0
+
+  // --------------------------------------------------------------------------
+  function getGameProgress01() returns real
+    return ((waveNumber - 1).toReal() + waveProgress) / TOTAL_NIGHTS
+
+  // --------------------------------------------------------------------------
+  function getGameDifficulty01() returns real
+    return g_GameInstance.getGameDifficulty01()
+
+  // --------------------------------------------------------------------------
+  function getTierChance01(int tier) returns real
+    return tierChances[tier]
+
+  // --------------------------------------------------------------------------
+  function getUnitModifierGameProgress01() returns real
+    return getGameProgress01()
+
+  // --------------------------------------------------------------------------
+  function getUnitModifierDifficultyScalar01() returns real
+    return playerDifficulty
+
+  // --------------------------------------------------------------------------
+  function clone() returns SpawnWaveContext
+    let clone = new SpawnWaveContext()
+    clone.definition = definition
+    clone.waveNumber = waveNumber
+    clone.waveProgress = waveProgress
+    clone.playerDifficulty = playerDifficulty
+    clone.tier = tier
+    clone.groupId = groupId
+    for i = 0 to MAX_ELITE_TIER-1
+      clone.tierChances[i] = tierChances[i]
+    return clone
+
+  // --------------------------------------------------------------------------
+  function getRandomTier() returns int
+    var roll01 = GetRandomReal(0, 1)
+    var tier = 0
+    for i = 0 to MAX_ELITE_TIER - 1
+      let tierChance = getTierChance01(i)
+      if (roll01 < tierChance)
+        tier = i
+        break
+      roll01 -= tierChance
+    return tier

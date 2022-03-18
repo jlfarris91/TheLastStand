@@ -3,11 +3,8 @@ import UnitComponent
 import HumanPlayerComponent
 import Events
 import RegisterEvents
-import HashMap
 import HumanPlayers
-import TlsUnitIds
 import GroupUtils
-import TargetUtility
 import UnitExtensions
 import ClosureTimers
 import Host
@@ -19,10 +16,10 @@ import Range
 import TimerUtils
 import ProjectConstants
 import GroupExtensions
-import BuildingUndeadTarget
 import DebuggerDialog
 import Frame
 import LeashComponent
+import UndeadTargetService
 
 constant rangeReal ATTACK_TIMER_DURATION_RANGE = rangeReal(1.0, 3.0)
 constant real ATTACK_TIMER_DISTANCE_THRESHOLD = 128.0
@@ -39,10 +36,6 @@ constant real UPDATE_INTERVAL = 0.2
 @configurable public bool g_enableUTCLogging = false
 @configurable constant public int VALID_HUMAN_STRUCTURE_TARGETS_ATTACKER_COUNT_THRESHOLD = 3
 
-PlayerData array g_playerData
-conditionfunc g_filterUnitIsValidTargetStructure = Condition(function filterUnitIsValidTargetStructure)
-conditionfunc g_filterUnitIsValidTargetNonStructure = Condition(function filterUnitIsValidTargetNonStructure)
-IterableMap<unit, group> g_targetedUnitToUTCMap = new IterableMap<unit, group>()
 group g_dealDOTGroup = CreateGroup()
 group g_awaitingOrderGroup = CreateGroup()
 CallbackPeriodic g_issueOrderTimer
@@ -321,32 +314,8 @@ public class UndeadTargetingComponent extends UnitComponent
       return null
     let ownerUnit = getOwnerUnit()
     unit targetUnit
-    if (shouldTargetOrganicUnits())
-      recordNote("gNTU", "shouldTargetOrganicUnits() == true")
-      targetUnit = getNearestUnitOfPlayer(targetPlayer, ownerUnit.getPos(), g_filterUnitIsValidTargetNonStructure)
-      if (targetUnit != null)
-        recordNote("gNTU", "getNearestUnitOfPlayer() != null")
-        return targetUnit
-      else
-        recordNote("gNTU", "getNearestUnitOfPlayer() == null")
-      targetUnit = getClosestValidHumanStructureTarget(targetPlayer, ownerUnit.getPos())
-      if (targetUnit != null)        
-        recordNote("gNTU", "getClosestValidHumanStructureTarget() != null")
-      else
-        recordNote("gNTU", "getClosestValidHumanStructureTarget() == null")
-    else
-      recordNote("gNTU", "shouldTargetOrganicUnits() == false")
-      targetUnit = getClosestValidHumanStructureTarget(targetPlayer, ownerUnit.getPos())
-      if (targetUnit != null)
-        recordNote("gNTU", "getClosestValidHumanStructureTarget() != null")
-        return targetUnit
-      else
-        recordNote("gNTU", "getClosestValidHumanStructureTarget() == null")
-      targetUnit = getNearestUnitOfPlayer(targetPlayer, ownerUnit.getPos(), g_filterUnitIsValidTargetNonStructure)
-      if (targetUnit != null)        
-        recordNote("gNTU", "getNearestUnitOfPlayer() != null")
-      else
-        recordNote("gNTU", "getNearestUnitOfPlayer() == null")
+    let targetProvider = getUndeadTargetProviderForPlayer(targetPlayer)
+    targetUnit = targetProvider.getClosestTargetUnit(ownerUnit.getPos(), getPreferOrganicTargets())
     return targetUnit
 
   // --------------------------------------------------------------------------
@@ -360,7 +329,9 @@ public class UndeadTargetingComponent extends UnitComponent
       unregisterTargetedUnit(m_targetUnit, getOwnerUnit())
 
     m_targetUnit = targetUnit
-    m_leashComponent.setTargetUnit(targetUnit)
+
+    if (m_leashComponent != null)
+      m_leashComponent.setTargetUnit(targetUnit)
 
     if (m_targetUnit != null)
       recordNote("sTU_i", "Target unit is not null : " + m_targetUnit.getName())
@@ -463,7 +434,7 @@ public class UndeadTargetingComponent extends UnitComponent
 
   // --------------------------------------------------------------------------
   private function tryTeleportCloserToTargetUnit() returns bool
-    return m_leashComponent.tryTeleportCloserToTargetUnit()
+    return m_leashComponent != null and m_leashComponent.tryTeleportCloserToTargetUnit()
 
   // --------------------------------------------------------------------------
   protected function restartAttackTimer()
@@ -507,125 +478,6 @@ public function unit.getOrAddUndeadTargetingComponent() returns UndeadTargetingC
   return metadata != null ? metadata.getOrAddUndeadTargetingComponent() : null
 
 // ============================================================================
-function getClosestValidHumanStructureTarget(player p, vec2 pos) returns unit
-  return getPlayerData(p).getClosestStructureTarget(pos)
-
-// ============================================================================
-class PlayerData
-  player m_player
-  group m_structureTargets
-  group m_structureTargets_LowPri
-  group m_structureTargets_HighPri
-
-  // --------------------------------------------------------------------------
-  construct(player _player)
-    m_player = _player
-    m_structureTargets = CreateGroup()
-    m_structureTargets_LowPri = CreateGroup()
-    m_structureTargets_HighPri = CreateGroup()
-
-    // offset by player id so that one player's structure targets are sorted every second
-    let period = g_PlayingHumanPlayerCount.toReal()
-    doAfter(m_player.getId().toReal()) ->
-      doPeriodically(period) (CallbackPeriodic cb) ->
-        sortStructureTargets()
-
-  // --------------------------------------------------------------------------
-  function clear()
-
-    m_structureTargets_LowPri.clear()
-    m_structureTargets_HighPri.clear()
-    
-    for targetStructure in m_structureTargets
-      unregisterTargetedUnit(targetStructure)
-    m_structureTargets.clear()
-
-  // --------------------------------------------------------------------------
-  function registerPlayerTargetStructure(unit targetStructure)
-    if (not unitIsValidTargetStructure(targetStructure) or not canAcceptNewStructures())
-      return
-    m_structureTargets.addUnit(targetStructure)
-    m_structureTargets.refresh()
-    sortStructureTargets()
-
-  // --------------------------------------------------------------------------
-  function unregisterPlayerTargetStructure(unit targetStructure)
-    m_structureTargets.removeUnit(targetStructure)
-    m_structureTargets.refresh()
-    sortStructureTargets()
-    unregisterTargetedUnit(targetStructure)
-
-  // --------------------------------------------------------------------------
-  function getClosestStructureTarget(vec2 pos) returns unit
-
-    if (not m_structureTargets_HighPri.isEmpty())
-      return m_structureTargets_HighPri.getClosestUnit(pos)
-
-    if (not m_structureTargets_LowPri.isEmpty())
-      return m_structureTargets_LowPri.getClosestUnit(pos)
-    
-    return null
-
-  // --------------------------------------------------------------------------
-  private function sortStructureTargets()
-    // Log.debug(m_player.getId().toString() + " Sorting structure targets")
-
-    m_structureTargets_HighPri.clear()
-    m_structureTargets_LowPri.clear()
-
-    for structureTarget in m_structureTargets
-    //{
-      group priorityGroup = m_structureTargets_HighPri
-      let attackerGroup = g_targetedUnitToUTCMap.get(structureTarget)
-      if (attackerGroup != null and attackerGroup.size() > VALID_HUMAN_STRUCTURE_TARGETS_ATTACKER_COUNT_THRESHOLD)
-        priorityGroup = m_structureTargets_LowPri
-      priorityGroup.addUnit(structureTarget)
-    //}
-
-  // --------------------------------------------------------------------------
-  private function canAcceptNewStructures() returns bool
-    if (not m_player.isIngame())
-      return false
-    let playerMetadata = m_player.getMetadata()
-    return playerMetadata != null and not playerMetadata.getHasLeftGame() and not playerMetadata.getHasLostGame()
-
-// ============================================================================
-function getPlayerData(player p) returns PlayerData
-  var playerData = g_playerData[p.getId()]
-  if (playerData == null)
-    playerData = new PlayerData(p)
-    g_playerData[p.getId()] = playerData
-  return playerData
-
-// ============================================================================
-function unitIsValidTargetStructure(unit u) returns bool
-  return u.isAlive() and u.isStructure() and u.isBuildingUndeadTarget()
-
-// ============================================================================
-function filterUnitIsValidTargetStructure() returns bool
-  return unitIsValidTargetStructure(GetFilterUnit())
-
-// ============================================================================
-function unitIsValidTargetNonStructure(unit u) returns bool
-  return u.isAlive() and not u.isInvulnerable() and (u.isCampHeadquarters() or not u.isStructure())
-
-// ============================================================================
-function filterUnitIsValidTargetNonStructure() returns bool
-  return unitIsValidTargetNonStructure(GetFilterUnit())
-
-// ============================================================================
-public function registerPlayerTargetStructure(unit targetStructure)
-  let owningPlayer = targetStructure.getOwner()
-  if (owningPlayer.isHumanPlayer())
-    getPlayerData(owningPlayer).registerPlayerTargetStructure(targetStructure)
-
-// ============================================================================
-public function unregisterPlayerTargetStructure(unit targetStructure)
-  let owningPlayer = targetStructure.getOwner()
-  if (owningPlayer.isHumanPlayer())
-    getPlayerData(owningPlayer).unregisterPlayerTargetStructure(targetStructure)
-
-// ============================================================================
 function onUnitAttacked()
   let attackingUnit = GetAttacker()
 
@@ -640,35 +492,6 @@ function onUnitAttacked()
   undeadTargetingComponent.onAttackedUnit(GetAttackedUnitBJ())
 
 group g_tempGroup = CreateGroup()
-
-// ============================================================================
-function registerTargetedUnit(unit targetedUnit, unit utc)
-  group attackerGroup
-  if (g_targetedUnitToUTCMap.has(targetedUnit))
-    attackerGroup = g_targetedUnitToUTCMap.get(targetedUnit)
-  else
-    attackerGroup = CreateGroup()
-    g_targetedUnitToUTCMap.put(targetedUnit, attackerGroup)
-  attackerGroup.addUnit(utc)
-
-// ============================================================================
-function unregisterTargetedUnit(unit targetedUnit, unit utc)
-  if (not g_targetedUnitToUTCMap.has(targetedUnit))
-    return
-  let attackerGroup = g_targetedUnitToUTCMap.get(targetedUnit)
-  attackerGroup.removeUnit(utc)
-
-// ============================================================================
-function unregisterTargetedUnit(unit targetedUnit)
-  if (not g_targetedUnitToUTCMap.has(targetedUnit))
-    return
-  let attackerList = g_targetedUnitToUTCMap.get(targetedUnit)
-  g_targetedUnitToUTCMap.remove(targetedUnit)
-  for utc in attackerList
-    let comp = utc.getUndeadTargetingComponent()
-    if (comp != null)
-      comp.onTargetUnitNoLongerTargettable()
-  attackerList.destr()
 
 // ============================================================================
 function applyDOT()
@@ -732,20 +555,6 @@ function issueOrders()
     //}
 
   g_numberOfTimesIssueOrdersEndCalled++
-
-// ============================================================================
-function clearLeavingPlayerData()
-  let leavingPlayer = getLeavingPlayer()
-  let playerData = getPlayerData(leavingPlayer)
-  if (playerData != null)
-    playerData.clear()
-
-// ============================================================================
-function clearLosingPlayerData()
-  let losingPlayer = getLosingPlayer()
-  let playerData = getPlayerData(losingPlayer)
-  if (playerData != null)
-    playerData.clear()
 
 // ============================================================================
 class UTCDebugger extends Frame
@@ -817,9 +626,6 @@ init
   doPeriodically(UPDATE_INTERVAL, (CallbackPeriodic cb) -> issueOrders())
   doPeriodically(DOT_INTERVAL, (CallbackPeriodic cb) -> applyDOT())
 
-  onPlayerLost(() -> clearLosingPlayerData())
-  onPlayerLeft(() -> clearLeavingPlayerData())
-
   if (DEV_ENVIRONMENT)
   //{
     DebuggerDialog.registerFrame("UTC") () ->
@@ -844,3 +650,75 @@ init
       if (g_utcDebuggerFrame != null)
         g_utcDebuggerFrame.setSelectedUnit(selectedUnit)
   //}
+
+// import UnitComponent
+// import GroupUtils
+// import GroupExtensions
+
+// @configurable public bool g_enableUTCLogging = false
+
+// public function registerPlayerTargetStructure(unit _)
+// public function unregisterPlayerTargetStructure(unit _)
+
+// // ============================================================================
+// public class UndeadTargetingComponent extends UnitComponent
+//   private player m_targetPlayer
+//   private unit m_targetUnit
+
+//   // --------------------------------------------------------------------------
+//   construct (IUnitMetadata owner)
+//     super(owner)
+
+//   function setTargetPlayer(player _player)
+//     m_targetPlayer = _player
+
+//   function getTargetPlayer() returns player
+//     return m_targetPlayer
+
+//   function setTargetUnit(unit _unit)
+//     m_targetUnit = _unit
+//     if (_unit != null)
+//       m_targetPlayer = _unit.getOwner()
+
+//   function getTargetUnit() returns unit
+//     return m_targetUnit
+
+//   function tryTargetClosestUnit()
+//     m_targetUnit = getNearestTargettableUnit()
+  
+//   function issueOrderTargetingPlayer()
+//     if (m_targetUnit != null)
+//       getOwnerUnit().issuePointOrder("attack", m_targetUnit.getPos())
+
+//   function getNearestTargettableUnit() returns unit
+//     if (m_targetPlayer == null)
+//       return null
+//     let g = getGroup()
+//     g.enumUnitsOfPlayer(m_targetPlayer, null)
+//     let u = g.getClosestUnit(getOwnerUnit().getPos())
+//     g.release()
+//     return u
+
+//   function setPreferOrganicTargets(bool _)
+//     skip
+
+// // ============================================================================
+// public function IUnitMetadata.getUndeadTargetingComponent() returns UndeadTargetingComponent
+//   return this.getComponent(UndeadTargetingComponent.typeId) castTo UndeadTargetingComponent
+
+// // ============================================================================
+// public function IUnitMetadata.getOrAddUndeadTargetingComponent() returns UndeadTargetingComponent
+//   var component = this.getUndeadTargetingComponent()
+//   if (component == null)
+//     component = this.addComponent(new UndeadTargetingComponent(this)) castTo UndeadTargetingComponent
+//   return component
+
+// // ============================================================================
+// public function unit.getUndeadTargetingComponent() returns UndeadTargetingComponent
+//   let metadata = this.getMetadata()
+//   return metadata != null ? metadata.getUndeadTargetingComponent() : null
+
+// // ============================================================================
+// public function unit.getOrAddUndeadTargetingComponent() returns UndeadTargetingComponent
+//   let metadata = this.getMetadata()
+//   return metadata != null ? metadata.getOrAddUndeadTargetingComponent() : null

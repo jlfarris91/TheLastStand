@@ -138,7 +138,7 @@ public class GridCachedSpawnManager implements ISpawnPointProvider
 
   // --------------------------------------------------------------------------
   function isAreaValid(int index) returns bool
-    return m_areaData[index].valid
+    return index >= 0 and index < NUM_SPAWN_AREAS and m_areaData[index].valid
 
   // --------------------------------------------------------------------------
   override function getRandomSpawnPointInRange(vec2 pos, rangeReal range) returns spawnPointResult
@@ -150,26 +150,18 @@ public class GridCachedSpawnManager implements ISpawnPointProvider
     
   // --------------------------------------------------------------------------
   override function getRandomSpawnPointInRect(bounds bounds) returns spawnPointResult
-
-    g_tempSpawnPointAreaIndices.clear()
-
     let span = GCSM.mapGrid.getArea(bounds)
-
-    for r = span.min.row to span.max.row
-      for c = span.min.column to span.max.column
-        let index = GCSM.mapGrid.getIndex(cell(r, c))
-        if (isAreaValid(index))
-          g_tempSpawnPointAreaIndices.add(index)
-
-    var result = spawnPointResult(false, ZERO2)
-
-    if (g_tempSpawnPointAreaIndices.isEmpty() == false)
-      result.succeeded = true
-      result.spawnPoint = m_areaData[g_tempSpawnPointAreaIndices.getRandom()].pos
-
-    g_tempSpawnPointAreaIndices.clear()
-
-    return result
+    var watchdog = 0
+    while watchdog < 1
+    //{
+      let r = GetRandomInt(span.min.row, span.max.row)
+      let c = GetRandomInt(span.min.column, span.max.column)
+      let i = GCSM.mapGrid.getIndex(cell(r, c))
+      if (isAreaValid(i))
+        return spawnPointResult(true, m_areaData[i].pos)
+      watchdog++
+    //}
+    return spawnPointResult(false, ZERO2)
 
   // --------------------------------------------------------------------------
   override function getRandomSpawnPointsInRect(bounds bounds, int count) returns spawnPointsResult
@@ -263,7 +255,7 @@ public class GridCachedSpawnManager implements ISpawnPointProvider
 
     if (not m_areaData[index].processingRequest)
       m_areaData[index].processingRequest = true
-      GCSM.updateRequests.enqueue(new SpawnAreaUpdateRequest(this, index))
+      queueRequest(new SpawnAreaUpdateRequest(this, index))
     
     updateEffects(index)
 
@@ -292,13 +284,11 @@ public class GridCachedSpawnManager implements ISpawnPointProvider
 function queueRequest(SpawnAreaUpdateRequest request)
   GCSM.updateRequests.enqueue(request)
 
-  if (GCSM.updateRequests.getCount() == 1)
+  if (GCSM.updateRequests.getCount() == 1 and g_processRequests == null)
     g_processRequests = doPeriodically(0.1, (CallbackPeriodic cb) -> processRequests())
 
 // ============================================================================
 function processRequests()
-  if (GCSM.updateRequests.isEmpty())
-    return
 
   var attemptsCounter = 0
 

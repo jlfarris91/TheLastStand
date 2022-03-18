@@ -5,3 +5,119 @@ import public SpawnRegionInit
 import public SpawnPointCollection
 import public PlayerSpawnPointProviders
 import public RandomSpawnPointProvider
+import LinkedList
+import ClosureTimers
+import RealTime
+
+constant int SPAWNS_MAX_PER_TICK = 1
+constant int PROCESS_MAX_PER_TICK = 8 // 1 per player?
+constant real PROCESS_QUEUE_INTERVAL = 0.1
+
+// ============================================================================
+public class SpawnController
+  private static LinkedList<SpawnRequestBase> s_requestQueue = new LinkedList<SpawnRequestBase>()
+  private static CallbackPeriodic s_processQueueCallback = null
+
+  private static int s_spawnCount
+  private static int s_requestCompletedCount
+  private static int s_requestTimeoutCount
+
+  // --------------------------------------------------------------------------
+  static function enqueue(SpawnRequestBase request)
+    s_requestQueue.add(request)
+
+    if (s_requestQueue.size() == 1)
+      s_processQueueCallback = doPeriodically(PROCESS_QUEUE_INTERVAL, cb -> processQueue())
+
+  // --------------------------------------------------------------------------
+  static function getSpawnCount() returns int
+    return s_spawnCount
+
+  // --------------------------------------------------------------------------
+  static function getNumberOfCompletedRequests() returns int
+    return s_requestCompletedCount
+
+  // --------------------------------------------------------------------------
+  static function getQueue() returns LinkedList<SpawnRequestBase>
+    return s_requestQueue
+
+  // --------------------------------------------------------------------------
+  private static function processQueue()
+
+    if (s_requestQueue.isEmpty())
+      return
+
+    let iter = s_requestQueue.staticItr()
+    iter.reset()
+    
+    var spawnCounter = 0
+    var processCounter = 0
+    while (spawnCounter < SPAWNS_MAX_PER_TICK and processCounter < PROCESS_MAX_PER_TICK)
+    //{
+
+      if (not iter.hasNext())
+        if (s_requestQueue.isEmpty())
+          break
+        iter.reset()
+
+      let request = iter.next()
+
+      var spawned = 0
+
+      if (request.hasNext())
+        processCounter++
+        spawned = request.next()
+        if (spawned > 0)
+          s_spawnCount += spawned
+          spawnCounter += spawned
+
+      if (not request.hasNext())
+        request.close()
+        s_requestCompletedCount++
+        iter.remove()
+        destroy request
+
+      else if (request.didTimeout())
+        s_requestTimeoutCount++
+        iter.remove()
+        destroy request
+
+      // Still has more to spawn but didn't spawn anything, move it to the back of the line
+      else if (spawned == 0 and iter.hasNext())
+        iter.remove()
+        s_requestQueue.add(request)
+
+    //}
+
+    iter.close()
+
+    if (s_requestQueue.isEmpty() and s_processQueueCallback != null)
+      destroy s_processQueueCallback
+      s_processQueueCallback = null
+
+// ============================================================================
+public abstract class SpawnRequestBase
+  protected real m_timeout
+  protected int m_startTime
+
+  // --------------------------------------------------------------------------
+  construct (real timeout)
+    m_timeout = timeout
+    m_startTime = getRealTimeSeconds()
+
+  // --------------------------------------------------------------------------
+  function didTimeout() returns bool
+    return (getRealTimeSeconds() - m_startTime) > m_timeout
+
+  // --------------------------------------------------------------------------
+  abstract function next() returns int
+
+  // --------------------------------------------------------------------------
+  abstract function hasNext() returns bool
+
+  // --------------------------------------------------------------------------
+  abstract function getDebuggerStateString() returns string
+
+  // --------------------------------------------------------------------------
+  function close()
+    skip
