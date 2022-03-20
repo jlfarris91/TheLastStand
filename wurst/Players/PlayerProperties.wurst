@@ -1,0 +1,144 @@
+package PlayerProperties
+import Func
+import RealExtensions
+import SmartValue
+import PlayerExtensions
+import TlsUpgradeIds
+import DefenseUpgrades
+import RegisterEvents
+import TlsUpgradeDefinition
+
+// ============================================================================
+public enum PlayerProperty
+  LUMBER_REFUND_PERC_01
+  SPIKE_STUN_CHANCE_01
+  SPIKE_STUN_DURATION
+  SCOUT_TOWER_TARGETS
+  SCOUT_TOWER_TARGET_DAMAGE_SCALAR_01
+  SURVIVOR_HP_BONUS
+  __COUNT
+
+// Must match number of items in PlayerProperties enum
+public constant int PLAYER_PROPERTY_COUNT = 6
+
+// ============================================================================
+tuple propertyMetadata(real defaultValue, bool triggersUpdate, string friendlyName, string shortName, Func1<real, string> stringifier)
+Func1<real, string> g_toString = (real v) -> v.toString()
+Func1<real, string> g_toIntString = (real v) -> v.toInt().toString()
+Func1<real, string> g_toScalarString = (real v) -> v.toString() + "x"
+Func1<real, string> g_toPercentageString01 = (real v) -> v.toPercentageString01()
+    
+// ============================================================================
+SmartValue array[24 * PLAYER_PROPERTY_COUNT] g_smartValues
+
+// ============================================================================
+public class PlayerProperties
+
+  static constant int count = PLAYER_PROPERTY_COUNT
+
+  protected static constant propertyMetadata array[count] PROPERTY_METADATA = [
+    /* LUMBER_REFUND_PERC               */  propertyMetadata(0.0, false,  "Lumber Refund",                          "lumber_refund",                    g_toPercentageString01.acquire()),
+    /* SPIKE_STUN_CHANCE                */  propertyMetadata(0.0, false,  "Spike Stun Chance",                      "spike_stun_chance",                g_toPercentageString01.acquire()),
+    /* SPIKE_STUN_DURATION              */  propertyMetadata(0.0, false,  "Spike Stun Duration",                    "spike_stun_dur",                   g_toString.acquire()),
+    /* SCOUT_TOWER_TARGETS              */  propertyMetadata(0.0, false,  "Scout Tower Targets",                    "scout_tower_targets",              g_toIntString.acquire()),
+    /* SCOUT_TOWER_TARGET_DAMAGE_SCALAR */  propertyMetadata(0.0, false,  "Scout Tower Target Bonus Damage Scale",  "scout_tower_target_damage_scalar", g_toPercentageString01.acquire()),
+    /* SURVIVOR_HP_BONUS                */  propertyMetadata(0.0, true,   "Survivor HP Bonus",                      "lifesteal",                        g_toIntString.acquire())
+  ]
+
+  // --------------------------------------------------------------------------
+  static function getPropertyDefaultValue(PlayerProperty property) returns real
+    return PROPERTY_METADATA[property castTo int].defaultValue
+
+  // --------------------------------------------------------------------------
+  static function getPropertyFriendlyName(PlayerProperty property) returns string
+    return PROPERTY_METADATA[property castTo int].friendlyName
+
+  // --------------------------------------------------------------------------
+  static function getPropertyShortName(PlayerProperty property) returns string
+    return PROPERTY_METADATA[property castTo int].shortName
+
+  // --------------------------------------------------------------------------
+  static function formatPropertyValue(PlayerProperty property, real value) returns string
+    let stringifier = PROPERTY_METADATA[property castTo int].stringifier
+    return stringifier != null ? stringifier.call(value) : value.toString()
+
+  // --------------------------------------------------------------------------
+  /**Returns PlayerProperty.__COUNT if no matching property could be found */
+  static function getPropertyByShortName(string shortName) returns PlayerProperty
+    for i = 0 to count - 1
+      if (PROPERTY_METADATA[i].shortName == shortName)
+        return i castTo PlayerProperty
+    return PlayerProperty.__COUNT
+
+// ============================================================================
+public function player.hasProperty(PlayerProperty property) returns bool
+  let propId = this.getId() * PLAYER_PROPERTY_COUNT + property castTo int
+  return g_smartValues[propId] != null
+
+// ============================================================================
+public function player.getProperty(PlayerProperty property) returns SmartValue
+  let propIndex = property castTo int
+  let propId = this.getId() * PLAYER_PROPERTY_COUNT + propIndex
+  if (g_smartValues[propId] == null)
+    g_smartValues[propId] = new SmartValue(PlayerProperties.getPropertyDefaultValue(property))
+    if (PlayerProperties.PROPERTY_METADATA[propIndex].triggersUpdate)
+      g_smartValues[propId].onValueChanged().register(() -> update(this))
+  return g_smartValues[propId]
+
+// ============================================================================
+public function player.getPropertyValue(PlayerProperty property) returns real
+  return this.hasProperty(property) ? this.getProperty(property).getValue() : PlayerProperties.getPropertyDefaultValue(property)
+
+// ============================================================================
+public function player.getPropertyIntValue(PlayerProperty property) returns int
+  return this.getPropertyValue(property).toInt()
+
+// ============================================================================
+public function player.getPropertyValueAsString(PlayerProperty property) returns string
+  return PlayerProperties.formatPropertyValue(property, this.getPropertyValue(property))
+  
+// ============================================================================
+function update(player p)
+  
+  p.setTechResearchLevel(TlsUpgradeIds.survivorHpBonus, getSurvivorHPBonusResearchLevel(p))
+
+// ============================================================================
+function getSurvivorHPBonusResearchLevel(player p) returns int
+  // This should match the increments defined in the TlsUpgradeIds.survivorHpBonus definition below
+  return (p.getPropertyValue(PlayerProperty.SURVIVOR_HP_BONUS) / 10).floor()
+
+// ============================================================================
+function onResearchFinished()
+  let researchingUnit = GetResearchingUnit()
+  let ownerPlayer = researchingUnit.getOwner()
+  let research = GetResearched()
+  let researchLevel = ownerPlayer.getTechResearchLevel(research)
+
+  if (research == TlsUpgradeIds.lumberRefund)
+    ownerPlayer.getProperty(PlayerProperty.LUMBER_REFUND_PERC_01).setBase(getLumberRefundPerc01(researchLevel))
+
+  if (research == TlsUpgradeIds.spikeStunChance)
+    ownerPlayer.getProperty(PlayerProperty.SPIKE_STUN_CHANCE_01).setBase(getSpikeStunChance01(researchLevel))
+    ownerPlayer.getProperty(PlayerProperty.SPIKE_STUN_DURATION).setBase(getSpikeStunDuration(researchLevel))
+
+  if (research == TlsUpgradeIds.scoutTowerMarkTargets)
+    ownerPlayer.getProperty(PlayerProperty.SCOUT_TOWER_TARGET_DAMAGE_SCALAR_01).setBase(getMarkedTargetDamageScalePerc01(researchLevel))
+    ownerPlayer.getProperty(PlayerProperty.SCOUT_TOWER_TARGETS).setBase(getMarkedTargetMaxTargets(researchLevel).toReal())
+
+// ============================================================================
+@compiletime function createObjects()
+
+  new TlsUpgradeDefinition(TlsUpgradeIds.survivorHpBonus, 100)
+    ..addEffectHitPointBonus(10, 10)
+    ..setGoldCostBase(0)
+    ..setGoldCostIncrement(0)
+    ..setLumberCostBase(0)
+    ..setLumberCostIncrement(0)
+    ..presetRequirements(lvl -> "")
+    ..presetName(lvl -> "Survivor HP Bonus " + lvl.toString())
+    ..presetTooltip(lvl -> "")
+    ..presetTooltipExtended(lvl -> "")    
+
+// ============================================================================
+init
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_RESEARCH_FINISH, function onResearchFinished)

@@ -1,0 +1,80 @@
+package ShelterComponent
+import UnitComponent
+import TlsUnitIds
+import Handle
+import RegisterEvents
+import GameConstants
+import PlayerProperties
+
+// ============================================================================
+public class ShelterComponent extends UnitComponent
+  private _handle m_affector = INVALID_HANDLE
+
+  // --------------------------------------------------------------------------
+  construct (IUnitMetadata owner)
+    super(owner)
+
+  // --------------------------------------------------------------------------
+  protected override function onEnabled()
+    super.onEnabled()
+    updateAffector()    
+    
+  // --------------------------------------------------------------------------
+  protected override function onDisabled()
+    super.onDisabled()
+    destroyAffector()
+
+  // --------------------------------------------------------------------------
+  protected function updateAffector()
+    let ownerUnit = getOwnerUnit()
+    let ownerPlayer = ownerUnit.getOwner()
+
+    var hpBonusValue = 0    
+    switch (ownerUnit.getTypeId())
+      case TlsUnitIds.shelter1
+        hpBonusValue = SURVIVOR_HP_BONUS_SHELTER_1
+      case TlsUnitIds.shelter2
+        hpBonusValue = SURVIVOR_HP_BONUS_SHELTER_2
+      case TlsUnitIds.shelter3
+        hpBonusValue = SURVIVOR_HP_BONUS_SHELTER_3
+    
+    let survivorHPBonusProp = ownerPlayer.getProperty(PlayerProperty.SURVIVOR_HP_BONUS)
+
+    if (m_affector != INVALID_HANDLE)
+      survivorHPBonusProp.remove(m_affector)
+
+    m_affector = survivorHPBonusProp.affectAdd(hpBonusValue.toReal())
+
+  // --------------------------------------------------------------------------
+  private function destroyAffector()
+    if (m_affector == INVALID_HANDLE)
+      return
+    getOwnerPlayer().getProperty(PlayerProperty.SURVIVOR_HP_BONUS).remove(m_affector)
+    m_affector = INVALID_HANDLE
+
+// ============================================================================
+public function IUnitMetadata.getShelterComponent() returns ShelterComponent
+  return this.getComponent(ShelterComponent.typeId) castTo ShelterComponent
+
+// ============================================================================
+public function IUnitMetadata.getOrAddShelterComponent() returns ShelterComponent
+  var component = this.getShelterComponent()
+  if (component == null)
+    component = this.addComponent(new ShelterComponent(this)) castTo ShelterComponent
+  return component
+
+// ============================================================================
+function onUpgradeFinished()
+  let triggerUnit = GetTriggerUnit()
+  if (not triggerUnit.isShelter())
+    return
+  let metadata = triggerUnit.getMetadata()
+  if (metadata == null)
+    return
+  let comp = metadata.getShelterComponent()
+  if (comp != null)
+    comp.updateAffector()
+
+// ============================================================================
+init
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_UPGRADE_FINISH, function onUpgradeFinished)
