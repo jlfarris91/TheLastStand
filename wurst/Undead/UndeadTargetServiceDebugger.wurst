@@ -1,0 +1,67 @@
+package UndeadTargetServiceDebugger
+import Frame
+import ClosureTimers
+import Host
+import PlayerExtensions
+import UndeadTargetService
+import ProjectConstants
+import DebuggerDialog
+
+// ============================================================================
+class UndeadTargetServiceDebugger extends Frame
+
+  // --------------------------------------------------------------------------
+  construct()
+    super(createFrame("TEXTAREA", "UTS", GAME_UI, "", 0))
+
+    doPeriodically(0.1) (CallbackPeriodic cb) ->
+      update()
+
+  // --------------------------------------------------------------------------
+  function update()
+
+    let frameHandle = getFrameHandle()
+
+    if (frameHandle.isVisible() == false)
+      return
+
+    let selectedUnit = g_HostPlayer.getFirstSelectedUnit()
+
+    if (selectedUnit == null)
+      BlzFrameSetText(frameHandle, "Select a unit")
+      return
+
+    let selectedPlayer = selectedUnit.getOwner()
+
+    BlzFrameSetText(frameHandle, "===== Undead Target Service: {0} =====".format(selectedPlayer.getName()))
+
+    let provider = getUndeadTargetProviderForPlayer(selectedPlayer)
+    if (provider == null)
+      BlzFrameAddText(frameHandle, "No provider found")
+      return
+
+    var playersStr = ""
+    for p in provider.getPlayers()
+      playersStr += p.getName() + " "
+
+    BlzFrameAddText(frameHandle, "Players: " + playersStr)
+
+    let structures = provider.getStructures()
+
+    BlzFrameAddText(frameHandle, "Structures: " + structures.size().toString())
+    
+    for u in structures
+      BlzFrameAddText(frameHandle, "  " + u.getName() + " " + (provider.getAttackPriority(u) == 1 ? "Low" : "High"))
+
+    let organic = provider.getNonStructures()
+
+    BlzFrameAddText(frameHandle, "Organic: " + organic.size().toString())
+    
+    for u in organic
+      BlzFrameAddText(frameHandle, "  " + u.getName())
+
+// ============================================================================
+init
+
+  if (DEV_ENVIRONMENT)
+    DebuggerDialog.registerFrame("UTS", () -> new UndeadTargetServiceDebugger())
