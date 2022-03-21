@@ -8,9 +8,9 @@ import DummyCaster
 import Math
 import Orders
 import BuffObjEditing
-import ClosureTimers
 import HeroAbilities
 import TlsAbilityIds
+import ClosureTimers
 import Execute
 
 constant int DUMMY_ID = compiletime(UNIT_ID_GEN.next())
@@ -75,12 +75,14 @@ public class SmokeGrenadeComponent extends HeroAbilityComponent
     m_lastTargetPoint = target
     g_castingSmokeGrenades.addUnit(getOwnerUnit())
 
+    Log.info("onCastPoint")
+
     let ownerUnit = getOwnerUnit()
 
     let dummy = new DummyCaster()
       ..origin(ownerUnit.getPos())
       ..owner(ownerUnit.getOwner())
-      ..delay(2.0)
+      ..delay(10.0)
   
     if (dummy.castPoint(DUMMY_PROJECTILE_ABIL_ID, 1, OrderIds.summonfactory, target) == null)
       // Refund since the ability failed to cast
@@ -90,6 +92,8 @@ public class SmokeGrenadeComponent extends HeroAbilityComponent
   // --------------------------------------------------------------------------
   protected function onMissileLanded()
     let ownerUnit = getOwnerUnit()
+
+    Log.info("onMissileLanded 1")
 
     try() () -> 
     //{
@@ -109,12 +113,16 @@ public class SmokeGrenadeComponent extends HeroAbilityComponent
       let circlefx = addEffect("circle.mdl", m_lastTargetPoint)
         ..setPos(m_lastTargetPoint)
         ..setScale(CLOUD_AOE / 64.0)
-        ..setColor(colorA(150, 150, 150, 100))
+        ..setColor(colorA(150, 150, 150, 50))
       doAfter(CLOUD_DURATION, () -> circlefx.destr())
     //}
 
+    Log.info("onMissileLanded 2")
+
     m_lastTargetPoint = ZERO2
     g_castingSmokeGrenades.removeUnit(ownerUnit)
+
+    Log.info("onMissileLanded 3")
 
   // --------------------------------------------------------------------------
   protected override function getTooltipNormal(int effectiveAbilityLevel, int learnedAbilityLevel) returns string
@@ -151,10 +159,12 @@ function onUnitIndexed()
   if (indexingUnit.getTypeId() != DUMMY_ID)
     return
 
+  Log.info("onUnitIndexed 1 smoke grenade dummy")
+
   let dummyUnitPos = indexingUnit.getPos()
 
   real closestDistance = REAL_MAX
-  unit closestCaster = null
+  SmokeGrenadeComponent closestCaster = null
     
   for castingUnit in g_castingSmokeGrenades
     let comp = castingUnit.getSmokeGrenadeComponent()
@@ -162,13 +172,17 @@ function onUnitIndexed()
       let dd = dummyUnitPos.distanceToSq(comp.m_lastTargetPoint)
       if (dd < closestDistance)
         closestDistance = dd
-        closestCaster = castingUnit
+        closestCaster = comp
   
   if (closestCaster == null)
     Log.error("Not sure who smoke grenade dummy unit belongs to")
     return
 
-  closestCaster.getSmokeGrenadeComponent().onMissileLanded()
+  Log.info("onUnitIndexed 2 found caster target")
+
+  closestCaster.onMissileLanded()
+
+  Log.info("onUnitIndexed 3")
 
 // ============================================================================
 @compiletime function createObjects()
@@ -224,15 +238,18 @@ function onUnitIndexed()
     ..presetDurationHero(lvl -> 0.1)
     ..presetDurationNormal(lvl -> 0.1)
     ..presetManaCost(lvl -> SmokeGrenade.getManaCost(lvl))
+    // ..presetManaCost(lvl -> 0)
     ..presetCooldown(lvl -> SmokeGrenade.getCooldown(lvl))
+    // ..presetCooldown(lvl -> 1.0)
     ..presetCastRange(lvl -> 900)
     ..setRequirements("")
 
   new AbilityDefinitionTinkererSummonFactoryLevel0(DUMMY_PROJECTILE_ABIL_ID)
     ..setLevels(1)
+    ..setHeroAbility(false)
     ..setName("Smoke Grenade")
     ..presetCastRange(lvl -> 900)
-    ..presetAreaofEffect(lvl -> 1.0)
+    ..presetAreaofEffect(lvl -> CLOUD_AOE)
     ..presetTargetsAllowed(lvl -> "")
     ..setAnimationNames("spell,attack,throw")
     ..setIconNormal(Icons.bTNCloudOfFog)
@@ -241,15 +258,14 @@ function onUnitIndexed()
     ..setMissileArc(0.5)
     ..presetFactoryUnitID(lvl -> DUMMY_ID.toRawCode())
     ..presetLeashRange(lvl -> 0.0)
-    ..presetSpawnInterval(lvl -> 0.0)
+    ..presetSpawnInterval(lvl -> 300.0)
     ..presetSpawnUnitDuration(lvl -> 0.0)
-    ..presetSpawnUnitID(lvl -> "")
-    ..presetSpawnUnitOffset(lvl -> 0.0)
-    ..presetBuffs(lvl -> "")
+    ..presetSpawnUnitOffset(lvl -> 99999.0)
+    ..presetBuffs(lvl -> "_")
     ..presetCastRange(lvl -> 900)
     ..presetManaCost(lvl -> 0)
-    ..presetDurationHero(lvl -> 0.1)
-    ..presetDurationNormal(lvl -> 0.1)
+    ..presetDurationHero(lvl -> 0)
+    ..presetDurationNormal(lvl -> 0)
     ..presetCooldown(lvl -> 0.0)
 
   new HeroLearnAbilityDefinition(TlsAbilityIds.Hero.smokeGrenade_learn, 3)
