@@ -4,20 +4,12 @@ import HumanPlayerComponent
 import Events
 import RegisterEvents
 import HumanPlayers
-import GroupUtils
 import UnitExtensions
 import ClosureTimers
-import Host
 import GameConstants
-import UnitRecycler
-import Vector
-import ColorUtility
 import Range
 import TimerUtils
-import ProjectConstants
 import GroupExtensions
-import DebuggerDialog
-import Frame
 import LeashComponent
 import UndeadTargetService
 
@@ -36,11 +28,9 @@ constant real UPDATE_INTERVAL = 0.2
 @configurable public bool g_enableUTCLogging = false
 @configurable constant public int VALID_HUMAN_STRUCTURE_TARGETS_ATTACKER_COUNT_THRESHOLD = 3
 
-group g_dealDOTGroup = CreateGroup()
-group g_awaitingOrderGroup = CreateGroup()
+public group g_dealDOTGroup = CreateGroup()
+public group g_awaitingOrderGroup = CreateGroup()
 CallbackPeriodic g_issueOrderTimer
-  
-UTCDebugger g_utcDebuggerFrame
 
 /*
 
@@ -80,7 +70,7 @@ public class UndeadTargetingComponent extends UnitComponent
   protected real m_baseAttackRange
   protected LeashComponent m_leashComponent = null
   protected string m_orderFailedReason
-  protected Vector<string> m_notes
+  // protected Vector<string> m_notes
   protected int m_numberOfTimesFailedOrder = 0
   protected int m_numberOfTimesAttackTimerExpired = 0
   protected vec2 m_lastPos
@@ -93,7 +83,7 @@ public class UndeadTargetingComponent extends UnitComponent
     m_targetUnit = null 
     m_nextAttackTime = 0
     m_preferOrganicTargets = false
-    m_notes = new Vector<string>()
+    // m_notes = new Vector<string>()
     m_numberOfTimesFailedOrder = 0
     m_numberOfTimesAttackTimerExpired = 0
     m_baseAttackRange = MELEE_UNIT_ATTACK_RANGE.toReal()
@@ -104,7 +94,7 @@ public class UndeadTargetingComponent extends UnitComponent
       destroy m_targetPlayerChangedEvent
       m_targetPlayerChangedEvent = null
 
-    destroy m_notes
+    // destroy m_notes
 
   // --------------------------------------------------------------------------
   override function onEnabled()
@@ -194,7 +184,7 @@ public class UndeadTargetingComponent extends UnitComponent
 
     // This should really never happen but if it does fuckit kill the unit
     if (targetPlayer == null)
-      recordNote("sTP_i", "Target player was set to null")
+      //recordNote("sTP_i", "Target player was set to null")
       nullTimer(() -> ownerUnit.kill())
       return false
 
@@ -206,12 +196,12 @@ public class UndeadTargetingComponent extends UnitComponent
     return true
 
   // --------------------------------------------------------------------------
-  protected function recordNote(string methodName, string note)
-    m_notes.add("[{0}] {1}".format(methodName, note))
+  // protected function recordNote(string methodName, string note)
+    // m_notes.add("[{0}] {1}".format(methodName, note))
 
   // --------------------------------------------------------------------------
   function issueOrderTargetingNewPlayerUnit()
-    recordNote("iOTNPU", "")
+    //recordNote("iOTNPU", "")
     setTargetUnit_impl(null)
     issueOrderTargetingPlayer()
 
@@ -220,38 +210,36 @@ public class UndeadTargetingComponent extends UnitComponent
 
     let ownerUnit = getOwnerUnit()
     if (not ownerUnit.isAlive())
-      recordNote("iOTP", "UTC owner unit is dead")
+      //recordNote("iOTP", "UTC owner unit is dead")
       m_orderFailedReason = "UTC owner unit is dead"
       return
 
     // We're already awaiting a call to issueOrderTargetingPlayer_impl so early out
     if (getIsAwaitingOrder())
-      recordNote("iOTP", "Awaiting order")
+      //recordNote("iOTP", "Awaiting order")
       m_orderFailedReason = "Still awaiting order"
       return 
     
     if (getIsInDOTGroup())
-      recordNote("iOTP", "Is in dot group")
+      //recordNote("iOTP", "Is in dot group")
       m_orderFailedReason = "In DOT group"
       return
 
-    if (registerUnitAwaitingOrder(ownerUnit))
-      recordNote("iOTP", "Added to waiting group")
-
-    recordNote("iOTP", "Dispatching order")
+    registerUnitAwaitingOrder(ownerUnit)
 
     m_orderFailedReason = "Awaiting order"
 
   // --------------------------------------------------------------------------
   protected function issueOrderTargetingPlayer_impl()
 
-    if (unregisterUnitAwaitingOrder(getOwnerUnit()))
-      recordNote("iOTP_i", "Removed from waiting group")      
+    unregisterUnitAwaitingOrder(getOwnerUnit())
+    // if (unregisterUnitAwaitingOrder(getOwnerUnit()))
+      //recordNote("iOTP_i", "Removed from waiting group")      
 
-    recordNote("iOTP_i", "Order dispatched")
+    //recordNote("iOTP_i", "Order dispatched")
 
     if (m_targetUnit == null)
-      recordNote("iOTP_i", "1 m_targetUnit == null")
+      //recordNote("iOTP_i", "1 m_targetUnit == null")
 
       // 1. Try targetting the nearest structure
       // 2. Try targetting the nearest non-structure
@@ -259,15 +247,16 @@ public class UndeadTargetingComponent extends UnitComponent
 
       // Unable to find a target unit
       if (m_targetUnit == null)
-        recordNote("iOTP_i", "2 m_targetUnit == null")
+        //recordNote("iOTP_i", "2 m_targetUnit == null")
 
         // 3. Try attack-moving to the target player's camp center (the HQ tent or the hero)
-        if (tryTargetCampCenter())
-          recordNote("iOTP_i", "Could not find target unit, attack-moving to camp center")
+        tryTargetCampCenter()
+        // if (tryTargetCampCenter())
+          //recordNote("iOTP_i", "Could not find target unit, attack-moving to camp center")
         
         // 4. The target player is either null or considered dead, so start damaging the unit over time
         if (m_targetUnit == null)
-          recordNote("iOTP_i", "3 m_targetUnit == null")
+          //recordNote("iOTP_i", "3 m_targetUnit == null")
           startDOT()
           return
 
@@ -278,29 +267,29 @@ public class UndeadTargetingComponent extends UnitComponent
     if (not tryIssueOrder())
       m_orderFailedReason = "Failed to issue attack order"
       m_numberOfTimesFailedOrder++
-      if (m_numberOfTimesFailedOrder > 3)
-        m_notes.clear()
-      recordNote("iOTP_i", "Unable to issue order ({0}), trying again".format(m_numberOfTimesFailedOrder.toString()))
+      // if (m_numberOfTimesFailedOrder > 3)
+        // m_notes.clear()
+      //recordNote("iOTP_i", "Unable to issue order ({0}), trying again".format(m_numberOfTimesFailedOrder.toString()))
       // Unable to issue the order so clear the target unit and try again later
       setTargetUnit_impl(null)
       issueOrderTargetingPlayer()
     else
       m_numberOfTimesFailedOrder = 0
-      m_notes.add("Success!")
+      // m_notes.add("Success!")
       m_orderFailedReason = "Success"
 
   // --------------------------------------------------------------------------
   function tryIssueOrder() returns bool
     if (m_targetUnit == null)
-      recordNote("tIO", "m_targetUnit == null")
+      //recordNote("tIO", "m_targetUnit == null")
       m_orderFailedReason = "m_targetUnit == null"
       return false
     bool issuedOrder
     if (m_targetUnit.isStructure())
-      recordNote("tIO", "ordering attack on " + m_targetUnit.getName())
+      //recordNote("tIO", "ordering attack on " + m_targetUnit.getName())
       issuedOrder = getOwnerUnit().issueTargetOrder("attack", m_targetUnit)
     else
-      recordNote("tIO", "ordering attack-move on " + m_targetUnit.getName())
+      //recordNote("tIO", "ordering attack-move on " + m_targetUnit.getName())
       issuedOrder = getOwnerUnit().issuePointOrder("attack", m_targetUnit.getPos())
     if (issuedOrder == false)
       m_orderFailedReason = "Failed to issue order"
@@ -310,7 +299,7 @@ public class UndeadTargetingComponent extends UnitComponent
   function getNearestTargettableUnit() returns unit
     let targetPlayer = getTargetPlayer()
     if (targetPlayer == null)
-      recordNote("gNTU", "getTargetPlayer() == null")
+      //recordNote("gNTU", "getTargetPlayer() == null")
       return null
     let ownerUnit = getOwnerUnit()
     unit targetUnit
@@ -321,11 +310,11 @@ public class UndeadTargetingComponent extends UnitComponent
   // --------------------------------------------------------------------------
   private function setTargetUnit_impl(unit targetUnit) returns bool
     if (m_targetUnit == targetUnit)
-      recordNote("sTU_i", "m_targetUnit == targetUnit, m_targetUnit = " + (m_targetUnit != null ? m_targetUnit.getName() : "null"))
+      //recordNote("sTU_i", "m_targetUnit == targetUnit, m_targetUnit = " + (m_targetUnit != null ? m_targetUnit.getName() : "null"))
       return false
 
     if (m_targetUnit != null)
-      recordNote("sTU_i", "Target unit was not null : " + m_targetUnit.getName())
+      //recordNote("sTU_i", "Target unit was not null : " + m_targetUnit.getName())
       unregisterTargetedUnit(m_targetUnit, getOwnerUnit())
 
     m_targetUnit = targetUnit
@@ -334,11 +323,11 @@ public class UndeadTargetingComponent extends UnitComponent
       m_leashComponent.setTargetUnit(targetUnit)
 
     if (m_targetUnit != null)
-      recordNote("sTU_i", "Target unit is not null : " + m_targetUnit.getName())
+      //recordNote("sTU_i", "Target unit is not null : " + m_targetUnit.getName())
       registerTargetedUnit(m_targetUnit, getOwnerUnit())
       restartAttackTimer()
-    else
-      recordNote("sTU_i", "Target unit is null")
+    // else
+      //recordNote("sTU_i", "Target unit is null")
 
     return true
 
@@ -347,12 +336,12 @@ public class UndeadTargetingComponent extends UnitComponent
   function tryTargetClosestUnit() returns bool
     let targetPlayer = getTargetPlayer()
     if (targetPlayer == null)
-      recordNote("tTCU", "getTargetPlayer() == null")
+      //recordNote("tTCU", "getTargetPlayer() == null")
       return false
 
     let targetUnit = getNearestTargettableUnit()
     if (targetUnit == null)
-      recordNote("tTCU", "getNearestTargettableUnit() == null")
+      //recordNote("tTCU", "getNearestTargettableUnit() == null")
       return false
 
     setTargetUnit_impl(targetUnit)
@@ -362,17 +351,17 @@ public class UndeadTargetingComponent extends UnitComponent
   protected function tryTargetCampCenter() returns bool    
     let targetPlayer = getTargetPlayer()
     if (targetPlayer == null)
-      recordNote("tTCC", "getTargetPlayer() == null")
+      //recordNote("tTCC", "getTargetPlayer() == null")
       return false
 
     let playerMetadata = targetPlayer.getHumanPlayerComponent()
     if (playerMetadata == null)
-      recordNote("tTCC", "playerMetadata == null")
+      //recordNote("tTCC", "playerMetadata == null")
       return false
 
     let campCenter = playerMetadata.getHQOrHero()
     if (campCenter == null or not campCenter.isAlive())
-      recordNote("tTCC", "campCenter == null or campCenter.isAlive()")
+      //recordNote("tTCC", "campCenter == null or campCenter.isAlive()")
       return false
 
     return setTargetUnit_impl(campCenter)
@@ -409,21 +398,21 @@ public class UndeadTargetingComponent extends UnitComponent
     m_numberOfTimesAttackTimerExpired++
     
     if (getIsAwaitingOrder())
-      recordNote("onAttackTimer", "Awaiting order")
+      //recordNote("onAttackTimer", "Awaiting order")
       return
 
-    recordNote("onAttackTimer", "Timer has expired")
+    //recordNote("onAttackTimer", "Timer has expired")
 
     // Distance to target unit is way too far to walk all the way there, teleport closer.
     // We want to check this regularly so we might as well check it here.
     if (tryTeleportCloserToTargetUnit())
-      recordNote("onAttackTimer", "Issuing new order")
+      //recordNote("onAttackTimer", "Issuing new order")
       issueOrderTargetingNewPlayerUnit()
 
     // If the unit is standing still and hasn't attacked anything since the last attack timer
     // then issue a new order, otherwise give them a chance to get to their target
     else if (getOwnerUnit().getPos().distanceToSq(m_lastPos) < ATTACK_TIMER_DISTANCE_THRESHOLD_SQ)
-      recordNote("onAttackTimer", "Issuing new order")
+      //recordNote("onAttackTimer", "Issuing new order")
       issueOrderTargetingNewPlayerUnit()
     
     // Otherwise, restart the attack timer to check again later
@@ -447,14 +436,30 @@ public class UndeadTargetingComponent extends UnitComponent
   // --------------------------------------------------------------------------
   private function startDOT()
     if (not getIsInDOTGroup() and not getOwnerUnit().getOwner().isHumanPlayer())
-      recordNote("startDOT", "Adding UTC owner unit to dot group")
+      //recordNote("startDOT", "Adding UTC owner unit to dot group")
       g_dealDOTGroup.addUnit(getOwnerUnit())
 
   // --------------------------------------------------------------------------
   private function stopDOT()
     if (getIsInDOTGroup())
-      recordNote("startDOT", "Removing UTC owner unit from dot group")
+      //recordNote("startDOT", "Removing UTC owner unit from dot group")
       g_dealDOTGroup.removeUnit(getOwnerUnit())
+
+  // --------------------------------------------------------------------------
+  function getOrderFailedReason() returns string
+    return m_orderFailedReason
+
+  // --------------------------------------------------------------------------
+  function getNumberOfTimesFailedOrder() returns int
+    return m_numberOfTimesFailedOrder
+
+  // --------------------------------------------------------------------------
+  function getNumberOfTimesAttackTimerExpired() returns int
+    return m_numberOfTimesAttackTimerExpired
+
+  // --------------------------------------------------------------------------
+  function getDistanceMoved() returns real
+    return getOwnerUnit().getPos().distanceTo(m_lastPos)
 
 // ============================================================================
 public function IUnitMetadata.getUndeadTargetingComponent() returns UndeadTargetingComponent
@@ -511,9 +516,9 @@ function unregisterUnitAwaitingOrder(unit utcUnit) returns bool
   g_awaitingOrderGroup.removeUnit(utcUnit)
   return didContainUnit and not g_awaitingOrderGroup.contains(utcUnit)
 
-int g_numberOfTimesIssueOrdersStartCalled = 0
-int g_numberOfTimesIssueOrdersEndCalled = 0
-int g_numberOfOrdersIssued = 0
+public int g_numberOfTimesIssueOrdersStartCalled = 0
+public int g_numberOfTimesIssueOrdersEndCalled = 0
+public int g_numberOfOrdersIssued = 0
 
 // ============================================================================
 function issueOrders()
@@ -557,99 +562,12 @@ function issueOrders()
   g_numberOfTimesIssueOrdersEndCalled++
 
 // ============================================================================
-class UTCDebugger extends Frame
-  private unit m_selectedUnit
-
-  // --------------------------------------------------------------------------
-  construct()
-    super(createFrame("TEXTAREA", "UTCDebugger", GAME_UI, "", 0))
-
-    doPeriodically(0.1) (CallbackPeriodic cb) ->
-      update()
-
-  // --------------------------------------------------------------------------
-  function setSelectedUnit(unit context)
-    m_selectedUnit = context
-
-  // --------------------------------------------------------------------------
-  function update()
-
-    let frameHandle = getFrameHandle()
-
-    if (frameHandle.isVisible() == false)
-      return
-
-    BlzFrameSetText(frameHandle, "Orders : a:{0}, t:{1}, c:{2}-{3}".format(g_awaitingOrderGroup.size().toString(), g_numberOfOrdersIssued.toString(), g_numberOfTimesIssueOrdersStartCalled.toString(), g_numberOfTimesIssueOrdersEndCalled.toString()))
-
-    if (m_selectedUnit == null)
-      BlzFrameAddText(frameHandle, "Selected unit : null")
-      return
-
-    BlzFrameAddText(frameHandle, "Selected unit : " + m_selectedUnit.getName())
-
-    let metadata = m_selectedUnit.getMetadata()
-    if (metadata == null)
-      BlzFrameAddText(frameHandle, "Selected unit metadata is null".colorize(Colors.red))
-      return
-
-    let utc = metadata.getUndeadTargetingComponent()
-    if (utc == null)
-      BlzFrameAddText(frameHandle, "Selected unit UTC is null".colorize(Colors.red))
-      return
-    
-    BlzFrameAddText(frameHandle, "UTC enabled : " + utc.getEnabled().toString())
-    BlzFrameAddText(frameHandle, "Target player : " + ((utc.m_targetPlayer != null) ? utc.m_targetPlayer.getName() : "null"))
-    BlzFrameAddText(frameHandle, "Target unit : " + ((utc.m_targetUnit != null) ? utc.m_targetUnit.getName() : "null"))
-    BlzFrameAddText(frameHandle, "Target : " + (utc.shouldTargetOrganicUnits() ? "Organic" : "Structures"))
-    BlzFrameAddText(frameHandle, "Awaiting Order : " + utc.getIsAwaitingOrder().toString())
-    BlzFrameAddText(frameHandle, "Failed Order : " + utc.m_orderFailedReason)
-    BlzFrameAddText(frameHandle, "Times Failed Order : " + utc.m_numberOfTimesFailedOrder.toString())
-    BlzFrameAddText(frameHandle, "Attack Timer Expired : " + utc.m_numberOfTimesAttackTimerExpired.toString())
-    BlzFrameAddText(frameHandle, "Distance Moved : " + utc.getOwnerUnit().getPos().distanceTo(utc.m_lastPos).toString())
-    BlzFrameAddText(frameHandle, "Order : {0} ({1})".format(OrderId2String(GetUnitCurrentOrder(utc.getOwnerUnit())), GetUnitCurrentOrder(utc.getOwnerUnit()).toString()))
-    BlzFrameAddText(frameHandle, "In DOT Group : " + utc.getIsInDOTGroup().toString())
-
-    let recycler = m_selectedUnit.getRecycler()
-    if (recycler != null)
-      BlzFrameAddText(frameHandle, "Active in recycler \"{0}\" : {1}".format(UnitId2String(recycler.getUnitId()), recycler.isUnitActive(m_selectedUnit).toString()))
-
-    if (utc.m_notes.isEmpty() == false)
-      BlzFrameAddText(frameHandle, "=== Notes: === ")
-      for note in utc.m_notes
-        BlzFrameAddText(frameHandle, note)
-
-// ============================================================================
 init
 
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ATTACKED, function onUnitAttacked)
 
   doPeriodically(UPDATE_INTERVAL, (CallbackPeriodic cb) -> issueOrders())
   doPeriodically(DOT_INTERVAL, (CallbackPeriodic cb) -> applyDOT())
-
-  if (DEV_ENVIRONMENT)
-  //{
-    DebuggerDialog.registerFrame("UTC") () ->
-      if (g_utcDebuggerFrame == null)
-        g_utcDebuggerFrame = new UTCDebugger()
-      return g_utcDebuggerFrame
-
-    doPeriodically(1.0) (CallbackPeriodic cb) ->
-      let g = getGroup()
-      unit selectedUnit = null
-      g.enumUnitsSelected(g_HostPlayer, null)
-      for u in g
-      //{
-        if (u.getOwner() == PLAYER_UNDEAD)
-          let m = u.getMetadata()
-          if (m != null)
-            let c1 = m.getUndeadTargetingComponent()
-            if (c1 != null)
-              selectedUnit = u
-      //}
-      g.release()
-      if (g_utcDebuggerFrame != null)
-        g_utcDebuggerFrame.setSelectedUnit(selectedUnit)
-  //}
 
 // import UnitComponent
 // import GroupUtils
