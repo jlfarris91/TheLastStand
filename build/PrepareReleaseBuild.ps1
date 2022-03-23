@@ -20,6 +20,7 @@ if ($LASTEXITCODE -ne 0)
 }
 
 $env:DevEnvironment = "false"
+$env:SaveDataPathRoot = "LastStand"
 
 # 2. Generate the wurst build file
 .\GenerateProjectFiles.ps1
