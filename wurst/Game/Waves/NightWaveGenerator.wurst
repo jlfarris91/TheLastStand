@@ -23,14 +23,12 @@ import WaveCollection
 import NightWave
 import SpawnWave
 import StandardUnitModifiers
-import SingleUnitTypeProvider
 import TieredUnitTypeProvider
 import FX
 import TombstoneComponent
 import PlayerSpawnPointProviders
 import LinkedList
-import FuncUnitTypeProvider
-import Vector
+import ActionUnitTypeProvider
 import WaveGeneratorCommon
 import WaveSpawning
 import Preload
@@ -445,36 +443,35 @@ function createSpawnWave_Raiders(int nightIndex) returns SpawnWaveDefinition
   end)
   ..setupForElite()
 
-  def.setUnitTypeProvider(new FuncUnitTypeProvider((SpawnWaveContext context, int count, Vector<int> result) -> begin
-    let tier = context.tier
+  def.setUnitTypeProvider(new ActionUnitTypeProvider((SpawnWaveContext context, int count, SpawnWaveUnitTypeCollection result) -> begin
+    let tier = context.getRandomTier()
     let groupId = context.groupId
     var added = 0
 
     for i = 0 to s_fallenBandit[tier * RAIDER_GROUP_COUNT + groupId]
       if (added == count)
         break
-      result.add(TlsUnitIds.Undead.fallenBandit[tier])
+      result.add(TlsUnitIds.Undead.fallenBandit[tier], tier)
       added++
 
     for i = 0 to s_fallenMarksman[tier * RAIDER_GROUP_COUNT + groupId]
       if (added == count)
         break
-      result.add(TlsUnitIds.Undead.fallenMarksman[tier])
+      result.add(TlsUnitIds.Undead.fallenMarksman[tier], tier)
       added++
 
     for i = 0 to s_fallenWizard[tier * RAIDER_GROUP_COUNT + groupId]
       if (added == count)
         break
-      result.add(TlsUnitIds.Undead.fallenWizard[tier])
+      result.add(TlsUnitIds.Undead.fallenWizard[tier], tier)
       added++
 
     for i = 0 to s_fallenBanditLord[tier * RAIDER_GROUP_COUNT + groupId]
       if (added == count)
         break
-      result.add(TlsUnitIds.Undead.fallenBanditLord[tier])
+      result.add(TlsUnitIds.Undead.fallenBanditLord[tier], tier)
       added++
 
-    return added
   end))
 
   for tier = 0 to MAX_ELITE_TIER-1
@@ -756,7 +753,7 @@ function createSpawnWave_MeatWagons(int nightIndex) returns SpawnWaveDefinition
   def.setCommonUnitModifier() (unit u, SpawnWaveContext context) ->
   //{
     g_eliteRangedModifiers.apply(context, u)
-    g_eliteRangedModifiers.applyAttack1Cooldown(context, u, 0.9)
+    g_eliteRangedModifiers.applyAttack1Cooldown(context, u, 1.1)
     u.setDefenseType(ArmorType.Large)
   //}
 
@@ -959,9 +956,13 @@ function createSpawnWave_Archimonde(int nightIndex) returns SpawnWaveDefinition
   ..setSpawnGroupingFactor(wavecontext -> 0.0)
   ..setActivator(new PeriodicWaveActivator(5.0))
   ..setSpawnRange(SpawnRange.MID)
-  ..setUnitTypeProvider(new SingleUnitTypeProvider(TlsUnitIds.Undead.archimonde))
   ..setGoldReward(context -> getStandardGoldRewardForWave(context))
   ..setupForBoss()
+
+  let unitTypeProvider = new TieredUnitTypeProvider()
+  for i = 0 to MAX_ELITE_TIER-1
+    unitTypeProvider.setUnitType(i, TlsUnitIds.Undead.archimonde)
+  def.setUnitTypeProvider(unitTypeProvider)
 
   def.setCommonUnitModifier() (unit u, SpawnWaveContext context) ->
     g_eliteMeleeModifiers.applyHealth(context, u, 4.0)
