@@ -2,7 +2,7 @@ $env:Build = "Tester"
 .\SetupBuildEnvironment.ps1
 .\CreateMapJunctions.ps1
 
-Copy-Item ".\wurst_run_debug.args" "..\wurst_run.args" -Force
+Copy-Item ".\wurst_run_tester.args" "..\wurst_run.args" -Force
 
 # The build machines don't have the data needed to run this
 if ($env:IsLocalBuild -eq 0)
