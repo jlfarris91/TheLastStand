@@ -2,7 +2,6 @@ package WaveSpawning
 import Events
 import Vector
 import Runnable
-import IProgress
 import Func
 import GameConstants
 import GameInstance
@@ -15,7 +14,7 @@ import Math
 
 public tuple tierChances(real tier1, real tier2, real tier3)
 
-public tuple spawnWaveUnitType(int unitTypeId, int tier)
+public tuple spawnWaveUnitType(int id, int tier)
 
 // ============================================================================
 public class SpawnWaveUnitTypeCollection
@@ -33,7 +32,7 @@ public class SpawnWaveUnitTypeCollection
 
   // --------------------------------------------------------------------------
   function add(int unitTypeId, int tier)
-    m_unitTypes[m_size].unitTypeId = unitTypeId
+    m_unitTypes[m_size].id = unitTypeId
     m_unitTypes[m_size].tier = tier
     m_size++
 
@@ -60,13 +59,12 @@ public interface ISpawnWaveActivator extends IRunnable
 // ============================================================================
 public class SpawnWaveDefinition
   private string m_name
-  private IProgress m_progress
+  private Func1<SpawnWaveContext, Runnable> m_progressFactory
   private ISpawnWaveActivator m_activator
   private SpawnRange m_spawnRange
   private ISpawnWaveUnitTypeProvider m_unitTypeProvider
   private Func1<SpawnWaveContext, int> m_maxSpawnCount
   private Func1<SpawnWaveContext, int> m_maxAliveCount
-  private Func1<SpawnWaveContext, int> m_spawnsPerActivation
   private Func1<SpawnWaveContext, real> m_spawnGroupingFactor
   private Func1<SpawnWaveContext, int> m_goldReward
   private Action2<unit, SpawnWaveContext> m_commonUnitModifier
@@ -74,7 +72,7 @@ public class SpawnWaveDefinition
   private Vector<string> m_tags
   private bool m_waitForFullSpawnGroup = false
   private bool m_useUnitRecycler = false
-  private rangeReal m_facingAngleRange = rangeReal(0.0, 360.0)
+  private rangeReal m_facingAngleRange = REAL_RANGE_ZERO
   private SpawnPointProviderType m_spawnPointProviderType = SpawnPointProviderType.CACHED_HOSTILE
   private sound m_playSoundOnStart = null
   private sound m_playSoundOnComplete = null
@@ -91,9 +89,9 @@ public class SpawnWaveDefinition
 
   // --------------------------------------------------------------------------
   ondestroy
-    if (m_progress != null)
-      destroy m_progress
-      m_progress = null
+    if (m_progressFactory != null)
+      m_progressFactory.release()
+      m_progressFactory = null
 
     if (m_activator != null)
       destroy m_activator
@@ -110,10 +108,6 @@ public class SpawnWaveDefinition
     if (m_maxSpawnCount != null)
       m_maxSpawnCount.release()
       m_maxSpawnCount = null
-
-    if (m_spawnsPerActivation != null)
-      m_spawnsPerActivation.release()
-      m_spawnsPerActivation = null
 
     if (m_spawnGroupingFactor != null)
       m_spawnGroupingFactor.release()
@@ -141,20 +135,16 @@ public class SpawnWaveDefinition
     return m_name
 
   // --------------------------------------------------------------------------
-  function setProgress(IProgress progress)
-    m_progress = progress
+  function setProgressFactory(Func1<SpawnWaveContext, Runnable> progressFactory)
+    if (progressFactory != null)
+      progressFactory.acquire()
+    if (m_progressFactory != null)
+      m_progressFactory.release()
+    m_progressFactory = progressFactory
 
   // --------------------------------------------------------------------------
-  function getProgress() returns IProgress
-    return m_progress
-
-  // --------------------------------------------------------------------------
-  function setActivator(ISpawnWaveActivator activator)
-    m_activator = activator
-
-  // --------------------------------------------------------------------------
-  function getActivator() returns ISpawnWaveActivator
-    return m_activator
+  function getProgress(SpawnWaveContext context) returns Runnable
+    return m_progressFactory == null ? null : m_progressFactory.call(context)
 
   // --------------------------------------------------------------------------
   function setSpawnRange(SpawnRange spawnRange)
@@ -197,19 +187,6 @@ public class SpawnWaveDefinition
     if (m_maxSpawnCount == null)
       return UNLIMITED
     return clamp(m_maxSpawnCount.call(context), 0, UNLIMITED)
-
-  // --------------------------------------------------------------------------
-  function getSpawnsPerActivation(SpawnWaveContext context) returns int
-    if (m_spawnsPerActivation == null)
-      return 1
-    return clamp(m_spawnsPerActivation.call(context), 0, 1000)
-
-  // --------------------------------------------------------------------------
-  function setSpawnsPerActivation(Func1<SpawnWaveContext, int> value)
-    value.acquire()
-    if (m_spawnsPerActivation != null)
-      m_spawnsPerActivation.release()
-    m_spawnsPerActivation = value
 
   // --------------------------------------------------------------------------
   function getSpawnGroupingFactor(SpawnWaveContext context) returns real
@@ -362,7 +339,17 @@ public class SpawnWaveContext
   real playerDifficulty = 1.0
   real array[MAX_ELITE_TIER] tierChances = [ 1.0, 0.0, 0.0]
   int unitTier = 0
+  int waveTier = 0
   int groupId = 0
+
+  private Event m_onUnitKilled
+  private int m_killCount = 0
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    if (m_onUnitKilled != null)
+      destroy m_onUnitKilled
+      m_onUnitKilled = null
 
   // --------------------------------------------------------------------------
   function getGameProgress01() returns real
@@ -381,12 +368,29 @@ public class SpawnWaveContext
     return playerDifficulty + unitTier
 
   // --------------------------------------------------------------------------
+  function onUnitKilled() returns IEvent
+    if (m_onUnitKilled == null)
+      m_onUnitKilled = new Event()
+    return m_onUnitKilled
+
+  // --------------------------------------------------------------------------
+  function getKillCount() returns int
+    return m_killCount
+
+  // --------------------------------------------------------------------------
+  function incKillCount()
+    m_killCount++
+    if (m_onUnitKilled != null)
+      m_onUnitKilled.call()
+
+  // --------------------------------------------------------------------------
   function clone() returns SpawnWaveContext
     let clone = new SpawnWaveContext()
     clone.definition = definition
     clone.waveNumber = waveNumber
     clone.waveProgress = waveProgress
     clone.playerDifficulty = playerDifficulty
+    clone.waveTier = waveTier
     clone.unitTier = unitTier
     clone.groupId = groupId
     for i = 0 to MAX_ELITE_TIER-1

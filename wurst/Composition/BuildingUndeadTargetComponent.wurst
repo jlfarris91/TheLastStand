@@ -15,6 +15,8 @@ import DebuggerDialog
 import Frame
 import ErrorHandling
 import UndeadTargetService
+import Host
+import PlayerExtensions
 
 @configurable public bool g_enableBUTCDebugging = false
 
@@ -165,43 +167,39 @@ public function IUnitMetadata.getOrAddBuildingUndeadTargetComponent() returns Bu
   return component
 
 // ============================================================================
-class BUTCDebugger extends Frame
-  private player m_context
+class BUTCDebugger extends DebuggerRealtimeUpdateFrame
   private group m_contextUnitGroup = CreateGroup()
 
   // --------------------------------------------------------------------------
   construct()
     super(createFrame("TEXTAREA", "BUTCDebugger", GAME_UI, "", 0))
 
-    doPeriodically(1.0) (CallbackPeriodic cb) ->
-      update()
+  // --------------------------------------------------------------------------
+  ondestroy
+    m_contextUnitGroup.destr()
 
   // --------------------------------------------------------------------------
-  function setContext(player context)
-    m_context = context
-
-  // --------------------------------------------------------------------------
-  function update()
+  override function realtimeUpdate(real _)
 
     let frameHandle = getFrameHandle()
 
-    if (frameHandle.isVisible() == false)
+    let selectedUnit = g_HostPlayer.getFirstSelectedUnit()
+    if (selectedUnit == null)
+      frameHandle.setOrAddText("Select a unit")
       return
 
-    if (m_context == null)
-      BlzFrameSetText(frameHandle, "===== BUTC (No Player Selected) =====")
-      return
+    let selectedPlayer = selectedUnit.getOwner()
 
-    BlzFrameSetText(frameHandle, "===== BUTC ({0}) =====".format(m_context.getName()))
+    frameHandle.setOrAddText("===== BUTC {0} =====".format(selectedPlayer.getName()))
 
-    m_contextUnitGroup.enumUnitsOfPlayer(m_context, null)
+    m_contextUnitGroup.enumUnitsOfPlayer(selectedPlayer, null)
 
     for u in m_contextUnitGroup
       let metadata = u.getMetadata()
       if (metadata != null)
         let comp = metadata.getBuildingUndeadTargetComponent()
         if (comp != null)
-          BlzFrameAddText(frameHandle, "{0} : {1} {2}".format(u.getName(), (comp.m_foundPath ? "Found path".colorize(Colors.green) : "No path".colorize(Colors.red)), (comp.m_searching ? " Searching..." : "")))
+          frameHandle.setOrAddText("{0} : {1} {2}".format(u.getName(), (comp.m_foundPath ? "Found path".colorize(Colors.green) : "No path".colorize(Colors.red)), (comp.m_searching ? " Searching..." : "")))
 
 // ============================================================================
 init
@@ -217,4 +215,4 @@ init
   g_pathCheckCompleteCallback.acquire() // keep alive
 
   if (DEV_ENVIRONMENT)
-    DebuggerDialog.registerFrame("BUTC", () -> new BUTCDebugger()..setContext(players[0]))
+    DebuggerDialog.registerFrame("BUTC", () -> new BUTCDebugger())

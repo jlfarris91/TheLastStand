@@ -8,6 +8,7 @@ import public RandomSpawnPointProvider
 import LinkedList
 import ClosureTimers
 import RealTime
+import Trace
 
 constant int SPAWNS_MAX_PER_TICK = 1
 constant int PROCESS_MAX_PER_TICK = 8 // 1 per player?
@@ -24,10 +25,28 @@ public class SpawnController
 
   // --------------------------------------------------------------------------
   static function enqueue(SpawnRequestBase request)
+    if (s_requestQueue.has(request))
+      return
     s_requestQueue.add(request)
+    startProcessQueue()
 
-    if (s_requestQueue.size() == 1)
+  // --------------------------------------------------------------------------
+  private static function startProcessQueue()
+    if (s_processQueueCallback == null)
       s_processQueueCallback = doPeriodically(PROCESS_QUEUE_INTERVAL, cb -> processQueue())
+    
+  // --------------------------------------------------------------------------
+  private static function stopProcessQueue()
+    if (s_processQueueCallback != null)
+      destroy s_processQueueCallback
+      s_processQueueCallback = null
+
+  // --------------------------------------------------------------------------
+  static function remove(SpawnRequestBase request) returns bool
+    let removed = s_requestQueue.remove(request)
+    if (s_requestQueue.isEmpty())
+      stopProcessQueue()
+    return removed
 
   // --------------------------------------------------------------------------
   static function getSpawnCount() returns int
@@ -43,8 +62,11 @@ public class SpawnController
 
   // --------------------------------------------------------------------------
   private static function processQueue()
+    
+    Trace.trace("Spawning.processQueue")
 
     if (s_requestQueue.isEmpty())
+      stopProcessQueue()
       return
 
     let iter = s_requestQueue.staticItr()
@@ -62,38 +84,40 @@ public class SpawnController
 
       let request = iter.next()
 
-      var spawned = 0
-
       if (request.hasNext())
         processCounter++
-        spawned = request.next()
+        let spawned = request.next()
         if (spawned > 0)
           s_spawnCount += spawned
           spawnCounter += spawned
 
+      // Request is done spawning, close it out
       if (not request.hasNext())
         request.complete()
         s_requestCompletedCount++
         iter.remove()
         request.close()
 
+      // Request timed out, this should probably never happen
       else if (request.didTimeout())
         s_requestTimeoutCount++
         iter.remove()
         request.close()
 
-      // Still has more to spawn but didn't spawn anything, move it to the back of the line
-      else if (spawned == 0 and iter.hasNext())
+      // Still has more to spawn move it to the back of the line
+      else if (iter.hasNext())
         iter.remove()
         s_requestQueue.add(request)
 
     //}
 
     iter.close()
+    
+    Trace.trace("Spawning.spawned", spawnCounter)
+    Trace.trace("Spawning.process", processCounter)
 
-    if (s_requestQueue.isEmpty() and s_processQueueCallback != null)
-      destroy s_processQueueCallback
-      s_processQueueCallback = null
+    if (s_requestQueue.isEmpty())
+      stopProcessQueue()
 
 // ============================================================================
 public abstract class SpawnRequestBase
