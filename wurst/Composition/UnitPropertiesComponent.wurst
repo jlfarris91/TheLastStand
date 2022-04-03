@@ -14,6 +14,7 @@ import RegisterEvents
 
 constant int ABILITY_ID_CRIT = compiletime(ABIL_ID_GEN.next())
 constant int ABILITY_ID_EVASION = compiletime(ABIL_ID_GEN.next())
+constant int ABILITY_ID_ATTACK_BONUS = compiletime(ABIL_ID_GEN.next())
 
 // ============================================================================
 public enum UnitProperty
@@ -29,17 +30,22 @@ public enum UnitProperty
   LOOT_DURATION_SCALE
   LOOT_TWICE_CHANCE_01
   LOOT_MANA_COST_SCALE
+  ATTACK_BONUS
   __COUNT
 
 // Must match number of items in UnitProperties enum
-public constant int UNIT_PROPERTY_COUNT = 12
+public constant int UNIT_PROPERTY_COUNT = 13
 
 // ============================================================================
-tuple unitPropertyMetadata(real defaultValue, bool triggersUpdate, string friendlyName, string shortName, Func1<real, string> stringifier)
+tuple unitPropertyMetadata(real defaultValue, string friendlyName, string shortName, Func1<real, string> stringifier, Action2<UnitPropertiesComponent, UnitProperty> onChangedCallback)
 Func1<real, string> g_toString = (real v) -> v.toString()
 Func1<real, string> g_toIntString = (real v) -> v.toInt().toString()
 Func1<real, string> g_toScalarString = (real v) -> v.toString() + "x"
 Func1<real, string> g_toPercentageString01 = (real v) -> v.toPercentageString01()
+
+constant UpdateCritProperties g_updateCritProperties = new UpdateCritProperties()
+constant UpdateEvadeChance g_updateEvadeChance = new UpdateEvadeChance()
+constant UpdateAttackBonus g_updateAttackBonus = new UpdateAttackBonus()
 
 // ============================================================================
 public class UnitProperties
@@ -47,18 +53,19 @@ public class UnitProperties
   static constant int count = UNIT_PROPERTY_COUNT
 
   protected static constant unitPropertyMetadata array[count] PROPERTY_METADATA = [
-    /* CRIT_CHANCE          */  unitPropertyMetadata(0.0, true,   "Crit Chance",          "critchance",     g_toPercentageString01.acquire()),
-    /* CRIT_DAMAGE_SCALAR   */  unitPropertyMetadata(2.0, true,   "Crit Damage Mult",     "critmult",       g_toScalarString.acquire()),
-    /* CRIT_DAMAGE_BONUS    */  unitPropertyMetadata(0.0, true,   "Crit Damage Bonus",    "critbonus",      g_toString.acquire()),
-    /* EVADE_CHANCE         */  unitPropertyMetadata(0.0, true,   "Evade Chance",         "evade",          g_toPercentageString01.acquire()),
-    /* LIFE_STEAL_PERC      */  unitPropertyMetadata(0.0, false,  "Life Steal",           "lifesteal",      g_toPercentageString01.acquire()),
-    /* DAMAGE_SCALAR_NORMAL */  unitPropertyMetadata(1.0, false,  "Damage Scalar Normal", "dmgscalenormal", g_toPercentageString01.acquire()),
-    /* DAMAGE_SCALAR_ELITE  */  unitPropertyMetadata(1.0, false,  "Damage Scalar Elite",  "dmgscaleelite",  g_toPercentageString01.acquire()),
-    /* DAMAGE_SCALAR_BOSS   */  unitPropertyMetadata(1.0, false,  "Damage Scalar Boss",   "dmgscaleboss",   g_toPercentageString01.acquire()),
-    /* OPERATOR_LEVEL       */  unitPropertyMetadata(1.0, false,  "Operator Level",       "oplevel",        g_toIntString.acquire()),
-    /* LOOT_DURATION_SCALAR */  unitPropertyMetadata(1.0, false,  "Loot Duration",        "lootdur",        g_toPercentageString01.acquire()),
-    /* LOOT_TWICE_CHANCE    */  unitPropertyMetadata(0.0, false,  "Loot Twice Chance",    "loottwice",      g_toPercentageString01.acquire()),
-    /* LOOT_MANA_COST_SCALE */  unitPropertyMetadata(1.0, false,  "Loot Mana Cost",       "lootcost",       g_toPercentageString01.acquire())
+    /* CRIT_CHANCE          */  unitPropertyMetadata(0.0, "Crit Chance",          "critchance",     g_toPercentageString01.acquire(), g_updateCritProperties),
+    /* CRIT_DAMAGE_SCALAR   */  unitPropertyMetadata(2.0, "Crit Damage Mult",     "critmult",       g_toScalarString.acquire(),       g_updateCritProperties),
+    /* CRIT_DAMAGE_BONUS    */  unitPropertyMetadata(0.0, "Crit Damage Bonus",    "critbonus",      g_toString.acquire(),             g_updateCritProperties),
+    /* EVADE_CHANCE         */  unitPropertyMetadata(0.0, "Evade Chance",         "evade",          g_toPercentageString01.acquire(), g_updateEvadeChance),
+    /* LIFE_STEAL_PERC      */  unitPropertyMetadata(0.0, "Life Steal",           "lifesteal",      g_toPercentageString01.acquire(), null),
+    /* DAMAGE_SCALAR_NORMAL */  unitPropertyMetadata(1.0, "Damage Scalar Normal", "dmgscalenormal", g_toPercentageString01.acquire(), null),
+    /* DAMAGE_SCALAR_ELITE  */  unitPropertyMetadata(1.0, "Damage Scalar Elite",  "dmgscaleelite",  g_toPercentageString01.acquire(), null),
+    /* DAMAGE_SCALAR_BOSS   */  unitPropertyMetadata(1.0, "Damage Scalar Boss",   "dmgscaleboss",   g_toPercentageString01.acquire(), null),
+    /* OPERATOR_LEVEL       */  unitPropertyMetadata(1.0, "Operator Level",       "oplevel",        g_toIntString.acquire(),          null),
+    /* LOOT_DURATION_SCALAR */  unitPropertyMetadata(1.0, "Loot Duration",        "lootdur",        g_toPercentageString01.acquire(), null),
+    /* LOOT_TWICE_CHANCE    */  unitPropertyMetadata(0.0, "Loot Twice Chance",    "loottwice",      g_toPercentageString01.acquire(), null),
+    /* LOOT_MANA_COST_SCALE */  unitPropertyMetadata(1.0, "Loot Mana Cost",       "lootcost",       g_toPercentageString01.acquire(), null),
+    /* ATTACK_BONUS         */  unitPropertyMetadata(0.0, "Attack Bonus",         "attackbonus",    g_toIntString.acquire(),          g_updateAttackBonus)
   ]
 
   // --------------------------------------------------------------------------
@@ -90,9 +97,6 @@ public class UnitProperties
 public class UnitPropertiesComponent extends UnitComponent
   private SmartValue array[UNIT_PROPERTY_COUNT] m_smartValues
 
-  private ability m_abilCritStrike
-  private ability m_abilEvasion
-
   // --------------------------------------------------------------------------
   construct(IUnitMetadata owner)
     super(owner)
@@ -113,8 +117,9 @@ public class UnitPropertiesComponent extends UnitComponent
     let propertyIndex = property castTo int
     if (m_smartValues[propertyIndex] == null)
       m_smartValues[propertyIndex] = new SmartValue(UnitProperties.getPropertyDefaultValue(property))
-      if (UnitProperties.PROPERTY_METADATA[propertyIndex].triggersUpdate)
-        m_smartValues[propertyIndex].onValueChanged().register(() -> update())
+      let onChangedCallback = UnitProperties.PROPERTY_METADATA[propertyIndex].onChangedCallback
+      if (onChangedCallback != null)
+        m_smartValues[propertyIndex].onValueChanged().registerDispatched(this, () -> onChangedCallback.call(this, property))
     return m_smartValues[propertyIndex]
 
   // --------------------------------------------------------------------------
@@ -132,20 +137,7 @@ public class UnitPropertiesComponent extends UnitComponent
   // --------------------------------------------------------------------------
   override function onEnabled()
     super.onEnabled()
-
-    let ownerUnit = getOwnerUnit()
-
-    if (not ownerUnit.hasAbility(ABILITY_ID_CRIT))
-      ownerUnit.addAbility(ABILITY_ID_CRIT)
-      ownerUnit.hideAbility(ABILITY_ID_CRIT, true)
-    m_abilCritStrike = ownerUnit.getAbility(ABILITY_ID_CRIT)
-
-    if (not ownerUnit.hasAbility(ABILITY_ID_EVASION))
-      ownerUnit.addAbility(ABILITY_ID_EVASION)
-      ownerUnit.hideAbility(ABILITY_ID_EVASION, true)
-    m_abilEvasion = ownerUnit.getAbility(ABILITY_ID_EVASION)
-
-    update()
+    updateAll()
 
   // --------------------------------------------------------------------------
   override function onDisabled()
@@ -155,89 +147,92 @@ public class UnitPropertiesComponent extends UnitComponent
 
     ownerUnit.removeAbility(ABILITY_ID_CRIT)
     ownerUnit.removeAbility(ABILITY_ID_EVASION)
-
-    m_abilCritStrike = null
-    m_abilEvasion = null
+    ownerUnit.removeAbility(ABILITY_ID_ATTACK_BONUS)
 
   // --------------------------------------------------------------------------
   protected function onUnitLeveled()
-    update()
+    updateAll()
 
   // --------------------------------------------------------------------------
-  private function update()
+  protected function onUnitUpgraded()
+    updateAll()
+
+  // --------------------------------------------------------------------------
+  private function updateAll()
 
     let ownerUnit = getOwnerUnit()
 
-    if (m_abilCritStrike != null)
-      let lvl = 0
-      ownerUnit.setAbilityLevel(ABILITY_ID_CRIT, lvl + 1)
-      setAbilityField(m_abilCritStrike, ABILITY_RLF_CHANCE_TO_CRITICAL_STRIKE, lvl, getPropertyValue(UnitProperty.CRIT_CHANCE_01) * 100.0)
-      setAbilityField(m_abilCritStrike, ABILITY_RLF_DAMAGE_MULTIPLIER_OCR2, lvl, getPropertyValue(UnitProperty.CRIT_DAMAGE_SCALAR))
-      setAbilityField(m_abilCritStrike, ABILITY_RLF_DAMAGE_BONUS_OCR3, lvl, getPropertyValue(UnitProperty.CRIT_DAMAGE_BONUS))
-      ownerUnit.setAbilityLevel(ABILITY_ID_CRIT, lvl)
+    if (not ownerUnit.hasAbility(ABILITY_ID_CRIT))
+      ownerUnit.addAbility(ABILITY_ID_CRIT)
+      ownerUnit.hideAbility(ABILITY_ID_CRIT, true)
 
-    if (m_abilEvasion != null)
-      let lvl = 0
-      ownerUnit.setAbilityLevel(ABILITY_ID_EVASION, lvl + 1)
-      setAbilityField(m_abilEvasion, ABILITY_RLF_CHANCE_TO_EVADE_EEV1, lvl, getPropertyValue(UnitProperty.EVADE_CHANCE_01))
-      ownerUnit.setAbilityLevel(ABILITY_ID_EVASION, lvl)
+    if (not ownerUnit.hasAbility(ABILITY_ID_EVASION))
+      ownerUnit.addAbility(ABILITY_ID_EVASION)
+      ownerUnit.hideAbility(ABILITY_ID_EVASION, true)
+
+    if (not ownerUnit.hasAbility(ABILITY_ID_ATTACK_BONUS))
+      ownerUnit.addAbility(ABILITY_ID_ATTACK_BONUS)
+
+    g_updateCritProperties.call(this, UnitProperty.CRIT_CHANCE_01)
+    g_updateEvadeChance.call(this, UnitProperty.EVADE_CHANCE_01)
+    g_updateAttackBonus.call(this, UnitProperty.ATTACK_BONUS)
 
     if (hasProperty(UnitProperty.OPERATOR_LEVEL))
       getProperty(UnitProperty.OPERATOR_LEVEL).setBase(ownerUnit.getLevel())
 
-  // --------------------------------------------------------------------------
-  private function setAbilityField(ability _ability, abilityreallevelfield field, int lvl, real value)
-    if (not _ability.setField(field, lvl, value))
-      Log.debug("Failed to set ability real level field: {0} lvl {1} {2} to {3}".format(
-        getAbilityName(_ability),
-        lvl.toString(),
-        getAbilityFieldName(field),
-        value.toString()))
-    // Log.debug("{0} lvl {1} {2} : {3}".format(
-    //     getAbilityName(_ability),
-    //     lvl.toString(),
-    //     getAbilityFieldName(field),
-    //     value.toString()))
+// ============================================================================
+function setAbilityField(ability _ability, abilityreallevelfield field, int lvl, real value)
+  if (not _ability.setField(field, lvl, value))
+    Log.debug("Failed to set ability real level field: {0} lvl {1} {2} to {3}".format(
+      getAbilityName(_ability),
+      lvl.toString(),
+      getAbilityFieldName(field),
+      value.toString()))
+  // Log.debug("{0} lvl {1} {2} : {3}".format(
+  //     getAbilityName(_ability),
+  //     lvl.toString(),
+  //     getAbilityFieldName(field),
+  //     value.toString()))
 
-  // // --------------------------------------------------------------------------
-  // private function setAbilityField(ability _ability, abilityintegerlevelfield field, int lvl, int value)
-  //   if (not _ability.setField(field, lvl, value))
-  //     Log.debug("Failed to set ability int level field: {0} lvl {1} {2} to {3}".format(
-  //       getAbilityName(_ability),
-  //       lvl.toString(),
-  //       getAbilityFieldName(field),
-  //       value.toString()))
-  //   // Log.debug("{0} lvl {1} {2} : {3}".format(
-  //   //     getAbilityName(_ability),
-  //   //     lvl.toString(),
-  //   //     getAbilityFieldName(field),
-  //   //     value.toString()))
+// ============================================================================
+function setAbilityField(ability _ability, abilityintegerlevelfield field, int lvl, int value)
+  if (not _ability.setField(field, lvl, value))
+    Log.debug("Failed to set ability int level field: {0} lvl {1} {2} to {3}".format(
+      getAbilityName(_ability),
+      lvl.toString(),
+      getAbilityFieldName(field),
+      value.toString()))
+  // Log.debug("{0} lvl {1} {2} : {3}".format(
+  //     getAbilityName(_ability),
+  //     lvl.toString(),
+  //     getAbilityFieldName(field),
+  //     value.toString()))
 
-  // --------------------------------------------------------------------------
-  private function getAbilityName(ability _ability) returns string
-    if (_ability == m_abilCritStrike)
-      return "crit"
-    if (_ability == m_abilEvasion)
-      return "evade"
-    return "<unknown>"
+// ============================================================================
+function getAbilityName(ability _ability) returns string
+  // if (_ability == m_abilCritStrike)
+  //   return "crit"
+  // if (_ability == m_abilEvasion)
+  //   return "evade"
+  return "<unknown>"
 
-  // --------------------------------------------------------------------------
-  private function getAbilityFieldName(abilityreallevelfield field) returns string
-    if (field == ABILITY_RLF_CHANCE_TO_CRITICAL_STRIKE)
-      return "critchance"
-    if (field == ABILITY_RLF_DAMAGE_MULTIPLIER_OCR2)
-      return "critmult"
-    if (field == ABILITY_RLF_DAMAGE_BONUS_OCR3)
-      return "critbonus"
-    if (field == ABILITY_RLF_CHANCE_TO_EVADE_EEV1)
-      return "evade"
-    return "<unknown>"
+// ============================================================================
+function getAbilityFieldName(abilityreallevelfield field) returns string
+  if (field == ABILITY_RLF_CHANCE_TO_CRITICAL_STRIKE)
+    return "critchance"
+  if (field == ABILITY_RLF_DAMAGE_MULTIPLIER_OCR2)
+    return "critmult"
+  if (field == ABILITY_RLF_DAMAGE_BONUS_OCR3)
+    return "critbonus"
+  if (field == ABILITY_RLF_CHANCE_TO_EVADE_EEV1)
+    return "evade"
+  return "<unknown>"
 
-  // // --------------------------------------------------------------------------
-  // private function getAbilityFieldName(abilityintegerlevelfield field) returns string
-  //   if (field == ABILITY_ILF_MAX_LIFE_GAINED)
-  //     return "hpbonus"
-  //   return "<unknown>"
+// ============================================================================
+function getAbilityFieldName(abilityintegerlevelfield field) returns string
+  if (field == ABILITY_ILF_ATTACK_BONUS)
+    return "attackbonus"
+  return "<unknown>"
 
 // ============================================================================
 public function UnitPropertiesComponent.printDebug(Action1<string> print)
@@ -268,6 +263,29 @@ public function unit.getUnitPropertiesComponent() returns UnitPropertiesComponen
 public function unit.getOrAddUnitPropertiesComponent() returns UnitPropertiesComponent
   let metadata = this.getMetadata()
   return metadata != null ? metadata.getOrAddUnitPropertiesComponent() : null
+
+// ============================================================================
+public function unit.hasProperty(UnitProperty property) returns bool
+  let comp = this.getUnitPropertiesComponent()
+  return comp != null and comp.hasProperty(property)
+
+// ============================================================================
+public function unit.getProperty(UnitProperty property) returns SmartValue
+  let comp = this.getOrAddUnitPropertiesComponent()
+  return comp != null ? comp.getProperty(property) : null
+
+// ============================================================================
+public function unit.getPropertyValue(UnitProperty property) returns real
+  let comp = this.getUnitPropertiesComponent()
+  return comp != null and comp.hasProperty(property) ? this.getProperty(property).getValue() : UnitProperties.getPropertyDefaultValue(property)
+
+// ============================================================================
+public function unit.getPropertyIntValue(UnitProperty property) returns int
+  return this.getPropertyValue(property).toInt()
+
+// ============================================================================
+public function unit.getPropertyValueAsString(UnitProperty property) returns string
+  return UnitProperties.formatPropertyValue(property, this.getPropertyValue(property))
 
 // ============================================================================
 function onDamageEventRelative()
@@ -328,6 +346,65 @@ function onHeroLeveled()
     comp.onUnitLeveled()
 
 // ============================================================================
+function onUnitUpgradeFinished()
+  let comp = GetTriggerUnit().getUnitPropertiesComponent()
+  if (comp != null)
+    comp.onUnitUpgraded()
+
+// ============================================================================
+class UpdateCritProperties extends Action2<UnitPropertiesComponent, UnitProperty>
+
+  // --------------------------------------------------------------------------
+  construct()
+    acquire()
+
+  // --------------------------------------------------------------------------
+  override function call(UnitPropertiesComponent comp, UnitProperty _prop)
+    let ownerUnit = comp.getOwnerUnit()
+    let abil = ownerUnit.getAbility(ABILITY_ID_CRIT)
+    if (abil != null)
+      let lvl = 0
+      ownerUnit.incAbilityLevel(ABILITY_ID_CRIT)
+      setAbilityField(abil, ABILITY_RLF_CHANCE_TO_CRITICAL_STRIKE, lvl, comp.getPropertyValue(UnitProperty.CRIT_CHANCE_01) * 100.0)
+      setAbilityField(abil, ABILITY_RLF_DAMAGE_MULTIPLIER_OCR2, lvl, comp.getPropertyValue(UnitProperty.CRIT_DAMAGE_SCALAR))
+      setAbilityField(abil, ABILITY_RLF_DAMAGE_BONUS_OCR3, lvl, comp.getPropertyValue(UnitProperty.CRIT_DAMAGE_BONUS))
+      ownerUnit.decAbilityLevel(ABILITY_ID_CRIT)
+
+// ============================================================================
+class UpdateEvadeChance extends Action2<UnitPropertiesComponent, UnitProperty>
+
+  // --------------------------------------------------------------------------
+  construct()
+    acquire()
+
+  // --------------------------------------------------------------------------
+  override function call(UnitPropertiesComponent comp, UnitProperty _prop)
+    let ownerUnit = comp.getOwnerUnit()
+    let abil = ownerUnit.getAbility(ABILITY_ID_EVASION)
+    if (abil != null)
+      let lvl = 0
+      ownerUnit.incAbilityLevel(ABILITY_ID_EVASION)
+      setAbilityField(abil, ABILITY_RLF_CHANCE_TO_EVADE_EEV1, lvl, comp.getPropertyValue(UnitProperty.EVADE_CHANCE_01))
+      ownerUnit.decAbilityLevel(ABILITY_ID_EVASION)
+
+// ============================================================================
+class UpdateAttackBonus extends Action2<UnitPropertiesComponent, UnitProperty>
+
+  // --------------------------------------------------------------------------
+  construct()
+    acquire()
+
+  // --------------------------------------------------------------------------
+  override function call(UnitPropertiesComponent comp, UnitProperty _prop)
+    let ownerUnit = comp.getOwnerUnit()
+    let abil = ownerUnit.getAbility(ABILITY_ID_ATTACK_BONUS)
+    if (abil != null)
+      let lvl = 0
+      ownerUnit.incAbilityLevel(ABILITY_ID_ATTACK_BONUS)
+      setAbilityField(abil, ABILITY_ILF_ATTACK_BONUS, lvl, comp.getPropertyIntValue(UnitProperty.ATTACK_BONUS))
+      ownerUnit.decAbilityLevel(ABILITY_ID_ATTACK_BONUS)
+
+// ============================================================================
 @compiletime function createCompiledObjects()
   
   new AbilityDefinitionCriticalStrikecreep(ABILITY_ID_CRIT)
@@ -335,16 +412,23 @@ function onHeroLeveled()
   ..setLevels(2)
   ..setChancetoCriticalStrike(1, 0.0)
   ..setDamageMultiplier(1, 0.0)
-  ..setDamageBonus(1, 0.0)
+  ..presetDamageBonus(lvl -> 0.0)
   
   new AbilityDefinitionEvasioncreep(ABILITY_ID_EVASION)
   ..setName("STAT_EVASION")
   ..setLevels(2)
-  ..setChancetoEvade(1, 0.0)
+  ..presetChancetoEvade(lvl -> 0.0)
+
+  new AbilityDefinitionAttackBonusPlus1(ABILITY_ID_ATTACK_BONUS)
+  ..setName("STAT_ATTACK_BONUS")
+  ..setLevels(2)
+  ..setItemAbility(false)
+  ..presetAttackBonus(lvl -> 0)
 
 // ============================================================================
 init
   DamageEvent.addListener(DAMAGE_EVENT_PRIO_RELATIVE, () -> onDamageEventRelative())
   DamageEvent.addListener(DAMAGE_EVENT_PRIO_FINAL, () -> onDamageEventFinal())
   registerPlayerUnitEvent(EVENT_PLAYER_HERO_LEVEL, function onHeroLeveled)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_UPGRADE_FINISH, function onUnitUpgradeFinished)
     
