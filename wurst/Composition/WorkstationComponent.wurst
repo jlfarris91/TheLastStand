@@ -181,6 +181,10 @@ public class WorkstationComponent extends UnitComponent
       m_workerLeveled.call()
 
   // --------------------------------------------------------------------------
+  protected function onUnitUpgradeFinish()
+    applyBuff()
+
+  // --------------------------------------------------------------------------
   private function onUnitLoaded(unit u)
     getLoadedUnits().addUnit(u)
     u.hide()
@@ -196,9 +200,14 @@ public class WorkstationComponent extends UnitComponent
 
     if (m_workerEntered != null)
       m_workerEntered.call()
-    
+
     if (getLoadedUnitCount() == 1)
-      let ownerUnit = getOwnerUnit()
+      applyBuff()
+
+  // --------------------------------------------------------------------------
+  private function applyBuff()
+    let ownerUnit = getOwnerUnit()
+    if (ownerUnit.hasAbility(WORKSTATION_ACTIVE_BUFF.abilId) == false)
       ownerUnit.addAnimationProperties("work")
       ownerUnit.addAbility(WORKSTATION_ACTIVE_BUFF.abilId)
 
@@ -262,7 +271,7 @@ public function IUnitMetadata.getOrAddWorkstationComponent() returns Workstation
     [Workstation - Active]
     A unit is currently operating this Workstation.
 
-    [Operator Bonuses]
+    Operator Level 5
     + 10% sight range
     + 10% bonus damage to target
 */
@@ -276,18 +285,17 @@ public class WorkstationIconTooltipBuilder extends TooltipBuilder
   // --------------------------------------------------------------------------
   override function getDescription(int level) returns string
     let sb = new StringBuilder()
+    
+    if (m_active)
+      sb.appendLine("¦ A unit is currently operating this workstation.".colorize(Colors.gold))
+    else
+      sb.appendLine("¦ Load a unit into this workstation to begin operations.".colorize(Colors.gold))
 
+    sb.appendLine()
+    
     let desc = super.getDescription(level)
     if (desc != null)
       sb.appendLine(desc)
-      sb.appendLine()
-    
-    if (m_active)
-      sb.appendLine("A unit is currently operating this Workstation.".colorize(Colors.gold))
-    else
-      sb.appendLine("Load a unit into this Workstation to begin operations.".colorize(Colors.gold))
-
-    sb.appendLine()
     
     return sb.toStringAndDestroy()
 
@@ -311,11 +319,12 @@ public class WorkstationOperatorBonusTooltipItem extends TooltipItem
   // --------------------------------------------------------------------------
   construct()
     super(getStaticNameGetter())
+    setAlwaysPutSubItemsOnNewLine(true)
 
   // --------------------------------------------------------------------------
   private static function getStaticNameGetter() returns Func1<int, string>
     if (s_nameGetter == null)
-      s_nameGetter = (int lvl) -> "[Operator Level {0}]".format(lvl.toString().colorize(Colors.gold))
+      s_nameGetter = (int lvl) -> "Operator Level " + lvl.toString()
       s_nameGetter.acquire() // keep alive forever
     return s_nameGetter
 
@@ -329,7 +338,7 @@ public class AbilityActiveWorkstationIconDefinition extends AbilityDefinition
     setButtonPositionNormalX(0)
     setButtonPositionNormalY(2)
     setIconNormal(Icons.bTNEngineeringUpgrade)
-    presetTooltipNormal(lvl -> "Workstation {0}".format("Active".colorize(Colors.green)))
+    presetTooltipNormal(lvl -> "Workstation {0}".format("Operating".colorize(Colors.green)))
 
 // ============================================================================
 public class AbilityInactiveWorkstationIconDefinition extends AbilityDefinition
@@ -341,7 +350,7 @@ public class AbilityInactiveWorkstationIconDefinition extends AbilityDefinition
     setButtonPositionNormalX(0)
     setButtonPositionNormalY(2)
     setIconNormal(Icons.dISBTNEngineeringUpgrade)
-    setTooltipNormal(1, "Workstation {0}".format("Inactive".colorize(Colors.gray)))
+    setTooltipNormal(1, "Workstation {0}".format("Unoperated".colorize(Colors.gray)))
 
 // ============================================================================
 function onLoadUnitAbilCast(unit caster, unit target)
@@ -401,6 +410,18 @@ function onUnitLeveled()
     comp.onWorkerLeveled(levelingUnit)
 
 // ============================================================================
+function onUnitUpgradeFinished()
+  let upgradingUnit = GetTriggerUnit()
+
+  let metadata = upgradingUnit.getMetadata()
+  if (metadata == null)
+    return
+
+  let comp = metadata.getWorkstationComponent()
+  if (comp != null)
+    comp.onUnitUpgradeFinish()
+
+// ============================================================================
 @compiletime function createObjects()
 
   new ChannelAbilityPreset(TlsAbilityIds.workstationLoadUnit, 1, true)
@@ -410,9 +431,9 @@ function onUnitLeveled()
     ..removeChannelProperties(true, true)
     ..presetBaseOrderID((lvl) -> "load")
     ..setIconNormal(Icons.bTNLoad)
-    ..setName("Load Unit")
-    ..setTooltipNormal(1, "Load Unit")
-    ..setTooltipNormalExtended(1, "Loads a targeted friendly land unit.")
+    ..setName("Load Operator")
+    ..setTooltipNormal(1, "Load Operator")
+    ..setTooltipNormalExtended(1, "Loads a target survivor to operate this workstation.")
     ..presetCastRange((int lvl) -> 80.0)
     ..presetTargetsAllowed((int lvl) -> "ground,friend,vulnerable,invulnerable")
     ..setButtonPositionNormalX(1)
@@ -426,9 +447,9 @@ function onUnitLeveled()
     ..removeChannelProperties(true, true)
     ..presetBaseOrderID((lvl) -> "unload")
     ..setIconNormal(Icons.bTNUnLoad)
-    ..setName("Unload All")
-    ..setTooltipNormal(1, "Unload All")
-    ..setTooltipNormalExtended(1, "Unload all units.")
+    ..setName("Dismiss Operators")
+    ..setTooltipNormal(1, "Dismiss Operators")
+    ..setTooltipNormalExtended(1, "Dismiss the survivors operating this workstation.")
     ..presetCastRange((int lvl) -> 80.0)
     ..presetTargetsAllowed((int lvl) -> "")
     ..setButtonPositionNormalX(2)
@@ -442,3 +463,4 @@ init
   
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ISSUED_UNIT_ORDER, function onUnitIssuedTargetOrder)
   registerPlayerUnitEvent(EVENT_PLAYER_HERO_LEVEL, function onUnitLeveled)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_UPGRADE_FINISH, function onUnitUpgradeFinished)
