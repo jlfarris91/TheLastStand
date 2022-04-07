@@ -14,6 +14,8 @@ import HashList
 import Math
 import StunUnit
 import PlayerProperties
+import UnitIndexer
+import RealTime
 
 constant real SPIKE4_TIMESCALE_ENABLED = 1.0
 constant real SPIKE4_TIMESCALE_DISABLED = 0.0
@@ -24,6 +26,9 @@ constant string SPIKE_DISABLED_EFFECT_PATH = "Abilities\\Disarm\\Disarm Red\\Dis
 constant int SPIKE_REPAIR_ENABLED_TARGETFLAG = 4 // TARGET_FLAG_AIR
 constant int SPIKE_REPAIR_DISABLED_TARGETFLAG = 0 // TARGET_FLAG_...invulnerable?
 HashList<SpikesComponent> g_activeSpikeComponents = new HashList<SpikesComponent>()
+constant real STUN_COOLDOWN = 10.0
+
+int array g_lastTimeStunned
 
 // ============================================================================
 public class SpikesComponent extends RealtimeUnitComponent
@@ -297,9 +302,20 @@ function onDamageEventFinal()
     return
 
   let ownerPlayer = source.getOwner()
+  let target = DamageEvent.getTarget()
 
-  if (passesChanceCheck01(ownerPlayer.getPropertyValue(PlayerProperty.SPIKE_STUN_CHANCE_01)))
-    stunUnit(source.getOwner(), DamageEvent.getTarget(), ownerPlayer.getPropertyValue(PlayerProperty.SPIKE_STUN_DURATION))
+  let stunDuration = ownerPlayer.getPropertyValue(PlayerProperty.SPIKE_STUN_DURATION)
+  let deltaSeconds = getRealTimeSeconds() - g_lastTimeStunned[target.getIndex()]
+
+  if (deltaSeconds < STUN_COOLDOWN)
+    return
+
+  let stunChance = ownerPlayer.getPropertyValue(PlayerProperty.SPIKE_STUN_CHANCE_01)
+  if (not passesChanceCheck01(stunChance))
+    return
+
+  g_lastTimeStunned[target.getIndex()] = getRealTimeSeconds()
+  stunUnit(source.getOwner(), target, stunDuration)
 
 // ============================================================================
 function onUnitAttacked()
