@@ -24,12 +24,17 @@ Action1<PathCheckerComponent> g_pathCheckCompleteCallback
 constant rangeReal PATH_CHECK_COOLDOWN_RANGE = rangeReal(3.0, 5.0)
 public BUTCDebugger g_butcDebugger
 
+enum PathStatus
+  UNDETERMINED
+  NOT_FOUND
+  FOUND
+
 // ============================================================================
 public class BuildingUndeadTargetComponent extends UnitComponent
   private unit m_pathChecker
   private ISpawnPointProvider m_spawnPointManager
   private bool m_affectUTCTargetOrganic = false
-  protected bool m_foundPath = false
+  protected PathStatus m_pathStatus = UNDETERMINED
   protected bool m_searching = false
 
   // --------------------------------------------------------------------------
@@ -38,7 +43,7 @@ public class BuildingUndeadTargetComponent extends UnitComponent
 
   // --------------------------------------------------------------------------
   function getIsPathableFromHostileSpawn() returns bool
-    return m_foundPath
+    return m_pathStatus == FOUND
 
   // --------------------------------------------------------------------------
   function setAffectUTCTargetOrganic(bool value)
@@ -50,7 +55,7 @@ public class BuildingUndeadTargetComponent extends UnitComponent
 
     m_spawnPointManager = getHostileSpawnPointProviderForPlayer(getOwnerUnit().getOwner())
 
-    setFoundPath(false)
+    setFoundPath(PathStatus.NOT_FOUND)
     startPathCheck()
 
   // --------------------------------------------------------------------------
@@ -60,16 +65,16 @@ public class BuildingUndeadTargetComponent extends UnitComponent
     destroyPathChecker()
 
   // --------------------------------------------------------------------------
-  private function setFoundPath(bool foundPath)
-    if (m_foundPath != foundPath)
-      m_foundPath = foundPath
+  private function setFoundPath(PathStatus foundPath)
+    if (m_pathStatus != foundPath)
+      m_pathStatus = foundPath
       updateUTCStatus()
     if (g_enableBUTCDebugging)
-      getOwnerUnit().setVertexColor(foundPath ? Colors.green : Colors.red)
+      getOwnerUnit().setVertexColor(foundPath == FOUND ? Colors.green : Colors.red)
     if (m_affectUTCTargetOrganic)
       let humanPlayerComp = getOwnerUnit().getOwner().getHumanPlayerComponent()
       if (humanPlayerComp != null)
-        humanPlayerComp.setCanPathToHeadquartersOrHero(foundPath)
+        humanPlayerComp.setCanPathToHeadquartersOrHero(foundPath == FOUND)
 
   // --------------------------------------------------------------------------
   protected function getPathCheckerActive() returns bool
@@ -118,7 +123,7 @@ public class BuildingUndeadTargetComponent extends UnitComponent
   // --------------------------------------------------------------------------
   protected function onPathCheckComplete(bool foundPath)
     // Log.debug((foundPath ? "Found" : "Did not find") + " path for unit " + getOwnerUnit().getName() + " : " + foundPath.toString())
-    setFoundPath(foundPath)
+    setFoundPath(foundPath ? PathStatus.FOUND : PathStatus.NOT_FOUND)
 
     // Continuously path check
     startPathCheck_Delayed()
@@ -129,7 +134,7 @@ public class BuildingUndeadTargetComponent extends UnitComponent
   private function updateUTCStatus()
     let ownerUnit = getOwnerUnit()
     let targetProvider = getUndeadTargetProviderForPlayer(ownerUnit.getOwner())
-    if (m_foundPath)
+    if (m_pathStatus == PathStatus.FOUND)
       targetProvider.registerPlayerUnit(ownerUnit)
     else
       targetProvider.unregisterPlayerUnit(ownerUnit)
@@ -195,11 +200,24 @@ class BUTCDebugger extends DebuggerRealtimeUpdateFrame
     m_contextUnitGroup.enumUnitsOfPlayer(selectedPlayer, null)
 
     for u in m_contextUnitGroup
+    //{
       let metadata = u.getMetadata()
       if (metadata != null)
         let comp = metadata.getBuildingUndeadTargetComponent()
         if (comp != null)
-          frameHandle.setOrAddText("{0} : {1} {2}".format(u.getName(), (comp.m_foundPath ? "Found path".colorize(Colors.green) : "No path".colorize(Colors.red)), (comp.m_searching ? " Searching..." : "")))
+        //{
+          string status
+          switch (comp.m_pathStatus)
+            case UNDETERMINED
+              status = "Undetermined".colorize(Colors.grey)
+            case NOT_FOUND
+              status = "No path".colorize(Colors.red)
+            case FOUND
+              status = "Found path".colorize(Colors.green)
+        
+          frameHandle.setOrAddText("{0} : {1} {2}".format(u.getName(), status, (comp.m_searching ? " Searching..." : "")))
+        //}
+    //}
 
 // ============================================================================
 init
