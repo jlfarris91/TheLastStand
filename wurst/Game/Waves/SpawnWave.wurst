@@ -29,6 +29,7 @@ import UndeadTargetService
 import ClosureTimers
 import RealTime
 import ColorUtility
+import GroupUtils
 
 constant real PROCESS_SPAWN_REQUEST_INTERVAL = 0.3
 constant int MAX_SPAWNS_PER_PROCESS = 1
@@ -41,8 +42,6 @@ HashMap<unit, SpawnWave> g_unitToSpawnWaveMap
 @configurable public bool g_enableSpawnWaveLogging = false
 
 ItemSet g_coinItemSet = new ItemSet("Coins", COLOR_GOLD.withoutAlpha())
-
-LinkedList<SpawnWaveSpawnRequest> g_spawnWaveRequestPool = new LinkedList<SpawnWaveSpawnRequest>()
 
 // ============================================================================
 enum SpawnRestriction
@@ -101,6 +100,10 @@ public class SpawnWave extends Runnable
       destroy m_context
       m_context = null
 
+    if (m_spawnRequest != null)
+      destroy m_spawnRequest
+      m_spawnRequest = null
+
   // --------------------------------------------------------------------------
   function getDefinition() returns SpawnWaveDefinition
     return m_definition
@@ -130,7 +133,7 @@ public class SpawnWave extends Runnable
 
     m_maxSpawnCount = m_definition.getMaxSpawnCount(m_context)
 
-    m_spawnRequest = createSpawnWaveRequest(this)
+    m_spawnRequest = new SpawnWaveSpawnRequest(this)
 
     m_progress = m_definition.getProgress(m_context)
 
@@ -155,15 +158,14 @@ public class SpawnWave extends Runnable
     // Do this one frame later so that all player spawn waves that share these
     // spawn def services get completed first
     nullTimer() () ->
-    //{
       if (m_progress != null)
         m_progress.complete()
-    //}
 
     if (m_spawnRequest != null)
       SpawnController.remove(m_spawnRequest)
       m_spawnRequest.complete()
       m_spawnRequest.close()
+      destroy m_spawnRequest
       m_spawnRequest = null
 
     // Show minimap icons for whatever units are left
@@ -278,16 +280,6 @@ function onUnitDeath()
   spawnWave.onUnitKilled(dyingUnit)
 
 // ============================================================================
-function createSpawnWaveRequest(SpawnWave spawnWave) returns SpawnWaveSpawnRequest
-  SpawnWaveSpawnRequest request
-  if (g_spawnWaveRequestPool.isEmpty())
-    request = new SpawnWaveSpawnRequest(spawnWave)
-  else
-    request = g_spawnWaveRequestPool.dequeue()
-    request.reset(spawnWave)
-  return request
-
-// ============================================================================
 public class SpawnWaveSpawnRequest extends SpawnRequestBase
 
   private SpawnWave m_spawnWave = null
@@ -311,21 +303,6 @@ public class SpawnWaveSpawnRequest extends SpawnRequestBase
   // --------------------------------------------------------------------------
   construct(SpawnWave spawnWave)
     super(REAL_MAX)
-    reset(spawnWave)
-
-  // --------------------------------------------------------------------------
-  ondestroy
-
-    if (m_spawnedUnits != null)
-      m_spawnedUnits.destr()
-      m_spawnedUnits = null
-
-    if (m_unitTypes != null)
-      destroy m_unitTypes
-      m_unitTypes = null
-
-  // --------------------------------------------------------------------------
-  function reset(SpawnWave spawnWave)
 
     m_startTime = getRealTimeSeconds()
 
@@ -336,24 +313,26 @@ public class SpawnWaveSpawnRequest extends SpawnRequestBase
     m_spawnPointProvider = getSpawnPointProvider(spawnWave.m_targetPlayer, m_definition.getSpawnPointProviderType())
     m_waitForFullSpawnGroup = m_definition.getWaitForFullSpawnGroup()
     m_maxAliveCount = 0
-
-    if (m_spawnedUnits == null)
-      m_spawnedUnits = CreateGroup()
-    else
-      m_spawnedUnits.clear()
-
+    m_spawnedUnits = getGroup()
     m_groupSize = 0
     m_groupId = -1
     m_groupTargetUnit = null 
 
-    if (m_unitTypes == null)
-      m_unitTypes = new SpawnWaveUnitTypeCollection()
-    else
-      m_unitTypes.clear()
-
+    m_unitTypes = new SpawnWaveUnitTypeCollection()
     m_unitTypeIndex = 0
 
     nextGroup()
+
+  // --------------------------------------------------------------------------
+  ondestroy
+
+    if (m_spawnedUnits != null)
+      m_spawnedUnits.release()
+      m_spawnedUnits = null
+
+    if (m_unitTypes != null)
+      destroy m_unitTypes
+      m_unitTypes = null
 
   // --------------------------------------------------------------------------
   override function next() returns int
@@ -416,11 +395,6 @@ public class SpawnWaveSpawnRequest extends SpawnRequestBase
         recycler.stock(u)
       else
         u.remove()
-
-    m_spawnedUnits.clear()
-    m_unitTypes.clear()
-
-    g_spawnWaveRequestPool.add(this)
 
   // --------------------------------------------------------------------------
   private function nextGroup()
