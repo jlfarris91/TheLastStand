@@ -68,22 +68,6 @@ public function getDamageScalar(ArmorType armorType, AttackType attackType) retu
   return damageScalarTable[(armorType castTo int) + ((attackType castTo int) - 1) * 8]
 
 // ============================================================================
-public function calculateStandardDpsRange(int level, int levels, real gameProgressStart, real attackDamageScalar, real followThroughScalar) returns rangeReal
-  let tCurr = gameProgressStart + (1.0 - gameProgressStart) * (level / levels.toReal())
-  let tNext = gameProgressStart + (1.0 - gameProgressStart) * ((level + 1) / levels.toReal())
-  let dpsBase = getStandardDPS(tCurr, attackDamageScalar)
-  let dpsNext = getStandardDPS(tNext, attackDamageScalar)
-  let dpsDelta = (dpsNext - dpsBase) * followThroughScalar
-  return rangeReal(dpsBase, dpsBase + dpsDelta)
-
-// ============================================================================
-public function calculateStandardDice(rangeReal dpsRange, real dpsScalar, int upgradeLevels, real upgradeScalar, real cooldown) returns dice
-  let dpsRangeScaled = dpsRange * dpsScalar
-  let damage = (dpsRangeScaled.min / cooldown).floor()
-  let sidesPerDie = (dpsRangeScaled.getLength() * (upgradeScalar / upgradeLevels)).floor()
-  return dice(damage, 0, sidesPerDie)
-
-// ============================================================================
 public tuple stdDmgInputs(int levels, real dpsScalar, real gameProgressStart, int upLevels, real upWeight, int opLevels, real opWeight, real followThroughScalar, real attackDamageScalar)
 public tuple stdDmgOutputs(dice dice, real damageDelta, real upScalar, real opScalar)
 
@@ -98,17 +82,17 @@ public function calculateStandardDamageValues(stdDmgInputs inputs, int level, re
   let dpsDeltaScaled = (dpsNextScaled - dpsBaseScaled) * inputs.followThroughScalar
   let upScalar = inputs.upWeight / (inputs.upWeight + inputs.opWeight)
   let opScalar = inputs.opWeight / (inputs.upWeight + inputs.opWeight)
-  let damageBase = (dpsBaseScaled / cooldown).floor()
-  let damageDelta = dpsDeltaScaled / cooldown
+  let damageBase = (dpsBaseScaled * cooldown).floor()
+  let damageDelta = dpsDeltaScaled * cooldown
   let sidesPerDie = (damageDelta * (upScalar / inputs.upLevels)).floor()
-  let dice = dice(damageBase, 0, sidesPerDie)
+  let dice = dice(damageBase, 1, sidesPerDie)
   return stdDmgOutputs(dice, damageDelta, upScalar, opScalar)
 
 // ============================================================================
 @test function asdf()
 
   let inputs = stdDmgInputs(3, 0.75, 0.25, 5, 0.5, 10, 0.5, 1.25, 1.5)
-  // let inputs = inputs(3, 1.0, 0.0, 5, 0.5, 10, 0.25, 1.0, 1.0)
+  // let inputs = stdDmgInputs(3, 1.0, 0.0, 5, 0.5, 10, 0.5, 1.0, 1.0)
 
   var cooldown = 2.0
   var outputs = calculateStandardDamageValues(inputs, 0, cooldown)
@@ -117,7 +101,7 @@ public function calculateStandardDamageValues(stdDmgInputs inputs, int level, re
   Log.info("opScalar: " + outputs.opScalar.toString() + " = " + (outputs.damageDelta * (outputs.opScalar / inputs.opLevels)).toString())
   var final = (outputs.dice.base + outputs.damageDelta * outputs.upScalar + outputs.damageDelta * outputs.opScalar)
   Log.info("final: " + final.toString())
-  Log.info("dps: " + (outputs.dice.base * cooldown).toString() + " -> " + (final * cooldown).toString())
+  Log.info("dps: " + (outputs.dice.base / cooldown).toString() + " -> " + (final / cooldown).toString())
 
   cooldown = 1.75
   outputs = calculateStandardDamageValues(inputs, 1, cooldown)
@@ -125,9 +109,9 @@ public function calculateStandardDamageValues(stdDmgInputs inputs, int level, re
   Log.info("dice: " + outputs.dice.toString())
   Log.info("upScalar: " + outputs.upScalar.toString() + " = " + (outputs.damageDelta * (outputs.upScalar / inputs.upLevels)).toString())
   Log.info("opScalar: " + outputs.opScalar.toString() + " = " + (outputs.damageDelta * (outputs.opScalar / inputs.opLevels)).toString())
-  final = (outputs.dice.base + outputs.damageDelta * outputs.upScalar + outputs.damageDelta * outputs.opScalar)
+  final = (outputs.dice.base / cooldown + outputs.damageDelta * outputs.upScalar + outputs.damageDelta * outputs.opScalar)
   Log.info("final: " + final.toString())
-  Log.info("dps: " + (outputs.dice.base * cooldown).toString() + " -> " + (final * cooldown).toString())
+  Log.info("dps: " + (outputs.dice.base / cooldown).toString() + " -> " + (final / cooldown).toString())
 
   cooldown = 1.5
   outputs = calculateStandardDamageValues(inputs, 2, cooldown)
@@ -135,9 +119,9 @@ public function calculateStandardDamageValues(stdDmgInputs inputs, int level, re
   Log.info("dice: " + outputs.dice.toString())
   Log.info("upScalar: " + outputs.upScalar.toString() + " = " + (outputs.damageDelta * (outputs.upScalar / inputs.upLevels)).toString())
   Log.info("opScalar: " + outputs.opScalar.toString() + " = " + (outputs.damageDelta * (outputs.opScalar / inputs.opLevels)).toString())
-  final = (outputs.dice.base + outputs.damageDelta * outputs.upScalar + outputs.damageDelta * outputs.opScalar)
+  final = (outputs.dice.base / cooldown + outputs.damageDelta * outputs.upScalar + outputs.damageDelta * outputs.opScalar)
   Log.info("final: " + final.toString())
-  Log.info("dps: " + (outputs.dice.base * cooldown).toString() + " -> " + (final * cooldown).toString())
+  Log.info("dps: " + (outputs.dice.base / cooldown).toString() + " -> " + (final / cooldown).toString())
   
 
 
