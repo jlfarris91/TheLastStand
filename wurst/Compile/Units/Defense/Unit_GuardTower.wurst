@@ -19,21 +19,27 @@ import UnitPropertiesComponent
 import TlsUpgradeDefinition
 import Icons
 import RealExtensions
+import Combat
 
 public TlsBuildingDefinition array[3] g_guardTowerDefinition
 
 rangeReal zombieHealthRange = rangeReal(120, 2000)
 
-constant rangeReal array[3] GUARD_TOWER_ATTACK_COOLDOWN               = [rangeReal(2.0, 2.0), rangeReal(1.5, 1.5), rangeReal(1.0, 1.0)]
-constant rangeReal array[3] GUARD_TOWER_ATTACK_DPS                    = [rangeReal(131, 240), rangeReal(250, 450), rangeReal(460, 660)]
-constant string array[3]    GUARD_TOWER_NAME                          = ["Guard Tower I", "Guard Tower II", "Guard Tower III"]
-constant int                GUARD_TOWER_ATTACK_UPGRADE_COUNT          = 5
-constant real               GUARD_TOWER_ZOMBIE_TTK_INITIAL            = 3.0
-constant real               GUARD_TOWER_ZOMBIE_TTK_UPGRADED           = 2.0
-constant real               GUARD_TOWER_OPERATOR_ATTACK_BONUS_SCALAR  = 0.5
-constant int                ACTIVE_SIGHT_ABILITY_ID                   = compiletime(ABIL_ID_GEN.next())
-constant int array[3]       GUARD_TOWER_ACTIVE_ICON_ABILITY_ID        = [compiletime(ABIL_ID_GEN.next()), compiletime(ABIL_ID_GEN.next()), compiletime(ABIL_ID_GEN.next())]
-constant int array[3]       GUARD_TOWER_INACTIVE_ICON_ABILITY_ID      = [compiletime(ABIL_ID_GEN.next()), compiletime(ABIL_ID_GEN.next()), compiletime(ABIL_ID_GEN.next())]
+constant real array[3]          GUARD_TOWER_ATTACK_COOLDOWN               = [2.0, 1.75, 1.5]
+constant int                    GUARD_TOWER_UPGRADE_LEVELS                = 5
+constant stdDmgInputs           GUARD_TOWER_STD_DMG_INPUTS                = stdDmgInputs(
+  3, 0.75, 0.25, GUARD_TOWER_UPGRADE_LEVELS, 0.5, 10, 0.5, 1.25, 1.5
+)
+constant stdDmgOutputs array[3] GUARD_TOWER_STD_DMG_OUTPUTS               = [
+  calculateStandardDamageValues(GUARD_TOWER_STD_DMG_INPUTS, 0, GUARD_TOWER_ATTACK_COOLDOWN[0]),
+  calculateStandardDamageValues(GUARD_TOWER_STD_DMG_INPUTS, 1, GUARD_TOWER_ATTACK_COOLDOWN[1]),
+  calculateStandardDamageValues(GUARD_TOWER_STD_DMG_INPUTS, 2, GUARD_TOWER_ATTACK_COOLDOWN[2])
+]
+
+constant string array[3]        GUARD_TOWER_NAME                          = ["Guard Tower I", "Guard Tower II", "Guard Tower III"]
+constant int                    ACTIVE_SIGHT_ABILITY_ID                   = compiletime(ABIL_ID_GEN.next())
+constant int array[3]           GUARD_TOWER_ACTIVE_ICON_ABILITY_ID        = [compiletime(ABIL_ID_GEN.next()), compiletime(ABIL_ID_GEN.next()), compiletime(ABIL_ID_GEN.next())]
+constant int array[3]           GUARD_TOWER_INACTIVE_ICON_ABILITY_ID      = [compiletime(ABIL_ID_GEN.next()), compiletime(ABIL_ID_GEN.next()), compiletime(ABIL_ID_GEN.next())]
 
 // ============================================================================
 public class GuardTowerDefinition extends TlsBuildingDefinition
@@ -82,38 +88,33 @@ public class GuardTowerDefinition extends TlsBuildingDefinition
     setTooltipBasic("Build Guard Tower")
 
   // --------------------------------------------------------------------------
-  static function getAttack1DpsRangeUnscaled(int level, int numLevels, real unlockGameProgress) returns real
-    let t = unlockGameProgress + (1.0 - unlockGameProgress) * level / numLevels
-    return zombieHealthRange.lerp(t)
+  static function getAttack1Dps(int towerLevel, int upgradeLevel, int operatorLevel) returns rangeReal
+    let baseDmg = GUARD_TOWER_STD_DMG_OUTPUTS[towerLevel].dice.base
+    let finalDmg = baseDmg
+      + upgradeLevel * GUARD_TOWER_STD_DMG_OUTPUTS[towerLevel].damageDelta * GUARD_TOWER_STD_DMG_OUTPUTS[towerLevel].upScalar
+      + operatorLevel * GUARD_TOWER_STD_DMG_OUTPUTS[towerLevel].damageDelta * GUARD_TOWER_STD_DMG_OUTPUTS[towerLevel].opScalar
+    let cooldown = getAttack1CooldownTime(towerLevel)
+    return rangeReal(baseDmg.toReal(), finalDmg) * cooldown
 
   // --------------------------------------------------------------------------
-  static function getAttack1Dps(int towerLevel, real timeToKill) returns real
-    let timeToKillScalar = 1.0 / (1.5 * timeToKill)
-    return getAttack1DpsRangeUnscaled(towerLevel, 3, 0.25) * timeToKillScalar
+  static function getUpgradeBonusDamageScalar(int towerLevel, int upgradeLevel) returns real
+    return upgradeLevel * GUARD_TOWER_STD_DMG_OUTPUTS[towerLevel].upScalar / GUARD_TOWER_STD_DMG_INPUTS.upLevels
+
+  // --------------------------------------------------------------------------
+  static function getOperatorBonusDamageScalar(int towerLevel, int operatorLevel) returns real
+    return operatorLevel * GUARD_TOWER_STD_DMG_OUTPUTS[towerLevel].opScalar / GUARD_TOWER_STD_DMG_INPUTS.opLevels
 
   // --------------------------------------------------------------------------
   static function getAttack1DamageDice(int towerLevel) returns dice
-    let dpsStart = getAttack1Dps(towerLevel, GUARD_TOWER_ZOMBIE_TTK_INITIAL)
-    let dpsEnd = getAttack1Dps(towerLevel, GUARD_TOWER_ZOMBIE_TTK_UPGRADED)
-    let sidesPerDie = ((dpsEnd - dpsStart) / GUARD_TOWER_ATTACK_UPGRADE_COUNT).floor()
-    let base = (dpsStart / getAttack1CooldownTime(towerLevel)).floor() - sidesPerDie
-    return dice(base, 1, sidesPerDie)
+    return GUARD_TOWER_STD_DMG_OUTPUTS[towerLevel].dice
 
   // --------------------------------------------------------------------------
   static function getAttack1CooldownTime(int towerLevel) returns real
-    return GUARD_TOWER_ATTACK_COOLDOWN[clamp(towerLevel, 0, 2)].min
-
-  // --------------------------------------------------------------------------
-  static function getAttack1OperatorAttackBonusPerc01(int operatorLevel) returns real
-    return 0.05 * operatorLevel
+    return GUARD_TOWER_ATTACK_COOLDOWN[clamp(towerLevel, 0, 2)]
 
   // --------------------------------------------------------------------------
   static function getAttack1OperatorAttackBonus(int towerLevel, int operatorLevel) returns int
-    // let diceStart = getAttack1DamageDice(towerLevel)
-    // let diceEnd = getAttack1DamageDice(towerLevel + 1)
-    // let t = parameterize(1, 10, operatorLevel) * GUARD_TOWER_OPERATOR_ATTACK_BONUS_SCALAR
-    // return ((diceEnd.base - diceStart.base) * t).floor()
-    return (getAttack1DamageDice(towerLevel).base * getAttack1OperatorAttackBonusPerc01(operatorLevel)).floor()
+    return (GUARD_TOWER_STD_DMG_OUTPUTS[towerLevel].dice.base * getOperatorBonusDamageScalar(towerLevel, operatorLevel)).floor()
 
 // ============================================================================
 @compiletime function createUnit()
@@ -187,7 +188,7 @@ public class GuardTowerDefinition extends TlsBuildingDefinition
   for i = 0 to 2
     createWorkstationAbilities(i)
 
-  new TlsUpgradeDefinition(TlsUpgradeIds.guardTowerAttackDamage, GUARD_TOWER_ATTACK_UPGRADE_COUNT)
+  new TlsUpgradeDefinition(TlsUpgradeIds.guardTowerAttackDamage, GUARD_TOWER_UPGRADE_LEVELS)
     ..setButtonPositionX(2)
     ..setButtonPositionY(1)
     ..addEffectAttackDiceBonus(1, 1)
@@ -231,7 +232,7 @@ function createWorkstationAbilities(int towerLevel)
   let inactiveWorkstationIconTooltipBuilder = new WorkstationIconTooltipBuilder(false)..setDescription(g_guardTowerDefinition[towerLevel].getTooltipExtended())
 
   let properties = new WorkstationOperatorLevelBonusesTooltipItem()
-  ..addValue(lvl -> "Damage increased by {0}".format(GuardTowerDefinition.getAttack1OperatorAttackBonusPerc01(lvl).toPercentageString01()))
+  ..addValue(lvl -> "Damage increased by {0}".format(GuardTowerDefinition.getOperatorBonusDamageScalar(towerLevel, lvl).toPercentageString01()))
   activeWorkstationIconTooltipBuilder.addItem(properties)
 
   new AbilityActiveWorkstationIconDefinition(GUARD_TOWER_ACTIVE_ICON_ABILITY_ID[towerLevel])
@@ -414,35 +415,33 @@ init
 // ============================================================================
 @test function asdf()
 
-  Log.info(GuardTowerDefinition.getAttack1Dps(0, GUARD_TOWER_ZOMBIE_TTK_INITIAL).toString())
-  Log.info(GuardTowerDefinition.getAttack1Dps(0, GUARD_TOWER_ZOMBIE_TTK_UPGRADED).toString())
-  Log.info(GuardTowerDefinition.getAttack1Dps(1, GUARD_TOWER_ZOMBIE_TTK_INITIAL).toString())
-  Log.info(GuardTowerDefinition.getAttack1Dps(1, GUARD_TOWER_ZOMBIE_TTK_UPGRADED).toString())
-  Log.info(GuardTowerDefinition.getAttack1Dps(2, GUARD_TOWER_ZOMBIE_TTK_INITIAL).toString())
-  Log.info(GuardTowerDefinition.getAttack1Dps(2, GUARD_TOWER_ZOMBIE_TTK_UPGRADED).toString())
+  let inputs = GUARD_TOWER_STD_DMG_INPUTS
 
-  var dice = GuardTowerDefinition.getAttack1DamageDice(0)
-  Log.info("Before: " + dice.toString() + " -> " + dice.min().toString() + "-" + dice.max().toString() + " " + (dice.toRange() * GuardTowerDefinition.getAttack1CooldownTime(0)).toString() + "dps")
+  var cooldown = GUARD_TOWER_ATTACK_COOLDOWN[0]
+  var outputs = GUARD_TOWER_STD_DMG_OUTPUTS[0]
+  Log.info("dice: " + outputs.dice.toString())
+  Log.info("upScalar: " + outputs.upScalar.toString() + " = " + (outputs.damageDelta * (outputs.upScalar / inputs.upLevels)).toString())
+  Log.info("opScalar: " + outputs.opScalar.toString() + " = " + (outputs.damageDelta * (outputs.opScalar / inputs.opLevels)).toString())
+  var final = (outputs.dice.base + outputs.damageDelta * outputs.upScalar + outputs.damageDelta * outputs.opScalar)
+  Log.info("final: " + final.toString())
+  Log.info("dps: " + (outputs.dice.base * cooldown).toString() + " -> " + (final * cooldown).toString())
 
-  dice.numberOfDice += GUARD_TOWER_ATTACK_UPGRADE_COUNT
-  Log.info("After: " + dice.toString() + " -> " + dice.min().toString() + "-" + dice.max().toString() + " " + (dice.toRange() * GuardTowerDefinition.getAttack1CooldownTime(0)).toString() + "dps")
+  cooldown = GUARD_TOWER_ATTACK_COOLDOWN[1]
+  outputs = GUARD_TOWER_STD_DMG_OUTPUTS[1]
   Log.info("")
+  Log.info("dice: " + outputs.dice.toString())
+  Log.info("upScalar: " + outputs.upScalar.toString() + " = " + (outputs.damageDelta * (outputs.upScalar / inputs.upLevels)).toString())
+  Log.info("opScalar: " + outputs.opScalar.toString() + " = " + (outputs.damageDelta * (outputs.opScalar / inputs.opLevels)).toString())
+  final = (outputs.dice.base + outputs.damageDelta * outputs.upScalar + outputs.damageDelta * outputs.opScalar)
+  Log.info("final: " + final.toString())
+  Log.info("dps: " + (outputs.dice.base * cooldown).toString() + " -> " + (final * cooldown).toString())
 
-  dice = GuardTowerDefinition.getAttack1DamageDice(1)
-  Log.info("Before: " + dice.toString() + " -> " + dice.min().toString() + "-" + dice.max().toString() + " " + (dice.toRange() * GuardTowerDefinition.getAttack1CooldownTime(1)).toString() + "dps")
-  
-  dice.numberOfDice += GUARD_TOWER_ATTACK_UPGRADE_COUNT
-  Log.info("After: " + dice.toString() + " -> " + dice.min().toString() + "-" + dice.max().toString() + " " + (dice.toRange() * GuardTowerDefinition.getAttack1CooldownTime(1)).toString() + "dps")
+  cooldown = GUARD_TOWER_ATTACK_COOLDOWN[2]
+  outputs = GUARD_TOWER_STD_DMG_OUTPUTS[2]
   Log.info("")
-
-  dice = GuardTowerDefinition.getAttack1DamageDice(2)
-  Log.info("Before: " + dice.toString() + " -> " + dice.min().toString() + "-" + dice.max().toString() + " " + (dice.toRange() * GuardTowerDefinition.getAttack1CooldownTime(2)).toString() + "dps")
-
-  dice.numberOfDice += GUARD_TOWER_ATTACK_UPGRADE_COUNT
-  Log.info("After: " + dice.toString() + " -> " + dice.min().toString() + "-" + dice.max().toString() + " " + (dice.toRange() * GuardTowerDefinition.getAttack1CooldownTime(2)).toString() + "dps")
-  Log.info("")
-
-  for i = 1 to 10
-    Log.info(i.toString() + ": " + GuardTowerDefinition.getAttack1OperatorAttackBonus(0, i).toString())
-    Log.info(i.toString() + ": " + GuardTowerDefinition.getAttack1OperatorAttackBonus(1, i).toString())
-    Log.info(i.toString() + ": " + GuardTowerDefinition.getAttack1OperatorAttackBonus(2, i).toString())
+  Log.info("dice: " + outputs.dice.toString())
+  Log.info("upScalar: " + outputs.upScalar.toString() + " = " + (outputs.damageDelta * (outputs.upScalar / inputs.upLevels)).toString())
+  Log.info("opScalar: " + outputs.opScalar.toString() + " = " + (outputs.damageDelta * (outputs.opScalar / inputs.opLevels)).toString())
+  final = (outputs.dice.base + outputs.damageDelta * outputs.upScalar + outputs.damageDelta * outputs.opScalar)
+  Log.info("final: " + final.toString())
+  Log.info("dps: " + (outputs.dice.base * cooldown).toString() + " -> " + (final * cooldown).toString())

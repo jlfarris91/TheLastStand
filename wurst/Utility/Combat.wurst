@@ -1,0 +1,146 @@
+package Combat
+import Range
+import ObjEditingCommons
+import GameConstants
+import Dice
+
+// public enum ArmorType
+// 	Small
+// 	Medium
+// 	Large
+// 	Fortified
+// 	Normal
+// 	Hero
+// 	Divine
+// 	Unarmored
+
+// public enum AttackType
+// 	Unknown
+// 	Normal
+// 	Pierce
+// 	Siege
+// 	Spells
+// 	Chaos
+// 	Magic
+// 	Hero
+
+// This needs to match the table in imports\war3mapMisc.txt
+constant real array damageScalarTable = [
+  //              Small   Medium  Large   Fort    Normal  Hero  Divine  Unarm
+  /*Normal  */    1.0,    1.5,    1.0,    0.7,    1.0,    1.0,  0.05,   1.0,
+  /*Pierce  */    2.0,    0.75,   1.0,    0.35,   1.0,    0.5,  0.05,   1.5,
+  /*Siege   */    1.0,    0.5,    1.0,    1.5,    1.0,    0.5,  0.05,   1.5,
+  /*Spells  */    1.0,    1.0,    1.0,    1.0,    1.0,    0.75, 0.05,   1.0,
+  /*Chaos   */    1.0,    1.0,    1.0,    1.0,    1.0,    1.0,  1.0,    1.0,
+  /*Magic   */    1.25,   0.75,   2.0,    0.35,   1.0,    0.5,  0.05,   1.0,
+  /*Hero    */    1.0,    1.0,    1.0,    0.5,    1.0,    1.0,  0.05,   1.0
+]
+
+// ============================================================================
+/** Gets the amount of damage to kill a tier 1 zombie in 1 second */
+public function getStandardDPS(real gameProgress01, AttackType attackType) returns real
+  return getStandardDPS(ZOMBIE_TIER1_HEALTH_RANGE, gameProgress01, ZOMBIE_TIER1_ARMOR_TYPE, attackType)
+
+// ============================================================================
+/** Gets the amount of damage to kill a tier 1 zombie in 1 second */
+public function getStandardDPS(real gameProgress01, real attackDamageScalar) returns real
+  return getStandardDPS(ZOMBIE_TIER1_HEALTH_RANGE, gameProgress01, attackDamageScalar)
+
+// ============================================================================
+/** Gets the amount of damage to kill a unit in 1 second */
+public function getStandardDPS(rangeInt healthRange, real gameProgress01, ArmorType armorType, AttackType attackType) returns real
+  let scalar = getDamageScalar(armorType, attackType)
+  if (scalar == 0.0)
+    return 0.0
+  return healthRange.lerp(gameProgress01) * (1.0 / scalar)
+
+// ============================================================================
+/** Gets the amount of damage to kill a unit in 1 second */
+public function getStandardDPS(rangeInt healthRange, real gameProgress01, real attackDamageScalar) returns real
+  if (attackDamageScalar == 0.0)
+    return 0.0
+  return healthRange.lerp(gameProgress01) * (1.0 / attackDamageScalar)
+
+// ============================================================================
+public function getDamageScalar(ArmorType armorType, AttackType attackType) returns real
+  if (attackType == AttackType.Unknown)
+    return 0.0
+  return damageScalarTable[(armorType castTo int) + ((attackType castTo int) - 1) * 8]
+
+// ============================================================================
+public function calculateStandardDpsRange(int level, int levels, real gameProgressStart, real attackDamageScalar, real followThroughScalar) returns rangeReal
+  let tCurr = gameProgressStart + (1.0 - gameProgressStart) * (level / levels.toReal())
+  let tNext = gameProgressStart + (1.0 - gameProgressStart) * ((level + 1) / levels.toReal())
+  let dpsBase = getStandardDPS(tCurr, attackDamageScalar)
+  let dpsNext = getStandardDPS(tNext, attackDamageScalar)
+  let dpsDelta = (dpsNext - dpsBase) * followThroughScalar
+  return rangeReal(dpsBase, dpsBase + dpsDelta)
+
+// ============================================================================
+public function calculateStandardDice(rangeReal dpsRange, real dpsScalar, int upgradeLevels, real upgradeScalar, real cooldown) returns dice
+  let dpsRangeScaled = dpsRange * dpsScalar
+  let damage = (dpsRangeScaled.min / cooldown).floor()
+  let sidesPerDie = (dpsRangeScaled.getLength() * (upgradeScalar / upgradeLevels)).floor()
+  return dice(damage, 0, sidesPerDie)
+
+// ============================================================================
+public tuple stdDmgInputs(int levels, real dpsScalar, real gameProgressStart, int upLevels, real upWeight, int opLevels, real opWeight, real followThroughScalar, real attackDamageScalar)
+public tuple stdDmgOutputs(dice dice, real damageDelta, real upScalar, real opScalar)
+
+// ============================================================================
+public function calculateStandardDamageValues(stdDmgInputs inputs, int level, real cooldown) returns stdDmgOutputs
+  let tCurr = inputs.gameProgressStart + (1.0 - inputs.gameProgressStart) * (level / inputs.levels.toReal())
+  let tNext = inputs.gameProgressStart + (1.0 - inputs.gameProgressStart) * ((level + 1) / inputs.levels.toReal())
+  let dpsBase = getStandardDPS(tCurr, inputs.attackDamageScalar)
+  let dpsNext = getStandardDPS(tNext, inputs.attackDamageScalar)
+  let dpsBaseScaled = dpsBase * inputs.dpsScalar
+  let dpsNextScaled = dpsNext * inputs.dpsScalar
+  let dpsDeltaScaled = (dpsNextScaled - dpsBaseScaled) * inputs.followThroughScalar
+  let upScalar = inputs.upWeight / (inputs.upWeight + inputs.opWeight)
+  let opScalar = inputs.opWeight / (inputs.upWeight + inputs.opWeight)
+  let damageBase = (dpsBaseScaled / cooldown).floor()
+  let damageDelta = dpsDeltaScaled / cooldown
+  let sidesPerDie = (damageDelta * (upScalar / inputs.upLevels)).floor()
+  let dice = dice(damageBase, 0, sidesPerDie)
+  return stdDmgOutputs(dice, damageDelta, upScalar, opScalar)
+
+// ============================================================================
+@test function asdf()
+
+  let inputs = stdDmgInputs(3, 0.75, 0.25, 5, 0.5, 10, 0.5, 1.25, 1.5)
+  // let inputs = inputs(3, 1.0, 0.0, 5, 0.5, 10, 0.25, 1.0, 1.0)
+
+  var cooldown = 2.0
+  var outputs = calculateStandardDamageValues(inputs, 0, cooldown)
+  Log.info("dice: " + outputs.dice.toString())
+  Log.info("upScalar: " + outputs.upScalar.toString() + " = " + (outputs.damageDelta * (outputs.upScalar / inputs.upLevels)).toString())
+  Log.info("opScalar: " + outputs.opScalar.toString() + " = " + (outputs.damageDelta * (outputs.opScalar / inputs.opLevels)).toString())
+  var final = (outputs.dice.base + outputs.damageDelta * outputs.upScalar + outputs.damageDelta * outputs.opScalar)
+  Log.info("final: " + final.toString())
+  Log.info("dps: " + (outputs.dice.base * cooldown).toString() + " -> " + (final * cooldown).toString())
+
+  cooldown = 1.75
+  outputs = calculateStandardDamageValues(inputs, 1, cooldown)
+  Log.info("")
+  Log.info("dice: " + outputs.dice.toString())
+  Log.info("upScalar: " + outputs.upScalar.toString() + " = " + (outputs.damageDelta * (outputs.upScalar / inputs.upLevels)).toString())
+  Log.info("opScalar: " + outputs.opScalar.toString() + " = " + (outputs.damageDelta * (outputs.opScalar / inputs.opLevels)).toString())
+  final = (outputs.dice.base + outputs.damageDelta * outputs.upScalar + outputs.damageDelta * outputs.opScalar)
+  Log.info("final: " + final.toString())
+  Log.info("dps: " + (outputs.dice.base * cooldown).toString() + " -> " + (final * cooldown).toString())
+
+  cooldown = 1.5
+  outputs = calculateStandardDamageValues(inputs, 2, cooldown)
+  Log.info("")
+  Log.info("dice: " + outputs.dice.toString())
+  Log.info("upScalar: " + outputs.upScalar.toString() + " = " + (outputs.damageDelta * (outputs.upScalar / inputs.upLevels)).toString())
+  Log.info("opScalar: " + outputs.opScalar.toString() + " = " + (outputs.damageDelta * (outputs.opScalar / inputs.opLevels)).toString())
+  final = (outputs.dice.base + outputs.damageDelta * outputs.upScalar + outputs.damageDelta * outputs.opScalar)
+  Log.info("final: " + final.toString())
+  Log.info("dps: " + (outputs.dice.base * cooldown).toString() + " -> " + (final * cooldown).toString())
+  
+
+
+
+
+
