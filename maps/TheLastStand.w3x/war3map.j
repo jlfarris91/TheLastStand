@@ -106,6 +106,7 @@ function CreateUnitsForPlayer0 takes nothing returns nothing
     local trigger t
     local real life
 
+    set u=BlzCreateUnitWithSkin(p, 'h00F', - 2796.8, - 9185.0, 263.709, 'h00F')
     set u=BlzCreateUnitWithSkin(p, 'h00J', - 334.5, 1988.2, 318.998, 'h00J')
     call SetUnitColor(u, ConvertPlayerColor(4))
     set u=BlzCreateUnitWithSkin(p, 'h00J', - 2407.0, 6167.1, 115.810, 'h00J')
@@ -213,7 +214,6 @@ function CreateUnitsForPlayer20 takes nothing returns nothing
     set u=BlzCreateUnitWithSkin(p, 'h00G', 1620.5, 1309.7, 1.717, 'h00G')
     set u=BlzCreateUnitWithSkin(p, 'h00C', 1464.0, 5549.4, 52.417, 'h00C')
     set u=BlzCreateUnitWithSkin(p, 'h00C', - 2057.1, 10002.9, 329.050, 'h00C')
-    set u=BlzCreateUnitWithSkin(p, 'h01J', - 3069.3, - 10206.4, 359.782, 'h01J')
     set u=BlzCreateUnitWithSkin(p, 'h01J', 1663.7, - 4093.3, 0.000, 'h01J')
     set u=BlzCreateUnitWithSkin(p, 'h01J', 3319.0, - 2752.7, 90.000, 'h01J')
     set u=BlzCreateUnitWithSkin(p, 'h01J', - 10720.0, 8992.0, 270.000, 'h01J')
@@ -278,10 +278,8 @@ function CreateUnitsForPlayer20 takes nothing returns nothing
     call SetUnitColor(u, ConvertPlayerColor(0))
     set u=BlzCreateUnitWithSkin(p, 'h00J', - 5045.9, - 8979.0, 232.412, 'h00J')
     call SetUnitColor(u, ConvertPlayerColor(4))
-    set u=BlzCreateUnitWithSkin(p, 'h00K', - 3725.6, - 10836.7, 98.913, 'h00K')
+    set u=BlzCreateUnitWithSkin(p, 'h00K', - 3456.1, - 10500.5, 98.913, 'h00K')
     call SetUnitColor(u, ConvertPlayerColor(0))
-    set u=BlzCreateUnitWithSkin(p, 'h00J', - 1924.7, - 9778.2, 50.703, 'h00J')
-    call SetUnitColor(u, ConvertPlayerColor(4))
     set u=BlzCreateUnitWithSkin(p, 'h00J', 797.3, - 8705.0, 22.358, 'h00J')
     call SetUnitColor(u, ConvertPlayerColor(4))
     set u=BlzCreateUnitWithSkin(p, 'h00J', 719.7, - 10166.0, 22.358, 'h00J')
