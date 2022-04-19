@@ -1,25 +1,25 @@
-package NecromancerComponent
+package SummonerComponent
 import UnitComponent
-import TlsAbilityIds
-import ClosureTimers
-import TlsUnitIds
-import ObjectIds
-import RegisterEvents
-import UndeadTargetingComponent
-import ErrorHandling
 import WaveSpawning
-import Trace
-
-constant string RAISEDEAD_IMMEDIATEORDERSTR = "instant" // don't ask me why
+import ErrorHandling
+import ObjectIds
+import UndeadTargetingComponent
+import RegisterEvents
 
 // ============================================================================
-public class NecromancerComponent extends UnitComponent
-  private CallbackPeriodic m_castTimer
+public class SummonerComponent extends UnitComponent
   private SpawnWaveContext m_spawnedContext
+  private int array[3] m_summonerUnitTypes
+  private int m_abilityId
 
   // --------------------------------------------------------------------------
   construct (IUnitMetadata owner)
     super(owner)
+    m_spawnedContext = null
+    m_summonerUnitTypes[0] = 0
+    m_summonerUnitTypes[1] = 0
+    m_summonerUnitTypes[2] = 0
+    m_abilityId = 0
 
   // --------------------------------------------------------------------------
   ondestroy
@@ -40,51 +40,51 @@ public class NecromancerComponent extends UnitComponent
     m_spawnedContext = contextToClone.clone()
 
   // --------------------------------------------------------------------------
+  function setSummonerUnitTypes(int tier1, int tier2, int tier3)
+    m_summonerUnitTypes[0] = tier1
+    m_summonerUnitTypes[1] = tier2
+    m_summonerUnitTypes[2] = tier3
+
+  // --------------------------------------------------------------------------
+  function setAbilityId(int abilityId)
+    m_abilityId = abilityId
+
+  // --------------------------------------------------------------------------
   override function onEnabled()
     super.onEnabled()
 
     let ownerUnit = getOwnerUnit()
-    if (not ownerUnit.hasAbility(TlsAbilityIds.necromancerRaiseDead))
-      ownerUnit.addAbility(TlsAbilityIds.necromancerRaiseDead)
+    if (not ownerUnit.hasAbility(m_abilityId))
+      ownerUnit.addAbility(m_abilityId)
     
-    switch (ownerUnit.getTypeId())
-      case TlsUnitIds.Undead.necromancers[0]
-        ownerUnit.setAbilityLevel(TlsAbilityIds.necromancerRaiseDead, 1)
-      case TlsUnitIds.Undead.necromancers[1]
-        ownerUnit.setAbilityLevel(TlsAbilityIds.necromancerRaiseDead, 2)
-      case TlsUnitIds.Undead.necromancers[2]
-        ownerUnit.setAbilityLevel(TlsAbilityIds.necromancerRaiseDead, 3)
-
-    let lvl = ownerUnit.getAbilityLevel(TlsAbilityIds.necromancerRaiseDead)
-    let cooldown = ownerUnit.getAbilityCooldown(TlsAbilityIds.necromancerRaiseDead, lvl) + 1.0
-
-    m_castTimer = doPeriodically(cooldown) (CallbackPeriodic cb) ->
-      Trace.trace("Necromancer.summon")
-      if (ownerUnit != null and ownerUnit.isAlive())
-        ownerUnit.issueImmediateOrder(RAISEDEAD_IMMEDIATEORDERSTR)
-
-  // --------------------------------------------------------------------------
-  override function onDisabled()
-    super.onDisabled()
-
-    let ownerUnit = getOwnerUnit()
-    if (ownerUnit.hasAbility(TlsAbilityIds.necromancerRaiseDead))
-      ownerUnit.removeAbility(TlsAbilityIds.necromancerRaiseDead)
-
-    if (m_castTimer != null)
-      destroy m_castTimer
-      m_castTimer = null
+    let unitTypeId = ownerUnit.getTypeId()
+    if (unitTypeId == m_summonerUnitTypes[1])
+      ownerUnit.setAbilityLevel(m_abilityId, 2)
+    else if (unitTypeId == m_summonerUnitTypes[2])
+      ownerUnit.setAbilityLevel(m_abilityId, 3)
+    else
+      ownerUnit.setAbilityLevel(m_abilityId, 1)
 
 // ============================================================================
-public function IUnitMetadata.getNecromancerComponent() returns NecromancerComponent
-  return this.getComponent(NecromancerComponent.typeId) castTo NecromancerComponent
+public function IUnitMetadata.getSummonerComponent() returns SummonerComponent
+  return this.getComponent(SummonerComponent.typeId) castTo SummonerComponent
 
 // ============================================================================
-public function IUnitMetadata.getOrAddNecromancerComponent() returns NecromancerComponent
-  var component = this.getNecromancerComponent()
+public function IUnitMetadata.getOrAddSummonerComponent() returns SummonerComponent
+  var component = this.getSummonerComponent()
   if (component == null)
-    component = this.addComponent(new NecromancerComponent(this)) castTo NecromancerComponent
+    component = this.addComponent(new SummonerComponent(this)) castTo SummonerComponent
   return component
+
+// ============================================================================
+public function unit.getSummonerComponent() returns SummonerComponent
+  let metadata = this.getMetadata()
+  return metadata != null ? metadata.getSummonerComponent() : null
+
+// ============================================================================
+public function unit.getOrAddSummonerComponent() returns SummonerComponent
+  let metadata = this.getMetadata()
+  return metadata != null ? metadata.getOrAddSummonerComponent() : null
 
 // ============================================================================
 function onUnitSummoned()
@@ -95,20 +95,20 @@ function onUnitSummoned()
   if (metadata == null)
     return
 
-  let comp = metadata.getNecromancerComponent()
+  let comp = metadata.getSummonerComponent()
   if (comp == null)
     return
 
   let spawnedContext = comp.getSpawnedContext()
   if (spawnedContext == null)
-    error("Necromancer was spawned with no spawn context!")
+    error("Summoner was spawned with no spawn context!")
     return
 
   let summonedTypeId = summoned.getTypeId()
 
   let modifier = spawnedContext.definition.getUnitModifier(summoned.getTypeId())
   if (modifier == null)
-    Log.error("No modifier for unit summoned by Necromancer of type " + summonedTypeId.toRawCode())
+    Log.error("No modifier for unit summoned of type " + summonedTypeId.toRawCode())
     return
 
   modifier.call(summoned, spawnedContext)
