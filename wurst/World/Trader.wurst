@@ -4,8 +4,8 @@ import Transform
 import ClosureTimers
 import Vector
 import UnitIndexer
-import FX
-import Gradient
+// import FX
+// import Gradient
 import ColorUtility
 import Tasks
 import LinkedList
@@ -32,12 +32,12 @@ import DisplayTextToPlayer
 import Host
 import PlayerExtensions
 
-constant int MAX_CANDIDATES = 4
+constant int MAX_CANDIDATES = 8
 
 LinkedList<TradingPost> g_tradingPosts = new LinkedList<TradingPost>()
 Vector<TradingPost> g_tradingPostsSorted = new Vector<TradingPost>()
 group g_invalidatingUnits = CreateGroup()
-GradientColorList g_debugGradient
+// GradientColorList g_debugGradient
 TaskDefinition g_updateTaskDef
 Task g_updateTask
 UpdateTraderPostTaskContext g_updateTaskContext
@@ -63,6 +63,7 @@ unit g_traderUnit
 unit g_traderHorseUnit
 constant transform g_traderLocalTransform = transform(ZERO3, ZERO3, IDENTITYQ, 1.0)
 constant transform g_traderHorseLocalTransform = transform(vec3(-32.0, -64.0, 0), ZERO3, eulerToQuat(124.0.toRadians(), 0, 0), 1.0)
+effect g_flareEffect
 
 minimapicon array g_playerHintAreaIcons
 bool array g_playerShowHintAreaIcons
@@ -75,7 +76,7 @@ constant color HINT_AREA_ICON_COLOR = Colors.gold.withoutAlpha()
 class TradingPost
   transform transform
   real dd
-  effect debug
+  // effect debug
 
 // ============================================================================
 function indexAllBaseUnits()
@@ -91,9 +92,9 @@ function indexTradingPostUnit(unit tradingPostUnit)
   let traderPost = new TradingPost()
   traderPost.transform = tradingPostUnit.getTransform()
   traderPost.dd = REAL_MAX
-  traderPost.debug = FX.createEffect("UI\\Feedback\\WaypointFlags\\WaypointFlag.mdl", traderPost.transform.pos.toVec2())
-        // ..setColor(Colors.clear)
-        ..setScale(2.0)
+  // traderPost.debug = FX.createEffect("UI\\Feedback\\WaypointFlags\\WaypointFlag.mdl", traderPost.transform.pos.toVec2())
+  //       // ..setColor(Colors.clear)
+  //       ..setScale(2.0)
   g_tradingPosts.add(traderPost)
   g_tradingPostsSorted.add(traderPost)
   tradingPostUnit.remove()
@@ -181,16 +182,16 @@ class UpdateTraderPostTaskContext
     progress.report(0.0, "Sorting ({0})...".format(sorter.getStackSize().toString()))
     return sorter.next()
 
-  // --------------------------------------------------------------------------
-  function updateDebug()
-    let size = g_tradingPostsSorted.size()
-    for i = 0 to size-1
-      let ts = g_tradingPostsSorted.get(i)
-      if (ts.dd != REAL_MAX)
-        let t = i.toReal() / (size-1)
-        ts.debug.setColor(g_debugGradient.sample(t))
-      else
-        ts.debug.setColor(Colors.black)
+  // // --------------------------------------------------------------------------
+  // function updateDebug()
+  //   let size = g_tradingPostsSorted.size()
+  //   for i = 0 to size-1
+  //     let ts = g_tradingPostsSorted.get(i)
+  //     if (ts.dd != REAL_MAX)
+  //       let t = i.toReal() / (size-1)
+  //       ts.debug.setColor(g_debugGradient.sample(t))
+  //     else
+  //       ts.debug.setColor(Colors.black)
 
 // ============================================================================
 public class TraderPostDebugger extends DebuggerRealtimeUpdateFrame
@@ -305,6 +306,8 @@ function onNightStart()
     g_traderUnit.hide()
     g_traderHorseUnit.hide()
 
+  destroyFlareEffect()
+
 // ============================================================================
 function showTraderHintArea(player p, bool show)
 
@@ -362,11 +365,26 @@ function onNoon()
   for p in g_PlayingHumanPlayers
     showTraderHintArea(p, true)
 
+  createFlareEffect(g_traderUnit.getPos())
+
 // ============================================================================
 function onNoonThirty()
 
   for p in g_PlayingHumanPlayers
     showTraderHintArea(p, false)
+
+  destroyFlareEffect()
+
+// ============================================================================
+function createFlareEffect(vec2 pos)
+  destroyFlareEffect()
+  g_flareEffect = addEffect("Abilities\\Spells\\Human\\Flare\\FlareCaster.mdl", pos)
+
+// ============================================================================
+function destroyFlareEffect()
+  if (g_flareEffect != null)
+    g_flareEffect.destr()
+    g_flareEffect = null
 
 // ============================================================================
 function checkIfTraderHasBeenFound()
@@ -400,12 +418,12 @@ init
         builder
         ..executeWhile2<UpdateTraderPostTaskContext>("Update", ANIMATION_PERIOD, 1, (Task task, UpdateTraderPostTaskContext context) -> context.updateNextTraderPost())
         ..executeWhile2<UpdateTraderPostTaskContext>("Sort", ANIMATION_PERIOD, 1, (Task task, UpdateTraderPostTaskContext context) -> context.stepSort())
-        ..execute<UpdateTraderPostTaskContext>((Task task, UpdateTraderPostTaskContext context) -> context.updateDebug())
+        // ..execute<UpdateTraderPostTaskContext>((Task task, UpdateTraderPostTaskContext context) -> context.updateDebug())
       end)
 
-  g_debugGradient = new GradientColorList((a, b, t) -> a.lerp(b, t), Colors.black)
-  ..addEntry(0.0, Colors.red)
-  ..addEntry(1.0, Colors.green)
+  // g_debugGradient = new GradientColorList((a, b, t) -> a.lerp(b, t), Colors.black)
+  // ..addEntry(0.0, Colors.red)
+  // ..addEntry(1.0, Colors.green)
 
   onUnitIndex() () ->
     let indexingUnit = getIndexingUnit()
