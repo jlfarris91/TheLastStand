@@ -31,6 +31,7 @@ import Range
 import DisplayTextToPlayer
 import Host
 import PlayerExtensions
+import MainItemLibrary
 
 constant int MAX_CANDIDATES = 8
 
@@ -71,6 +72,8 @@ string array g_playerHintAreaListenerName
 bool array g_playerHasFoundTrader
 bool array g_playerHintRevealed
 constant color HINT_AREA_ICON_COLOR = Colors.gold.withoutAlpha()
+
+Vector<int> g_stockedItemTypeIds = new Vector<int>()
 
 // ============================================================================
 class TradingPost
@@ -267,6 +270,8 @@ function selectNextTradingPost()
     g_playerHasFoundTrader[p.getId()] = false
     g_playerHintRevealed[p.getId()] = false
 
+  updateStock()
+
 // ============================================================================
 function onDayStart()
 
@@ -306,8 +311,6 @@ function onNightStart()
     g_traderUnit.hide()
     g_traderHorseUnit.hide()
 
-  destroyFlareEffect()
-
 // ============================================================================
 function showTraderHintArea(player p, bool show)
 
@@ -333,18 +336,50 @@ function showTraderHintArea(player p, bool show)
   g_playerHintRevealed[p.getId()] = true
 
 // ============================================================================
+function updateStock()
+
+  for itemTypeId in g_stockedItemTypeIds
+    g_traderUnit.removeItemFromStock(itemTypeId)
+  g_stockedItemTypeIds.clear()
+
+  let commonItemTypes = g_MainItemLibrary.commonSet.getRandomItemTypes(4)
+  for itemType in commonItemTypes
+    g_traderUnit.addItemToStock(itemType.id, itemType.maxStock, itemType.maxStock)
+    g_stockedItemTypeIds.add(itemType.id)
+  destroy commonItemTypes
+
+  let rareItemTypes = g_MainItemLibrary.rareSet.getRandomItemTypes(3)
+  for itemType in rareItemTypes
+    g_traderUnit.addItemToStock(itemType.id, itemType.maxStock, itemType.maxStock)
+    g_stockedItemTypeIds.add(itemType.id)
+  destroy rareItemTypes
+
+  let epicItemTypes = g_MainItemLibrary.epicSet.getRandomItemTypes(2)
+  for itemType in epicItemTypes
+    g_traderUnit.addItemToStock(itemType.id, itemType.maxStock, itemType.maxStock)
+    g_stockedItemTypeIds.add(itemType.id)
+  destroy epicItemTypes
+
+  let legendaryItemTypes = g_MainItemLibrary.legendarySet.getRandomItemTypes(1)
+  for itemType in legendaryItemTypes
+    g_traderUnit.addItemToStock(itemType.id, itemType.maxStock, itemType.maxStock)
+    g_stockedItemTypeIds.add(itemType.id)
+  destroy legendaryItemTypes  
+
+// ============================================================================
 @compiletime function createObjects()
 
   new TlsUnitDefinition(TlsUnitIds.trader, UnitIds.medivh)
-    ..setNormalAbilities(commaList(AbilityIds.invulnerable))
+    ..setNormalAbilities(commaList(AbilityIds.invulnerable, AbilityIds.selectHero, AbilityIds.shopPurchaseItem, 'Asid'))
     ..setCanFlee(false)
     ..setName("Trader")
+    ..setItemsSold("")
 
   new TlsUnitDefinition(TlsUnitIds.traderHorse, UnitIds.packhorse)
     ..setNormalAbilities(commaList(AbilityIds.invulnerable, AbilityIds.ghostVisible))
     ..setCanFlee(false)
     ..setCollisionSize(0.0)
-    ..setName("Radert")
+    ..setName("Redart")
 
 // ============================================================================
 public function setTraderHintListener(player p, bool listening, string name)
@@ -365,26 +400,13 @@ function onNoon()
   for p in g_PlayingHumanPlayers
     showTraderHintArea(p, true)
 
-  createFlareEffect(g_traderUnit.getPos())
+  flashEffect("Abilities\\Spells\\Human\\Flare\\FlareCaster.mdl", g_traderUnit.getPos())
 
 // ============================================================================
 function onNoonThirty()
 
   for p in g_PlayingHumanPlayers
     showTraderHintArea(p, false)
-
-  destroyFlareEffect()
-
-// ============================================================================
-function createFlareEffect(vec2 pos)
-  destroyFlareEffect()
-  g_flareEffect = addEffect("Abilities\\Spells\\Human\\Flare\\FlareCaster.mdl", pos)
-
-// ============================================================================
-function destroyFlareEffect()
-  if (g_flareEffect != null)
-    g_flareEffect.destr()
-    g_flareEffect = null
 
 // ============================================================================
 function checkIfTraderHasBeenFound()
