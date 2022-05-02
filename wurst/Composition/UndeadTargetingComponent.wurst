@@ -75,6 +75,9 @@ public class UndeadTargetingComponent extends UnitComponent
   protected int m_numberOfTimesFailedOrder = 0
   protected int m_numberOfTimesAttackTimerExpired = 0
   protected vec2 m_lastPos
+  
+  private UndeadTargetProvider m_targetProvider = null
+  private _handle m_targetProviderOrganicTargetsChangedCallback = INVALID_HANDLE
 
   // --------------------------------------------------------------------------
   construct(IUnitMetadata owner)
@@ -111,6 +114,13 @@ public class UndeadTargetingComponent extends UnitComponent
     m_targetUnit = null
     m_numberOfTimesFailedOrder = 0
     m_numberOfTimesAttackTimerExpired = 0
+
+    if (m_targetProvider != null)
+      let evnt = m_targetProvider.onPreferOrganicTargetsChanged()
+      if (evnt != null)
+        evnt.unregister(m_targetProviderOrganicTargetsChangedCallback)
+      m_targetProvider = null
+      m_targetProviderOrganicTargetsChangedCallback = INVALID_HANDLE
 
     unregisterUnitAwaitingOrder(getOwnerUnit())
     setTargetUnit_impl(null)
@@ -272,12 +282,16 @@ public class UndeadTargetingComponent extends UnitComponent
         // m_notes.clear()
       //recordNote("iOTP_i", "Unable to issue order ({0}), trying again".format(m_numberOfTimesFailedOrder.toString()))
       // Unable to issue the order so clear the target unit and try again later
-      setTargetUnit_impl(null)
-      issueOrderTargetingPlayer()
+      clearTargetAndIssueNewOrder()
     else
       m_numberOfTimesFailedOrder = 0
       // m_notes.add("Success!")
       m_orderFailedReason = "Success"
+
+  // --------------------------------------------------------------------------
+  function clearTargetAndIssueNewOrder()
+    setTargetUnit_impl(null)
+    issueOrderTargetingPlayer()
 
   // --------------------------------------------------------------------------
   function tryIssueOrder() returns bool
@@ -304,11 +318,32 @@ public class UndeadTargetingComponent extends UnitComponent
       return null
     let ownerUnit = getOwnerUnit()
     unit targetUnit
-    let targetProvider = getUndeadTargetProviderForPlayer(targetPlayer)
+    let targetProvider = getUndeadTargetProvider(targetPlayer)
     if (targetProvider == null)
       return null
     targetUnit = targetProvider.getClosestTargetUnit(ownerUnit.getPos(), getPreferOrganicTargets())
     return targetUnit
+
+  // --------------------------------------------------------------------------
+  function getUndeadTargetProvider(player targetPlayer) returns UndeadTargetProvider
+    let targetProvider = getUndeadTargetProviderForPlayer(targetPlayer)
+
+    if (m_targetProvider == targetProvider)
+      return targetProvider
+    
+    if (m_targetProvider != null)
+      let e = m_targetProvider.onPreferOrganicTargetsChanged()
+      if (e != null)
+        e.unregister(m_targetProviderOrganicTargetsChangedCallback)
+      m_targetProviderOrganicTargetsChangedCallback = INVALID_HANDLE
+
+    m_targetProvider = targetProvider
+
+    if (targetProvider != null)
+      m_targetProviderOrganicTargetsChangedCallback = m_targetProvider.onPreferOrganicTargetsChanged().registerDispatched(this) () ->
+        clearTargetAndIssueNewOrder()
+
+    return m_targetProvider
 
   // --------------------------------------------------------------------------
   private function setTargetUnit_impl(unit targetUnit) returns bool

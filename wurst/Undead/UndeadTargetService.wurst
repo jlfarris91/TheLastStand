@@ -10,6 +10,7 @@ import GroupUtils
 import PlayerMetadata
 import initlater UndeadTargetingComponent
 import Trace
+import Events
 
 @configurable constant public int VALID_HUMAN_STRUCTURE_TARGETS_ATTACKER_COUNT_THRESHOLD = 3
 constant real PROCESS_UPDATES_INTERVAL = 1.0
@@ -43,6 +44,8 @@ public class UndeadTargetProvider
   private group m_nonStructureTargets = CreateGroup()
   private group m_structureTargets_LowPri = CreateGroup()
   private group m_structureTargets_HighPri = CreateGroup()
+  private bool m_preferOrganicTargets = false
+  private Event m_preferOrganicTargetsChanged
 
   // --------------------------------------------------------------------------
   construct()
@@ -51,6 +54,10 @@ public class UndeadTargetProvider
   // --------------------------------------------------------------------------
   ondestroy
     unregisterHumanForceTargetCollection(this)
+
+    if (m_preferOrganicTargetsChanged != null)
+      destroy m_preferOrganicTargetsChanged
+      m_preferOrganicTargetsChanged = null
 
     m_players.destr()
     m_structureTargets.destr()
@@ -94,6 +101,22 @@ public class UndeadTargetProvider
     return -1
 
   // --------------------------------------------------------------------------
+  function setPreferOrganicTargets(bool value)
+    if (m_preferOrganicTargets != value)
+      m_preferOrganicTargets = value
+      preferOrganicTargetsChanged()
+
+  // --------------------------------------------------------------------------
+  function getPreferOrganicTargets() returns bool
+    return m_preferOrganicTargets
+
+  // --------------------------------------------------------------------------
+  function onPreferOrganicTargetsChanged() returns IEvent
+    if (m_preferOrganicTargetsChanged == null)
+      m_preferOrganicTargetsChanged = new Event()
+    return m_preferOrganicTargetsChanged
+
+  // --------------------------------------------------------------------------
   function getNonStructures() returns group
     return m_nonStructureTargets
 
@@ -112,7 +135,7 @@ public class UndeadTargetProvider
   // --------------------------------------------------------------------------
   function getRandomTargetUnit(bool preferOrganic) returns unit
 
-    if (preferOrganic and not m_nonStructureTargets.isEmpty())
+    if ((preferOrganic or m_preferOrganicTargets) and not m_nonStructureTargets.isEmpty())
       return m_nonStructureTargets.getRandomUnit()
 
     if (not m_structureTargets_HighPri.isEmpty())
@@ -129,7 +152,7 @@ public class UndeadTargetProvider
   // --------------------------------------------------------------------------
   function getClosestTargetUnit(vec2 pos, bool preferOrganic) returns unit
 
-    if (preferOrganic and not m_nonStructureTargets.isEmpty())
+    if ((preferOrganic or m_preferOrganicTargets) and not m_nonStructureTargets.isEmpty())
       return m_nonStructureTargets.getClosestUnit(pos)
 
     if (not m_structureTargets_HighPri.isEmpty())
@@ -156,6 +179,8 @@ public class UndeadTargetProvider
 
     m_nonStructureTargets.clear()
 
+    m_preferOrganicTargets = false
+
   // --------------------------------------------------------------------------
   function registerPlayerUnit(unit _unit)
 
@@ -163,6 +188,7 @@ public class UndeadTargetProvider
       if (unitIsValidTargetStructure(_unit) and not m_structureTargets.contains(_unit))
         m_structureTargets.addUnit(_unit)
         sortStructureTargetUnit(_unit)
+        updateBUTAttackEnabled(_unit, getBUTAttacksEnabled())
         
         // enumNearbyStructures(_unit.getPos())
         // addScore(1)
@@ -205,6 +231,26 @@ public class UndeadTargetProvider
     if (attackerGroup != null and attackerGroup.size() > VALID_HUMAN_STRUCTURE_TARGETS_ATTACKER_COUNT_THRESHOLD)
       priorityGroup = m_structureTargets_LowPri
     priorityGroup.addUnit(structureTarget)
+
+  // --------------------------------------------------------------------------
+  private function preferOrganicTargetsChanged()
+    updateAllBUTAttacksEnabled(getBUTAttacksEnabled())
+    if (m_preferOrganicTargetsChanged != null)
+      m_preferOrganicTargetsChanged.call()
+
+  // --------------------------------------------------------------------------
+  private function updateAllBUTAttacksEnabled(bool enabled)
+    for target in m_structureTargets
+      updateBUTAttackEnabled(target, enabled)
+
+  // --------------------------------------------------------------------------
+  private function updateBUTAttackEnabled(unit target, bool enabled)
+    if (target.isBuildingUndeadTargetWithSpecialDamage())
+      target.setFieldWeapon(UNIT_WEAPON_BF_ATTACKS_ENABLED, 0, enabled)
+
+  // --------------------------------------------------------------------------
+  private function getBUTAttacksEnabled() returns bool
+    return not m_preferOrganicTargets
 
   // --------------------------------------------------------------------------
   // private function enumNearbyStructures(vec2 pos)
