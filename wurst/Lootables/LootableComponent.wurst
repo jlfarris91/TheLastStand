@@ -14,6 +14,8 @@ import Vector
 import initlater LootOperationComponent
 import LootableUtility
 import UnitPropertiesComponent
+import SoundUtils
+import ClosureTimers
 
 constant colorA LOOTABLE_COLOR = colorA(255, 255, 255, 255)
 constant colorA LOOTED_COLOR = colorA(150, 150, 150, 150)
@@ -21,6 +23,7 @@ constant colorA LOOTED_COLOR = colorA(150, 150, 150, 150)
 constant colorA COUNTDOWN_COLOR = colorA(0, 170, 0, 255)
 
 Vector<LootableComponent> g_lootableUnits = null
+SoundDefinition array[3] g_lootFinishedSound
 
 // ============================================================================
 public class LootableComponent extends UnitComponent
@@ -216,14 +219,21 @@ public class LootableComponent extends UnitComponent
 
   // --------------------------------------------------------------------------
   function displayLootRewardText(player _player, string message)
-    if (m_lootRewardMultiplier == 1)
-      displayMessageToPlayer(
-        _player,
-        "Finished Looting : ".colorize(Colors.gold) + message)
-    else
-      displayMessageToPlayer(
-        _player,
-        "Finished Looting x{0} : ".format(m_lootRewardMultiplier.toString()).colorize(Colors.gold) + message)
+
+    let index = m_lootRewardMultiplier
+    let delay = (index - 1) * 0.3
+
+    doAfter(delay) () ->
+      if (index == 1)
+        displayMessageToPlayer(
+          _player,
+          "Finished Looting : ".colorize(Colors.gold) + message)
+      else
+        displayMessageToPlayer(
+          _player,
+          "Finished Looting x{0} : ".format(index.toString()).colorize(Colors.gold) + message)
+      g_lootFinishedSound[index.clamp(0, 2)].playForPlayer(_player)
+
     m_lootRewardMultiplier++
 
   // --------------------------------------------------------------------------
@@ -316,3 +326,8 @@ function onDayStart()
 // ============================================================================
 init
   registerDayEvent(function onDayStart)
+  
+  for i = 0 to 2
+    g_lootFinishedSound[i] = new SoundDefinition("sound\\interface\\goodjob.flac", false, false)
+    g_lootFinishedSound[i].volume = 100
+    g_lootFinishedSound[i].pitch += i * 0.1
