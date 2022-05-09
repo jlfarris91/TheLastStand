@@ -1,0 +1,224 @@
+package Crafting
+import ErrorHandling
+import Vector
+import UnitComponent
+import RegisterEvents
+import ObjectIdGenerator
+import BuildItems
+import ItemBuildUnitDefinition
+import TlsItemDefinition
+
+public tuple itemRecipeComponent(int itemTypeId, int count)
+
+// ============================================================================
+public class ItemRecipe
+  private itemRecipeComponent array[6] m_components
+  private int m_componentsCount
+  private int m_itemTypeId
+  private int m_id
+  private int m_itemBuildUnitTypeId
+  private int m_goldCost
+  private int m_lumberCost
+  private int m_buildTime
+
+  // ----------------------------------------------------------------------------
+  construct(int itemTypeId)
+    m_itemTypeId = itemTypeId
+    m_componentsCount = 0
+    m_itemBuildUnitTypeId = UNIT_ID_GEN.next()
+    BuildItems.register(m_itemTypeId, m_itemBuildUnitTypeId)
+
+  // ----------------------------------------------------------------------------
+  function getItemTypeId() returns int
+    return m_itemTypeId
+
+  // ----------------------------------------------------------------------------
+  function getItemBuildUnitTypeId() returns int
+    return m_itemBuildUnitTypeId
+
+  // ----------------------------------------------------------------------------
+  function getComponentCount() returns int
+    return m_componentsCount
+
+  // ----------------------------------------------------------------------------
+  function getComponent(int index) returns itemRecipeComponent
+    return m_components[index]
+
+  // ----------------------------------------------------------------------------
+  function add(int itemTypeId, int count)
+    if (m_componentsCount == 6)
+      error("An ItemRecipe can have a max of 6 components")
+    m_components[m_componentsCount].itemTypeId = itemTypeId
+    m_components[m_componentsCount].count = count
+    m_id = getHashCode()
+
+  // ----------------------------------------------------------------------------
+  function getGoldCost() returns int
+    return m_goldCost
+
+  // ----------------------------------------------------------------------------
+  function setGoldCost(int value)
+    m_goldCost = value
+
+  // ----------------------------------------------------------------------------
+  function getLumberCost() returns int
+    return m_lumberCost
+  
+  // ----------------------------------------------------------------------------
+  function setLumberCost(int value)
+    m_lumberCost = value
+
+  // ----------------------------------------------------------------------------
+  function getBuildTime() returns int
+    return m_buildTime
+  
+  // ----------------------------------------------------------------------------
+  function setBuildTime(int value)
+    m_buildTime = value
+
+  // ----------------------------------------------------------------------------
+  function doesUnitInventorySatisfyRecipe(unit u) returns bool
+
+    for i = 0 to m_componentsCount-1
+    //{
+      let comp = m_components[i]
+      var charges = 0
+      
+      for itm in u.inventory()
+        if (itm != null and itm.getTypeId() == comp.itemTypeId)
+          charges += itm.getCharges()
+      
+      if (charges != comp.count)
+        return false
+    //}
+
+    return true
+
+  // ----------------------------------------------------------------------------
+  function getId() returns int
+    return m_id
+
+  // ----------------------------------------------------------------------------
+  function getHashCode() returns int 
+    var id = m_itemTypeId
+    id = id.pow(m_componentsCount)
+    for i = 0 to m_componentsCount-1
+      id = id.pow(m_components[i].itemTypeId)
+      id = id.pow(m_components[i].count)
+    return id
+
+// ============================================================================
+public class ItemRecipeBook
+  private Vector<ItemRecipe> m_recipes = new Vector<ItemRecipe>()
+
+  // ----------------------------------------------------------------------------
+  ondestroy
+    for itemRecipe in m_recipes
+      destroy itemRecipe
+    m_recipes.clear()
+
+  // ----------------------------------------------------------------------------
+  function addRecipe(int itemTypeId) returns ItemRecipe
+    let itemRecipe = new ItemRecipe(itemTypeId)
+    m_recipes.add(itemRecipe)
+    return itemRecipe
+
+  // ----------------------------------------------------------------------------
+  function addRecipe(ItemRecipe itemRecipe)
+    m_recipes.add(itemRecipe)
+
+  // ----------------------------------------------------------------------------
+  function getRecipe(int id) returns ItemRecipe
+    for recipe in m_recipes
+      if (recipe.getId() == id)
+        return recipe
+    return null
+
+  // ----------------------------------------------------------------------------
+  function getRecipes(int itemTypeId, Vector<ItemRecipe> outRecipes) returns int
+    var count = 0
+    for recipe in m_recipes
+      if (recipe.getItemTypeId() == itemTypeId)
+        outRecipes.add(recipe)
+        count++
+    return count
+
+  // ----------------------------------------------------------------------------
+  function getSatisfiedRecipesFromUnitInventory(unit u, Vector<ItemRecipe> outRecipes) returns int
+    var count = 0
+    for recipe in m_recipes
+      if (recipe.doesUnitInventorySatisfyRecipe(u))
+        outRecipes.add(recipe)
+        count++
+    return count
+
+  // ----------------------------------------------------------------------------
+  function compile()
+    for recipe in m_recipes
+      ItemBuildUnitDefinition.create(getItemDefinition(recipe.getItemTypeId()), recipe.getItemBuildUnitTypeId(), "Craft")
+        ..setGoldCost(recipe.getGoldCost())
+        ..setLumberCost(recipe.getLumberCost())
+        ..setBuildTime(recipe.getBuildTime())
+
+  // ----------------------------------------------------------------------------
+  function iterator() returns VectorIterator<ItemRecipe>
+    return m_recipes.iterator()
+
+// ============================================================================
+public class CraftingComponent extends UnitComponent
+  private ItemRecipeBook m_recipeBook = null
+
+  // ----------------------------------------------------------------------------
+  construct(IUnitMetadata owner)
+    super(owner)
+
+  // ----------------------------------------------------------------------------
+  function setRecipeBook(ItemRecipeBook recipeBook)
+    if (m_recipeBook != recipeBook)
+      m_recipeBook = recipeBook
+      update()
+
+  // ----------------------------------------------------------------------------
+  function getRecipeBook() returns ItemRecipeBook
+    return m_recipeBook
+
+  // ----------------------------------------------------------------------------
+  protected function update()
+
+    let ownerUnit = getOwnerUnit()
+
+    for recipe in m_recipeBook
+      if (recipe.doesUnitInventorySatisfyRecipe(ownerUnit))
+        AddUnitToStock(ownerUnit, recipe.getItemBuildUnitTypeId(), 1, 1)
+      else
+        RemoveUnitFromStock(ownerUnit, recipe.getItemBuildUnitTypeId())
+
+// ============================================================================
+public function IUnitMetadata.getCraftingComponent() returns CraftingComponent
+  return this.getComponent(CraftingComponent.typeId) castTo CraftingComponent
+
+// ============================================================================
+public function IUnitMetadata.getOrAddCraftingComponent() returns CraftingComponent
+  var component = this.getCraftingComponent()
+  if (component == null)
+    component = this.addComponent(new CraftingComponent(this)) castTo CraftingComponent
+  return component
+
+// ============================================================================
+function onUnitPickupItem()
+  let manipulatingUnit = GetManipulatingUnit()
+  
+  let metadata = manipulatingUnit.getMetadata()
+  if (metadata == null)
+    return
+  
+  let comp = metadata.getCraftingComponent()
+  if (comp != null)
+    comp.update()
+
+// ============================================================================
+init
+
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_PICKUP_ITEM, function onUnitPickupItem)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_DROP_ITEM, function onUnitPickupItem)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_STACK_ITEM, function onUnitPickupItem)
