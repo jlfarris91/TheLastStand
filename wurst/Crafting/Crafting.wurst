@@ -3,38 +3,70 @@ import ErrorHandling
 import Vector
 import UnitComponent
 import RegisterEvents
-import ObjectIdGenerator
 import BuildItems
 import ItemBuildUnitDefinition
 import TlsItemDefinition
+import TooltipBuilder
+import ClosureTimers
+import ChannelAbilityPreset
 
-public tuple itemRecipeComponent(int itemTypeId, int count)
+@configurable public constant int ITEM_RECIPE_MAX_COMPONENTS = 6
+public constant int ITEM_RECIPE_PARTIAL = -1
+
+public tuple itemRecipeComponent(TlsItemDefinition itemDefinition, int count)
+public tuple itemRecipeDefinition(TlsItemDefinition itemDef, int buildUnitTypeId, int iconAbilTypeId)
+
+int array[ITEM_RECIPE_MAX_COMPONENTS] g_tempComponentCount
+
+// --------------------------------------------------------------------------
+public function itemRecipeDefinition(TlsItemDefinition itemDef) returns itemRecipeDefinition
+  return itemRecipeDefinition(itemDef, compiletime(UNIT_ID_GEN.next()), compiletime(ABIL_ID_GEN.next()))
 
 // ============================================================================
 public class ItemRecipe
   private itemRecipeComponent array[6] m_components
-  private int m_componentsCount
-  private int m_itemTypeId
-  private int m_id
-  private int m_itemBuildUnitTypeId
-  private int m_goldCost
-  private int m_lumberCost
-  private int m_buildTime
+  private int m_componentsCount = 0
+  private int m_id = 0
+  private itemRecipeDefinition m_definition
+  private int m_goldCost = 0
+  private int m_lumberCost = 0
+  private int m_buildTime = 0
+  private string m_verb = null
 
   // ----------------------------------------------------------------------------
-  construct(int itemTypeId)
-    m_itemTypeId = itemTypeId
-    m_componentsCount = 0
-    m_itemBuildUnitTypeId = UNIT_ID_GEN.next()
-    BuildItems.register(m_itemTypeId, m_itemBuildUnitTypeId)
+  construct(itemRecipeDefinition def)
+    if (def.itemDef == null)
+      argumentNullError("itemDefinition")
+    m_definition = def
+    BuildItems.register(def.itemDef.getNewId(), def.buildUnitTypeId)
+
+  // ----------------------------------------------------------------------------
+  function getId() returns int
+    return m_id
+
+  // --------------------------------------------------------------------------
+  function getItemDefinition() returns TlsItemDefinition
+    return m_definition.itemDef
 
   // ----------------------------------------------------------------------------
   function getItemTypeId() returns int
-    return m_itemTypeId
+    return m_definition.itemDef.getNewId()
 
   // ----------------------------------------------------------------------------
   function getItemBuildUnitTypeId() returns int
-    return m_itemBuildUnitTypeId
+    return m_definition.buildUnitTypeId
+
+  // ----------------------------------------------------------------------------
+  function getPartialIconAbilityId() returns int
+    return m_definition.iconAbilTypeId
+
+  // ----------------------------------------------------------------------------
+  function getVerb() returns string
+    return m_verb
+
+  // ----------------------------------------------------------------------------
+  function setVerb(string value)
+    m_verb = value
 
   // ----------------------------------------------------------------------------
   function getComponentCount() returns int
@@ -45,11 +77,12 @@ public class ItemRecipe
     return m_components[index]
 
   // ----------------------------------------------------------------------------
-  function add(int itemTypeId, int count)
+  function addComponent(TlsItemDefinition itemDefinition, int count)
     if (m_componentsCount == 6)
       error("An ItemRecipe can have a max of 6 components")
-    m_components[m_componentsCount].itemTypeId = itemTypeId
+    m_components[m_componentsCount].itemDefinition = itemDefinition
     m_components[m_componentsCount].count = count
+    m_componentsCount++
     m_id = getHashCode()
 
   // ----------------------------------------------------------------------------
@@ -77,39 +110,69 @@ public class ItemRecipe
     m_buildTime = value
 
   // ----------------------------------------------------------------------------
-  function doesUnitInventorySatisfyRecipe(unit u) returns bool
+  /** Returns the number of items that can be created given the items in the units inventory.
+      Returns -1 if any amount of any components are only partially satisfied. */
+  function countNumberOfCraftableItemsInUnitInventory(unit u) returns int
+
+    var hasAnyComponents = false
 
     for i = 0 to m_componentsCount-1
     //{
       let comp = m_components[i]
-      var charges = 0
-      
+      g_tempComponentCount[i] = 0      
       for itm in u.inventory()
-        if (itm != null and itm.getTypeId() == comp.itemTypeId)
-          charges += itm.getCharges()
-      
-      if (charges != comp.count)
-        return false
+        if (itm != null and itm.getTypeId() == comp.itemDefinition.getNewId())
+          g_tempComponentCount[i] += max(itm.getCharges(), 1)
+          hasAnyComponents = true
     //}
 
-    return true
-
-  // ----------------------------------------------------------------------------
-  function getId() returns int
-    return m_id
-
-  // ----------------------------------------------------------------------------
-  function getHashCode() returns int 
-    var id = m_itemTypeId
-    id = id.pow(m_componentsCount)
+    var minNumberOfCraftableItems = INT_MAX
     for i = 0 to m_componentsCount-1
-      id = id.pow(m_components[i].itemTypeId)
-      id = id.pow(m_components[i].count)
+    //{
+      let numberOfSatisfiedItems = (g_tempComponentCount[i].toReal() / m_components[i].count).floor()
+      minNumberOfCraftableItems = min(minNumberOfCraftableItems, numberOfSatisfiedItems)
+    //}
+
+    return (minNumberOfCraftableItems == 0 and hasAnyComponents) ? ITEM_RECIPE_PARTIAL : minNumberOfCraftableItems
+
+  // ----------------------------------------------------------------------------
+  /** Only call this if the unit is certain to have the right amount of items */
+  function consumeItems(unit u)
+
+    for i = 0 to m_componentsCount-1
+    //{
+      let comp = m_components[i]
+      g_tempComponentCount[i] = 0
+      var count = m_components[i].count
+      for itm in u.inventory()
+      //{
+        if (itm != null and itm.getTypeId() == comp.itemDefinition.getNewId())
+          let itemCharges = max(itm.getCharges(), 1)
+          if (count >= itemCharges)
+            count -= itemCharges
+            itm.remove()
+          else
+            itm.setCharges(itemCharges - count)
+            count = 0
+          if (count == 0)
+            break
+      //}
+    //}
+
+  // ----------------------------------------------------------------------------
+  function getHashCode() returns int
+    var id = 37
+    id *= getItemTypeId()
+    id *= m_componentsCount
+    for i = 0 to m_componentsCount-1
+      id *= m_components[i].itemDefinition.getNewId().moduloInt(17)
+      id *= m_components[i].count.moduloInt(17)
     return id
 
 // ============================================================================
 public class ItemRecipeBook
   private Vector<ItemRecipe> m_recipes = new Vector<ItemRecipe>()
+  private string m_defaultVerb = "Craft"
 
   // ----------------------------------------------------------------------------
   ondestroy
@@ -118,8 +181,12 @@ public class ItemRecipeBook
     m_recipes.clear()
 
   // ----------------------------------------------------------------------------
-  function addRecipe(int itemTypeId) returns ItemRecipe
-    let itemRecipe = new ItemRecipe(itemTypeId)
+  function setDefaultVerb(string value)
+    m_defaultVerb = value
+
+  // ----------------------------------------------------------------------------
+  function addRecipe(itemRecipeDefinition def) returns ItemRecipe
+    let itemRecipe = new ItemRecipe(def)
     m_recipes.add(itemRecipe)
     return itemRecipe
 
@@ -144,25 +211,58 @@ public class ItemRecipeBook
     return count
 
   // ----------------------------------------------------------------------------
-  function getSatisfiedRecipesFromUnitInventory(unit u, Vector<ItemRecipe> outRecipes) returns int
-    var count = 0
-    for recipe in m_recipes
-      if (recipe.doesUnitInventorySatisfyRecipe(u))
-        outRecipes.add(recipe)
-        count++
-    return count
-
-  // ----------------------------------------------------------------------------
   function compile()
     for recipe in m_recipes
-      ItemBuildUnitDefinition.create(getItemDefinition(recipe.getItemTypeId()), recipe.getItemBuildUnitTypeId(), "Craft")
-        ..setGoldCost(recipe.getGoldCost())
-        ..setLumberCost(recipe.getLumberCost())
-        ..setBuildTime(recipe.getBuildTime())
+      compileRecipe(recipe)
+      
+  // --------------------------------------------------------------------------
+  private function compileRecipe(ItemRecipe recipe)
+    let verb = recipe.getVerb() != null ? recipe.getVerb() : m_defaultVerb
+
+    let itemBuildUnitDef = ItemBuildUnitDefinition.create(recipe.getItemDefinition(), recipe.getItemBuildUnitTypeId(), verb)
+      ..setGoldCost(recipe.getGoldCost())
+      ..setLumberCost(recipe.getLumberCost())
+      ..setBuildTime(recipe.getBuildTime())
+
+    let tooltipBuilder = new TooltipBuilder()
+
+    let tooltipExtended = itemBuildUnitDef.getTooltipExtended()
+
+    let componentsItem = tooltipBuilder.addItem(new ItemRecipeComponentsTooltipItem())
+
+    for i = 0 to recipe.getComponentCount()-1
+      let comp = recipe.getComponent(i)
+      componentsItem.addValue("{0} x{1}".format(comp.itemDefinition.getName(), comp.count.toString()))
+
+    itemBuildUnitDef.setTooltipExtended(tooltipExtended + "|n" + tooltipBuilder.getTooltipExtended())
+
+    new ItemRecipePartialIconAbilityDefinition(recipe.getPartialIconAbilityId())
+      ..setTooltipNormal(1, itemBuildUnitDef.getTooltipBasic())
+      ..setTooltipNormalExtended(1, itemBuildUnitDef.getTooltipExtended())
+      ..setIconNormal(itemBuildUnitDef.getIconGameInterfaceDisabled())
+
+    destroy tooltipBuilder
 
   // ----------------------------------------------------------------------------
   function iterator() returns VectorIterator<ItemRecipe>
     return m_recipes.iterator()
+
+// ============================================================================
+class ItemRecipeComponentsTooltipItem extends TooltipItem
+  construct()
+    super("Components:")
+    setAlwaysPutSubItemsOnNewLine(true)
+    setShowItemBullets(true)
+    setPrependSpacerLine(true)
+
+// ============================================================================
+class ItemRecipePartialIconAbilityDefinition extends AbilityDefinitionCriticalStrikecreep
+  // --------------------------------------------------------------------------
+  construct(int id)
+    super(id)
+    presetButtonPosNormal(0, 0)
+    presetChancetoCriticalStrike(lvl -> 0.0)
+    presetChancetoEvade(lvl -> 0.0)
 
 // ============================================================================
 public class CraftingComponent extends UnitComponent
@@ -182,16 +282,47 @@ public class CraftingComponent extends UnitComponent
   function getRecipeBook() returns ItemRecipeBook
     return m_recipeBook
 
+  // --------------------------------------------------------------------------
+  protected override function onEnabled()
+    super.onEnabled()
+
+    let ownerUnit = getOwnerUnit()
+
+    if (not ownerUnit.hasAbility('Asud'))
+      ownerUnit.addAbility('Asud')
+
   // ----------------------------------------------------------------------------
   protected function update()
 
     let ownerUnit = getOwnerUnit()
 
     for recipe in m_recipeBook
-      if (recipe.doesUnitInventorySatisfyRecipe(ownerUnit))
-        AddUnitToStock(ownerUnit, recipe.getItemBuildUnitTypeId(), 1, 1)
+    //{
+      let count = recipe.countNumberOfCraftableItemsInUnitInventory(ownerUnit)
+
+      let partialIconAbilId = recipe.getPartialIconAbilityId()
+      if (count == ITEM_RECIPE_PARTIAL)
+        Log.info("Partial! Added abil " + count.toString() + " " + partialIconAbilId.toRawCode() + " to unit")
+        ownerUnit.addAbility(partialIconAbilId)
+      else
+        ownerUnit.removeAbility(partialIconAbilId)
+
+      if (count > 0)
+        AddUnitToStock(ownerUnit, recipe.getItemBuildUnitTypeId(), count, count)
+        Log.info("Full! Added unit " + count.toString() + " " + recipe.getItemBuildUnitTypeId().toRawCode() + " to stock")
       else
         RemoveUnitFromStock(ownerUnit, recipe.getItemBuildUnitTypeId())
+    //}
+
+  // --------------------------------------------------------------------------
+  protected function onSoldUnit(unit soldUnit)
+    let ownerUnit = getOwnerUnit()
+    for recipe in m_recipeBook
+      if (recipe.getItemBuildUnitTypeId() == soldUnit.getTypeId())
+        recipe.consumeItems(ownerUnit)
+        ownerUnit.addItemById(recipe.getItemTypeId())
+        return
+    Log.warn("Unable to find recipe matching sold unit")    
 
 // ============================================================================
 public function IUnitMetadata.getCraftingComponent() returns CraftingComponent
@@ -214,7 +345,20 @@ function onUnitPickupItem()
   
   let comp = metadata.getCraftingComponent()
   if (comp != null)
-    comp.update()
+    nullTimer(() -> comp.update())
+
+// ============================================================================
+function onUnitSell()
+  let sellingUnit = GetSellingUnit()
+  let soldUnit = GetSoldUnit()
+
+  let metadata = sellingUnit.getMetadata()
+  if (metadata == null)
+    return
+  
+  let comp = metadata.getCraftingComponent()
+  if (comp != null)
+    comp.onSoldUnit(soldUnit)
 
 // ============================================================================
 init
@@ -222,3 +366,4 @@ init
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_PICKUP_ITEM, function onUnitPickupItem)
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_DROP_ITEM, function onUnitPickupItem)
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_STACK_ITEM, function onUnitPickupItem)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_SELL, function onUnitSell)
