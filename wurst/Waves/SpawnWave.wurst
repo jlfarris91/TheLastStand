@@ -16,7 +16,6 @@ import TlsItemIds
 import ItemSet
 import UnitModifiers
 import Coins
-import DropItemOnDeathComponent
 import Range
 import Spawning
 import UnitExtensions
@@ -59,7 +58,6 @@ public class SpawnWave extends Runnable
   private int m_groupId
   private string m_id
   protected player m_targetPlayer
-  private int m_totalGoldAwarded
   private SpawnWaveContext m_context
   private string m_debugState
   private Runnable m_progress
@@ -79,7 +77,6 @@ public class SpawnWave extends Runnable
     m_numSpawned = 0
     m_maxSpawnCount = 0
     m_groupId = 0
-    m_totalGoldAwarded = 0
     m_id = def.getName()
     m_debugState = ""
 
@@ -130,6 +127,8 @@ public class SpawnWave extends Runnable
       m_context.tierChances[i] = playerMetadata.getTierChance(i)
     m_context.unitTier = 0
     m_context.waveTier = m_context.getRandomTier()
+    m_context.goldDrops = 0
+    m_context.goldAvailable = 0
 
     m_maxSpawnCount = m_definition.getMaxSpawnCount(m_context)
 
@@ -195,19 +194,6 @@ public class SpawnWave extends Runnable
     start()
 
   // --------------------------------------------------------------------------
-  function shouldGrantGoldReward() returns int
-    let goldReward = m_definition.getGoldReward(m_context)
-    if (m_totalGoldAwarded == goldReward)
-      return 0
-    let waveProgress = clamp01(getProgress() * 2.0)
-    let chance = lerp(GOLD_CHANCE_MIN, GOLD_CHANCE_MAX, waveProgress)
-    if (not passesChanceCheck01(chance))
-      return 0
-    let goldRewardRemaining = goldReward - m_totalGoldAwarded
-    let goldToGive = (goldRewardRemaining * waveProgress).floor()
-    return max(goldToGive, 0)
-
-  // --------------------------------------------------------------------------
   function registerSpawnedUnit(unit spawnedUnit)
 
     if (g_unitToSpawnWaveMap.has(spawnedUnit))
@@ -233,14 +219,6 @@ public class SpawnWave extends Runnable
   // --------------------------------------------------------------------------
   function getAliveCount() returns int
     return m_aliveSpawnedUnits.size()
-
-  // --------------------------------------------------------------------------
-  function getGoldAwarded() returns int
-    return m_totalGoldAwarded
-
-  // --------------------------------------------------------------------------
-  protected function recordGoldAwarded(int value)
-    m_totalGoldAwarded += value
 
   // --------------------------------------------------------------------------
   private function onDefProgressChanged()
@@ -304,6 +282,9 @@ public class SpawnWaveSpawnRequest extends SpawnRequestBase
   private bool m_waitForFullSpawnGroup = false
   private int m_maxAliveCount = 0
 
+  private int m_spawnsPerGoldDrop = 0
+  private int m_spawnsPerGoldDropCounter = 0
+
   // All units spawned for the entire group, this includes all subgroups units spawned
   private group m_spawnedUnits = null
 
@@ -326,6 +307,8 @@ public class SpawnWaveSpawnRequest extends SpawnRequestBase
     m_targetProvider = targetProvider..acquire()
     m_spawnPointProvider = getSpawnPointProvider(spawnWave.m_targetPlayer, m_definition.getSpawnPointProviderType())
     m_waitForFullSpawnGroup = m_definition.getWaitForFullSpawnGroup()
+    m_spawnsPerGoldDrop = m_definition.getSpawnsPerGoldDrop(m_context)
+    m_spawnsPerGoldDropCounter = 0
     m_maxAliveCount = 0
     m_spawnedUnits = getGroup()
     m_groupSize = 0
@@ -387,6 +370,14 @@ public class SpawnWaveSpawnRequest extends SpawnRequestBase
     m_context.groupId = -1
     m_context.unitTier = 0
 
+    m_spawnsPerGoldDropCounter++
+    if (m_spawnsPerGoldDrop != 0 and m_spawnsPerGoldDropCounter == m_spawnsPerGoldDrop)
+    //{
+      m_spawnsPerGoldDropCounter = 0
+      m_context.goldDrops++
+      makeSpawnedUnitDropGold(spawnedUnit)
+    //}
+
     if (m_spawnedUnits.size() == m_groupSize)
       nextGroup()
 
@@ -434,6 +425,7 @@ public class SpawnWaveSpawnRequest extends SpawnRequestBase
     let spawnGroupingFactor = m_definition.getSpawnGroupingFactor(m_context)
     m_maxAliveCount = m_definition.getMaxAliveCount(m_context)
     m_groupSize = max(R2I(I2R(m_maxAliveCount) * spawnGroupingFactor), 1)
+    m_spawnsPerGoldDrop = m_definition.getSpawnsPerGoldDrop(m_context)
 
     if (m_groupSize == 0)
       error("Subgroup count cannot be 0")
@@ -527,11 +519,6 @@ public class SpawnWaveSpawnRequest extends SpawnRequestBase
         UnitId2StringBJ(spawnedUnit.getTypeId())))
       return false
 
-    let goldReward = m_spawnWave.shouldGrantGoldReward()
-    if (goldReward != 0)
-      let coinTypeId = getCoinItemTypeFromGoldReward(goldReward)
-      spawnedUnit.awardItemOnDeath(g_coinItemSet, coinTypeId, 1.0)
-
     let commonUnitModifier = m_definition.getCommonUnitModifier()
     if (commonUnitModifier != null)
       commonUnitModifier.call(spawnedUnit, m_context)
@@ -539,20 +526,6 @@ public class SpawnWaveSpawnRequest extends SpawnRequestBase
     let unitModifier = m_definition.getUnitModifier(spawnedUnit.getTypeId())
     if (unitModifier != null)
       unitModifier.call(spawnedUnit, m_context)
-
-    // If the unit is going to drop a coin, track that
-    let dropItemOnDeathComp = unitMetadata.getDropItemOnDeathComponent()
-    if (dropItemOnDeathComp != null)
-    //{
-      if (dropItemOnDeathComp.hasItem(TlsItemIds.coinSmall))
-        m_spawnWave.recordGoldAwarded(getGoldRewardFromCoinItemType(TlsItemIds.coinSmall))
-      if (dropItemOnDeathComp.hasItem(TlsItemIds.coinMedium))
-        m_spawnWave.recordGoldAwarded(getGoldRewardFromCoinItemType(TlsItemIds.coinMedium))
-      if (dropItemOnDeathComp.hasItem(TlsItemIds.coinLarge))
-        m_spawnWave.recordGoldAwarded(getGoldRewardFromCoinItemType(TlsItemIds.coinLarge))
-      if (dropItemOnDeathComp.hasItem(TlsItemIds.coinEpic))
-        m_spawnWave.recordGoldAwarded(getGoldRewardFromCoinItemType(TlsItemIds.coinEpic))
-    //}
 
     return true
 
@@ -576,6 +549,16 @@ public class SpawnWaveSpawnRequest extends SpawnRequestBase
       return SpawnRestriction.Done
 
     return SpawnRestriction.None
+
+  // --------------------------------------------------------------------------
+  private function makeSpawnedUnitDropGold(unit spawnedUnit)
+    let goldDropAmount = m_definition.getGoldDropAmount(m_context)
+    m_context.goldAvailable += goldDropAmount
+    // spawnedUnit.awardGoldOnDeath(goldDropAmount.toRange(), 1.0)
+    if (goldDropAmount != 0)
+      let coinTypeId = getCoinItemTypeFromGoldReward(goldDropAmount)
+      spawnedUnit.awardItemOnDeath(g_coinItemSet, coinTypeId, 1.0)
+      addEffect("Abilities\\Spells\\NightElf\\FaerieFire\\FaerieFireTarget.mdl", spawnedUnit, "chest")
 
   // --------------------------------------------------------------------------
   override function getDebuggerStateString() returns string
