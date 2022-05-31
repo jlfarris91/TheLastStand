@@ -29,6 +29,7 @@ import ClosureTimers
 import RealTime
 import ColorUtility
 import GroupUtils
+import BuffObjEditing
 
 constant real PROCESS_SPAWN_REQUEST_INTERVAL = 0.3
 constant int MAX_SPAWNS_PER_PROCESS = 1
@@ -41,6 +42,8 @@ HashMap<unit, SpawnWave> g_unitToSpawnWaveMap
 @configurable public bool g_enableSpawnWaveLogging = false
 
 ItemSet g_coinItemSet = new ItemSet("Coins", COLOR_GOLD.withoutAlpha())
+
+constant buffTuple g_goldCarrierBuff = compiletime(createDummyBuffObject("Gold Carrier", "This unit is carrying gold!", "ReplaceableTextures\\CommandButtons\\BTNChestOfGold.blp", "Abilities\\Spells\\NightElf\\FaerieFire\\FaerieFireTarget.mdl", "chest"))
 
 // ============================================================================
 enum SpawnRestriction
@@ -370,13 +373,14 @@ public class SpawnWaveSpawnRequest extends SpawnRequestBase
     m_context.groupId = -1
     m_context.unitTier = 0
 
+    spawnedUnit.removeAbility(g_goldCarrierBuff.abilId)
+    spawnedUnit.removeAbility(g_goldCarrierBuff.buffId)
+
     m_spawnsPerGoldDropCounter++
     if (m_spawnsPerGoldDrop != 0 and m_spawnsPerGoldDropCounter == m_spawnsPerGoldDrop)
-    //{
       m_spawnsPerGoldDropCounter = 0
       m_context.goldDrops++
       makeSpawnedUnitDropGold(spawnedUnit)
-    //}
 
     if (m_spawnedUnits.size() == m_groupSize)
       nextGroup()
@@ -552,13 +556,18 @@ public class SpawnWaveSpawnRequest extends SpawnRequestBase
 
   // --------------------------------------------------------------------------
   private function makeSpawnedUnitDropGold(unit spawnedUnit)
-    let goldDropAmount = m_definition.getGoldDropAmount(m_context)
-    m_context.goldAvailable += goldDropAmount
+    var goldDropAmount = m_definition.getGoldDropAmount(m_context)
     // spawnedUnit.awardGoldOnDeath(goldDropAmount.toRange(), 1.0)
-    if (goldDropAmount != 0)
+    if (goldDropAmount == 0)
+      return
+    spawnedUnit.addAbility(g_goldCarrierBuff.abilId)
+    goldDropAmount = min(goldDropAmount, 50) // 5 10g coins max
+    while (goldDropAmount > 0)
       let coinTypeId = getCoinItemTypeFromGoldReward(goldDropAmount)
       spawnedUnit.awardItemOnDeath(g_coinItemSet, coinTypeId, 1.0)
-      addEffect("Abilities\\Spells\\NightElf\\FaerieFire\\FaerieFireTarget.mdl", spawnedUnit, "chest")
+      let coinValue = getGoldRewardFromCoinItemType(coinTypeId)
+      goldDropAmount -= coinValue
+      m_context.goldAvailable += coinValue
 
   // --------------------------------------------------------------------------
   override function getDebuggerStateString() returns string

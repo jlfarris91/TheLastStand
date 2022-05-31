@@ -12,14 +12,6 @@ public StandardUnitModifiers g_zombieMeleeModifiers
 public StandardUnitModifiers g_eliteMeleeModifiers
 public StandardUnitModifiers g_eliteRangedModifiers
 
-public constant int GOLD_PER_BOSS = 5
-constant int GOLD_TOTAL_BASE = 100
-constant int GOLD_PER_DIFF = 25
-constant real array[3] GOLD_PERC_WEIGHTS = [ 1, 2, 3]
-constant real GOLD_PERC_WEIGHTS_TOTAL = GOLD_PERC_WEIGHTS[0] + GOLD_PERC_WEIGHTS[1] + GOLD_PERC_WEIGHTS[2]
-constant real array[3] GOLD_PERC_VALUES = [ GOLD_PERC_WEIGHTS[0] / GOLD_PERC_WEIGHTS_TOTAL, GOLD_PERC_WEIGHTS[1] / GOLD_PERC_WEIGHTS_TOTAL, GOLD_PERC_WEIGHTS[2] / GOLD_PERC_WEIGHTS_TOTAL ]
-constant int BOSS_WAVE_TOTAL_SCALAR = 1 + 2 + 3
-
 // ============================================================================
 public function getStandardGoldRewardForWave(SpawnWaveContext context) returns int
   return context.waveNumber - 1
@@ -37,15 +29,12 @@ public function SpawnWaveDefinition.setupForBoss()
 /* Wave starts at 1 */
 public function calculateWaveGoldReward(int wave, real diff) returns int
 
-  if (wave == TOTAL_NIGHTS)
+  // No gold reward on the last night or any boss nights since bosses drop gold coins
+  if (wave == TOTAL_NIGHTS or wave % 5 == 0)
     return 0
 
   let bossGoldAmountPerWave = GOLD_PER_BOSS * max(((diff - 0.5) / 2.0).floor() + 1, 1)
-  let bossGoldAmountThisWave = ((wave / 5.0) * bossGoldAmountPerWave).round()
   let bossGoldAmountTotal = bossGoldAmountPerWave * BOSS_WAVE_TOTAL_SCALAR
-
-  if (wave % 5 == 0 or wave == 0)
-    return bossGoldAmountThisWave
 
   let expectedGoldDrops = calculateGoldDropAmount(wave, diff)
 
@@ -95,20 +84,20 @@ public function calculateMaxSpawnCountForBoss(SpawnWaveContext context) returns 
   return calculateMaxAliveCountForBoss(context)
 
 // ============================================================================
-init
+function initialize()
 
   g_zombieMeleeModifiers = new StandardUnitModifiers()
-  g_zombieMeleeModifiers.healthRange = rangeInt(120, 2000)
-  g_zombieMeleeModifiers.armorRange = rangeReal(0, 5)
+  g_zombieMeleeModifiers.healthRange = rangeInt(160, 2000)
+  g_zombieMeleeModifiers.armorRange = rangeReal(1, 4)
   g_zombieMeleeModifiers.attack1MinDamageRange = rangeInt(8, 12)
-  g_zombieMeleeModifiers.attack1MaxDamageRange = rangeInt(240, 260)
+  g_zombieMeleeModifiers.attack1MaxDamageRange = rangeInt(240, 360)
   g_zombieMeleeModifiers.attack1Cooldown = rangeReal(2.0, 1.5)
   g_zombieMeleeModifiers.attack1Range = MELEE_UNIT_ATTACK_RANGE.toReal()
   g_zombieMeleeModifiers.sightRange = ELITE_SIGHT_RANGE
   g_zombieMeleeModifiers.preferOrganicTargets = false
 
   g_eliteMeleeModifiers = new StandardUnitModifiers()
-  g_eliteMeleeModifiers.healthRange = rangeInt(480, 8000)
+  g_eliteMeleeModifiers.healthRange = rangeInt(640, 8000)
   g_eliteMeleeModifiers.armorRange = rangeReal(4, 16)
   g_eliteMeleeModifiers.attack1MinDamageRange = rangeInt(32, 48)
   g_eliteMeleeModifiers.attack1MaxDamageRange = rangeInt(960, 1440)
@@ -118,14 +107,18 @@ init
   g_eliteMeleeModifiers.preferOrganicTargets = false
   
   g_eliteRangedModifiers = new StandardUnitModifiers()
-  g_eliteRangedModifiers.healthRange = rangeInt(240, 4000)
-  g_eliteRangedModifiers.armorRange = rangeReal(2, 8)
-  g_eliteRangedModifiers.attack1MinDamageRange = rangeInt(16, 24)
-  g_eliteRangedModifiers.attack1MaxDamageRange = rangeInt(480, 720)
+  g_eliteRangedModifiers.healthRange = rangeInt(480, 6000)
+  g_eliteRangedModifiers.armorRange = rangeReal(3, 12)
+  g_eliteRangedModifiers.attack1MinDamageRange = rangeInt(24, 36)
+  g_eliteRangedModifiers.attack1MaxDamageRange = rangeInt(720, 1080)
   g_eliteRangedModifiers.attack1Cooldown = rangeReal(2.0, 1.5)
   g_eliteRangedModifiers.attack1Range = RANGED_UNIT_ATTACK_RANGE.toReal()
   g_eliteRangedModifiers.sightRange = ELITE_SIGHT_RANGE
   g_eliteRangedModifiers.preferOrganicTargets = true
+
+// ============================================================================
+init
+  initialize()
 
 // ============================================================================
 @test function testCalculatWaveGoldReward()
@@ -156,3 +149,25 @@ init
       total += value
     sb.append(" = " + total.toString())
     Log.info(sb.toStringAndDestroy())
+
+// ============================================================================
+@test function testZombieStats()
+
+  initialize()
+
+  let context = new SpawnWaveContext()
+
+  for d = 0 to 5
+    let diff = d == 0 ? 0.5 : d.toReal()
+    for t = 0 to 2
+      context.unitTier = t
+      context.waveTier = t
+      let sb = new StringBuilder()
+      sb.append(d.toString().padLeft(4, " ") + ":  T" + t.toString() + " ")
+      for i = 1 to 16
+        context.waveNumber = i
+        context.playerDifficulty = diff
+        let value = g_zombieMeleeModifiers.getHealth(context, 1.0)
+        sb.append(value.toString().padLeft(4, " ") + " ")
+      Log.info(sb.toStringAndDestroy())
+    Log.info("")
