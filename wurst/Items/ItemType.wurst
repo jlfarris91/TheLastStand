@@ -1,4 +1,44 @@
 package ItemType
+import ColorUtility
+import ItemExtensions
+import LinkedList
+import ErrorHandling
+import HashMap
+
+HashMap<int, ItemType> g_allItemTypes = new HashMap<int, ItemType>()
+
+// ============================================================================
+public class ItemRarity
+  private LinkedList<ItemType> m_allItemTypes = new LinkedList<ItemType>()
+  private string m_name
+  private color m_color
+
+  // --------------------------------------------------------------------------
+  construct(string name, color color)
+    m_name = name
+    m_color = color
+
+  // --------------------------------------------------------------------------
+  function getName() returns string
+    return m_name
+
+  // --------------------------------------------------------------------------
+  function getColor() returns color
+    return m_color
+
+  // --------------------------------------------------------------------------
+  function add(ItemType itemType)
+    m_allItemTypes.add(itemType)
+    itemType.m_rarity = this
+
+  // --------------------------------------------------------------------------
+  function remove(ItemType itemType)
+    m_allItemTypes.remove(itemType)
+    itemType.m_rarity = null
+
+  // --------------------------------------------------------------------------
+  function iterator() returns LLIterator<ItemType>
+    return m_allItemTypes.iterator()
 
 // ============================================================================
 public class ItemType
@@ -14,6 +54,8 @@ public class ItemType
   int maxStacks
   int maxStock
 
+  protected ItemRarity m_rarity
+
   // --------------------------------------------------------------------------
   construct(int id)
     this.id = id
@@ -22,11 +64,12 @@ public class ItemType
     description = ""
     extendedTooltip = ""
     itemTypeName = "Item"
-    pawnable = false
+    pawnable = true
     droppable = true
     dropOnDeath = true
     maxStacks = 1
     maxStock = 1
+    m_rarity = null
 
   // --------------------------------------------------------------------------
   function setMaxStacks(int value)
@@ -35,3 +78,97 @@ public class ItemType
   // --------------------------------------------------------------------------
   function setMaxStock(int value)
     maxStock = value
+
+  // --------------------------------------------------------------------------
+  function getItemTypeName() returns string
+    return itemTypeName
+
+  // --------------------------------------------------------------------------
+  function setItemTypeName(string value)
+    itemTypeName = value
+
+  // --------------------------------------------------------------------------
+  function getRarity() returns ItemRarity
+    return m_rarity
+
+  // --------------------------------------------------------------------------
+  function setRarity(ItemRarity itemSet)
+    if (m_rarity != null)
+      m_rarity.remove(this)
+    m_rarity = itemSet
+    if (m_rarity != null)
+      m_rarity.add(this)
+
+  // --------------------------------------------------------------------------
+  function createItem(vec2 pos) returns item
+    let _item = CreateItem(id, pos.x, pos.y)
+    if (_item == null)
+      Log.error("ItemType", "createItem", name, "Unable to create item of type " + id.toString())
+    decorateItem(_item)
+    return _item
+
+  // --------------------------------------------------------------------------
+  function createItemForUnit(unit u) returns item
+    let itm = createItem(u.getPos())
+    if (itm != null)
+      itm.giveTo(u)
+    return itm
+
+  // --------------------------------------------------------------------------
+  function decorateItem(item i)
+    var _name = name
+    var _description = description
+    var _extended = extendedTooltip
+
+    if (_name == "")
+      _name = i.getName()
+
+    if (_description == "")
+      _description = i.getDescription()
+    
+    if (_extended == "")
+      _extended = i.getExtendedTooltip()
+
+    if (m_rarity != null)
+    //{
+      _name = _name.colorize(m_rarity.getColor())
+
+      let itemRarityString = (m_rarity.getName() + " " + itemTypeName).colorize(m_rarity.getColor()) + "|n|n"
+      _description = itemRarityString + _description
+      _extended = itemRarityString + _extended
+      
+      i.setTintColor(m_rarity.getColor())
+    //}
+
+    i.setName(_name)
+    i.setDescription(_description)
+    i.setExtendedTooltip(_extended)
+
+    if (tooltip != "")
+      i.setTooltip(tooltip)
+
+    i.setPawnable(pawnable)
+    i.setDroppable(droppable)
+    i.setDropOnDeath(dropOnDeath)
+
+  // --------------------------------------------------------------------------
+  static function getItemType(int itemTypeId) returns ItemType
+    return g_allItemTypes.get(itemTypeId)
+
+  // --------------------------------------------------------------------------
+  static function define(int itemTypeId, ItemRarity rarity) returns ItemType
+    if (itemTypeId < 0)
+      error("Item type id is out of bounds " + itemTypeId.toString())
+    var itemType = g_allItemTypes.get(itemTypeId)
+    if (itemType == null)
+      itemType = new ItemType(itemTypeId)..setRarity(rarity)
+      g_allItemTypes.put(itemTypeId, itemType)
+    return itemType
+
+  // --------------------------------------------------------------------------
+  static function createItem(int itemTypeId, vec2 pos) returns item
+    return ItemType.getItemType(itemTypeId).createItem(pos)
+
+  // --------------------------------------------------------------------------
+  static function createItemForUnit(int itemTypeId, unit u) returns item
+    return ItemType.getItemType(itemTypeId).createItemForUnit(u)
