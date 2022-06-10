@@ -6,8 +6,10 @@ import TlsUnitIds
 import ClosureTimers
 import DisplayTextToPlayer
 import ItemType
+import HumanPlayerComponent
 
-HashMap<player, item> g_playerHearts = new HashMap<player, item>()
+HashMap<player, item> g_playerToHeart = new HashMap<player, item>()
+HashMap<item, player> g_heartToPlayer = new HashMap<item, player>()
 
 // ============================================================================
 public function createHeartItemForHero(unit hero) returns item
@@ -24,37 +26,42 @@ public function createHeartItemForHero(unit hero) returns item
   heartItem.setPos(hero.getPos())
   heartItem.setUserData(hero.getHandleId())
 
-  g_playerHearts.put(heroOwner, heartItem)
+  g_playerToHeart.put(heroOwner, heartItem)
+  g_heartToPlayer.put(heartItem, heroOwner)
 
   return heartItem
 
 // ============================================================================
 public function getHeartItem(player _player) returns item
-  return g_playerHearts.get(_player)
+  return g_playerToHeart.get(_player)
+
+// ============================================================================
+public function getHeartOwner(item heartItem) returns player
+  return g_heartToPlayer.get(heartItem)
 
 // ============================================================================
 public function getHeartHero(item heartItem) returns unit
-  let unitIndex = heartItem.getUserData()
-  let heartUnit = unitFromIndex(unitIndex)
-  if (heartUnit == null)
-    Log.error("Could not find owner of heart item " + unitIndex.toString())
-  return heartUnit
+  let owner = g_heartToPlayer.get(heartItem)
+  let comp = owner.getHumanPlayerComponent()
+  if (comp == null)
+    return null
+  return comp.getHero()
 
 // ============================================================================
 public function destroyHeroHeartItem(item heartItem)
-  let heartUnit = getHeartHero(heartItem)
-  g_playerHearts.remove(heartUnit.getOwner())
+  let heartOwner = getHeartOwner(heartItem)
+  g_playerToHeart.remove(heartOwner)
+  g_heartToPlayer.remove(heartItem)
   heartItem.remove()
 
 // ============================================================================
 function onHeartAcquired(unit manipulatingUnit, item manipulatedItem)
-  let heroUnit = getHeartHero(manipulatedItem)
-  let heroOwner = heroUnit.getOwner()
+  let heartOwner = getHeartOwner(manipulatedItem)
   let manOwner = manipulatingUnit.getOwner()
   let manipulatingUnitIsAcoltye = manipulatingUnit.isAcolyte()
   let manipulatingUnitIsAltar = manipulatingUnit.getTypeId() == TlsUnitIds.altar
 
-  if (not (manipulatingUnitIsAcoltye or manipulatingUnitIsAltar) or not manOwner.isAllyOf(heroOwner))
+  if (not (manipulatingUnitIsAcoltye or manipulatingUnitIsAltar) or not manOwner.isAllyOf(heartOwner))
     displayMessageToPlayer(manOwner, "Only friendly Acolytes can pick up a hero's heart")
     nullTimer(() -> manipulatingUnit.dropItemPoint(manipulatedItem, manipulatingUnit.getPos()))
     return
