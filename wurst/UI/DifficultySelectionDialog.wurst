@@ -1,0 +1,621 @@
+package DifficultySelectionDialog
+import Frame
+import LoadToc
+import RealExtensions
+import StringBuilder
+import Observable
+import Object
+import Events
+import ColorUtility
+import ClosureFrames
+import Math
+import GameConstants
+
+constant int DIFFICULTY_COUNT = 6
+constant int DIFFICULTY_PANEL_COUNT = 4
+
+string array[DIFFICULTY_COUNT] g_difficultyNames = [ "CASUAL", "NORMAL", "HARD", "INSANE", "APOCALYPSE I", "APOCALYPSE II"]
+
+colorA array[DIFFICULTY_COUNT] g_difficultyNameColors = [
+  fromHexString("FF809e74"),
+  fromHexString("FFBCB6A6"),
+  fromHexString("FFE3905B"),
+  fromHexString("FFc06727"),
+  fromHexString("FFb33809"),
+  fromHexString("FF9e2000")
+]
+
+string array[DIFFICULTY_COUNT] g_difficultyDescriptions = [
+  "Take it easy while learning the game",
+  "Play the game the way it was intended to be played",
+  "For players looking for a challenge",
+  "For hardcore players and experienced cooperators",
+  "For those who may have a screw loose",
+  "For masochists who hate winning"
+]
+
+// ============================================================================
+public class DifficultySelectionDialog
+  private framehandle m_frame = null
+  private DifficultyDialogVM m_dataContext = null
+  private framehandle array[DIFFICULTY_COUNT] m_panelContainers
+  private DifficultyPanelFrame array[DIFFICULTY_PANEL_COUNT] m_panels
+  private DifficultyDetailsPanelFrame m_detailsPanelFrame
+  private _handle m_propertyChangedEventHandler
+  private framehandle m_scrollDecButtonFrame
+  private framehandle m_scrollIncButtonFrame
+  private framehandle m_readyButtonFrame
+  private Event m_onDialogClosed
+
+  // --------------------------------------------------------------------------
+  construct()
+
+    m_frame = createFrame("DifficultyDialogTemplate")
+
+    let panelContainerFrame = getFrame("PanelContainer")
+
+    let panelWidth = 0.0666
+    let panelContainerSpacing = (panelContainerFrame.getWidth() - panelWidth * DIFFICULTY_PANEL_COUNT) / (DIFFICULTY_PANEL_COUNT - 1)
+
+    var offset = ZERO2
+
+    for i = 0 to DIFFICULTY_PANEL_COUNT-1
+    //{
+      m_panelContainers[i] = createFrame("FRAME", "PC" + i.toString(), GAME_UI, "", 0)
+      ..setParent(panelContainerFrame)
+      ..setWidth(panelWidth)
+      ..setPoint(FRAMEPOINT_TOPLEFT, panelContainerFrame, FRAMEPOINT_TOPLEFT, offset)
+      ..setPoint(FRAMEPOINT_BOTTOMLEFT, panelContainerFrame, FRAMEPOINT_BOTTOMLEFT, offset)
+
+      offset.x += panelWidth + panelContainerSpacing
+      
+      let panelFrame = createFrame("DifficultyPanelTemplate")
+      ..setParent(m_panelContainers[i])..setAllPoints(m_panelContainers[i])
+
+      m_panels[i] = new DifficultyPanelFrame(panelFrame)
+    //}
+
+    let detailsPanelContainer = getFrame("DetailsPanelContainer")
+
+    let detailsPanelFrame = createFrame("DifficultyDetailsPanelTemplate")
+    ..setParent(detailsPanelContainer)
+    ..setAllPoints(detailsPanelContainer)
+
+    m_detailsPanelFrame = new DifficultyDetailsPanelFrame(detailsPanelFrame)
+
+    m_scrollDecButtonFrame = getFrame("ScrollDecButton")
+    ..onClick(() -> onScrollDecButtonClick())
+    
+    m_scrollIncButtonFrame = getFrame("ScrollIncButton")
+    ..onClick(() -> onScrollIncButtonClick())
+
+    m_readyButtonFrame = getFrame("ReadyButton")
+    ..onClick(() -> onReadyButtonClick())
+  
+  // --------------------------------------------------------------------------
+  ondestroy
+
+    if (m_onDialogClosed != null)
+      destroy m_onDialogClosed
+      m_onDialogClosed = null
+
+    for i = 0 to DIFFICULTY_PANEL_COUNT-1
+      destroy m_panels[i]
+      m_panels[i] = null
+      m_panelContainers[i].remove()
+      m_panelContainers[i] = null
+
+    destroy m_detailsPanelFrame
+    m_detailsPanelFrame = null
+
+    m_frame.remove()
+    m_frame = null
+
+  // --------------------------------------------------------------------------
+  function getFramehandle() returns framehandle
+    return m_frame
+
+  // --------------------------------------------------------------------------
+  function getDataContext() returns DifficultyDialogVM
+    return m_dataContext
+
+  // --------------------------------------------------------------------------
+  function setDataContext(DifficultyDialogVM value)
+    if (m_dataContext != value)
+      let oldDataContext = m_dataContext
+      m_dataContext = value
+      onDataContextChanged(oldDataContext, m_dataContext)
+
+  // --------------------------------------------------------------------------
+  protected function onDataContextChanged(DifficultyDialogVM oldValue, DifficultyDialogVM newValue)
+
+    if (m_propertyChangedEventHandler != INVALID_HANDLE and oldValue != null)
+      oldValue.onPropertyChanged().unregister(m_propertyChangedEventHandler)
+      m_propertyChangedEventHandler = INVALID_HANDLE
+
+    if (newValue != null)
+      m_propertyChangedEventHandler = newValue.onPropertyChanged().register() (DifficultyDialogVM sender, string propertyName) ->
+        onDataContextPropertyChanged(propertyName)
+
+      scrollSelectionIntoView()
+
+    updateFrame()
+
+  // --------------------------------------------------------------------------
+  private function onDataContextPropertyChanged(string _propertyName)
+
+    if (_propertyName == DifficultyDialogVM.META.PROPERTIES.selectedDifficulty)
+      scrollSelectionIntoView()
+
+    updateFrame()
+
+  // --------------------------------------------------------------------------
+  private function scrollSelectionIntoView()
+    if (m_dataContext == null)
+      return
+    let selectedIndex = m_dataContext.getSelectedDifficulty()
+    let scrollValue = m_dataContext.getScrollValue()
+    if (not selectedIndex.isBetween(scrollValue, scrollValue + DIFFICULTY_PANEL_COUNT - 1))
+      m_dataContext.setScrollValue(clamp(selectedIndex, 0, DIFFICULTY_COUNT - DIFFICULTY_PANEL_COUNT))
+
+  // --------------------------------------------------------------------------
+  private function updateFrame()
+
+    if (m_dataContext != null)
+      let scrollValue = m_dataContext.getScrollValue()
+      for i = 0 to 3
+        m_panels[i].setDataContext(m_dataContext.getDifficulty(scrollValue + i))
+
+      let selectedDifficulty = m_dataContext.getSelectedDifficulty()
+      m_detailsPanelFrame.setDataContext(m_dataContext.getDifficulty(selectedDifficulty))
+
+      m_scrollDecButtonFrame.setEnabled(scrollValue > 0)
+      m_scrollIncButtonFrame.setEnabled(scrollValue < DIFFICULTY_COUNT - DIFFICULTY_PANEL_COUNT)
+
+    else
+      m_detailsPanelFrame.setDataContext(null)
+      for i = 0 to 3
+        m_panels[i].setDataContext(null)
+      m_scrollDecButtonFrame.setEnabled(false)
+      m_scrollIncButtonFrame.setEnabled(false)
+
+  // --------------------------------------------------------------------------
+  private function onScrollDecButtonClick()
+    m_scrollDecButtonFrame.clearFocus()
+
+    if (m_dataContext != null)
+      m_dataContext.setScrollValue(clamp(m_dataContext.getScrollValue() - 1, 0, 2))
+
+  // --------------------------------------------------------------------------
+  private function onScrollIncButtonClick()
+    m_scrollIncButtonFrame.clearFocus()
+    
+    if (m_dataContext != null)
+      m_dataContext.setScrollValue(clamp(m_dataContext.getScrollValue() + 1, 0, 2))
+
+  // --------------------------------------------------------------------------
+  private function onReadyButtonClick()
+    
+    if (m_onDialogClosed != null)
+      m_onDialogClosed.call()
+
+  // --------------------------------------------------------------------------
+  function onDialogClosed() returns IEvent
+    if (m_onDialogClosed == null)
+      m_onDialogClosed = new Event()
+    return m_onDialogClosed
+
+// ============================================================================
+class DifficultyPanelFrame
+  private framehandle m_frame
+  private framehandle m_titleBackdropFrame
+  private framehandle m_difficultyLabelTextFrame
+  private framehandle m_panelButtonFrame
+  private framehandle m_panelButtonBackdropFrame
+  private framehandle m_imageBackdropFrame
+  private framehandle m_imageIconFrame
+  private framehandle m_lockedFrame
+  private framehandle m_lockHighlightFrame
+  private _handle m_propertyChangedEventHandler
+  private DifficultyVM m_dataContext = null
+
+  // --------------------------------------------------------------------------
+  construct (framehandle frame)
+
+    m_frame = frame
+    m_titleBackdropFrame = getFrame("TitleBackdrop")
+    m_difficultyLabelTextFrame = getFrame("TitleText")
+    m_panelButtonFrame = getFrame("PanelButton")
+    m_panelButtonBackdropFrame = getFrame("PanelButtonBackdrop")
+    m_imageBackdropFrame = getFrame("ImageBackdrop")
+    m_imageIconFrame = getFrame("IconBackdrop")
+    m_lockedFrame = getFrame("LockedFrame")
+    m_lockHighlightFrame = getFrame("LockBackdropHighlight")
+
+    m_panelButtonFrame
+    ..onClick(() -> onClick())
+    ..onMouseWheel(() -> onMouseWheel())
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    m_frame.remove()
+
+  // --------------------------------------------------------------------------
+  function getDataContext() returns DifficultyVM
+    return m_dataContext
+
+  // --------------------------------------------------------------------------
+  function setDataContext(DifficultyVM value)
+    if (m_dataContext != value)
+      let oldDataContext = m_dataContext
+      m_dataContext = value
+      onDataContextChanged(oldDataContext, m_dataContext)
+
+  // --------------------------------------------------------------------------
+  protected function onDataContextChanged(DifficultyVM oldValue, DifficultyVM newValue)
+
+    if (m_propertyChangedEventHandler != INVALID_HANDLE and oldValue != null)
+      oldValue.onPropertyChanged().unregister(m_propertyChangedEventHandler)
+      m_propertyChangedEventHandler = INVALID_HANDLE
+
+    if (newValue != null)
+      m_propertyChangedEventHandler = newValue.onPropertyChanged().register() (DifficultyVM sender, string propertyName) ->
+        onDataContextPropertyChanged(propertyName)
+
+    updateFrame()
+
+  // --------------------------------------------------------------------------
+  private function onDataContextPropertyChanged(string _propertyName)
+    updateFrame()
+
+  // --------------------------------------------------------------------------
+  private function updateFrame()
+    
+    let index = m_dataContext != null ? m_dataContext.getIndex() : 0
+    let selected = (m_dataContext != null and m_dataContext.getIsSelected())
+    let locked = (m_dataContext != null and m_dataContext.getIsLocked())
+
+    let name = m_dataContext != null ? m_dataContext.getName() : "<Name>"
+    m_difficultyLabelTextFrame.setText(name)
+
+    let backdrop = "ui\\DifficultyDialog\\Difficulty{0}Backdrop.tga".format(index.toString())
+    m_imageBackdropFrame.setTexture(backdrop, 0, true)
+
+    let backdropTexture = selected
+      ? "ui\\DifficultyDialog\\Difficulty{0}BackdropHighlight.tga".format(index.toString())
+      : "ui\\DifficultyDialog\\DifficultyPanelBackdrop"
+    m_panelButtonBackdropFrame.setTexture(backdropTexture, 0, true)
+
+    let icon = "ui\\DifficultyDialog\\Difficulty{0}Icon.tga".format(index.toString())
+    m_imageIconFrame.setTexture(icon, 0, true)
+
+    let titleBackdropTexture = selected
+      ? "ui\\DifficultyDialog\\DifficultyPanelTitleBackdropHighlight"
+      : "ui\\DifficultyDialog\\DifficultyPanelTitleBackdrop"
+    m_titleBackdropFrame.setTexture(titleBackdropTexture, 0, true)
+
+    m_lockedFrame.setVisible(locked)
+
+    let color = m_dataContext != null ? g_difficultyNameColors[m_dataContext.getIndex()] : Colors.white
+    m_lockHighlightFrame.setVertexColor(color)
+
+  // --------------------------------------------------------------------------
+  private function onClick()
+    if (m_dataContext == null)
+      return
+    m_dataContext.getDialog().setSelectedDifficulty(m_dataContext.getIndex())
+
+  // --------------------------------------------------------------------------
+  private function onMouseWheel()
+    if (m_dataContext == null)
+      return
+    let scrollValue = BlzGetTriggerFrameValue()
+    let owningDialog = m_dataContext.getDialog()
+    let newScrollValue = owningDialog.getScrollValue() - (scrollValue / 120.0).floor()
+    owningDialog.setScrollValue(clamp(newScrollValue, 0, DIFFICULTY_COUNT - DIFFICULTY_PANEL_COUNT))
+
+// ============================================================================
+class DifficultyDetailsPanelFrame
+  private framehandle m_frame
+  private framehandle m_difficultyIconFrame
+  private framehandle m_difficultyLabelTextFrame
+  private framehandle m_difficultyDescriptionTextFrame
+  private framehandle m_tierChancesBarFrame
+  private framehandle array[3] m_tierChancesBarFrames
+  private framehandle m_statsTextAreaFrame
+  private _handle m_propertyChangedEventHandler
+  private DifficultyVM m_dataContext
+
+  // --------------------------------------------------------------------------
+  construct (framehandle frame)
+    
+    m_frame = frame
+    m_difficultyIconFrame = getFrame("DifficultyIconFrame")
+    m_difficultyLabelTextFrame = getFrame("DifficultyLabelText")
+    m_difficultyDescriptionTextFrame = getFrame("DifficultyDescriptionText")
+    m_tierChancesBarFrame = getFrame("TierChancesBar")
+
+    for i = 0 to 2
+      m_tierChancesBarFrames[i] = getFrame("Tier{0}ChanceBar".format(i.toString()))
+
+    m_statsTextAreaFrame = getFrame("StatsTextArea")
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    m_frame.remove()
+
+  // --------------------------------------------------------------------------
+  function getDataContext() returns DifficultyVM
+    return m_dataContext
+
+  // --------------------------------------------------------------------------
+  function setDataContext(DifficultyVM value)
+    if (m_dataContext != value)
+      let oldDataContext = m_dataContext
+      m_dataContext = value
+      onDataContextChanged(oldDataContext, m_dataContext)
+
+  // --------------------------------------------------------------------------
+  protected function onDataContextChanged(DifficultyVM oldValue, DifficultyVM newValue)
+
+    if (m_propertyChangedEventHandler != INVALID_HANDLE and oldValue != null)
+      oldValue.onPropertyChanged().unregister(m_propertyChangedEventHandler)
+      m_propertyChangedEventHandler = INVALID_HANDLE
+
+    if (newValue != null)
+      m_propertyChangedEventHandler = newValue.onPropertyChanged().register() (DifficultyVM sender, string propertyName) ->
+        onDataContextPropertyChanged(propertyName)
+
+    updateFrame()
+
+  // --------------------------------------------------------------------------
+  private function onDataContextPropertyChanged(string _propertyName)
+    updateFrame()
+
+  // --------------------------------------------------------------------------
+  private function updateFrame()
+
+    let index = m_dataContext != null ? m_dataContext.getIndex() : 0
+
+    let icon = "ui\\DifficultyDialog\\Difficulty{0}Icon.tga".format(index.toString())
+    m_difficultyIconFrame.setTexture(icon, 0, true)
+
+    let name = m_dataContext != null ? m_dataContext.getName() : "<Name>"
+    m_difficultyLabelTextFrame.setText(name)
+    
+    let description = m_dataContext != null ? m_dataContext.getDescription() : "<Description>"
+    m_difficultyDescriptionTextFrame.setText(description)
+    
+    let stats = m_dataContext != null ? m_dataContext.getStats() : "<Stats>"
+    m_statsTextAreaFrame.setText(stats)
+
+    let tierChances = m_dataContext != null ? m_dataContext.getTierChances() : vec3(1,1,1)
+    let tierChancesBarWidth = m_tierChancesBarFrame.getWidth()
+    m_tierChancesBarFrames[0].setVisible(tierChances.x != 0)
+    m_tierChancesBarFrames[1].setVisible(tierChances.y != 0)
+    m_tierChancesBarFrames[2].setVisible(tierChances.z != 0)
+    m_tierChancesBarFrames[0].setWidth(tierChancesBarWidth * tierChances.x)
+    m_tierChancesBarFrames[1].setWidth(tierChancesBarWidth * tierChances.y)
+    m_tierChancesBarFrames[2].setWidth(tierChancesBarWidth * tierChances.z)
+
+
+// ============================================================================
+class DifficultyVM
+
+  /////////////////////////////////////////////////////////////////////////////
+  static class META
+    static class PROPERTIES
+      static constant string name = "name"
+      static constant string description = "description"
+      static constant string tierChances = "tierChances"
+      static constant string stats = "stats"
+      static constant string bannerImage = "bannerImage"
+      static constant string isLocked = "isLocked"
+      static constant string isSelected = "isSelected"
+    
+    protected static function fromObject(object obj) returns DifficultyVM
+      return obj.cast<DifficultyVM>(DifficultyVM.typeId)
+    
+    protected static function registerMetadata(MetaRegistrar registrar)
+      registrar.registerClass(DifficultyVM.typeId)..registerDestructor((object obj) -> destroy fromObject(obj))
+  /////////////////////////////////////////////////////////////////////////////
+
+  use Observable
+
+  private DifficultyDialogVM m_dialog
+  private int m_index
+  private string m_name
+  private string m_description
+  private vec3 m_tierChances
+  private string m_stats
+  private string m_bannerImage
+  private bool m_isLocked
+  private bool m_isSelected
+
+  // --------------------------------------------------------------------------
+  construct (DifficultyDialogVM owner, int index)
+    m_dialog = owner
+    m_index = index
+
+  // --------------------------------------------------------------------------
+  function getIndex() returns int
+    return m_index
+
+  // --------------------------------------------------------------------------
+  function getDialog() returns DifficultyDialogVM
+    return m_dialog
+
+  // --------------------------------------------------------------------------
+  function getName() returns string
+    return m_name
+
+  // --------------------------------------------------------------------------
+  function setName(string value)
+    if (m_name != value)
+      m_name = value
+      raisePropertyChangedEvent(META.PROPERTIES.name)
+
+  // --------------------------------------------------------------------------
+  function getDescription() returns string
+    return m_description
+
+  // --------------------------------------------------------------------------
+  function setDescription(string value)
+    if (m_description != value)
+      m_description = value
+      raisePropertyChangedEvent(META.PROPERTIES.description)
+
+  // --------------------------------------------------------------------------
+  function getTierChances() returns vec3
+    return m_tierChances
+
+  // --------------------------------------------------------------------------
+  function setTierChances(vec3 value)
+    if (m_tierChances != value)
+      m_tierChances = value
+      raisePropertyChangedEvent(META.PROPERTIES.tierChances)
+
+  // --------------------------------------------------------------------------
+  function getStats() returns string
+    return m_stats
+
+  // --------------------------------------------------------------------------
+  function setStats(string value)
+    if (m_stats != value)
+      m_stats = value
+      raisePropertyChangedEvent(META.PROPERTIES.stats)
+
+  // --------------------------------------------------------------------------
+  function getBannerImage() returns string
+    return m_bannerImage
+
+  // --------------------------------------------------------------------------
+  function setBannerImage(string value)
+    if (m_bannerImage != value)
+      m_bannerImage = value
+      raisePropertyChangedEvent(META.PROPERTIES.bannerImage)
+
+  // --------------------------------------------------------------------------
+  function getIsLocked() returns bool
+    return m_isLocked
+
+  // --------------------------------------------------------------------------
+  function setIsLocked(bool value)
+    if (m_isLocked != value)
+      m_isLocked = value
+      raisePropertyChangedEvent(META.PROPERTIES.isLocked)
+
+  // --------------------------------------------------------------------------
+  function getIsSelected() returns bool
+    return m_isSelected
+
+  // --------------------------------------------------------------------------
+  function setIsSelected(bool value)
+    if (m_isSelected != value)
+      m_isSelected = value
+      raisePropertyChangedEvent(META.PROPERTIES.isSelected)
+
+// ============================================================================
+public class DifficultyDialogVM
+
+  /////////////////////////////////////////////////////////////////////////////
+  static class META
+  //{
+    static class PROPERTIES
+      static constant string selectedDifficulty = "selectedDifficulty"
+      static constant string scrollValue = "scrollValue"
+
+    protected static function fromObject(object obj) returns DifficultyDialogVM
+      return obj.cast<DifficultyDialogVM>(DifficultyDialogVM.typeId)
+      
+    protected static function registerMetadata(MetaRegistrar registrar)
+      registrar.registerClass(DifficultyDialogVM.typeId)..registerDestructor((object obj) -> destroy fromObject(obj))
+  //}
+  /////////////////////////////////////////////////////////////////////////////
+
+  use Observable
+
+  private player m_player
+  private DifficultyVM array[DIFFICULTY_COUNT] m_difficulties
+  private int m_selectedDifficulty = 1
+  private int m_scrollValue = 0
+
+  // --------------------------------------------------------------------------
+  construct(player forPlayer)
+
+    m_player = forPlayer
+    
+    for i = 0 to 5
+    //{
+      let sb = new StringBuilder()
+
+      if (i <= DIFFICULTY_START_RANDOM_WAVES)
+        sb.appendLine("· Fixed spawn wave order")
+      else
+        sb.appendLine("· Random spawn wave order")
+
+      let eliteDamageScale = (DIFFICULTIES[i] + 1) / 2.0 * ELITE_DAMAGE_SCALAR
+      let eliteHealthScale = (DIFFICULTIES[i] + 1) / 2.0
+      let itemQualityScale = 1 + max(i - 1, 0) * 0.1
+      let metaXPScale = 0.5 + i * 0.5
+
+      sb..appendLine("· {0} elite damage".format(eliteDamageScale.toPercentageString01(0)))
+      sb..appendLine("· {0} elite health".format(eliteHealthScale.toPercentageString01(0)))
+      sb..appendLine("· {0} item quality".format(itemQualityScale.toPercentageString01(0)))
+      sb..appendLine("· {0} meta XP".format(metaXPScale.toPercentageString01(0)))
+
+      m_difficulties[i] = new DifficultyVM(this, i)
+      ..setName(g_difficultyNames[i].colorize(g_difficultyNameColors[i]))
+      ..setDescription(g_difficultyDescriptions[i])
+      ..setTierChances(vec3(TIER_1_CHANCES[i], TIER_2_CHANCES[i], TIER_3_CHANCES[i]))
+      ..setIsSelected(i == 1)
+      // ..setIsLocked(i > 2)
+      ..setStats(sb.toStringAndDestroy())
+    //}
+
+  // --------------------------------------------------------------------------
+  ondestroy
+
+    for i = 0 to DIFFICULTY_COUNT-1
+      destroy m_difficulties[i]
+      m_difficulties[i] = null
+
+  // --------------------------------------------------------------------------
+  function getPlayer() returns player
+    return m_player
+        
+  // --------------------------------------------------------------------------
+  function getDifficulty(int index) returns DifficultyVM
+    return m_difficulties[index]
+
+  // --------------------------------------------------------------------------
+  function getSelectedDifficulty() returns int
+    return m_selectedDifficulty
+
+  // --------------------------------------------------------------------------
+  function setSelectedDifficulty(int value)
+    if (m_selectedDifficulty != value)
+
+      for i = 0 to 5
+        m_difficulties[i].setIsSelected(i == value)
+
+      m_selectedDifficulty = value
+      raisePropertyChangedEvent(META.PROPERTIES.selectedDifficulty)
+  
+  // --------------------------------------------------------------------------
+  function getScrollValue() returns int
+    return m_scrollValue
+  
+  // --------------------------------------------------------------------------
+  function setScrollValue(int value)
+    if (m_scrollValue != value)
+      m_scrollValue = value
+      raisePropertyChangedEvent(META.PROPERTIES.scrollValue)
+  
+// ============================================================================
+init
+  Meta.register("DifficultySelectionDialog") (MetaRegistrar registrar) ->
+    DifficultyVM.META.registerMetadata(registrar)
+    DifficultyDialogVM.META.registerMetadata(registrar)
+
+  ensureTocIsLoaded()
