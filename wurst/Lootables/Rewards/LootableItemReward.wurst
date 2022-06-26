@@ -10,6 +10,7 @@ import LooterComponent
 import GameInstance
 import SoundUtils
 import ItemType
+import Notifications
 
 SoundDefinition g_lootRewardSound
 
@@ -32,12 +33,15 @@ public class LootableItemReward implements ILootableReward
 
     var itemChances = lerp(m_itemChancesStart, m_itemChancesEnd, g_GameInstance.getGameProgress01())
 
+    var pendantApplied = false
+
     // Treasure Hunter's Pendant increases rare item chances
     let metadata = looter.getMetadata()
     if (metadata != null)
       let comp = metadata.getLooterComponent()
       if (comp != null and comp.getEnabled() and comp.getOverrideItemChances())
         itemChances = comp.getItemChances()
+        pendantApplied = true
         displayMessageToPlayer(looter.getOwner(), "Treasure Hunter's Pendant!".colorize(Colors.lightBlue))
 
     let itm = g_MainItemLibrary.giveRandomItemToUnit(looter, itemChances)
@@ -51,16 +55,22 @@ public class LootableItemReward implements ILootableReward
       Log.debug("LootableItemReward", "giveReward", "", "Could not find matching item set for item {0}".format(itm.getTypeId().toString()))
       return false
 
+    let owner = looter.getOwner()
     let itemType = ItemType.getItemType(itm.getTypeId())
     let itemRarity = itemType.getRarity()
 
     FX.createFoundItemTag(looter.getPos(), looter.getOwner())
 
-    lootable.displayLootRewardText(looter.getOwner(),
-      "Found {0} item {1}!".format(
-        itemRarity.getName().colorize(itemRarity.getColor()),
-        itm.getName().colorize(Colors.gold)),
+    let notification = new LootRewardNotification(
+      NotificationManager.nextNotificationId(),
+      owner,
+      looter.getPos(),
       g_lootRewardSound)
+    ..setMessage("Found item " + itm.getName().colorize(itemRarity.getColor()))
+    ..setIconPath(itm.getIconPath())
+    ..setAffectedByLuckyPendant(pendantApplied)
+
+    lootable.showLootRewardNotification(owner, notification)
 
     return true
 

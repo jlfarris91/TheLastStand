@@ -1,7 +1,131 @@
 package LootableReward
 import initlater LootableComponent
+import Notifications
+import SoundUtils
+import Command
+import ClosureTimers
+import FullscreenFrame
+import ClosureFrames
+import StandardTooltip
+import Icons
+
+public constant real LOOT_REWARD_NOTIFICATION_DURATION = 15.0
+
+constant string LUCKY_HORSHOE_TOOLTIP = "Lucky Horseshoe"
+constant string LUCKY_HORSHOE_TOOLTIP_EXTENDED = "This bonus loot was acquired thanks to the Lucky Horseshoe item"
+
+constant string PENDANT_TOOLTIP = "Treasure Hunter's Pendant"
+constant string PENDANT_TOOLTIP_EXTENDED = "This loot is a higher rarity thanks to the Treasure Hunter's Pendant item"
 
 // ============================================================================
 public interface ILootableReward
   function giveReward(LootableComponent lootable, unit looter) returns bool
   function getStopsRetrigger() returns bool
+
+// ============================================================================
+public class LootRewardNotification extends Notification
+  private player m_player
+  private vec2 m_cameraPos
+  private SoundDefinition m_soundDef
+  private bool m_dueToLuckyHorseshoe
+  private bool m_affectedByLuckyPendant
+
+  // --------------------------------------------------------------------------
+  construct (int id, player p, vec2 cameraPos, SoundDefinition soundDef)
+    super(id, LOOT_REWARD_NOTIFICATION_DURATION)
+
+    m_player = p
+    m_cameraPos = cameraPos
+    m_soundDef = soundDef
+    m_dueToLuckyHorseshoe = false
+    m_affectedByLuckyPendant = false
+
+    setClickCommand(new RoutedCommand(() -> onClick()))
+
+  // --------------------------------------------------------------------------
+  function getDueToLuckyHorseshoe() returns bool
+    return m_dueToLuckyHorseshoe
+
+  // --------------------------------------------------------------------------
+  function setDueToLuckyHorseshoe(bool value)
+    m_dueToLuckyHorseshoe = value
+
+  // --------------------------------------------------------------------------
+  function getAffectedByLuckyPendant() returns bool
+    return m_affectedByLuckyPendant
+
+  // --------------------------------------------------------------------------
+  function setAffectedByLuckyPendant(bool value)
+    m_affectedByLuckyPendant = value
+
+  // --------------------------------------------------------------------------
+  override function onShow()
+    super.onShow()
+
+    if (m_soundDef != null)
+      doAfter(0.15, () -> m_soundDef.playForPlayer(m_player))      
+
+  // --------------------------------------------------------------------------
+  private function onClick()
+    if (localPlayer == m_player)
+      PanCameraToTimedForPlayer(m_player, m_cameraPos.x, m_cameraPos.y, 0)
+
+// ============================================================================
+public class LootRewardNotificationFrame extends TextSimpleNotificationFrame
+  private framehandle m_luckyHorseshoeFrame
+  private framehandle m_pendantFrame
+
+  // --------------------------------------------------------------------------
+  construct ()
+    super (createFrame("SimpleNotification", CONSOLE_UI_BACKDROP, 0, 0))
+
+    m_luckyHorseshoeFrame = createFrame("FRAME", "", GAME_UI, "", 0)
+    ..setParent(m_iconFrame)
+    ..setSize(0.01, 0.01)
+    ..onMouseEnter(() -> StandardTooltip.show(LUCKY_HORSHOE_TOOLTIP, LUCKY_HORSHOE_TOOLTIP_EXTENDED, GetTriggerPlayer()))
+    ..onMouseLeave(() -> StandardTooltip.hide(GetTriggerPlayer()))
+
+    createFrame("BACKDROP", "", GAME_UI, "", 0)
+    ..setParent(m_luckyHorseshoeFrame)
+    ..setAllPoints(m_luckyHorseshoeFrame)
+    ..setTexture(Icons.bTNAnimalWarTraining, 0, false)
+
+    m_pendantFrame = createFrame("FRAME", "", GAME_UI, "", 0)
+    ..setParent(m_iconFrame)
+    ..setSize(0.01, 0.01)
+    ..onMouseEnter(() -> StandardTooltip.show(PENDANT_TOOLTIP, PENDANT_TOOLTIP_EXTENDED, GetTriggerPlayer()))
+    ..onMouseLeave(() -> StandardTooltip.hide(GetTriggerPlayer()))
+
+    createFrame("BACKDROP", "", GAME_UI, "", 0)
+    ..setParent(m_pendantFrame)
+    ..setAllPoints(m_pendantFrame)
+    ..setTexture(Icons.bTNGem, 0, false)
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    m_luckyHorseshoeFrame.hide()
+    m_luckyHorseshoeFrame.remove()
+    m_pendantFrame.hide()
+    m_pendantFrame.remove()
+
+  // --------------------------------------------------------------------------
+  override protected function updateFrame()
+    super.updateFrame()
+
+    let lootRewardNotification = m_notification castTo LootRewardNotification
+    var offset = vec2(-0.0025, -0.0025)
+
+    let luckyHorseshoeVisible = lootRewardNotification != null and lootRewardNotification.getDueToLuckyHorseshoe()
+    m_luckyHorseshoeFrame.setVisible(luckyHorseshoeVisible)
+    if (luckyHorseshoeVisible)
+      m_luckyHorseshoeFrame.setPoint(FRAMEPOINT_TOPRIGHT, m_frame, FRAMEPOINT_TOPRIGHT, offset.x, offset.y)
+      offset.x -= m_luckyHorseshoeFrame.getWidth() + 0.0025
+
+    let pendantFrameVisible = lootRewardNotification != null and lootRewardNotification.getAffectedByLuckyPendant()
+    m_pendantFrame.setVisible(pendantFrameVisible)
+    if (pendantFrameVisible)
+      m_pendantFrame.setPoint(FRAMEPOINT_TOPRIGHT, m_frame, FRAMEPOINT_TOPRIGHT, offset.x, offset.y)
+
+// ============================================================================
+init
+  NotificationManager.notificationFrameFactory.registerFactory(LootRewardNotification.typeId, () -> new LootRewardNotificationFrame())

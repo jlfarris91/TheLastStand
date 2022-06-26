@@ -10,6 +10,8 @@ import HumanPlayers
 import ColorUtility
 import HumanPlayerComponent
 import ItemType
+import VoteKick
+import PlayerUtility
 
 constant string COMMAND_BASE = "base"
 constant string COMMAND_BASES = "bases"
@@ -25,6 +27,7 @@ constant string COMMAND_GIVELUMB = "givelumber"
 constant string COMMAND_GIVELUMB_ALIAS = "givel"
 constant string COMMAND_GIVELUMB_ALIAS2 = "gl"
 constant string COMMAND_SAVE = "save"
+constant string COMMAND_VOTEKICK = "votekick"
 
 public quest g_playerCommandsQuest
 ChatCommandHandler g_playerChatCommandHandler
@@ -104,29 +107,6 @@ function splitItemsInSlot(unit _unit, int index) returns bool
   return successfullySplit
 
 // ============================================================================
-function getPlayerFromPartialNameColorOrId(string playerPartialNameColorOrId, player ignore) returns player  
-  // Check for an ID match first since toInt() will return -1 when parsing an int fails
-  let playerId = playerPartialNameColorOrId.toInt()
-  if (playerId != -1)
-    let p = players[playerId]
-    if (p != ignore and p != null)
-      return p
-  // Then check for exact player name match
-  for p in g_PlayingHumanPlayers
-    if (p != ignore and p.getName() == playerPartialNameColorOrId)
-      return p
-  // Then, partial player name match
-  for p in g_PlayingHumanPlayers
-    if (p != ignore and p.getName().startsWith(playerPartialNameColorOrId))
-      return p
-  // Then player color
-  let playerColor  = playerPartialNameColorOrId.toPlayerColor()
-  for p in g_PlayingHumanPlayers
-    if (p != ignore and p.getColor() == playerColor)
-      return p
-  return null
-
-// ============================================================================
 function giveGold()
   let command = getChatCommand()
   let commandPlayer = getChatCommandPlayer()
@@ -185,6 +165,23 @@ function savePlayerData()
   getChatCommandPlayer().getHumanPlayerComponentRequired().save()
 
 // ============================================================================
+function startVoteKick()
+  let command = getChatCommand()
+  let commandPlayer = getChatCommandPlayer()
+  let playerPartialNameColorOrId = command.getArgument(0).getString()
+
+  let targetPlayer = getPlayerFromPartialNameColorOrId(playerPartialNameColorOrId, commandPlayer)
+  if (targetPlayer == null)
+    chatCommandPrintToPlayer(commandPlayer, "Could not find player " + playerPartialNameColorOrId)
+    return
+
+  if (not targetPlayer.isHumanPlayer())
+    chatCommandPrintToPlayer(commandPlayer, "Player {0} is not a playing human player".format(targetPlayer.getName()))
+    return
+
+  VoteKick.start(commandPlayer, targetPlayer)
+
+// ============================================================================
 function setupPlayerCommandsQuest()
   g_playerCommandsQuest = CreateQuest()
   QuestSetIconPath(g_playerCommandsQuest, "ReplaceableTextures\\WorldEditUI\\DoodadPlaceholder.blp")
@@ -232,6 +229,10 @@ function registerDebugCommands()
 
   g_playerChatCommandHandler.registerCommandDefinition(COMMAND_SAVE, function savePlayerData)
     ..setDescription("Saves data for the player to a file on the disk")
+
+  g_playerChatCommandHandler.registerCommandDefinition(COMMAND_VOTEKICK, function startVoteKick)
+    ..setDescription("Start a vote to kick a player")
+    ..addStringArgument("PLAYER_NAME_PARTIAL_OR_ID", false)
 
   g_playerChatCommandHandler.addQuestItems()
 

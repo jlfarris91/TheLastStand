@@ -11,6 +11,8 @@ import Survivors
 import SoundUtils
 import HashMap
 import TlsUnitIds
+import Notifications
+import UnitExtensions
 
 WeightedSet<SurvivorJobType> g_weightedSurvivorJobSet
 HashMap<int, WeightedSet<SoundDefinition>> g_lootFinishedSoundMap
@@ -30,21 +32,25 @@ public class LootableSurvivorReward implements ILootableReward
   // --------------------------------------------------------------------------
   function spawnSurvivor(LootableComponent lootable, unit looter)
     let lootableUnit = lootable.getOwnerUnit()
+    let owner = looter.getOwner()
     
     let survivor = SurvivorUtility.spawnSurvivorWithRandomJob(PLAYER_VILLAGERS, lootableUnit.getPos(), g_weightedSurvivorJobSet)
 
     survivor.issuePointOrderById(OrderIds.move, looter.getPos())
 
-    FX.createFoundSurvivorTag(lootableUnit.getPos(), lootableUnit.getOwner())
+    FX.createFoundSurvivorTag(lootableUnit.getPos(), owner)
     
     let job = SurvivorJobs.getJobDefinitionForUnitType(survivor.getTypeId())
 
-    lootable.displayLootRewardText(
-      looter.getOwner(),
-      "Found {0} {1}!".format(
-        job.getTitle(survivor.getTypeId()).colorize(Colors.gold),
-        survivor.getProperName()),
+    let notification = new LootRewardNotification(
+      NotificationManager.nextNotificationId(),
+      owner,
+      looter.getPos(),
       getSoundDefinition(survivor.getTypeId()))
+    ..setMessage("Found " + "{0} {1}".format(job.getTitle(survivor.getTypeId()), survivor.getProperName()).colorize(Colors.gold))
+    ..setIconPath(survivor.getIconPath())
+
+    lootable.showLootRewardNotification(owner, notification)
 
 // ============================================================================
 function registerSoundDefinition(int unitTypeId, string soundPath, int volume, real weight)

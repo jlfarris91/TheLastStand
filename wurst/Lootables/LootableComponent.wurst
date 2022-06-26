@@ -34,7 +34,9 @@ public class LootableComponent extends UnitComponent
   private texttag m_cooldownDayTextTag
   private real m_chanceToRetrigger01
   private rangeInt m_cooldownDaysRange
-  private int m_lootRewardMultiplier = 1
+  private int m_lootRewardMultiplier = 1  
+  private int m_dueToLuckyHorseshoe = 0
+
   // --------------------------------------------------------------------------
   construct(IUnitMetadata owner)
     super(owner)
@@ -218,22 +220,20 @@ public class LootableComponent extends UnitComponent
     onLootable()
 
   // --------------------------------------------------------------------------
-  function displayLootRewardText(player _player, string message, SoundDefinition rewardSound)
+  function showLootRewardNotification(player _player, LootRewardNotification notification)
 
     let index = m_lootRewardMultiplier
     let delay = (index - 1) * 0.6
+    let dueToLuckyHorseshoe = m_dueToLuckyHorseshoe > 0
 
     doAfter(delay) () ->
-      if (index == 1)
-        displayMessageToPlayer(
-          _player,
-          "Finished Looting : ".colorize(Colors.gold) + message)
-      else
-        displayMessageToPlayer(
-          _player,
-          "Finished Looting x{0} : ".format(index.toString()).colorize(Colors.gold) + message)
+    //{
+      notification
+      ..setDueToLuckyHorseshoe(dueToLuckyHorseshoe)
+      ..show(_player)
+
       g_lootFinishedSound[index.clamp(0, 2)].playForPlayer(_player)
-      doAfter(0.15, () -> rewardSound.playForPlayer(_player))
+    //"
 
     m_lootRewardMultiplier++
 
@@ -241,7 +241,7 @@ public class LootableComponent extends UnitComponent
   protected function giveRewards(unit lootingUnit)
     m_lootRewardMultiplier = 1
     let rewardsSet = new WeightedSet<ILootableReward>(m_rewards)
-    giveRewardsWithChanceToRetrigger(rewardsSet, lootingUnit, m_chanceToRetrigger01, true)
+    giveRewardsWithChanceToRetrigger(rewardsSet, lootingUnit, m_chanceToRetrigger01, true, false)
     destroy rewardsSet
 
   // --------------------------------------------------------------------------
@@ -249,24 +249,30 @@ public class LootableComponent extends UnitComponent
     WeightedSet<ILootableReward> rewards,
     unit lootingUnit,
     real chanceToRetrigger01,
-    bool allowLuckyHorseshoe)
+    bool allowLuckyHorseshoe,
+    bool rewardDueToLuckyHorseshoe)
 
     // No more rewards to give
     if (rewards.isEmpty())
       return
+
+    m_dueToLuckyHorseshoe += rewardDueToLuckyHorseshoe ? 1 : 0
 
     // Give the player their reward
     ILootableReward reward = null
     while (not rewards.isEmpty())
     //{
       reward = rewards.popRandom()
+
       if (reward == null)
         Log.debug("No reward registered for lootable")
-        return
+        break
 
       if (reward.giveReward(this, lootingUnit))
         break
     //}
+
+    m_dueToLuckyHorseshoe -= rewardDueToLuckyHorseshoe ? 1 : 0
 
     // Some rewards necessarily must stop the retrigger loop
     if (reward == null or reward.getStopsRetrigger())
@@ -274,6 +280,7 @@ public class LootableComponent extends UnitComponent
 
     var chanceToRetriggerWithHoreshoe01 = chanceToRetrigger01
     var mutableLuckyHorseshoe = allowLuckyHorseshoe
+    var mutableRewardDueToLuckyHorseshoe = false
 
     // Lucky Horseshoe item grants a small chance to immediately loot a second time
     let metadata = lootingUnit.getMetadata()
@@ -290,9 +297,10 @@ public class LootableComponent extends UnitComponent
     if (not passesChanceCheck(chanceToRetrigger01, roll))
       displayMessageToPlayer(lootingUnit.getOwner(), "Lucky Horseshoe!".colorize(Colors.lightBlue) + " You found even more loot!")
       mutableLuckyHorseshoe = false // Lucky horseshoe can only fire once
+      mutableRewardDueToLuckyHorseshoe = true
 
     // Give the player another reward and give it another shot to retrigger
-    giveRewardsWithChanceToRetrigger(rewards, lootingUnit, chanceToRetrigger01 / 3.0, mutableLuckyHorseshoe)
+    giveRewardsWithChanceToRetrigger(rewards, lootingUnit, chanceToRetrigger01 / 3.0, mutableLuckyHorseshoe, mutableRewardDueToLuckyHorseshoe)
 
   // --------------------------------------------------------------------------
   private function onLooted()

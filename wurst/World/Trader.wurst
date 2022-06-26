@@ -28,12 +28,14 @@ import AbilityIds
 import MinimapIcon
 import HumanPlayers
 import Range
-import DisplayTextToPlayer
 import Host
 import PlayerExtensions
 import MainItemLibrary
 import HumanPlayerComponent
 import ItemType
+import Notifications
+import Icons
+import Command
 
 LinkedList<TradingPost> g_tradingPosts = new LinkedList<TradingPost>()
 Vector<TradingPost> g_tradingPostsSorted = new Vector<TradingPost>()
@@ -330,10 +332,22 @@ function showTraderHintArea(player p, bool show)
   g_playerHintAreaIcons[p.getId()] = icon
 
   if (not g_playerHintRevealed[p.getId()])
+  //{
     let listenerName = g_playerHintAreaListenerName[p.getId()]
+
+    string message
+
     if (listenerName != null)
-      displayMessageToPlayer(p, (listenerName + " has spotted signs of the Trader").colorize(Colors.gold))
-    displayMessageToPlayer(p, "The general location of the Trader has been revealed on your minimap")
+      message = listenerName + " has spotted signs of the Trader"
+    else
+      message = "The general location of the Trader has been revealed on your minimap"
+
+    new Notification()
+    ..setMessage(message)
+    ..setIconPath("ReplaceableTextures\\WorldEditUI\\Editor-Random-Item.blp")
+    ..show(p)
+
+  //}
 
   g_playerHintRevealed[p.getId()] = true
 
@@ -417,11 +431,23 @@ function checkIfTraderHasBeenFound()
 
 // ============================================================================
 function onPlayerFoundTrader(player p)
-  if (not g_playerHasFoundTrader[p.getId()])
-    g_playerHasFoundTrader[p.getId()] = true
-    showTraderHintArea(p, false)
-    displayMessageToPlayer(p, "You found the Trader!")
-    PingMinimap(g_traderUnit.getX(), g_traderUnit.getY(), 3.0)
+  if (g_playerHasFoundTrader[p.getId()])
+    return
+  
+  g_playerHasFoundTrader[p.getId()] = true
+  showTraderHintArea(p, false)
+
+  let traderPos = g_traderUnit.getPos()
+  PingMinimap(traderPos.x, traderPos.y, 3.0)
+
+  new Notification()
+  ..setMessage("You found the trader!")
+  ..setIconPath(Icons.bTNMedivh)
+  ..setClickCommand(new RoutedCommand(() -> begin
+    if (GetTriggerPlayer() == localPlayer)
+      PanCameraToTimedForPlayer(p, traderPos.x, traderPos.y, 0)
+  end))
+  ..show(p)
 
 // ============================================================================
 init
