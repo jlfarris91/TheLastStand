@@ -1,6 +1,5 @@
 package DebugCommands
 import ChatCommands
-import ClosureTimers
 import Godlike
 import ErrorHandling
 import GameInstance
@@ -33,11 +32,16 @@ import UndeadTargetingComponent
 import GroupExtensions
 import BuildingUndeadTargetComponent
 import GridCachedSpawnManager
-import PlayerSpawnPointProviders
 import DebuggerDialog
 import ItemType
 import PlayerUtility
 import Notifications
+import VoteKick
+import Execute
+import PathChecker
+import Spawning
+import BuilderBuildMenus
+import UndeadTargetService
 
 constant string COMMAND_GODLIKE = "godlike"
 constant string COMMAND_SPAWNONE = "spawnone"
@@ -95,6 +99,15 @@ constant string COMMAND_ISSUE_ORDER = "order"
 constant string COMMAND_DEBUGGER = "debugger"
 constant string COMMAND_NOTIFY = "notify"
 constant string COMMAND_NOTIFYALL = "notifyAll"
+constant string COMMAND_STARTKICKVOTE = "startKickVote"
+constant string COMMAND_CASTKICKVOTE = "castKickVote"
+
+constant string COMMAND_UTC = "utc"
+constant string COMMAND_UTS = "uts"
+constant string COMMAND_GCSM = "gcsm"
+constant string COMMAND_PATHCHECKER = "pathChecker"
+constant string COMMAND_SPAWNING = "spawning"
+constant string COMMAND_BLDMENU = "bldmenu"
 
 DevChatCommandHandler g_commandHandler
 fogmodifier array g_seeVisionModifiers
@@ -1241,11 +1254,156 @@ function notify()
 function notifyAll()
   let command = getChatCommand()
   let message = command.getArgument(0).getString()
-
   notifyAllPlayers(message)
 
 // ============================================================================
-function registerDebugCommands()
+function startKickVote()
+  let command = getChatCommand()
+  let commandPlayer = getChatCommandPlayer()
+
+  let kickerStr = command.getArgument(0).getString()
+  let kickeeStr = command.getArgument(1).getString()
+
+  let kicker = getPlayerFromPartialNameColorOrId(kickerStr)
+  if (kicker == null)
+    chatCommandPrintToPlayer(commandPlayer, "Could not find player " + kickerStr)
+    return
+
+  if (not kicker.isHumanPlayer())
+    chatCommandPrintToPlayer(commandPlayer, "Player {0} is not a playing human player".format(kicker.getName()))
+    return
+
+  let kickee = getPlayerFromPartialNameColorOrId(kickeeStr)
+  if (kickee == null)
+    chatCommandPrintToPlayer(commandPlayer, "Could not find player " + kickeeStr)
+    return
+
+  if (not kickee.isHumanPlayer())
+    chatCommandPrintToPlayer(commandPlayer, "Player {0} is not a playing human player".format(kickee.getName()))
+    return
+
+  VoteKick.start(kicker, kickee)
+  chatCommandPrintToPlayer(commandPlayer, "Started vote: {0} wants to kick {1}".format(kicker.getName(), kickee.getName()))
+
+// ============================================================================
+function castKickVote()
+  let command = getChatCommand()
+  let commandPlayer = getChatCommandPlayer()
+
+  let playerPartialNameColorOrId = command.getArgument(0).getString()
+  let vote = command.getArgument(1).getBool()
+
+  let targetPlayer = getPlayerFromPartialNameColorOrId(playerPartialNameColorOrId)
+  if (targetPlayer == null)
+    chatCommandPrintToPlayer(commandPlayer, "Could not find player " + playerPartialNameColorOrId)
+    return
+
+  if (not targetPlayer.isHumanPlayer())
+    chatCommandPrintToPlayer(commandPlayer, "Player {0} is not a playing human player".format(targetPlayer.getName()))
+    return
+
+  VoteKick.castVote(targetPlayer, vote)
+  chatCommandPrintToPlayer(commandPlayer, "Cast vote {0} for player {1}".format(vote.toString(), targetPlayer.getName()))
+
+// ============================================================================
+function utc()
+  let command = getChatCommand()
+  let commandPlayer = getChatCommandPlayer()
+  let opStr = command.getArgument(0).getString()
+
+  switch (opStr)
+    case "enable"
+      UTC_ENABLED = true
+      chatCommandPrintToPlayer(commandPlayer, "Enabled UTC")
+    case "disable"
+      UTC_ENABLED = false
+      chatCommandPrintToPlayer(commandPlayer, "Disabled UTC")
+    default
+      chatCommandPrintToPlayer(commandPlayer, "Unknown op")
+
+// ============================================================================
+function uts()
+  let command = getChatCommand()
+  let commandPlayer = getChatCommandPlayer()
+  let opStr = command.getArgument(0).getString()
+
+  switch (opStr)
+    case "enable"
+      UTS_ENABLED = true
+      chatCommandPrintToPlayer(commandPlayer, "Enabled UTS")
+    case "disable"
+      UTS_ENABLED = false
+      chatCommandPrintToPlayer(commandPlayer, "Disabled UTS")
+    default
+      chatCommandPrintToPlayer(commandPlayer, "Unknown op")
+
+// ============================================================================
+function gcsm()
+  let command = getChatCommand()
+  let commandPlayer = getChatCommandPlayer()
+  let opStr = command.getArgument(0).getString()
+
+  switch (opStr)
+    case "enable"
+      GCSM_ENABLED = true
+      chatCommandPrintToPlayer(commandPlayer, "Enabled GCSM")
+    case "disable"
+      GCSM_ENABLED = false
+      chatCommandPrintToPlayer(commandPlayer, "Disabled GCSM")
+    default
+      chatCommandPrintToPlayer(commandPlayer, "Unknown op")
+
+// ============================================================================
+function pathChecker()
+  let command = getChatCommand()
+  let commandPlayer = getChatCommandPlayer()
+  let opStr = command.getArgument(0).getString()
+
+  switch (opStr)
+    case "enable"
+      PATHCHECKER_ENABLED = true
+      chatCommandPrintToPlayer(commandPlayer, "Enabled PATHCHECKER")
+    case "disable"
+      PATHCHECKER_ENABLED = false
+      chatCommandPrintToPlayer(commandPlayer, "Disabled PATHCHECKER")
+    default
+      chatCommandPrintToPlayer(commandPlayer, "Unknown op")
+
+// ============================================================================
+function spawning()
+  let command = getChatCommand()
+  let commandPlayer = getChatCommandPlayer()
+  let opStr = command.getArgument(0).getString()
+
+  switch (opStr)
+    case "enable"
+      SPAWNING_ENABLED = true
+      chatCommandPrintToPlayer(commandPlayer, "Enabled SPAWNING")
+    case "disable"
+      SPAWNING_ENABLED = false
+      chatCommandPrintToPlayer(commandPlayer, "Disabled SPAWNING")
+    default
+      chatCommandPrintToPlayer(commandPlayer, "Unknown op")
+
+// ============================================================================
+function bldmenu()
+  let command = getChatCommand()
+  let commandPlayer = getChatCommandPlayer()
+  let opStr = command.getArgument(0).getString()
+
+  switch (opStr)
+    case "enable"
+      BLDMENU_ENABLED = true
+      chatCommandPrintToPlayer(commandPlayer, "Enabled BLDMENU")
+    case "disable"
+      BLDMENU_ENABLED = false
+      chatCommandPrintToPlayer(commandPlayer, "Disabled BLDMENU")
+    default
+      chatCommandPrintToPlayer(commandPlayer, "Unknown op")
+
+
+// ============================================================================
+function registerDebugCommands1()
 
   g_commandHandler.registerCommandDefinition(COMMAND_GODLIKE, function godlike)
 
@@ -1391,6 +1549,9 @@ function registerDebugCommands()
     ..setDescription("Starts a path checker for a given player")
     ..addIntegerArgument("PLAYER", false)
 
+// ============================================================================
+function registerDebugCommands2()
+
   g_commandHandler.registerCommandDefinition(COMMAND_SPAWNSURVIVOR, function spawnSurvivor)
     ..setDescription("Tries to spawn one or more random survivors for a player")
     ..addIntegerArgument("PLAYER", false)
@@ -1466,6 +1627,34 @@ function registerDebugCommands()
     ..setDescription("Send a notification to all players")
     ..addStringArgument("MESSAGE", false)
 
+  g_commandHandler.registerCommandDefinition(COMMAND_STARTKICKVOTE, function startKickVote)
+    ..setDescription("Starts a vote to kick")
+    ..addStringArgument("PLAYER_NAME_PARTIAL_OR_ID_KICKER", false)
+    ..addStringArgument("PLAYER_NAME_PARTIAL_OR_ID_KICKEE", false)
+
+  g_commandHandler.registerCommandDefinition(COMMAND_CASTKICKVOTE, function castKickVote)
+    ..setDescription("Casts a vote for a player")
+    ..addStringArgument("PLAYER_NAME_PARTIAL_OR_ID", false)
+    ..addBoolArgument("VOTE", false)
+
+  g_commandHandler.registerCommandDefinition(COMMAND_UTC, function utc)
+    ..addStringArgument("OP", false)
+
+  g_commandHandler.registerCommandDefinition(COMMAND_UTS, function uts)
+    ..addStringArgument("OP", false)
+
+  g_commandHandler.registerCommandDefinition(COMMAND_GCSM, function gcsm)
+    ..addStringArgument("OP", false)
+
+  g_commandHandler.registerCommandDefinition(COMMAND_PATHCHECKER, function pathChecker)
+    ..addStringArgument("OP", false)
+
+  g_commandHandler.registerCommandDefinition(COMMAND_SPAWNING, function spawning)
+    ..addStringArgument("OP", false)
+
+  g_commandHandler.registerCommandDefinition(COMMAND_BLDMENU, function bldmenu)
+    ..addStringArgument("OP", false)
+
 // ============================================================================
 init
 
@@ -1474,5 +1663,6 @@ init
     g_commandHandler = new DevChatCommandHandler("Debug", null)
     registerChatCommandHandler(g_commandHandler, -1)
 
-    nullTimer(() -> registerDebugCommands())
+    execute(() -> registerDebugCommands1())
+    execute(() -> registerDebugCommands2())
   //}
