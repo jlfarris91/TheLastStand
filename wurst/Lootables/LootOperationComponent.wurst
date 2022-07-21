@@ -3,7 +3,6 @@ import RealtimeUnitComponent
 import LootableComponent
 import LinkedList
 import HashMap
-import TextProgressBar
 import TimerUtils
 import ClosureTimers
 import FX
@@ -19,6 +18,10 @@ import LootableUtility
 import LootableTypes
 import SoundUtils
 import RealTime
+import IProgress
+import Notifications
+import Icons
+import Command
 
 constant int PROGRESS_BAR_LENGTH = 20
 constant colorA PROGRESS_BAR_FOREGROUND = colorA(0, 170, 0, 255)
@@ -28,8 +31,6 @@ constant real PROGRESS_BAR_UPDATE_PERIOD = 0.1
 LinkedList<LootOperationComponent> g_activeOperations
 HashMap<unit, LootOperationComponent> g_looterToOperationMap = new HashMap<unit, LootOperationComponent>()
 
-TextProgressBar g_LootOperationProgressBar
-
 SoundDefinition g_notEnoughManaSoundDef
 SoundDefinition g_errorSoundDef
 int array g_notEnoughManaLastPlayedTime
@@ -37,7 +38,9 @@ int array g_notEnoughManaLastPlayedTime
 // ============================================================================
 public class LootOperationComponent extends RealtimeUnitComponent
   private unit m_lootingUnit
-  private WorldProgressBar m_progressBar
+  private WorldProgressBar m_worldProgressBar
+  private Progress m_progress
+  private Notification m_notification
   private real m_duration
   private timer m_timer
   private int m_secondsElapsed
@@ -49,7 +52,10 @@ public class LootOperationComponent extends RealtimeUnitComponent
     super(owner)
     
     m_timer = getTimer()
-    m_progressBar = new WorldProgressBar()..setHeight(128.0)..setScale(16.0)
+
+    m_worldProgressBar = new WorldProgressBar()
+    ..setHeight(128.0)
+    ..setScale(16.0)
 
   // --------------------------------------------------------------------------
   ondestroy
@@ -58,14 +64,23 @@ public class LootOperationComponent extends RealtimeUnitComponent
       m_timer.release()
       m_timer = null
     
-    if (m_progressBar != null)
-      destroy m_progressBar
-      m_progressBar = null
+    if (m_worldProgressBar != null)
+      destroy m_worldProgressBar
+      m_worldProgressBar = null
+
+    if (m_notification != null)
+      m_notification.close()
+      m_notification.release()
+      m_notification = null
+
+    if (m_progress != null)
+      destroy m_progress
+      m_progress = null
 
   // --------------------------------------------------------------------------
   override function onEnabled()
     super.onEnabled()
-    m_progressBar..setPos(getOwnerUnit().getPos())
+    m_worldProgressBar..setPos(getOwnerUnit().getPos())
 
   // --------------------------------------------------------------------------
   override function onDisabled()
@@ -91,10 +106,12 @@ public class LootOperationComponent extends RealtimeUnitComponent
 
     if (getIsRunning() == false)
       return
+    
+    let percentage01 = parameterize01(m_duration, 0.0, m_timer.getRemaining())
+    m_progress.report(percentage01)
 
-    if (m_progressBar != null)
-      let percentage01 = parameterize01(m_duration, 0.0, m_timer.getRemaining())
-      m_progressBar.setPercentageNow(percentage01)
+    if (m_worldProgressBar != null)
+      m_worldProgressBar.setPercentageNow(percentage01)
 
     // Remove mana per second
     let secondsElapsed = m_timer.getElapsed().floor()
@@ -113,16 +130,34 @@ public class LootOperationComponent extends RealtimeUnitComponent
     m_isRunning = true
     m_lootingUnit = looter
     m_duration = duration
+    
+    let lootingPlayer = looter.getOwner()
+    let cameraPos = getOwnerUnit().getPos()
 
     // Avoid implicit capture of 'this' by caching the result of m_lootableUnit
     let lootableUnitCached = getOwnerUnit()
     m_timer.doManual(duration, true, () -> onOperationFinished(lootableUnitCached))
 
-    // m_progressBar.showForPlayer(looter.getOwner())
-    m_progressBar
+    m_progress = new Progress()
+    m_progress.report("Looting {0}...".format(getOwnerUnit().getName()))
+
+    m_worldProgressBar
     ..setPos(looter.getPos())
     ..setSpeed(1.0 / m_duration)
     ..fadeIn()
+
+    m_notification = new Notification(duration)
+    ..setProgress(m_progress)
+    ..setIconPath(Icons.bTNTelescope)
+    ..setMessage("Looting {0}...".format(getOwnerUnit().getName()))
+    ..setShowTimeRemaining(false)
+    ..setCanClose(false)
+    ..setClickCommand(new RoutedCommand(() -> begin
+      if (localPlayer == lootingPlayer)
+        PanCameraToTimedForPlayer(lootingPlayer, cameraPos.x, cameraPos.y, 0)
+    end))
+    ..show(lootingPlayer)
+    ..acquire()
 
     g_looterToOperationMap.put(looter, this)
 
@@ -165,7 +200,14 @@ public class LootOperationComponent extends RealtimeUnitComponent
     m_lootingUnit = null
 
     m_timer.pause()
-    m_progressBar.fadeOut()
+    m_worldProgressBar.fadeOut()
+    
+    m_notification.close()
+    m_notification.release()
+    m_notification = null
+
+    destroy m_progress
+    m_progress = null
 
     this.unregisterForRealtimeUpdate()
 
@@ -336,8 +378,7 @@ function onUnitIssuedImmediateOrPointOrder()
 
 // ============================================================================
 init
-  
-  g_LootOperationProgressBar = new TextProgressBar(PROGRESS_BAR_LENGTH, PROGRESS_BAR_FOREGROUND, PROGRESS_BAR_BACKGROUND)
+
   g_activeOperations = new LinkedList<LootOperationComponent>()
   
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_SPELL_CHANNEL, function onSpellChannel)
