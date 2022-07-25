@@ -33,24 +33,28 @@ constant int  UNIT_GATE_ARMOR = 1
 public HashList<int> g_allGateIds = new HashList<int>()
 public HashList<int> g_allOpenGateIds = new HashList<int>()
 public HashList<int> g_allClosedGateIds = new HashList<int>()
-public HashList<int> g_allBuildGateIds = new HashList<int>()
+public HashList<int> g_allClosedBuildGateIds = new HashList<int>()
+public HashList<int> g_allOpenBuildGateIds = new HashList<int>()
 HashMap<int, GateCardinalUnitDefinitionHelper> g_unitTypeToHelperMap = new HashMap<int, GateCardinalUnitDefinitionHelper>()
 
 //=============================================================================
 public function unit.isGate() returns bool
-  return this.isClosedGate() or this.isOpenGate() or this.isBuildGate()
+  return g_allClosedGateIds.has(this.getTypeId()) or
+         g_allOpenGateIds.has(this.getTypeId()) or
+         g_allClosedBuildGateIds.has(this.getTypeId()) or
+         g_allOpenBuildGateIds.has(this.getTypeId())
 
 //=============================================================================
 public function unit.isOpenGate() returns bool
-  return g_allOpenGateIds.has(this.getTypeId())
+  return g_allOpenGateIds.has(this.getTypeId()) or g_allOpenBuildGateIds.has(this.getTypeId())
 
 //=============================================================================
 public function unit.isClosedGate() returns bool
-  return g_allClosedGateIds.has(this.getTypeId()) or this.isBuildGate()
+  return g_allClosedGateIds.has(this.getTypeId()) or g_allClosedBuildGateIds.has(this.getTypeId())
 
 //=============================================================================
 public function unit.isBuildGate() returns bool
-  return g_allBuildGateIds.has(this.getTypeId())
+  return g_allClosedBuildGateIds.has(this.getTypeId()) or g_allOpenBuildGateIds.has(this.getTypeId())
 
 //=============================================================================
 public function getGateHelperForUnitType(int unitType) returns GateCardinalUnitDefinitionHelper
@@ -123,7 +127,7 @@ public function defineOpenGateUnit(
 
   if (upgradesToHelper != null)
     let closedGateId = helper.getClosedId(angle)
-    let nextLevelGateId = upgradesToHelper.getId(angle)
+    let nextLevelGateId = upgradesToHelper.getOpenBuildId(angle)
     def.setUpgradesTo(commaList(closedGateId, nextLevelGateId))
   else
     let closedGateId = helper.getClosedId(angle)
@@ -155,12 +159,12 @@ public function defineClosedGateUnit(
   ..setHotkey("G")
 
   if (upgradesToHelper != null)
-    let closedGateId = helper.getOpenId(angle)
-    let nextLevelGateId = upgradesToHelper.getId(angle)
-    def.setUpgradesTo(commaList(closedGateId, nextLevelGateId))
+    let openGateId = helper.getOpenId(angle)
+    let nextLevelGateId = upgradesToHelper.getClosedBuildId(angle)
+    def.setUpgradesTo(commaList(openGateId, nextLevelGateId))
   else
-    let closedGateId = helper.getOpenId(angle)
-    def.setUpgradesTo(commaList(closedGateId))
+    let openGateId = helper.getOpenId(angle)
+    def.setUpgradesTo(commaList(openGateId))
 
   g_allGateIds.add(newId)
   g_allClosedGateIds.add(newId)
@@ -169,16 +173,16 @@ public function defineClosedGateUnit(
   return def
 
 //=============================================================================
-public function defineBuildGateUnit(
+public function defineClosedBuildGateUnit(
   GateCardinalUnitDefinitionHelper helper,
   int newId,
   CardinalUnitAngle angle,
   GateCardinalUnitDefinitionHelper upgradesToHelper) returns BaseGateDefinition
 
   let def = new BaseGateDefinition(newId)
-  ..setIconGameInterface(helper.getIconPath(angle))
+  ..setIconGameInterface(helper.getClosedIconPath(angle))
   ..setModelFile(helper.getModelPath(angle))
-  ..setPathingMap(helper.getPathMap(angle))
+  ..setPathingMap(helper.getClosedPathMap(angle))
   ..setGoldCost(UNIT_GATE_GOLD_COST)
   ..setMaterialCost(UNIT_GATE_LUMBER_COST)
   ..setRepairGoldCost(UNIT_GATE_REPAIR_GOLD)
@@ -193,15 +197,53 @@ public function defineBuildGateUnit(
   ..setHotkey("G")
 
   if (upgradesToHelper != null)
-    let closedGateId = helper.getOpenId(angle)
-    let nextLevelGateId = upgradesToHelper.getId(angle)
+    let openGateId = helper.getOpenId(angle)
+    let nextLevelGateId = upgradesToHelper.getClosedBuildId(angle)
+    def.setUpgradesTo(commaList(openGateId, nextLevelGateId))
+  else
+    let openGateId = helper.getOpenId(angle)
+    def.setUpgradesTo(commaList(openGateId))
+
+  g_allGateIds.add(newId)
+  g_allClosedBuildGateIds.add(newId)
+  g_unitTypeToHelperMap.put(newId, helper)
+
+  return def
+
+//=============================================================================
+public function defineOpenBuildGateUnit(
+  GateCardinalUnitDefinitionHelper helper,
+  int newId,
+  CardinalUnitAngle angle,
+  GateCardinalUnitDefinitionHelper upgradesToHelper) returns BaseGateDefinition
+
+  let def = new BaseGateDefinition(newId)
+  ..setIconGameInterface(helper.getOpenIconPath(angle))
+  ..setModelFile(helper.getModelPath(angle))
+  ..setPathingMap(helper.getOpenPathMap(angle))
+  ..setGoldCost(UNIT_GATE_GOLD_COST)
+  ..setMaterialCost(UNIT_GATE_LUMBER_COST)
+  ..setRepairGoldCost(UNIT_GATE_REPAIR_GOLD)
+  ..setRepairLumberCost(UNIT_GATE_REPAIR_GOLD)
+  ..setBuildTime(UNIT_GATE_BUILD_TIME)
+  ..setTooltipBasic("Upgrade to |cffffcc00G|rate")
+  ..setTooltipExtended("Upgrade to a stronger gate that can be opened and closed.")
+  ..setButtonPositionX(0)
+  ..setButtonPositionY(2)
+  ..setRequiredAnimationNames(getGateAnimationProperties(angle, true))
+  ..makeBuildingUndeadTarget()
+  ..setHotkey("G")
+
+  if (upgradesToHelper != null)
+    let closedGateId = helper.getClosedId(angle)
+    let nextLevelGateId = upgradesToHelper.getOpenBuildId(angle)
     def.setUpgradesTo(commaList(closedGateId, nextLevelGateId))
   else
-    let closedGateId = helper.getOpenId(angle)
+    let closedGateId = helper.getClosedId(angle)
     def.setUpgradesTo(commaList(closedGateId))
 
   g_allGateIds.add(newId)
-  g_allBuildGateIds.add(newId)
+  g_allOpenBuildGateIds.add(newId)
   g_unitTypeToHelperMap.put(newId, helper)
 
   return def
