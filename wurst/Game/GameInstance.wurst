@@ -21,6 +21,8 @@ import initlater GameStatsMultiboard
 import initlater NightWaveGenerator
 import initlater DayWaveGenerator
 import Math
+import SmartValue
+import GameProperties
 
 public GameInstance g_GameInstance = new GameInstance()
 
@@ -31,8 +33,6 @@ public class GameInstance
   private int m_day
   private int m_night
   private real m_gameDifficulty = 1.0
-  private real m_gameSpeedScale = 1.0
-  private real m_unscaledTimeOfDaySpeedScale = 1.0
   private PlayerWavesMap m_playerWaves
   private IDayWaveGenerator m_staticDayWaveGenerator
   private IDayWaveGenerator m_randomDayWaveGenerator
@@ -74,25 +74,6 @@ public class GameInstance
   // --------------------------------------------------------------------------
   function setUpdateGracePeriod(bool value)
     m_updateGracePeriod = value
-
-  // --------------------------------------------------------------------------
-  function getGameSpeed() returns real
-    return m_gameSpeedScale
-
-  // --------------------------------------------------------------------------
-  function setGameSpeed(real value)
-    if (m_gameSpeedScale != value)
-      m_gameSpeedScale = value
-      setTimeOfDayScale(m_unscaledTimeOfDaySpeedScale)
-
-  // --------------------------------------------------------------------------
-  function setTimeOfDayScale(real value)
-    m_unscaledTimeOfDaySpeedScale = value
-    SetTimeOfDayScale(m_unscaledTimeOfDaySpeedScale * m_gameSpeedScale)
-
-  // --------------------------------------------------------------------------
-  function setTimeOfDayScalePercent(real percent)
-    setTimeOfDayScale(percent / 100.0)
 
   // --------------------------------------------------------------------------
   function getGameDifficulty01() returns real
@@ -158,10 +139,12 @@ public class GameInstance
   // --------------------------------------------------------------------------
   function skipToDay(int day)
     m_day = day - 1
+    m_night = day - 1
     startNextDay()
 
   // --------------------------------------------------------------------------
   function skipToNight(int night)
+    m_day = night
     m_night = night - 1
     startNextNight()
 
@@ -170,14 +153,14 @@ public class GameInstance
     m_day = 0
     m_night = 0
     SetTimeOfDay(TIME_OF_DAY_INITIAL)
-    SetTimeOfDayScalePercentBJ(GAME_SPEED_INITIAL)
+    g_GameProperties.setTODScale(TOD_SCALE_INITIAL)
 
   // --------------------------------------------------------------------------
   function start()
 
     m_updateGracePeriod = true
 
-    SetTimeOfDayScale(0.0)
+    g_GameProperties.setTODScale(0.0)
     SetTimeOfDay(TIME_OF_DAY - 0.5)
 
     m_hasStarted = true
@@ -210,6 +193,10 @@ public class GameInstance
 
     doAfter(1.0) ->
       postStart()
+
+  // ----------------------------------------------------------------------------
+  function onTODScaleValueChanged()
+
 
   // --------------------------------------------------------------------------
   function complete()
@@ -290,7 +277,7 @@ public class GameInstance
     if (m_day == 1)
       showMultiboardsForPlayers()
 
-    doAfter(0.1, () -> setTimeOfDayScalePercent(TOD_DAY_SCALARS[m_day - 1]))
+    g_GameProperties.getProperty(GameProperty.TOD_SCALE).setBase(TOD_DAY_SCALARS[m_day - 1])
 
     // Start day waves for players
     for p in g_PlayingHumanPlayers
@@ -303,7 +290,7 @@ public class GameInstance
     // End the game
     if (m_day > TOTAL_NIGHTS)
       doAfter(30.0) () ->
-        setTimeOfDayScale(0.0)
+        g_GameProperties.setTODScale(0.0)
         for p in g_PlayingHumanPlayers
           if (p.getMetadata().getHasLostGame())
             CustomDefeatBJ( p, "You lose. Better luck next time!" )
@@ -328,7 +315,7 @@ public class GameInstance
 
     Log.debug("Starting night {0}...".format(m_night.toString()))
 
-    doAfter(0.1, () -> setTimeOfDayScalePercent(TOD_NIGHT_SCALARS[m_night - 1]))
+    g_GameProperties.getProperty(GameProperty.TOD_SCALE).setBase(TOD_NIGHT_SCALARS[m_night - 1])
 
     // Start night waves for players
     for p in g_PlayingHumanPlayers
@@ -350,7 +337,8 @@ public class GameInstance
     SetPlayerFlagBJ(PLAYER_STATE_GIVES_BOUNTY, true, PLAYER_UNDEAD)
     CameraSetSmoothingFactor(5.0)
     SetCreepCampFilterState(false)
-    SetTimeOfDayScalePercentBJ(GAME_SPEED_INITIAL)
+
+    g_GameProperties.setTODScale(TOD_SCALE_INITIAL)
     SetTimeOfDay(TIME_OF_DAY_INITIAL)
 
     // Tells the AI to not use guard positions?

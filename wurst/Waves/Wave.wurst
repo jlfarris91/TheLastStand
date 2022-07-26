@@ -14,8 +14,13 @@ import IProgress
 import Icons
 import Notifications
 import SoundUtils
+import Optional
+import GameProperties
 
 SoundDefinition g_lootRewardSound
+
+/** Only one wave can affect TOD scale at a time */
+_handle g_todScaleAffector = INVALID_HANDLE
 
 // ============================================================================
 public class Wave extends Runnable
@@ -30,6 +35,9 @@ public class Wave extends Runnable
   private int m_completedSpawnWaves
   private sound m_playSoundOnStart = null
   private sound m_playSoundOnComplete = null
+  
+  private optionalReal m_todScale = none_real()
+  private _handle m_todScaleAffector = INVALID_HANDLE
 
   // --------------------------------------------------------------------------
   construct(player p)
@@ -40,7 +48,7 @@ public class Wave extends Runnable
 
   // --------------------------------------------------------------------------
   ondestroy
-    unlistenToAllSpawnWaveEvents()
+    cleanup()
 
     for sw in m_spawnWaves
       destroy sw
@@ -108,6 +116,10 @@ public class Wave extends Runnable
   function playSoundOnComplete(sound value)
     m_playSoundOnComplete = value
 
+  // ----------------------------------------------------------------------------
+  function setTODScale(real value)
+    m_todScale = some(value)
+
   // --------------------------------------------------------------------------
   override function onStarted()
     super.onStarted()
@@ -122,11 +134,15 @@ public class Wave extends Runnable
     if (m_playSoundOnStart != null)
       PlaySoundBJ(m_playSoundOnStart)
 
+    if (m_todScale.hasValue and g_todScaleAffector == INVALID_HANDLE)
+      g_todScaleAffector = g_GameProperties.getProperty(GameProperty.TOD_SCALE).affectScale(m_todScale.value)
+      m_todScaleAffector = g_todScaleAffector
+
   // --------------------------------------------------------------------------
   override function onCompleted()
     super.onCompleted()
 
-    unlistenToAllSpawnWaveEvents()
+    cleanup()
 
     for wave in m_spawnWaves
       if (not wave.isCompleted())
@@ -230,6 +246,17 @@ public class Wave extends Runnable
     raiseProgressChangedEvent()
     if (getProgress() == 1.0)
       complete()
+
+  // ----------------------------------------------------------------------------
+  private function cleanup()
+    
+    unlistenToAllSpawnWaveEvents()
+
+    if (m_todScaleAffector != INVALID_HANDLE and m_todScaleAffector == g_todScaleAffector)
+      assertTrue(m_todScale.hasValue)
+      g_GameProperties.getProperty(GameProperty.TOD_SCALE).remove(g_todScaleAffector)
+      m_todScaleAffector = INVALID_HANDLE
+      g_todScaleAffector = INVALID_HANDLE
 
 // ============================================================================
 init

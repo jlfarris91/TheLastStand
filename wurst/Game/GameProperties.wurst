@@ -1,0 +1,101 @@
+package GameProperties
+import Func
+import RealExtensions
+import SmartValue
+import ClosureTimers
+
+// ============================================================================
+public enum GameProperty
+  TOD_SCALE
+  __COUNT
+
+// Must match number of items in GameProperty enum
+public constant int GAME_PROPERTY_COUNT = 1
+
+// ============================================================================
+tuple propertyMetadata(real defaultValue, bool triggersUpdate, string friendlyName, string shortName, Func1<real, string> stringifier)
+
+Func1<real, string> g_toString = (real v) -> v.toString()
+Func1<real, string> g_toIntString = (real v) -> v.toInt().toString()
+Func1<real, string> g_toScalarString = (real v) -> v.toString() + "x"
+Func1<real, string> g_toPercentageString01 = (real v) -> v.toPercentageString01()
+
+public GameProperties g_GameProperties = new GameProperties()
+
+// ============================================================================
+public class GameProperties
+
+  private SmartValue array[GAME_PROPERTY_COUNT] m_smartValues
+
+  static constant int count = GAME_PROPERTY_COUNT
+
+  protected static constant propertyMetadata array[count] PROPERTY_METADATA = [
+    /* TOD_SCALE  */  propertyMetadata(1.0, true,  "TOD Scale",    "tod_scale",    g_toPercentageString01.acquire())
+  ]
+
+  // --------------------------------------------------------------------------
+  static function getPropertyDefaultValue(GameProperty property) returns real
+    return PROPERTY_METADATA[property castTo int].defaultValue
+
+  // --------------------------------------------------------------------------
+  static function getPropertyFriendlyName(GameProperty property) returns string
+    return PROPERTY_METADATA[property castTo int].friendlyName
+
+  // --------------------------------------------------------------------------
+  static function getPropertyShortName(GameProperty property) returns string
+    return PROPERTY_METADATA[property castTo int].shortName
+
+  // --------------------------------------------------------------------------
+  static function formatPropertyValue(GameProperty property, real value) returns string
+    let stringifier = PROPERTY_METADATA[property castTo int].stringifier
+    return stringifier != null ? stringifier.call(value) : value.toString()
+
+  // --------------------------------------------------------------------------
+  /**Returns GameProperty.__COUNT if no matching property could be found */
+  static function getPropertyByShortName(string shortName) returns GameProperty
+    for i = 0 to count - 1
+      if (PROPERTY_METADATA[i].shortName == shortName)
+        return i castTo GameProperty
+    return GameProperty.__COUNT
+
+  // --------------------------------------------------------------------------
+  function hasProperty(GameProperty property) returns bool
+    return m_smartValues[property castTo int] != null
+
+  // --------------------------------------------------------------------------
+  function getProperty(GameProperty property) returns SmartValue
+    let propId = property castTo int
+    if (m_smartValues[propId] == null)
+      m_smartValues[propId] = new SmartValue(GameProperties.getPropertyDefaultValue(property))
+      if (GameProperties.PROPERTY_METADATA[propId].triggersUpdate)
+        m_smartValues[propId].onValueChanged().register(() -> update(property))
+        update(property)
+    return m_smartValues[propId]
+
+  // --------------------------------------------------------------------------
+  function getPropertyValue(GameProperty property) returns real
+    return hasProperty(property) ? getProperty(property).getValue() : GameProperties.getPropertyDefaultValue(property)
+
+  // --------------------------------------------------------------------------
+  function getPropertyIntValue(GameProperty property) returns int
+    return getPropertyValue(property).toInt()
+
+  // --------------------------------------------------------------------------
+  function getPropertyValueAsString(GameProperty property) returns string
+    return GameProperties.formatPropertyValue(property, getPropertyValue(property))
+
+  // --------------------------------------------------------------------------
+  private function update(GameProperty property)
+    
+    if (property == GameProperty.TOD_SCALE)
+      let propValue = getPropertyValue(property)
+      doAfter(0.1) () ->
+        SetTimeOfDayScale(propValue)
+
+  // --------------------------------------------------------------------------
+  function setTODScale(real value)
+    getProperty(GameProperty.TOD_SCALE).setBase(value)
+
+  // --------------------------------------------------------------------------
+  function getTODScale() returns real
+    return getProperty(GameProperty.TOD_SCALE).getValue()
