@@ -30,12 +30,16 @@ import HumanPlayers
 import Range
 import Host
 import PlayerExtensions
-import MainItemLibrary
 import HumanPlayerComponent
 import ItemType
 import Notifications
 import Icons
 import Command
+import TlsItemDefinition
+import ObjectIdGenerator
+import RegisterEvents
+import FX
+import TlsSounds
 
 LinkedList<TradingPost> g_tradingPosts = new LinkedList<TradingPost>()
 Vector<TradingPost> g_tradingPostsSorted = new Vector<TradingPost>()
@@ -76,6 +80,9 @@ bool array g_playerHintRevealed
 constant color HINT_AREA_ICON_COLOR = Colors.gold.withoutAlpha()
 
 Vector<int> g_stockedItemTypeIds = new Vector<int>()
+
+constant int ITEM_ID_LUMBER_TO_GOLD = compiletime(ITEM_ID_GEN.next())
+constant int ITEM_ID_GOLD_TO_LUMBER = compiletime(ITEM_ID_GEN.next())
 
 // ============================================================================
 class TradingPost
@@ -377,10 +384,41 @@ function updateStock()
     ..setAttack1DamageRange(rangeInt(999,999))
 
   new TlsUnitDefinition(TlsUnitIds.traderHorse, UnitIds.packhorse)
-    ..setNormalAbilities(commaList(AbilityIds.invulnerable, AbilityIds.ghostVisible))
+    ..setNormalAbilities(commaList(AbilityIds.invulnerable, AbilityIds.selectHero, AbilityIds.shopPurchaseItem, 'Asid', AbilityIds.ghostVisible))
     ..setCanFlee(false)
     ..setCollisionSize(0.0)
     ..setName("Redart")
+    ..setItemsSold(commaList(ITEM_ID_GOLD_TO_LUMBER, ITEM_ID_LUMBER_TO_GOLD))
+
+  new TlsItemDefinition(ITEM_ID_GOLD_TO_LUMBER, 'crys')
+    ..setAbilities("")
+    ..setButtonPositionX(0)
+    ..setButtonPositionY(0)
+    ..setInterfaceIcon(Icons.bTNGLExchange)
+    ..setName("Stack of Lumber")
+    ..setTooltipBasic("Purchase Lumber")
+    ..setTooltipExtended("Trade {0} gold for {1} lumber".format(TRADE_LUMBER_GOLD_COST.toString(), TRADE_GOLD_LUMBER_COST.toString()))
+    ..setGoldCost(TRADE_LUMBER_GOLD_COST)
+    ..setLumberCost(0)
+    ..setStockInitial(1)
+    ..setStockMaximum(99)
+    ..setStockReplenishInterval(0)
+    ..setStockStartDelay(0)
+
+  new TlsItemDefinition(ITEM_ID_LUMBER_TO_GOLD, 'crys')
+    ..setAbilities("")
+    ..setButtonPositionX(1)
+    ..setButtonPositionY(0)
+    ..setInterfaceIcon(Icons.bTNLGExchange)
+    ..setName("Gold Coin")
+    ..setTooltipBasic("Purchase Gold")
+    ..setTooltipExtended("Trade {0} lumber for {1} gold".format(TRADE_GOLD_LUMBER_COST.toString(), TRADE_LUMBER_GOLD_COST.toString()))
+    ..setGoldCost(0)
+    ..setLumberCost(TRADE_GOLD_LUMBER_COST)
+    ..setStockInitial(1)
+    ..setStockMaximum(99)
+    ..setStockReplenishInterval(0)
+    ..setStockStartDelay(0)
 
 // ============================================================================
 public function setTraderHintListener(player p, bool listening, string name)
@@ -446,6 +484,30 @@ function onPlayerFoundTrader(player p)
   ..show(p)
 
 // ============================================================================
+function onItemSold()
+  let itemSold = GetSoldItem()
+  let sellingUnit = GetSellingUnit()
+  let buyingUnit = GetBuyingUnit()
+
+  if (sellingUnit.getTypeId() != TlsUnitIds.trader and
+      sellingUnit.getTypeId() != TlsUnitIds.traderHorse)
+    return
+
+  let buyingPlayer = buyingUnit.getOwner()
+
+  if (itemSold.getTypeId() == ITEM_ID_GOLD_TO_LUMBER)
+    buyingUnit.getOwner().addLumber(TRADE_GOLD_LUMBER_COST)
+    itemSold.remove()
+    FX.createFoundMaterialsTag(buyingUnit.getPos(), TRADE_GOLD_LUMBER_COST, buyingPlayer)
+    TlsSounds.getRandomFoundLumber().playForPlayer(buyingPlayer)
+
+  if (itemSold.getTypeId() == ITEM_ID_LUMBER_TO_GOLD)
+    buyingUnit.getOwner().addGold(TRADE_LUMBER_GOLD_COST)
+    itemSold.remove()
+    FX.createFoundGoldTag(buyingUnit.getPos(), TRADE_LUMBER_GOLD_COST, buyingPlayer)
+    TlsSounds.getRandomFoundGold().playForPlayer(buyingPlayer)
+
+// ============================================================================
 init
 
   g_comparator = (TradingPost a, TradingPost b) ->
@@ -482,6 +544,8 @@ init
 
   registerDayEvent(function onDayStart)
   registerNightEvent(function onNightStart)
+
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_SELL_ITEM, function onItemSold)
 
   registerTimeOfDayEvent(TRADER_REVEAL_TOD_RANGE.min, function onNoon)
   registerTimeOfDayEvent(TRADER_REVEAL_TOD_RANGE.max, function onNoonThirty)
