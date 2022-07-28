@@ -43,6 +43,7 @@ import Spawning
 import BuilderBuildMenus
 import UndeadTargetService
 import GameProperties
+import PlayerProperties
 
 constant string COMMAND_GODLIKE = "godlike"
 constant string COMMAND_SPAWNONE = "spawnone"
@@ -73,9 +74,9 @@ constant string COMMAND_REPUTATION = "rep"
 constant string COMMAND_SETREPUTATION = "setrep"
 constant string COMMAND_UPDATEREPUTATION = "updaterep"
 constant string COMMAND_SPAWNALLITEMS = "spawnitems"
-constant string COMMAND_UNITPROPS = "showprops"
-constant string COMMAND_SETUNITPROP = "setprop"
-constant string COMMAND_CLEARUNITPROP = "clearprop"
+constant string COMMAND_SHOWPROPS = "showprops"
+constant string COMMAND_SETPROP = "setprop"
+constant string COMMAND_CLEARPROP = "clearprop"
 constant string COMMAND_SETHEALTH = "sethp"
 constant string COMMAND_SETMANA = "setmana"
 constant string COMMAND_PAUSE = "pause"
@@ -619,99 +620,242 @@ function spawnAllItems()
     chatCommandPrintToPlayer(commandPlayer, "Created legendary item {0} ({1})".format(itm.getName(), itm.getTypeId().toString()))
 
 // ============================================================================
-function showSelectedUnitStats()
+function showProps()
   let commandPlayer = getChatCommandPlayer()
+  let propScopeArg = getChatCommand().getArgument(0)
 
-  let selectedUnit = getFirstWorkingGroupUnit(commandPlayer)
-  if (selectedUnit == null)
-    chatCommandPrintToPlayer(commandPlayer, "Must have a unit selected")
-    return
+  var propScope = "u"
+  if (propScopeArg != null)
+    propScope = propScopeArg.getString()
 
-  let metadata = selectedUnit.getMetadata()
-  if (metadata == null)
-    chatCommandPrintToPlayer(commandPlayer, "Selected unit does not have metadata")
-    return
+  switch (propScope)
+    case "u"
+    //{
+      let selectedUnit = getFirstWorkingGroupUnit(commandPlayer)
+      if (selectedUnit == null)
+        chatCommandPrintToPlayer(commandPlayer, "Must have a unit selected")
+        return
 
-  let comp = metadata.getUnitPropertiesComponent()
-  if (comp == null)
-    chatCommandPrintToPlayer(commandPlayer, "Unit does not have properties component")
-    return
+      let metadata = selectedUnit.getMetadata()
+      if (metadata == null)
+        chatCommandPrintToPlayer(commandPlayer, "Selected unit does not have metadata")
+        return
 
-  comp.printDebug((message) -> chatCommandPrintToPlayer(commandPlayer, message))
+      let comp = metadata.getUnitPropertiesComponent()
+      if (comp == null)
+        chatCommandPrintToPlayer(commandPlayer, "Unit does not have properties component")
+        return
+
+      comp.printDebug((message) -> chatCommandPrintToPlayer(commandPlayer, message))
+    //}
+    case "g"
+    //{
+      g_GameProperties.printDebug((message) -> chatCommandPrintToPlayer(commandPlayer, message))
+    //}
+    case "p"
+    //{
+      let selectedUnit = getFirstWorkingGroupUnit(commandPlayer)
+      if (selectedUnit == null)
+        chatCommandPrintToPlayer(commandPlayer, "Must have a unit selected")
+        return
+      PlayerProperties.printDebug(selectedUnit.getOwner(), (message) -> chatCommandPrintToPlayer(commandPlayer, message))
+    //}
 
 // ============================================================================
-function setSelectedUnitProperty()
+function setProp()
   let command = getChatCommand()
   let commandPlayer = getChatCommandPlayer()
-  let propName = command.getArgument(0).getString()
-  let op = command.getArgument(1).getString()
-  let value = command.getArgument(2).getReal()
-  let durationArg = command.getArgument(3)
-
-  let selectedUnits = getWorkingGroupUnits(commandPlayer)
-  if (selectedUnits.isEmpty())
-    chatCommandPrintToPlayer(commandPlayer, "Must have at least one unit selected")
-    destroy selectedUnits
-    return
-
-  let unitProp = UnitProperties.getPropertyByShortName(propName)
-  if (unitProp == UnitProperty.__COUNT)
-    chatCommandPrintToPlayer(commandPlayer, "Could not find unit property with name " + propName + ". Try instead: ")
-    for i = 0 to UnitProperties.count - 1
-      chatCommandPrintToPlayer(commandPlayer, UnitProperties.getPropertyShortName(i castTo UnitProperty))
-    return
+  let propScopeArg = getChatCommand().getArgument(0)
+  let propName = command.getArgument(1).getString()
+  let op = command.getArgument(2).getString()
+  let value = command.getArgument(3).getReal()
+  let durationArg = command.getArgument(4)
 
   let duration = durationArg != null ? durationArg.getReal() : 0.0
 
-  for u in selectedUnits
-  //{
-    let metadata = u.getMetadata()
-    if (metadata != null)
-      let comp = metadata.getOrAddUnitPropertiesComponent()
-      if (comp != null)
-        let smartValue = comp.getProperty(unitProp)
+  var propScope = "u"
+  if (propScopeArg != null)
+    propScope = propScopeArg.getString()
 
-        switch (op)
-          case "base"
-            smartValue.affectBase(value, duration)
-          case "scale"
-            smartValue.affectScale(value, duration)
-          case "add"
-            smartValue.affectAdd(value, duration)
-          case "sub"
-            smartValue.affectSub(value, duration)
+  switch (propScope)
+    case "u"
+    //{
+      let selectedUnits = getWorkingGroupUnits(commandPlayer)
+      if (selectedUnits.isEmpty())
+        chatCommandPrintToPlayer(commandPlayer, "Must have at least one unit selected")
+        destroy selectedUnits
+        return
 
-        comp.printDebug((message) -> chatCommandPrintToPlayer(commandPlayer, message))
-  //}
+      let unitProp = UnitProperties.getPropertyByShortName(propName)
+      if (unitProp == UnitProperty.__COUNT)
+        chatCommandPrintToPlayer(commandPlayer, "Could not find unit property with name " + propName + ". Try instead: ")
+        for i = 0 to UnitProperties.count - 1
+          chatCommandPrintToPlayer(commandPlayer, UnitProperties.getPropertyShortName(i castTo UnitProperty))
+        destroy selectedUnits
+        return
 
-  destroy selectedUnits
+      for u in selectedUnits
+      //{
+        let metadata = u.getMetadata()
+        if (metadata != null)
+          let comp = metadata.getOrAddUnitPropertiesComponent()
+          if (comp != null)
+            let smartValue = comp.getProperty(unitProp)
+
+            switch (op)
+              case "base"
+                smartValue.affectBase(value, duration)
+              case "scale"
+                smartValue.affectScale(value, duration)
+              case "add"
+                smartValue.affectAdd(value, duration)
+              case "sub"
+                smartValue.affectSub(value, duration)
+
+            comp.printDebug((message) -> chatCommandPrintToPlayer(commandPlayer, message))
+      //}
+
+      destroy selectedUnits
+    //}
+    case "g"
+    //{
+      let prop = GameProperties.getPropertyByShortName(propName)
+      if (prop == GameProperty.__COUNT)
+        chatCommandPrintToPlayer(commandPlayer, "Could not find game property with name " + propName + ". Try instead: ")
+        for i = 0 to GameProperties.count - 1
+          chatCommandPrintToPlayer(commandPlayer, GameProperties.getPropertyShortName(i castTo GameProperty))
+        return
+
+      let smartValue = g_GameProperties.getProperty(prop)
+
+      switch (op)
+        case "base"
+          smartValue.affectBase(value, duration)
+        case "scale"
+          smartValue.affectScale(value, duration)
+        case "add"
+          smartValue.affectAdd(value, duration)
+        case "sub"
+          smartValue.affectSub(value, duration)
+
+      g_GameProperties.printDebug((message) -> chatCommandPrintToPlayer(commandPlayer, message))
+    //}
+    case "p"
+    //{
+      let selectedUnits = getWorkingGroupUnits(commandPlayer)
+      if (selectedUnits.isEmpty())
+        chatCommandPrintToPlayer(commandPlayer, "Must have one unit selected")
+        destroy selectedUnits
+        return
+
+      let selectedUnit = selectedUnits.getFirst()
+      let selectedPlayer = selectedUnit.getOwner()
+
+      let prop = PlayerProperties.getPropertyByShortName(propName)
+      if (prop == PlayerProperty.__COUNT)
+        chatCommandPrintToPlayer(commandPlayer, "Could not find player property with name " + propName + ". Try instead: ")
+        for i = 0 to PlayerProperties.count - 1
+          chatCommandPrintToPlayer(commandPlayer, PlayerProperties.getPropertyShortName(i castTo PlayerProperty))
+        destroy selectedUnits
+        return
+
+      let smartValue = selectedPlayer.getProperty(prop)
+
+      switch (op)
+        case "base"
+          smartValue.affectBase(value, duration)
+        case "scale"
+          smartValue.affectScale(value, duration)
+        case "add"
+          smartValue.affectAdd(value, duration)
+        case "sub"
+          smartValue.affectSub(value, duration)
+
+      PlayerProperties.printDebug(selectedPlayer, (message) -> chatCommandPrintToPlayer(commandPlayer, message))
+
+      destroy selectedUnits
+    //}
 
 // ============================================================================
-function clearSelectedUnitProperty()
+function clearProp()
   let commandPlayer = getChatCommandPlayer()
+  let propScopeArg = getChatCommand().getArgument(0)
+  let propName = getChatCommand().getArgument(1).getString()
 
-  let selectedUnits = getWorkingGroupUnits(commandPlayer)
-  if (selectedUnits.isEmpty())
-    chatCommandPrintToPlayer(commandPlayer, "Must have at least one unit selected")
-    destroy selectedUnits
-    return
-  
-  for u in selectedUnits
-  //{
-    let metadata = u.getMetadata()
-    if (metadata != null)
-      let comp = metadata.getOrAddUnitPropertiesComponent()
-      if (comp != null)
-      
+  var propScope = "u"
+  if (propScopeArg != null)
+    propScope = propScopeArg.getString()
+
+  switch (propScope)
+    case "u"
+    //{
+      let selectedUnits = getWorkingGroupUnits(commandPlayer)
+      if (selectedUnits.isEmpty())
+        chatCommandPrintToPlayer(commandPlayer, "Must have at least one unit selected")
+        destroy selectedUnits
+        return
+
+      let unitProp = UnitProperties.getPropertyByShortName(propName)
+      if (unitProp == UnitProperty.__COUNT)
+        chatCommandPrintToPlayer(commandPlayer, "Could not find unit property with name " + propName + ". Try instead: ")
         for i = 0 to UnitProperties.count - 1
-          let prop = i castTo UnitProperty
-          if (comp.hasProperty(prop))
-            comp.getProperty(prop).clearAffectors()
+          chatCommandPrintToPlayer(commandPlayer, UnitProperties.getPropertyShortName(i castTo UnitProperty))
+        destroy selectedUnits
+        return
 
-        comp.printDebug((message) -> chatCommandPrintToPlayer(commandPlayer, message))
-  //}
+      for u in selectedUnits
+      //{
+        let metadata = u.getMetadata()
+        if (metadata != null)
+          let comp = metadata.getOrAddUnitPropertiesComponent()
+          if (comp != null)
+            let smartValue = comp.getProperty(unitProp)
+            smartValue.clearAffectors()
+            comp.printDebug((message) -> chatCommandPrintToPlayer(commandPlayer, message))
+      //}
 
-  destroy selectedUnits
+      destroy selectedUnits
+    //}
+    case "g"
+    //{
+      let prop = GameProperties.getPropertyByShortName(propName)
+      if (prop == GameProperty.__COUNT)
+        chatCommandPrintToPlayer(commandPlayer, "Could not find game property with name " + propName + ". Try instead: ")
+        for i = 0 to GameProperties.count - 1
+          chatCommandPrintToPlayer(commandPlayer, GameProperties.getPropertyShortName(i castTo GameProperty))
+        return
+
+      let smartValue = g_GameProperties.getProperty(prop)
+      smartValue.clearAffectors()
+
+      g_GameProperties.printDebug((message) -> chatCommandPrintToPlayer(commandPlayer, message))
+    //}
+    case "p"
+    //{
+      let selectedUnits = getWorkingGroupUnits(commandPlayer)
+      if (selectedUnits.isEmpty())
+        chatCommandPrintToPlayer(commandPlayer, "Must have one unit selected")
+        destroy selectedUnits
+        return
+
+      let selectedUnit = selectedUnits.getFirst()
+      let selectedPlayer = selectedUnit.getOwner()
+
+      let prop = PlayerProperties.getPropertyByShortName(propName)
+      if (prop == PlayerProperty.__COUNT)
+        chatCommandPrintToPlayer(commandPlayer, "Could not find player property with name " + propName + ". Try instead: ")
+        for i = 0 to PlayerProperties.count - 1
+          chatCommandPrintToPlayer(commandPlayer, PlayerProperties.getPropertyShortName(i castTo PlayerProperty))
+        destroy selectedUnits
+        return
+
+      let smartValue = selectedPlayer.getProperty(prop)
+      smartValue.clearAffectors()
+
+      PlayerProperties.printDebug(selectedPlayer, (message) -> chatCommandPrintToPlayer(commandPlayer, message))
+
+      destroy selectedUnits
+    //}
 
 // ============================================================================
 function setSelectedUnitHealth()
@@ -1489,22 +1633,22 @@ function registerDebugCommands1()
   g_commandHandler.registerCommandDefinition(COMMAND_SPAWNALLITEMS, function spawnAllItems)
     ..setDescription("Spawns all items in the main item library")
   
-  g_commandHandler.registerCommandDefinition(COMMAND_UNITPROPS, function showSelectedUnitStats)
+  g_commandHandler.registerCommandDefinition(COMMAND_SHOWPROPS, function showProps)
     ..setDescription("Prints the stats of a selected unit")
-  
-  let unitPropNameArg = new ChatCommandArgument("PROP_NAME", ChatCommandArgumentType.STRING, false)
-  for i = 0 to UnitProperties.count - 1
-    unitPropNameArg.addStringOption(UnitProperties.getPropertyShortName(i castTo UnitProperty))
+    ..addArgument(new ChatCommandArgument("PROP_SCOPE", ChatCommandArgumentType.STRING, false)..setStringOptions("g", "p", "u"))
 
-  g_commandHandler.registerCommandDefinition(COMMAND_SETUNITPROP, function setSelectedUnitProperty)
+  g_commandHandler.registerCommandDefinition(COMMAND_SETPROP, function setProp)
     ..setDescription("Sets the property of a selected unit")
-    ..addArgument(unitPropNameArg)
+    ..addArgument(new ChatCommandArgument("PROP_SCOPE", ChatCommandArgumentType.STRING, false)..setStringOptions("g", "p", "u"))
+    ..addStringArgument("PROP_NAME", false)
     ..addArgument(new ChatCommandArgument("OP", ChatCommandArgumentType.STRING, false)..setStringOptions("base", "scale", "add", "sub"))
     ..addRealArgument("VALUE", false)
     ..addRealArgument("DURATION", true)
 
-  g_commandHandler.registerCommandDefinition(COMMAND_CLEARUNITPROP, function clearSelectedUnitProperty)
+  g_commandHandler.registerCommandDefinition(COMMAND_CLEARPROP, function clearProp)
     ..setDescription("Clears all affectors from the given property of a selected unit")
+    ..addArgument(new ChatCommandArgument("PROP_SCOPE", ChatCommandArgumentType.STRING, false)..setStringOptions("g", "p", "u"))
+    ..addStringArgument("PROP_NAME", false)
   
   g_commandHandler.registerCommandDefinition(COMMAND_SETHEALTH, function setSelectedUnitHealth)
     ..setDescription("Sets the health of the selected unit")
