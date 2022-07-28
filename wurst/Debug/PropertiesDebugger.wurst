@@ -1,0 +1,130 @@
+package PropertiesDebugger
+import DebuggerDialog
+import Host
+import TabPanel
+import Frame
+import GameProperties
+import SmartValue
+import PlayerExtensions
+import PlayerProperties
+import UnitPropertiesComponent
+import ProjectConstants
+
+// ============================================================================
+class PropertyDebugger extends DebuggerRealtimeUpdateFrame
+  private TabPanel m_tabPanel
+  private Frame m_gameContentFrame
+  private Frame m_playerContentFrame
+  private Frame m_unitContentFrame
+
+  // --------------------------------------------------------------------------
+  construct()
+    super(createFrame("FRAME", "PropDebugger", GAME_UI, "", 0))
+
+    m_gameContentFrame = new Frame(createFrame("TEXTAREA", "GAME", GAME_UI, "", 0))
+    m_playerContentFrame = new Frame(createFrame("TEXTAREA", "PLAYER", GAME_UI, "", 0))
+    m_unitContentFrame = new Frame(createFrame("TEXTAREA", "UNIT", GAME_UI, "", 0))
+
+    m_tabPanel = new TabPanel()
+    ..addContent("GAME", "Game", m_gameContentFrame)
+    ..addContent("PLAYER", "Player", m_playerContentFrame)
+    ..addContent("UNIT", "Unit", m_unitContentFrame)
+
+    addChild(m_tabPanel)
+
+  // --------------------------------------------------------------------------
+  override function realtimeUpdate(real _)
+    let selectedContentId = m_tabPanel.getSelectedContentId()
+    switch (selectedContentId)
+      case "GAME"
+        updateGameFrame()
+      case "PLAYER"
+        updatePlayerFrame()
+      case "UNIT"
+        updateUnitFrame()
+
+  // --------------------------------------------------------------------------
+  private function updateGameFrame()
+    let frameHandle = m_gameContentFrame.getFrameHandle()
+
+    BlzFrameSetText(frameHandle, "===== Game Properties : =====")
+
+    for i = 0 to GameProperties.count - 1
+      let propId = i castTo GameProperty
+      let prop = g_GameProperties.getProperty(propId)
+      addSmartValueTextToFrame(frameHandle, GameProperties.getPropertyFriendlyName(propId), g_GameProperties.getPropertyValueAsString(propId), prop)
+
+  // --------------------------------------------------------------------------
+  private function updatePlayerFrame()
+    let frameHandle = m_playerContentFrame.getFrameHandle()
+
+    let selectedUnit = g_HostPlayer.getFirstSelectedUnit()
+
+    if (selectedUnit == null)
+      BlzFrameSetText(frameHandle, "Select a unit")
+      return
+
+    let selectedPlayer = selectedUnit.getOwner()
+
+    BlzFrameSetText(frameHandle, "===== Properties for {0}: =====".format(selectedPlayer.getName()))
+
+    for i = 0 to PlayerProperties.count - 1
+      let propId = i castTo PlayerProperty
+      let prop = selectedPlayer.getProperty(propId)
+      addSmartValueTextToFrame(frameHandle, PlayerProperties.getPropertyFriendlyName(propId), selectedPlayer.getPropertyValueAsString(propId), prop)
+
+  // --------------------------------------------------------------------------
+  private function updateUnitFrame()
+    let frameHandle = m_unitContentFrame.getFrameHandle()
+
+    let selectedUnit = g_HostPlayer.getFirstSelectedUnit()
+
+    if (selectedUnit == null)
+      BlzFrameSetText(frameHandle, "Select a unit")
+      return
+
+    BlzFrameSetText(frameHandle, "===== Properties for {0}: =====".format(selectedUnit.getName()))
+
+    let comp = selectedUnit.getUnitPropertiesComponent()
+    if (comp == null)
+      BlzFrameAddText(frameHandle, "Unit has no properties component")
+      return
+
+    for i = 0 to UnitProperties.count - 1
+      let propId = i castTo UnitProperty
+      let prop = comp.getProperty(propId)
+      addSmartValueTextToFrame(frameHandle, UnitProperties.getPropertyFriendlyName(propId), comp.getPropertyValueAsString(propId), prop)
+    
+// ============================================================================
+function addSmartValueTextToFrame(framehandle frameHandle, string propName, string propValue, SmartValue smartValue)
+
+  let source = smartValue.getSource()
+  let affectors = smartValue.getAffectors()
+
+  var propState = ""
+
+  if (source != null or (affectors != null and not affectors.isEmpty()))
+  //{
+    if (source != null)
+      propState += "SRC:{0} ".format(source.getValue().toString())
+
+    for affector in affectors
+    //{
+      switch (affector.m_type)
+        case AffectorType.BASE
+          propState += "B:{0} ".format(affector.m_value.toString())
+        case AffectorType.SCALE
+          propState += "S:{0} ".format(affector.m_value.toString())
+        case AffectorType.ABSOLUTE
+          propState += "A:{0} ".format(affector.m_value.toString())
+      if (affector.getDurationSeconds() > 0.0)
+        propState += affector.getRemainingSeconds().toString() + "s "
+    //}
+  //}
+
+  BlzFrameAddText(frameHandle, "{0} : {1} {2}".format(propName, propValue, propState))
+
+// ============================================================================
+init
+  if (DEV_ENVIRONMENT)
+    DebuggerDialog.registerFrame("PROPS", () -> new PropertyDebugger())
