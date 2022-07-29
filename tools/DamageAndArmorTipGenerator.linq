@@ -14,7 +14,7 @@ var attackTypeStringToIndex = new Dictionary<string, int>() {
 };
 
 string[] indexToAttackTypeVar = new [] {
-	"NORMAL",
+	"MELEE",
 	"PIERCE",
 	"SIEGE",
 	"SPELLS",
