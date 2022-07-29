@@ -9,6 +9,7 @@ import TlsItemDefinition
 import TooltipBuilder
 import ClosureTimers
 import ChannelAbilityPreset
+import Events
 
 @configurable public constant int ITEM_RECIPE_MAX_COMPONENTS = 6
 public constant int ITEM_RECIPE_PARTIAL = -1
@@ -267,10 +268,18 @@ class ItemRecipePartialIconAbilityDefinition extends AbilityDefinitionCriticalSt
 // ============================================================================
 public class CraftingComponent extends UnitComponent
   private ItemRecipeBook m_recipeBook = null
+  private Event1<ItemRecipe> m_onCraftedItem = null
 
   // ----------------------------------------------------------------------------
   construct(IUnitMetadata owner)
     super(owner)
+
+  // --------------------------------------------------------------------------
+  ondestroy
+
+    if (m_onCraftedItem != null)
+      destroy m_onCraftedItem
+      m_onCraftedItem = null
 
   // ----------------------------------------------------------------------------
   function setRecipeBook(ItemRecipeBook recipeBook)
@@ -280,7 +289,13 @@ public class CraftingComponent extends UnitComponent
 
   // ----------------------------------------------------------------------------
   function getRecipeBook() returns ItemRecipeBook
-    return m_recipeBook
+    return m_recipeBook 
+
+  // --------------------------------------------------------------------------
+  function onCraftedItem() returns IEvent1<ItemRecipe>
+    if (m_onCraftedItem == null)
+      m_onCraftedItem = new Event1<ItemRecipe>()
+    return m_onCraftedItem
 
   // --------------------------------------------------------------------------
   protected override function onEnabled()
@@ -290,6 +305,14 @@ public class CraftingComponent extends UnitComponent
 
     if (not ownerUnit.hasAbility('Asud'))
       ownerUnit.addAbility('Asud')
+
+    update()
+
+  // --------------------------------------------------------------------------
+  protected override function onDisabled()
+    super.onDisabled()
+
+    clearStockedUnits()
 
   // ----------------------------------------------------------------------------
   protected function update()
@@ -313,14 +336,29 @@ public class CraftingComponent extends UnitComponent
     //}
 
   // --------------------------------------------------------------------------
-  protected function onSoldUnit(unit soldUnit)
+  private function clearStockedUnits()
     let ownerUnit = getOwnerUnit()
     for recipe in m_recipeBook
+      RemoveUnitFromStock(ownerUnit, recipe.getItemBuildUnitTypeId())
+
+  // --------------------------------------------------------------------------
+  protected function onSoldUnit(unit soldUnit)
+    for recipe in m_recipeBook
       if (recipe.getItemBuildUnitTypeId() == soldUnit.getTypeId())
-        recipe.consumeItems(ownerUnit)
-        ownerUnit.addItemById(recipe.getItemTypeId())
+        craftItem(recipe)
         return
-    Log.warn("Unable to find recipe matching sold unit")    
+    Log.warn("Unable to find recipe matching sold unit")   
+
+  // --------------------------------------------------------------------------
+  private function craftItem(ItemRecipe recipe)
+    let ownerUnit = getOwnerUnit()
+
+    recipe.consumeItems(ownerUnit)
+    
+    if (m_onCraftedItem != null)
+      m_onCraftedItem.call(recipe)
+    else
+      ownerUnit.addItemById(recipe.getItemTypeId())
 
 // ============================================================================
 public function IUnitMetadata.getCraftingComponent() returns CraftingComponent
@@ -342,7 +380,7 @@ function onUnitPickupItem()
     return
   
   let comp = metadata.getCraftingComponent()
-  if (comp != null)
+  if (comp != null and comp.getEnabled())
     nullTimer(() -> comp.update())
 
 // ============================================================================
@@ -355,7 +393,7 @@ function onUnitSell()
     return
   
   let comp = metadata.getCraftingComponent()
-  if (comp != null)
+  if (comp != null and comp.getEnabled())
     comp.onSoldUnit(soldUnit)
 
 // ============================================================================
