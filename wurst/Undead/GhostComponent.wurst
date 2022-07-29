@@ -1,6 +1,5 @@
 package GhostComponent
 import UnitComponent
-import HashList
 import AbilityObjEditing
 import ObjectIdGenerator
 import ClosureTimers
@@ -10,7 +9,6 @@ import Orders
 import UnitExtensions
 import UndeadTargetingComponent
 import Suspend
-import Trace
 
 constant real STATE_TOGGLE_INTERVAL = 10.0
 constant real ETHEREAL_MOVE_RANGE = 256.0
@@ -20,17 +18,23 @@ constant real TARGET_OFFSET = 128.0
 constant colorA COLOR_VISIBLE = colorA(255, 255, 255, 255)
 constant colorA COLOR_INVISIBLE = colorA(255, 255, 255, 0)
 constant int DOT_ABILITY_ID = compiletime(ABIL_ID_GEN.next())
-HashList<unit> g_ghosts = new HashList<unit>()
-CallbackPeriodic g_toggleStateTimer
 
 // ============================================================================
 public class GhostComponent extends UnitComponent
   private unit m_lastAttackedUnit
+  private CallbackPeriodic m_toggleStateTimer = null
 
   // --------------------------------------------------------------------------
   construct (IUnitMetadata owner)
     super(owner)
     m_lastAttackedUnit = null
+
+  // --------------------------------------------------------------------------
+  ondestroy
+
+    if (m_toggleStateTimer != null)
+      destroy m_toggleStateTimer
+      m_toggleStateTimer = null
 
   // --------------------------------------------------------------------------
   function setLastAttackedUnit(unit attackedUnit)
@@ -43,16 +47,20 @@ public class GhostComponent extends UnitComponent
   // --------------------------------------------------------------------------
   override function onEnabled()
     super.onEnabled()
-    let ownerUnit = getOwnerUnit()
-    registerGhost(ownerUnit)
     m_lastAttackedUnit = null
     makeInvisible()
+
+    m_toggleStateTimer = doPeriodically(STATE_TOGGLE_INTERVAL, cb -> toggleState())
 
   // --------------------------------------------------------------------------
   override function onDisabled()
     super.onDisabled()
+
+    if (m_toggleStateTimer != null)
+      destroy m_toggleStateTimer
+      m_toggleStateTimer = null
+
     let ownerUnit = getOwnerUnit()
-    unregisterGhost(ownerUnit)
     m_lastAttackedUnit = null
     makeVisible()
     ownerUnit.unsuspend()
@@ -145,38 +153,6 @@ public function IUnitMetadata.getOrAddGhostComponent() returns GhostComponent
   if (component == null)
     component = this.addComponent(new GhostComponent(this)) castTo GhostComponent
   return component
-
-// ============================================================================
-function registerGhost(unit ghost)
-  g_ghosts.add(ghost)
-  
-  if (g_ghosts.size() == 1 and g_toggleStateTimer == null)
-    g_toggleStateTimer = doPeriodically(STATE_TOGGLE_INTERVAL, (CallbackPeriodic cb) -> toggleGhostStates())
-
-// ============================================================================
-function toggleGhostStates()
-  Trace.trace("toggleGhostStates")
-  for g in g_ghosts
-  //{
-    if (g.getCurrentOrder() != OrderIds.move)
-    //{
-      let metadata = g.getMetadata()
-      if (metadata != null)
-        let comp = metadata.getGhostComponent()
-        if (comp != null)
-        //{
-          comp.toggleState()
-        //}
-    //}
-  //}
-
-// ============================================================================
-function unregisterGhost(unit ghost)
-  g_ghosts.remove(ghost)
-  
-  if (g_ghosts.size() == 0 and g_toggleStateTimer != null)
-    destroy g_toggleStateTimer
-    g_toggleStateTimer = null
 
 // ============================================================================
 function onUnitAttacked()
