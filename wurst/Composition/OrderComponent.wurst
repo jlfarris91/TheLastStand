@@ -1,0 +1,271 @@
+package OrderComponent
+import UnitComponent
+import RegisterEvents
+import DebuggerDialog
+import Host
+import PlayerExtensions
+import ColorUtility
+import Math
+import ErrorHandling
+import ProjectConstants
+
+@configurable public constant int ORDER_COMPONENT_HISTORY_LEN = 3
+
+public enum OrderTarget
+  Unknown
+  None
+  Point
+  Unit
+  Item
+  Destructable
+
+// ============================================================================
+function OrderTarget.toString() returns string
+  switch (this)
+    case None
+      return "None"
+    case Point
+      return "Point"
+    case Unit
+      return "Unit"
+    case Item
+      return "Item"
+    case Destructable
+      return "Destructable"
+    default
+      return "Unknown"
+
+tuple orderData(int id, OrderTarget targetType, vec2 targetPoint, unit targetUnit, item targetItem, destructable targetDestructable)
+
+// ============================================================================
+public class OrderComponent extends UnitComponent
+  private orderData array[ORDER_COMPONENT_HISTORY_LEN] m_orders
+  private int m_currentOrderIndex = -1
+  private int m_orderLength = 0
+
+  // --------------------------------------------------------------------------
+  construct (IUnitMetadata owner)
+    super(owner)
+
+  // --------------------------------------------------------------------------
+  function size() returns int
+    return m_orderLength
+
+  // --------------------------------------------------------------------------
+  function getOrderId(int index) returns int
+    if (index < 0 or index >= m_orderLength)
+      error("Index out of range: " + index.toString())
+    let index2 = wrap(m_currentOrderIndex - index, 0, ORDER_COMPONENT_HISTORY_LEN - 1)
+    return m_orders[index2].id
+
+  // --------------------------------------------------------------------------
+  function getOrderTargetType(int index) returns OrderTarget
+    if (index < 0 or index >= m_orderLength)
+      error("Index out of range: " + index.toString())
+    let index2 = wrap(m_currentOrderIndex - index, 0, ORDER_COMPONENT_HISTORY_LEN - 1)
+    return m_orders[index2].targetType
+ 
+  // --------------------------------------------------------------------------
+  function getTargetPoint(int index) returns vec2
+    if (index < 0 or index >= m_orderLength)
+      error("Index out of range: " + index.toString())
+    let index2 = wrap(m_currentOrderIndex - index, 0, ORDER_COMPONENT_HISTORY_LEN - 1)
+    return m_orders[index2].targetPoint
+
+  // --------------------------------------------------------------------------
+  function getTargetUnit(int index) returns unit
+    if (index < 0 or index >= m_orderLength)
+      error("Index out of range: " + index.toString())
+    let index2 = wrap(m_currentOrderIndex - index, 0, ORDER_COMPONENT_HISTORY_LEN - 1)
+    return m_orders[index2].targetUnit
+   
+  // --------------------------------------------------------------------------
+  function getTargetItem(int index) returns item
+    if (index < 0 or index >= m_orderLength)
+      error("Index out of range: " + index.toString())
+    let index2 = wrap(m_currentOrderIndex - index, 0, ORDER_COMPONENT_HISTORY_LEN - 1)
+    return m_orders[index2].targetItem
+   
+  // --------------------------------------------------------------------------
+  function getTargetDestructable(int index) returns destructable
+    if (index < 0 or index >= m_orderLength)
+      error("Index out of range: " + index.toString())
+    let index2 = wrap(m_currentOrderIndex - index, 0, ORDER_COMPONENT_HISTORY_LEN - 1)
+    return m_orders[index2].targetDestructable
+
+  // --------------------------------------------------------------------------
+  override protected function onEnabled()
+    super.onEnabled()
+
+    m_currentOrderIndex = -1
+    m_orderLength = 0
+
+    let orderData = orderData(
+      getOwnerUnit().getCurrentOrder(),
+      OrderTarget.Unknown,
+      ZERO2,
+      null,
+      null,
+      null
+    )
+
+    pushOrder(orderData)
+
+  // --------------------------------------------------------------------------
+  override protected function onDisabled()
+    super.onDisabled()
+
+  // --------------------------------------------------------------------------
+  function onIssuedOrder()
+    pushOrder(orderData(
+      GetIssuedOrderId(),
+      OrderTarget.None,
+      ZERO2,
+      null,
+      null,
+      null
+    ))
+
+  // --------------------------------------------------------------------------
+  function onIssuedPoint()
+    pushOrder(orderData(
+      GetIssuedOrderId(),
+      OrderTarget.Point,
+      vec2(GetOrderPointX(), GetOrderPointY()),
+      null,
+      null,
+      null
+    ))
+
+  // --------------------------------------------------------------------------
+  function onIssuedTargetOrder()
+
+    let targetUnit = GetOrderTargetUnit()
+    let targetItem = GetOrderTargetItem()
+    let targetDestructable = GetOrderTargetDestructable()
+    var orderTarget = OrderTarget.Unknown
+
+    if (targetUnit != null)
+      orderTarget = OrderTarget.Unit
+    else if (targetItem != null)
+      orderTarget = OrderTarget.Item
+    else if (targetDestructable != null)
+      orderTarget = OrderTarget.Destructable
+
+    pushOrder(orderData(
+      GetIssuedOrderId(),
+      orderTarget,
+      ZERO2,
+      targetUnit,
+      targetItem,
+      targetDestructable
+    ))
+
+  // --------------------------------------------------------------------------
+  private function pushOrder(orderData orderData)
+    m_currentOrderIndex = wrap(m_currentOrderIndex + 1, 0, ORDER_COMPONENT_HISTORY_LEN - 1)
+    m_orders[m_currentOrderIndex] = orderData
+    m_orderLength = min(m_orderLength + 1, ORDER_COMPONENT_HISTORY_LEN)
+
+// ============================================================================
+public function IUnitMetadata.getOrderComponent() returns OrderComponent
+  return this.getComponent(OrderComponent.typeId) castTo OrderComponent
+
+// ============================================================================
+public function IUnitMetadata.getOrAddOrderComponent() returns OrderComponent
+  var component = this.getOrderComponent()
+  if (component == null)
+    component = this.addComponent(new OrderComponent(this)) castTo OrderComponent
+  return component
+
+// ============================================================================
+public function unit.getOrderComponent() returns OrderComponent
+  let metadata = this.getMetadata()
+  return metadata != null ? metadata.getOrderComponent() : null
+
+// ============================================================================
+public function unit.getOrAddOrderComponent() returns OrderComponent
+  let metadata = this.getMetadata()
+  return metadata != null ? metadata.getOrAddOrderComponent() : null
+
+// ============================================================================
+function onIssuedOrder()
+  let orderedUnit = GetOrderedUnit()
+  let comp = orderedUnit.getOrderComponent()
+  if (comp != null and comp.getEnabled())
+    comp.onIssuedOrder()
+
+// ============================================================================
+function onIssuedPoint()
+  let orderedUnit = GetOrderedUnit()
+  let comp = orderedUnit.getOrderComponent()
+  if (comp != null and comp.getEnabled())
+    comp.onIssuedPoint()
+
+// ============================================================================
+function onIssuedTargetOrder()
+  let orderedUnit = GetOrderedUnit()
+  let comp = orderedUnit.getOrderComponent()
+  if (comp != null and comp.getEnabled())
+    comp.onIssuedTargetOrder()
+  
+// ============================================================================
+class OrderComponentDebugger extends DebuggerRealtimeUpdateFrame
+
+  // --------------------------------------------------------------------------
+  construct()
+    super(createFrame("TEXTAREA", "UTCDebugger", GAME_UI, "", 0))
+
+  // --------------------------------------------------------------------------
+  override protected function realtimeUpdate(real _dt)
+
+    let frameHandle = getFrameHandle()
+
+    let selectedUnit = g_HostPlayer.getFirstSelectedUnit()
+    if (selectedUnit == null)
+      BlzFrameSetText(frameHandle, "Select a unit")
+      return
+
+    BlzFrameSetText(frameHandle, "Selected unit : " + selectedUnit.getName())
+
+    let comp = selectedUnit.getOrderComponent()
+    if (comp == null)
+      BlzFrameAddText(frameHandle, "Selected unit has no order component".colorize(Colors.red))
+      return
+
+    if (comp.size() == 0)
+      BlzFrameAddText(frameHandle, "No order history recorded".colorize(Colors.red))
+      return
+
+    for i = 0 to comp.size() - 1
+    //{
+      BlzFrameAddText(frameHandle, "===== Order {0} - {1} =====".format((-i).toString(), comp.getOrderTargetType(i).toString()))
+      BlzFrameAddText(frameHandle, "Order : {0} ({1})".format(OrderId2String(comp.getOrderId(i)), comp.getOrderId(i).toString()))
+
+      switch (comp.getOrderTargetType(i))
+        case Unknown
+          BlzFrameAddText(frameHandle, "Target : ?")
+        case None
+          BlzFrameAddText(frameHandle, "Target : None")
+        case Point
+          BlzFrameAddText(frameHandle, "Target : " + comp.getTargetPoint(i).toString())
+        case Unit
+          let targetUnit = comp.getTargetUnit(i)
+          BlzFrameAddText(frameHandle, "Target : {0} - {1} ({2})".format(targetUnit.getName(), UnitId2String(targetUnit.getTypeId()), targetUnit.getTypeId().toString()))
+        case Item
+          let targetItem = comp.getTargetItem(i)
+          BlzFrameAddText(frameHandle, "Target : {0} - {1} ({2})".format(targetItem.getName(), UnitId2String(targetItem.getTypeId()), targetItem.getTypeId().toString()))
+        case Destructable
+          let targetDestructable = comp.getTargetDestructable(i)
+          BlzFrameAddText(frameHandle, "Target : {0} - {1} ({2})".format(targetDestructable.getName(), UnitId2String(targetDestructable.getTypeId()), targetDestructable.getTypeId().toString()))
+    //}
+
+// ============================================================================
+init
+
+  if (DEV_ENVIRONMENT)
+    DebuggerDialog.registerFrame("ORDERS", () -> new OrderComponentDebugger())
+
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ISSUED_ORDER, function onIssuedOrder)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ISSUED_POINT_ORDER, function onIssuedPoint)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ISSUED_TARGET_ORDER, function onIssuedTargetOrder)

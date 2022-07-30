@@ -13,10 +13,12 @@ import GroupExtensions
 import LeashComponent
 import UndeadTargetService
 import Trace
+// import Vector
+import Orders
 
 public bool UTC_ENABLED = true
 
-constant rangeReal ATTACK_TIMER_DURATION_RANGE = rangeReal(1.0, 3.0)
+constant rangeReal ATTACK_TIMER_DURATION_RANGE = rangeReal(3.0, 5.0)
 constant real ATTACK_TIMER_DISTANCE_THRESHOLD = 128.0
 constant real ATTACK_TIMER_DISTANCE_THRESHOLD_SQ = ATTACK_TIMER_DISTANCE_THRESHOLD * ATTACK_TIMER_DISTANCE_THRESHOLD
 constant real TELEPORT_DISTANCE_THRESHOLD = SPAWN_RANGE_FAR.max
@@ -132,6 +134,10 @@ public class UndeadTargetingComponent extends UnitComponent
       destroy m_attackTimer
       m_attackTimer = null
 
+  // // --------------------------------------------------------------------------
+  // function getNotes() returns Vector<string>
+  //   return m_notes
+
   // --------------------------------------------------------------------------
   function getIsAwaitingOrder() returns bool
     return g_awaitingOrderGroup.contains(getOwnerUnit())
@@ -179,7 +185,7 @@ public class UndeadTargetingComponent extends UnitComponent
     if (setPlayer)
       setTargetUnit_impl(null)
       raiseTargetPlayerChangedEvent()
-      issueOrderTargetingPlayer()
+      issueOrderTargetingPlayer_impl()
     return setPlayer
 
   // --------------------------------------------------------------------------
@@ -188,7 +194,7 @@ public class UndeadTargetingComponent extends UnitComponent
     let setPlayer = setTargetPlayer_impl(targetPlayer)
     let setUnit = setTargetUnit_impl(targetUnit)
     if (setUnit)
-      issueOrderTargetingPlayer()
+      issueOrderTargetingPlayer_impl()
     return setPlayer
 
   // --------------------------------------------------------------------------
@@ -210,7 +216,7 @@ public class UndeadTargetingComponent extends UnitComponent
 
   // --------------------------------------------------------------------------
   // protected function recordNote(string methodName, string note)
-    // m_notes.add("[{0}] {1}".format(methodName, note))
+  //   m_notes.add("{0}: [{1}] {2}".format(m_numberOfTimesFailedOrder.toString(), methodName, note))
 
   // --------------------------------------------------------------------------
   function issueOrderTargetingNewPlayerUnit()
@@ -287,7 +293,7 @@ public class UndeadTargetingComponent extends UnitComponent
       clearTargetAndIssueNewOrder()
     else
       m_numberOfTimesFailedOrder = 0
-      // m_notes.add("Success!")
+      //recordNote("iOTP_i", "Success!")
       m_orderFailedReason = "Success"
 
   // --------------------------------------------------------------------------
@@ -301,15 +307,19 @@ public class UndeadTargetingComponent extends UnitComponent
       //recordNote("tIO", "m_targetUnit == null")
       m_orderFailedReason = "m_targetUnit == null"
       return false
+    
     bool issuedOrder
+    
     if (m_targetUnit.isStructure())
       //recordNote("tIO", "ordering attack on " + m_targetUnit.getName())
-      issuedOrder = getOwnerUnit().issueTargetOrder("attack", m_targetUnit)
+      issuedOrder = getOwnerUnit().issueTargetOrderById(OrderIds.attack, m_targetUnit)
     else
-      //recordNote("tIO", "ordering attack-move on " + m_targetUnit.getName())
-      issuedOrder = getOwnerUnit().issuePointOrder("attack", m_targetUnit.getPos())
+      //recordNote("tIO", "ordering attack on " + m_targetUnit.getName())
+      issuedOrder = getOwnerUnit().issueTargetOrderById(OrderIds.attack, m_targetUnit)
+
     if (issuedOrder == false)
       m_orderFailedReason = "Failed to issue order"
+    
     return issuedOrder
 
   // --------------------------------------------------------------------------
@@ -322,8 +332,10 @@ public class UndeadTargetingComponent extends UnitComponent
     unit targetUnit
     let targetProvider = getUndeadTargetProvider(targetPlayer)
     if (targetProvider == null)
+      //recordNote("gNTU", "No target provider")
       return null
     targetUnit = targetProvider.getClosestTargetUnit(ownerUnit.getPos(), getPreferOrganicTargets())
+    //recordNote("gNTU", "Closest {0} unit: {1}".format((getPreferOrganicTargets() ? "organic" : "structure"), (targetUnit != null ? targetUnit.getName() : "null")))
     return targetUnit
 
   // --------------------------------------------------------------------------
@@ -448,13 +460,13 @@ public class UndeadTargetingComponent extends UnitComponent
     // Distance to target unit is way too far to walk all the way there, teleport closer.
     // We want to check this regularly so we might as well check it here.
     if (tryTeleportCloserToTargetUnit())
-      //recordNote("onAttackTimer", "Issuing new order")
+      //recordNote("onAttackTimer", "No teleport, issuing new order")
       issueOrderTargetingNewPlayerUnit()
 
     // If the unit is standing still and hasn't attacked anything since the last attack timer
     // then issue a new order, otherwise give them a chance to get to their target
     else if (getOwnerUnit().getPos().distanceToSq(m_lastPos) < ATTACK_TIMER_DISTANCE_THRESHOLD_SQ)
-      //recordNote("onAttackTimer", "Issuing new order")
+      //recordNote("onAttackTimer", "Standing still, issuing new order")
       issueOrderTargetingNewPlayerUnit()
     
     // Otherwise, restart the attack timer to check again later
@@ -469,6 +481,7 @@ public class UndeadTargetingComponent extends UnitComponent
 
   // --------------------------------------------------------------------------
   protected function restartAttackTimer()
+    //recordNote("rAT", "restarting attack timer")
     if (m_attackTimer == null)
       m_attackTimer = getTimer().doManual(ATTACK_TIMER_DURATION_RANGE.getRandom(), true) -> 
         onAttackTimer()
