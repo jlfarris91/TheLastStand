@@ -1,54 +1,56 @@
 package LuckyHorseshoe
-import TlsItemIds
 import UnitMetadata
-import LooterComponent
 import ItemEffectComponent
+import UnitPropertiesComponent
+import SmartValue
+import ItemAcquiredPropertyAffectComponent
+import TlsItemDefinition
+import Icons
+import RealExtensions
 
-constant real CHANCE = 0.1
+constant real LOOT_TWICE_CHANCE = 0.1
 
 // ============================================================================
-class LuckyHorseshoeComponent extends ItemEffectComponent
+class LuckyHorseshoeComponent extends ItemAcquiredPropertyAffectComponent
 
   // --------------------------------------------------------------------------
   construct (IUnitMetadata owner)
-    super(owner)
-
-    setMode(ItemEffectApplication.ACQUIRED)
-    setItemTypeId(TlsItemIds.luckyHorseshoe)
-    setDestroyOnDrop(true)
+    super(owner, TlsItemIds.luckyHorseshoe, UnitProperty.LOOT_TWICE_CHANCE_01, AffectorType.BASE)
   
   // --------------------------------------------------------------------------
-  override function onApplied(int stacks)
-    super.onApplied(stacks)
-    let comp = getOwner().getLooterComponent()
-    if (comp != null)
-      comp.setChanceToLootTwice(comp.getChanceToLootTwice() + CHANCE)
-
-  // --------------------------------------------------------------------------
-  override function onReverted(int stacks)
-    super.onReverted(stacks)
-    let comp = getOwner().getLooterComponent()
-    if (comp != null)
-      comp.setChanceToLootTwice(comp.getChanceToLootTwice() - CHANCE)
+  override function getUnitPropertyAffectorValue(int stacks) returns real
+    return LOOT_TWICE_CHANCE
 
 // ============================================================================
-function IUnitMetadata.getLuckyHorseshoeComponent() returns LuckyHorseshoeComponent
-  return this.getComponent(LuckyHorseshoeComponent.typeId) castTo LuckyHorseshoeComponent
+@compiletime function createItem()
 
-// ============================================================================
-function IUnitMetadata.getOrAddLuckyHorseshoeComponent() returns LuckyHorseshoeComponent
-  var component = this.getLuckyHorseshoeComponent()
-  if (component == null)
-    component = this.addComponent(new LuckyHorseshoeComponent(this)) castTo LuckyHorseshoeComponent
-  return component
+  new TlsItemDefinition(TlsItemIds.luckyHorseshoe, 'skrt')
+  ..setName("Lucky Horseshoe")
+  ..setDescription("Belonged to a horse once. The horse wasn't so lucky.")
+  ..setTooltipBasic("Purchase Lucky Horseshoe")
+  ..setTooltipExtended("Grants a {0} chance of immediately looting a structure a second time. Does not stack.".format(LOOT_TWICE_CHANCE.toPercentageString01()))
+  ..setInterfaceIcon(Icons.bTNAnimalWarTraining)
+  ..setGoldCost(3)
+  ..setLumberCost(888)
+  ..setStockInitial(0)
+  ..setStockMaximum(1)
+  ..setStockStartDelay(150)
+  ..setStockReplenishInterval(300)
+  ..addTlsUnitClassifications(TlsUnitClassification.HUMAN)
+  ..build()
 
 // ============================================================================
 init
-  g_itemIdToComponentFactoryMap.put(TlsItemIds.luckyHorseshoe) (_unit) ->
+  if (not compiletime)
+    createItem()
+
+  ItemEffectComponent.registerComponentFactory(TlsItemIds.luckyHorseshoe) (_unit) ->
   //{
     let metadata = _unit.getMetadata()
     ItemEffectComponent comp = null
     if (metadata != null)
-      comp = metadata.getOrAddLuckyHorseshoeComponent()
+      comp = metadata.getComponent(LuckyHorseshoeComponent.typeId) castTo LuckyHorseshoeComponent
+      if (comp == null)
+        comp = metadata.addComponent(new LuckyHorseshoeComponent(metadata)) castTo LuckyHorseshoeComponent
     return comp
   //}

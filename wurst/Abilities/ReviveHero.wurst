@@ -8,20 +8,50 @@ import TlsItemIds
 import FX
 import ColorUtility
 import UnitExtensions
+import TlsJobItemIds
+import ItemType
+import HumanPlayerComponent
+import Heroes
 
 // ============================================================================
 function reviveHeroUsingHeartItem(item heroHeart, unit sacrifice)
-  let heroUnit = getHeartHero(heroHeart)
+  let heartOwner = getHeartOwner(heroHeart)
   destroyHeroHeartItem(heroHeart)
+  
+  if (heartOwner == null)
+    Log.debug("Could not find heart owner")
+    return
+  
+  let humanPlayerComp = heartOwner.getHumanPlayerComponent()
+  if (humanPlayerComp == null)
+    Log.debug("Heart owner player comp is null")
+    return
+  
+  var heroUnit = humanPlayerComp.getHero()
+  let revivingHero = heroUnit != null
   let pos = sacrifice.getPos()
   let xp = sacrifice.getXp()
+
+  for itm in sacrifice.inventory()
+    sacrifice.dropItemPoint(itm, sacrifice.getPos())
+
   sacrifice.remove()
+
+  if (heroUnit == null)
+    heroUnit = spawnHeroForPlayer(heartOwner, pos, false)
+    
   heroUnit.resetLevelAndXP()
   heroUnit.setXp(xp, false)
-  heroUnit.revive(pos, true)
+  
+  if (revivingHero)
+    heroUnit.revive(pos, true)
+
   FX.createSpawnEffect(pos)
   FX.createTag(pos, "Revived", Colors.gold)
   PanCameraToTimedForPlayer(heroUnit.getOwner(), pos.x, pos.y, 3.0)
+
+  // Create a dagger and give it to the hero
+  ItemType.createItemForUnit(TlsJobItemIds.acolyte1, heroUnit)
 
 // ============================================================================
 function onSpellCast()

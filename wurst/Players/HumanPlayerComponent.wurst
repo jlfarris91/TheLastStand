@@ -7,26 +7,57 @@ import ErrorHandling
 import GameConstants
 import RegisterEvents
 import GroupUtils
-import TlsUnitIds
+import TlsUnitDefinition
+import FX
+import PlayerSaveData
+import Math
+import Observable
+import ClosureTimers
+import PlayerProperties
+import UndeadTargetService
+import GroupExtensions
+
+boolexpr g_isFilterUnitAliveHQTentCondition = Condition(function isFilterUnitAliveHQTent)
+group g_tempGroup = getGroup()
 
 // ============================================================================
 public class HumanPlayerComponent extends PlayerComponent
   private int m_kills
   private int m_score
-  private IUnitMetadata m_hero
+  private unit m_hero
+  private int m_heroTypeId
   private group m_campCenterContributors
   private bool m_canPathToHeadquartersOrHero
+  private real m_difficulty
+  private real array[MAX_ELITE_TIER] m_tierWeights
+  private real m_totalTierWeight = 0
+  private real m_cameraDistance = CAMERA_DISTANCE_DEFAULT
+  private UnitMetadata m_heroMetadata
+
+  use Observable
+
+  // --------------------------------------------------------------------------
+  public static class Properties
+    static constant string cameraDistance = "cameraDistance"
 
   // --------------------------------------------------------------------------
   construct(IPlayerMetadata owner)
     super(owner)
     m_campCenterContributors = CreateGroup()
     m_canPathToHeadquartersOrHero = false
+    m_hero = null
+    m_heroTypeId = 0
+    m_difficulty = 1.0
+
+    m_heroMetadata = new UnitMetadata()..setShouldDestroyWithOwner(false)
 
   // --------------------------------------------------------------------------
   ondestroy
     m_campCenterContributors.destr()
-
+    
+    destroy m_heroMetadata
+    m_heroMetadata = null
+    
   // --------------------------------------------------------------------------
   function getKills() returns int
     return m_kills
@@ -50,45 +81,84 @@ public class HumanPlayerComponent extends PlayerComponent
   // --------------------------------------------------------------------------
   function setCanPathToHeadquartersOrHero(bool value)
     m_canPathToHeadquartersOrHero = value
+    
+    let uts = getUndeadTargetProviderForPlayer(getOwnerPlayer())
+    if (uts != null)
+      uts.setPreferOrganicTargets(value)
+
+  // --------------------------------------------------------------------------
+  function getDifficulty() returns real
+    return m_difficulty
+
+  // --------------------------------------------------------------------------
+  function setDifficulty(real difficulty)
+    m_difficulty = difficulty
+
+  // --------------------------------------------------------------------------
+  function getTierChance(int tier) returns real
+    if (m_totalTierWeight == 0)
+      return 0.0
+    return m_tierWeights[tier] / m_totalTierWeight
+
+  // --------------------------------------------------------------------------
+  function setTierWeight(int tier, real weight)
+    m_totalTierWeight -= m_tierWeights[tier]
+    m_tierWeights[tier] = weight
+    m_totalTierWeight += m_tierWeights[tier]
 
   // --------------------------------------------------------------------------
   function getIsHeroDead() returns bool
     if (m_hero == null)
       Log.debug("hero is null")
       return true
-    let heroUnit = m_hero.getUnit()
+    let heroUnit = m_hero
     if (heroUnit == null)
       Log.debug("hero unit is null")
       return true
     return heroUnit.isAlive() == false
 
   // --------------------------------------------------------------------------
-  function getHero() returns IUnitMetadata
+  function getHeroTypeId() returns int
+    return m_heroTypeId
+
+  // --------------------------------------------------------------------------
+  function setHeroTypeId(int heroTypeId)
+    m_heroTypeId = heroTypeId
+
+  // --------------------------------------------------------------------------
+  function getHeroMetadata() returns UnitMetadata
+    return m_heroMetadata
+
+  // --------------------------------------------------------------------------
+  function getHero() returns unit
     return m_hero
 
   // --------------------------------------------------------------------------
-  function setHero(IUnitMetadata hero)
+  function setHero(unit hero)
     m_hero = hero
     Log.debug("Hero assigned to player: " + (hero != null).toString())
 
   // --------------------------------------------------------------------------
   function getHQOrHero() returns unit
     unit hqOrHero = null
-    let temp = getGroup()
-    temp.enumUnitsOfPlayer(getOwnerPlayer(), null)
-    for u in temp
+    g_tempGroup.enumUnitsOfPlayer(getOwnerPlayer(), null)
+    for u in g_tempGroup
     //{
       if (u.isAlive())
       //{
         if (u.isCampHeadquarters())
           hqOrHero = u
           break
-        else if (u.getTypeId() == TlsUnitIds.hero)
+        else if (u.isTlsHero())
           hqOrHero = u
       //}
     //}
-    temp.release()
     return hqOrHero
+
+  // --------------------------------------------------------------------------
+  function getHQTent() returns unit
+    g_tempGroup.enumUnitsOfPlayer(getOwnerPlayer(), g_isFilterUnitAliveHQTentCondition)
+    return g_tempGroup.getFirst()
 
   // --------------------------------------------------------------------------
   function addCampCenter(unit centerContributor)
@@ -108,7 +178,7 @@ public class HumanPlayerComponent extends PlayerComponent
   function getCampCenter() returns vec2
     if (m_campCenterContributors.isEmpty())
       if (m_hero != null)
-        return m_hero.getUnit().getPos()
+        return m_hero.getPos()
       Log.debug("HumanPlayerComponent", "getCampCenter", "", "Player {0} has no valid camp center".format(getOwnerPlayer().getName()))
       return ZERO2
     var center = ZERO2
@@ -116,6 +186,68 @@ public class HumanPlayerComponent extends PlayerComponent
       center += centerContributor.getPos()
     center /= m_campCenterContributors.size().toReal()
     return center
+
+  // --------------------------------------------------------------------------
+  function getCameraDistance() returns real
+    return m_cameraDistance
+
+  // --------------------------------------------------------------------------
+  function setCameraDistance(real value)
+    let clampedValue = clamp(value, CAMERA_DISTANCE_MIN, CAMERA_DISTANCE_MAX)
+    if (m_cameraDistance != clampedValue)
+      m_cameraDistance = clampedValue
+      updateCamera()
+      raisePropertyChangedEvent(Properties.cameraDistance)
+
+  // --------------------------------------------------------------------------
+  function load()
+    load(PlayerSaveData.getPlayerSaveData(getOwnerPlayer()))
+
+  // --------------------------------------------------------------------------
+  function load(IPlayerSaveData saveData)
+    let saveDataVersioned = saveData castTo PlayerSaveData_v800
+    setCameraDistance(saveDataVersioned.cameraDistance)
+
+  // --------------------------------------------------------------------------
+  function save(IPlayerSaveData saveData)
+    let saveDataVersioned = saveData castTo PlayerSaveData_v800
+    saveDataVersioned.cameraDistance = getCameraDistance()
+
+  // --------------------------------------------------------------------------
+  function save()
+    let ownerPlayer = getOwnerPlayer()
+    let playerSaveData = PlayerSaveData.getPlayerSaveData(ownerPlayer)
+    save(playerSaveData)
+    PlayerSaveData.save(ownerPlayer)
+    
+  // --------------------------------------------------------------------------
+  override protected function onEnabled()
+    super.onEnabled()
+    updateCamera()
+
+  // --------------------------------------------------------------------------
+  private function updateCamera()
+    nullTimer() () ->
+      let ownerPlayer = getOwnerPlayer()
+      SetCameraFieldForPlayer(ownerPlayer, CAMERA_FIELD_TARGET_DISTANCE, m_cameraDistance, CAMERA_DISTANCE_SMOOTH)
+      SetCameraFieldForPlayer(ownerPlayer, CAMERA_FIELD_FARZ, CAMERA_FARZ, 0)
+
+  // --------------------------------------------------------------------------
+  protected function tryRefundLumber(unit structure)
+    let refundPerc01 = getOwnerPlayer().getPropertyValue(PlayerProperty.LUMBER_REFUND_PERC_01)
+    if (refundPerc01 == 0.0)
+      return
+    let unitDef = getUnitDefinition(structure.getTypeId())
+    if (unitDef == null)
+      Log.debug("No unit def found for unit {0} ({1})".format(structure.getTypeId().toString(), UnitId2String(structure.getTypeId())))
+      return
+    let lumberCost = unitDef.getLumberCost()
+    let lumberRefunded = (lumberCost * refundPerc01).toInt()
+    if (lumberRefunded == 0)
+      return
+    let owningPlayer = getOwnerPlayer()
+    owningPlayer.addLumber(lumberRefunded)
+    FX.createFoundMaterialsTag(structure.getPos(), lumberRefunded, owningPlayer)
 
 // ============================================================================
 public function IPlayerMetadata.getHumanPlayerComponent() returns HumanPlayerComponent
@@ -170,6 +302,35 @@ function onUnitKilled()
   comp.incrementKills()
 
 // ============================================================================
+function onConstructionFinished()
+  let constructedUnit = GetConstructedStructure()
+  let comp = constructedUnit.getOwnerHumanPlayerComponent()
+  if (comp != null)
+    comp.tryRefundLumber(constructedUnit)
+
+// ============================================================================
+function onUpgradeFinished()
+  let upgradedUnit = GetTriggerUnit()
+  let comp = upgradedUnit.getOwnerHumanPlayerComponent()
+  if (comp != null)
+    comp.tryRefundLumber(upgradedUnit)
+
+// ============================================================================
+function assignCameraQuickPositions()
+
+  for p in g_PlayingHumanPlayers
+    let comp = p.getHumanPlayerComponent()
+    if (comp != null)
+      let target = comp.getHQOrHero()
+      if (target != null)
+        SetCameraQuickPositionForPlayer(p, target.getX(), target.getY())
+
+// ============================================================================
+function isFilterUnitAliveHQTent() returns bool
+  let filterUnit = GetFilterUnit()
+  return filterUnit.isAlive() and filterUnit.isCampHeadquarters()
+
+// ============================================================================
 init
   for p in g_PlayingHumanPlayers
     initializePlayerMetadata(p)
@@ -177,3 +338,8 @@ init
   initializePlayerMetadata(PLAYER_VILLAGERS)
 
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_DEATH, function onUnitKilled)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_CONSTRUCT_FINISH, function onConstructionFinished)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_UPGRADE_FINISH, function onUpgradeFinished)
+
+  doPeriodically(0.1) (CallbackPeriodic cb) ->
+    assignCameraQuickPositions()

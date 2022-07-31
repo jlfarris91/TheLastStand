@@ -1,6 +1,5 @@
 package GhostComponent
 import UnitComponent
-import HashList
 import AbilityObjEditing
 import ObjectIdGenerator
 import ClosureTimers
@@ -13,23 +12,28 @@ import Suspend
 
 constant real STATE_TOGGLE_INTERVAL = 10.0
 constant real ETHEREAL_MOVE_RANGE = 256.0
-constant real FADE_IN_DURATION = 1.0
-constant real FADE_OUT_DURATION = 3.0
-constant real TARGET_OFFSET = 128.0
+constant real FADE_IN_DURATION = 2.0
+constant real FADE_OUT_DURATION = 2.0
 constant colorA COLOR_VISIBLE = colorA(255, 255, 255, 255)
 constant colorA COLOR_INVISIBLE = colorA(255, 255, 255, 0)
 constant int DOT_ABILITY_ID = compiletime(ABIL_ID_GEN.next())
-HashList<unit> g_ghosts = new HashList<unit>()
-CallbackPeriodic g_toggleStateTimer
 
 // ============================================================================
 public class GhostComponent extends UnitComponent
   private unit m_lastAttackedUnit
+  private CallbackPeriodic m_toggleStateTimer = null
 
   // --------------------------------------------------------------------------
   construct (IUnitMetadata owner)
     super(owner)
     m_lastAttackedUnit = null
+
+  // --------------------------------------------------------------------------
+  ondestroy
+
+    if (m_toggleStateTimer != null)
+      destroy m_toggleStateTimer
+      m_toggleStateTimer = null
 
   // --------------------------------------------------------------------------
   function setLastAttackedUnit(unit attackedUnit)
@@ -42,16 +46,20 @@ public class GhostComponent extends UnitComponent
   // --------------------------------------------------------------------------
   override function onEnabled()
     super.onEnabled()
-    let ownerUnit = getOwnerUnit()
-    registerGhost(ownerUnit)
     m_lastAttackedUnit = null
-    makeInvisible()
+    makeVisible()
+
+    m_toggleStateTimer = doPeriodically(STATE_TOGGLE_INTERVAL, cb -> toggleState())
 
   // --------------------------------------------------------------------------
   override function onDisabled()
     super.onDisabled()
+
+    if (m_toggleStateTimer != null)
+      destroy m_toggleStateTimer
+      m_toggleStateTimer = null
+
     let ownerUnit = getOwnerUnit()
-    unregisterGhost(ownerUnit)
     m_lastAttackedUnit = null
     makeVisible()
     ownerUnit.unsuspend()
@@ -71,6 +79,7 @@ public class GhostComponent extends UnitComponent
   function fadeOut()
     let ownerUnit = getOwnerUnit()
     fade(COLOR_VISIBLE, COLOR_INVISIBLE, FADE_OUT_DURATION)
+    ownerUnit.setFieldWeapon(UNIT_WEAPON_BF_ATTACKS_ENABLED, 0, false)
     doAfter(FADE_OUT_DURATION) ->
     //{
       let metadata = ownerUnit.getMetadata()
@@ -87,6 +96,7 @@ public class GhostComponent extends UnitComponent
     ownerUnit.addAbility(AbilityIds.invulnerable)
     ownerUnit.setVertexColor(COLOR_INVISIBLE)
     ownerUnit.suspend()
+    ownerUnit.setFieldWeapon(UNIT_WEAPON_BF_ATTACKS_ENABLED, 0, false)
 
   // --------------------------------------------------------------------------
   function makeVisible()
@@ -95,6 +105,7 @@ public class GhostComponent extends UnitComponent
     ownerUnit.removeAbility(AbilityIds.invulnerable)
     ownerUnit.setVertexColor(COLOR_VISIBLE)
     ownerUnit.unsuspend()
+    ownerUnit.setFieldWeapon(UNIT_WEAPON_BF_ATTACKS_ENABLED, 0, true)
 
   // --------------------------------------------------------------------------
   function toggleState()
@@ -108,27 +119,29 @@ public class GhostComponent extends UnitComponent
   function unsuspendAndFadeIn()
     let ownerUnit = getOwnerUnit()
     let targetingComponent = getOwner().getUndeadTargetingComponent()
+    if (targetingComponent == null)
+      return
     targetingComponent.tryTargetClosestUnit()
-    let spawnDistance = ownerUnit.getFieldWeapon(UNIT_WEAPON_RF_ATTACK_RANGE, 0) + TARGET_OFFSET
+    let spawnDistance = ownerUnit.getMoveSpeed() * FADE_IN_DURATION
     vec2 spawnPos
     let targetUnit = targetingComponent.getTargetUnit()
     if (targetUnit != null)
       spawnPos = targetUnit.getPos().polarOffset(GetRandomDirectionDeg().asAngleDegrees(), spawnDistance)
     else
-      spawnPos = ownerUnit.getPos() + ownerUnit.getFacingAngle().toVec(spawnDistance)
+      spawnPos = ownerUnit.getPos().polarOffset(ownerUnit.getFacingAngle(), spawnDistance)
     ownerUnit.setXY(spawnPos)
     fadeIn()
 
   // --------------------------------------------------------------------------
   function fadeOutAndSuspend()
     let ownerUnit = getOwnerUnit()
-    let moveDistance = ownerUnit.getFieldWeapon(UNIT_WEAPON_RF_ATTACK_RANGE, 0) + TARGET_OFFSET
+    let moveDistance = ownerUnit.getMoveSpeed() * FADE_OUT_DURATION
     vec2 movePos
     if (m_lastAttackedUnit != null)
-      movePos = m_lastAttackedUnit.getPos()
-      movePos += (movePos - ownerUnit.getPos()).norm() * moveDistance
+      let v = (m_lastAttackedUnit.getPos() - ownerUnit.getPos()).norm()
+      movePos = ownerUnit.getPos() + v * moveDistance
     else
-      movePos = ownerUnit.getPos() + ownerUnit.getFacingAngle().toVec(moveDistance)
+      movePos = ownerUnit.getPos().polarOffset(ownerUnit.getFacingAngle(), moveDistance)
     ownerUnit.issuePointOrderById(OrderIds.move, movePos)
     fadeOut()
 
@@ -144,42 +157,11 @@ public function IUnitMetadata.getOrAddGhostComponent() returns GhostComponent
   return component
 
 // ============================================================================
-function registerGhost(unit ghost)
-  g_ghosts.add(ghost)
-  
-  if (g_ghosts.size() == 1 and g_toggleStateTimer == null)
-    g_toggleStateTimer = doPeriodically(STATE_TOGGLE_INTERVAL, (CallbackPeriodic cb) -> toggleGhostStates())
-
-// ============================================================================
-function toggleGhostStates()
-  for g in g_ghosts
-  //{
-    if (g.getCurrentOrder() != OrderIds.move)
-    //{
-      let metadata = g.getMetadata()
-      if (metadata != null)
-        let comp = metadata.getGhostComponent()
-        if (comp != null)
-        //{
-          comp.toggleState()
-        //}
-    //}
-  //}
-
-// ============================================================================
-function unregisterGhost(unit ghost)
-  g_ghosts.remove(ghost)
-  
-  if (g_ghosts.size() == 0 and g_toggleStateTimer != null)
-    destroy g_toggleStateTimer
-    g_toggleStateTimer = null
-
-// ============================================================================
 function onUnitAttacked()
   let attackedUnit = GetAttackedUnitBJ()
   let attackingUnit = GetAttacker()
 
-  if (attackingUnit.getTypeId() != TlsUnitIds.Undead.ghost)
+  if (not attackingUnit.isTypeOfGhost())
     return
 
   let metadata = attackingUnit.getMetadata()

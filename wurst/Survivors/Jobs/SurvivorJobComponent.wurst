@@ -2,15 +2,12 @@ package SurvivorJobComponent
 import UnitComponent
 import SurvivorJobs
 import Func
-import HashMap
 
-HashMap<SurvivorJobDefinition, Func1<IUnitMetadata, SurvivorJobComponent>> g_survivorJobComponentGetterMap = new HashMap<SurvivorJobDefinition, Func1<IUnitMetadata, SurvivorJobComponent>>()
-HashMap<SurvivorJobDefinition, Func1<IUnitMetadata, SurvivorJobComponent>> g_survivorJobComponentFactoryMap = new HashMap<SurvivorJobDefinition, Func1<IUnitMetadata, SurvivorJobComponent>>()
+int array[g_survivorJobCount] g_survivorJobComponentIds
+Func1<IUnitMetadata, SurvivorJobComponent> array[g_survivorJobCount] g_survivorJobComponentFactories
 
 // ============================================================================
 public abstract class SurvivorJobComponent extends UnitComponent
-  private int m_level
-  private int m_experience
   private int m_unitId
   private int m_skillPoints
   private bool m_isAssigned
@@ -18,8 +15,6 @@ public abstract class SurvivorJobComponent extends UnitComponent
   // --------------------------------------------------------------------------
   construct(IUnitMetadata owner)
     super(owner)
-    m_level = 1
-    m_experience = 0
     m_skillPoints = 1
     m_isAssigned = false
     m_unitId = getJob().getInitialUnitType()
@@ -42,22 +37,6 @@ public abstract class SurvivorJobComponent extends UnitComponent
   // --------------------------------------------------------------------------
   function setIsAssigned(bool value)
     m_isAssigned = value
-
-  // --------------------------------------------------------------------------
-  function getLevel() returns int
-    return m_level
-
-  // --------------------------------------------------------------------------
-  function setLevel(int level)
-    m_level = level
-
-  // --------------------------------------------------------------------------
-  function getExperience() returns int
-    return m_experience
-
-  // --------------------------------------------------------------------------
-  function setExperience(int experience)
-    m_experience = experience
 
   // --------------------------------------------------------------------------
   function getSkillPoints() returns int
@@ -88,39 +67,32 @@ public abstract class SurvivorJobComponent extends UnitComponent
   // --------------------------------------------------------------------------
   protected function loadJobData()
     let ownerUnit = getOwnerUnit()
-
-    let xp = getExperience()
-    if (xp > 0)
-      ownerUnit.setXp(xp, false)
-
     ownerUnit.setSkillPoints(getSkillPoints())
 
   // --------------------------------------------------------------------------
   protected function saveJobData()
     let ownerUnit = getOwnerUnit()
-    setLevel(ownerUnit.getLevel())
-    setExperience(ownerUnit.getXp())
     setUnitId(ownerUnit.getTypeId())
     setSkillPoints(ownerUnit.getSkillPoints())
 
   // --------------------------------------------------------------------------
-  static function registerSurvivorJobComponentGetter(SurvivorJobDefinition job, Func1<IUnitMetadata, SurvivorJobComponent> getter)
-    g_survivorJobComponentGetterMap.put(job, getter)
+  static function registerSurvivorJobComponentGetter(SurvivorJobType job, int componentTypeId)
+    g_survivorJobComponentIds[job castTo int] = componentTypeId
 
   // --------------------------------------------------------------------------
-  static function registerSurvivorJobComponentFactory(SurvivorJobDefinition job, Func1<IUnitMetadata, SurvivorJobComponent> getter)
-    g_survivorJobComponentFactoryMap.put(job, getter)
+  static function registerSurvivorJobComponentFactory(SurvivorJobType job, Func1<IUnitMetadata, SurvivorJobComponent> getter)
+    g_survivorJobComponentFactories[job castTo int] = getter.acquire()
 
 // ============================================================================
-public function IUnitMetadata.getSurvivorJobComponent(SurvivorJobDefinition job) returns SurvivorJobComponent
-  let getter = g_survivorJobComponentGetterMap.get(job)
-  if (getter == null)
-    return null
-  return getter.call(this)
+public function IUnitMetadata.getSurvivorJobComponent(SurvivorJobType job) returns SurvivorJobComponent
+  let componentTypeId = g_survivorJobComponentIds[job castTo int]
+  return componentTypeId == 0 ? null : this.getComponent(componentTypeId) castTo SurvivorJobComponent
 
 // ============================================================================
-public function IUnitMetadata.getOrAddSurvivorJobComponent(SurvivorJobDefinition job) returns SurvivorJobComponent
-  let factory = g_survivorJobComponentFactoryMap.get(job)
-  if (factory == null)
-    return null
-  return factory.call(this)
+public function IUnitMetadata.getOrAddSurvivorJobComponent(SurvivorJobType job) returns SurvivorJobComponent
+  var comp = this.getSurvivorJobComponent(job)
+  if (comp == null)
+    let factory = g_survivorJobComponentFactories[job castTo int]
+    if (factory != null)
+      comp = factory.call(this)
+  return comp

@@ -1,0 +1,258 @@
+package Wave
+import SpawnWave
+import HashMap
+import Events
+import HumanPlayerComponent
+import WaveRewardScalarComponent
+import PlayerUtils
+import Math
+import ColorUtility
+import Vector
+import Runnable
+import Reflection
+import IProgress
+import Icons
+import Notifications
+import SoundUtils
+import Optional
+import GameProperties
+import TlsSounds
+
+/** Only one wave can affect TOD scale at a time */
+_handle g_todScaleAffector = INVALID_HANDLE
+
+// ============================================================================
+public class Wave extends Runnable
+  protected Vector<SpawnWave> m_spawnWaves
+  protected HashMap<SpawnWave, _handle> m_spawnWaveStateChangeHandlers
+  protected HashMap<SpawnWave, _handle> m_spawnWaveProgressChangeHandlers
+  private player m_player
+  private string m_id
+  private int m_xpReward
+  private int m_matsReward
+  private int m_goldReward
+  private int m_completedSpawnWaves
+  private sound m_playSoundOnStart = null
+  private sound m_playSoundOnComplete = null
+  
+  private optionalReal m_todScale = none_real()
+  private _handle m_todScaleAffector = INVALID_HANDLE
+
+  // --------------------------------------------------------------------------
+  construct(player p)
+    m_player = p
+    m_spawnWaves = new Vector<SpawnWave>()
+    m_spawnWaveStateChangeHandlers = new HashMap<SpawnWave, _handle>()
+    m_spawnWaveProgressChangeHandlers = new HashMap<SpawnWave, _handle>()
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    cleanup()
+
+    for sw in m_spawnWaves
+      destroy sw
+
+    destroy m_spawnWaves
+    m_spawnWaves = null
+
+    destroy m_spawnWaveStateChangeHandlers
+    m_spawnWaveStateChangeHandlers = null
+
+    destroy m_spawnWaveProgressChangeHandlers
+    m_spawnWaveProgressChangeHandlers = null
+
+  // --------------------------------------------------------------------------
+  function getId() returns string
+    return m_id
+
+  // --------------------------------------------------------------------------
+  function setId(string id)
+    m_id = id
+
+  // --------------------------------------------------------------------------
+  function addSpawnWave(SpawnWave spawnWave)
+    m_spawnWaves.add(spawnWave)
+
+  // --------------------------------------------------------------------------
+  function removeSpawnWave(SpawnWave spawnWave) returns bool
+    if (not m_spawnWaves.remove(spawnWave))
+      return false
+    return true
+
+  // --------------------------------------------------------------------------
+  function getSpawnWaves() returns Vector<SpawnWave>
+    return m_spawnWaves
+
+  // --------------------------------------------------------------------------
+  function getXpReward() returns int
+    return m_xpReward
+
+  // --------------------------------------------------------------------------
+  function setXpReward(int xpReward)
+    m_xpReward = xpReward
+
+  // --------------------------------------------------------------------------
+  function getMatsReward() returns int
+    return m_matsReward
+
+  // --------------------------------------------------------------------------
+  function setMatsReward(int matsReward)
+    m_matsReward = matsReward
+
+  // --------------------------------------------------------------------------
+  function getGoldReward() returns int
+    return m_goldReward
+
+  // --------------------------------------------------------------------------
+  function setGoldReward(int goldReward)
+    m_goldReward = goldReward
+
+  // --------------------------------------------------------------------------
+  function playSoundOnStart(sound value)
+    m_playSoundOnStart = value
+
+  // --------------------------------------------------------------------------
+  function playSoundOnComplete(sound value)
+    m_playSoundOnComplete = value
+
+  // ----------------------------------------------------------------------------
+  function setTODScale(real value)
+    m_todScale = some(value)
+
+  // --------------------------------------------------------------------------
+  override function onStarted()
+    super.onStarted()
+
+    Log.debug(typeIdToTypeName(this.typeId), "onStarted", getId(), "Wave started")
+
+    m_completedSpawnWaves = 0
+    listenToAllSpawnWaveEvents()
+    for wave in m_spawnWaves
+      wave.start()
+
+    if (m_playSoundOnStart != null)
+      PlaySoundBJ(m_playSoundOnStart)
+
+    if (m_todScale.hasValue and g_todScaleAffector == INVALID_HANDLE)
+      g_todScaleAffector = g_GameProperties.getProperty(GameProperty.TOD_SCALE).affectScale(m_todScale.value)
+      m_todScaleAffector = g_todScaleAffector
+
+  // --------------------------------------------------------------------------
+  override function onCompleted()
+    super.onCompleted()
+
+    cleanup()
+
+    for wave in m_spawnWaves
+      if (not wave.isCompleted())
+        if (succeeded())
+          wave.complete()
+        else
+          wave.fail(getError())
+
+    if (m_playSoundOnComplete != null)
+      PlaySoundBJ(m_playSoundOnComplete)
+
+    if (this.succeeded())
+      grantRewards()
+
+  // --------------------------------------------------------------------------
+  override function getProgress() returns real
+    var numProgress = 0.0
+    var totalProgress = 0.0
+    for wave in m_spawnWaves
+      numProgress += 1.0
+      totalProgress += wave.getProgress()
+    return clamp01(totalProgress / numProgress)
+
+  // --------------------------------------------------------------------------
+  function announceWaveToPlayer(player _player)
+    skip
+
+  // --------------------------------------------------------------------------
+  private function grantRewards()
+
+    let comp = m_player.getMetadata().getOrAddWaveRewardScalarComponent()
+
+    int xp = getXpReward()
+    xp = comp.scaleXpReward(xp)
+    if (xp != 0)
+      addXpToAllHeroesBelongingToPlayer(m_player, xp)
+      notifyPlayer(m_player, "Reward: " + "+{0} xp".format(xp.toString()).colorize(Colors.xp), Icons.bTNTome)
+
+    int mats = getMatsReward()
+    mats = comp.scaleMatsReward(mats)
+    if (mats != 0)
+      m_player.addLumber(mats)
+      notifyPlayer(m_player, "Reward: " + "+{0} lumber".format(mats.toString()).colorize(Colors.lumber), Icons.bTNBundleOfLumber)
+
+    int gold = getGoldReward()
+    gold = comp.scaleMatsReward(gold)
+    if (gold != 0)
+      m_player.addGold(gold)
+      notifyPlayer(m_player, "Reward: " + "+{0} gold".format(gold.toString()).colorize(Colors.gold), Icons.bTNChestOfGold)
+      TlsSounds.getRandomFoundGold().playForPlayer(m_player)
+
+  // --------------------------------------------------------------------------
+  private function listenToAllSpawnWaveEvents()
+    for spawnWave in m_spawnWaves
+      listenToSpawnWaveEvents(spawnWave)
+
+  // --------------------------------------------------------------------------
+  private function listenToSpawnWaveEvents(SpawnWave spawnWave)
+    unlistenToSpawnWaveEvents(spawnWave)
+    
+    let stateChangedEvent = spawnWave.getStateChangedEvent()
+    if (stateChangedEvent != null)
+      let handler = stateChangedEvent.register((runnable) -> onSpawnWaveStateChanged(runnable))
+      m_spawnWaveStateChangeHandlers.put(spawnWave, handler)
+
+    let progressChangedEvent = spawnWave.onProgressChanged()
+    if (progressChangedEvent != null)
+      let handler = progressChangedEvent.register((progress) -> onSpawnWaveProgressChanged(progress))
+      m_spawnWaveProgressChangeHandlers.put(spawnWave, handler)
+    
+  // --------------------------------------------------------------------------
+  private function unlistenToAllSpawnWaveEvents()
+    for spawnWave in m_spawnWaves
+      unlistenToSpawnWaveEvents(spawnWave)
+
+  // --------------------------------------------------------------------------
+  private function unlistenToSpawnWaveEvents(SpawnWave spawnWave)
+    let stateChangedHandler = m_spawnWaveStateChangeHandlers.get(spawnWave)
+    m_spawnWaveStateChangeHandlers.remove(spawnWave)
+    let stateChangedEvent = spawnWave.getStateChangedEvent()
+    if (stateChangedEvent != null and stateChangedEvent.isHandleValid(stateChangedHandler))
+      stateChangedEvent.unregister(stateChangedHandler)
+    
+    let progressChangedHandler = m_spawnWaveProgressChangeHandlers.get(spawnWave)
+    m_spawnWaveProgressChangeHandlers.remove(spawnWave)
+    let progressChangedEvent = spawnWave.onProgressChanged()
+    if (progressChangedEvent != null)
+      progressChangedEvent.unregister(progressChangedHandler)
+  
+  // --------------------------------------------------------------------------
+  private function onSpawnWaveStateChanged(IRunnable _)
+    if (isCompleted())
+      return
+    for spawnWave in m_spawnWaves
+      if (spawnWave.failed())
+        fail(spawnWave.getError())
+        return
+
+  // --------------------------------------------------------------------------
+  private function onSpawnWaveProgressChanged(IProgress _)
+    raiseProgressChangedEvent()
+    if (getProgress() == 1.0)
+      complete()
+
+  // ----------------------------------------------------------------------------
+  private function cleanup()
+    
+    unlistenToAllSpawnWaveEvents()
+
+    if (m_todScaleAffector != INVALID_HANDLE and m_todScaleAffector == g_todScaleAffector)
+      assertTrue(m_todScale.hasValue)
+      g_GameProperties.getProperty(GameProperty.TOD_SCALE).remove(m_todScaleAffector)
+      m_todScaleAffector = INVALID_HANDLE
+      g_todScaleAffector = INVALID_HANDLE

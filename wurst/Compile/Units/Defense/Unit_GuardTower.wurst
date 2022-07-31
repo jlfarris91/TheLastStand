@@ -1,0 +1,473 @@
+package Unit_GuardTower
+import TlsBuildingDefinition
+import BuildingUndeadTarget
+import GameConstants
+import TlsUpgradeIds
+import TlsUnitDefinitionBuilder
+import Range
+import Dice
+import Math
+import UnitComponent
+import Events
+import WorkstationComponent
+import ObjectIdGenerator
+import AbilityObjEditing
+import ExperienceComponent
+import FX
+import RegisterEvents
+import UnitPropertiesComponent
+import TlsUpgradeDefinition
+import Icons
+import RealExtensions
+import Combat
+
+public TlsBuildingDefinition array[3] g_guardTowerDefinition
+
+constant real array[3]          GUARD_TOWER_ATTACK_COOLDOWN               = [1.5, 1.25, 1.0]
+constant int                    GUARD_TOWER_UPGRADE_LEVELS                = 6
+
+constant stdDmgInputs           GUARD_TOWER_STD_DMG_INPUTS                = stdDmgInputs(
+  /* Levels               */ 3,
+  /* DPS Scalar Base      */ 0.3,
+  /* DPS Scalar Inc       */ 0.05,
+  /* Game Progress Start  */ 0.2,
+  /* Operator Levels      */ 10,
+  /* Operator Weight      */ 1,
+  /* Upgrade Levels       */ GUARD_TOWER_UPGRADE_LEVELS,
+  /* Upgrade Weight       */ 2,
+  /* Follow Through       */ 1,
+  /* Attack Damage Scalar */ getDamageScalar(ZOMBIE_TIER1_ARMOR_TYPE, AttackType.Pierce)
+)
+constant stdDmgOutputs array[3] GUARD_TOWER_STD_DMG_OUTPUTS               = [
+  compiletime(calculateStandardDamageValues(GUARD_TOWER_STD_DMG_INPUTS, 0, GUARD_TOWER_ATTACK_COOLDOWN[0])),
+  compiletime(calculateStandardDamageValues(GUARD_TOWER_STD_DMG_INPUTS, 1, GUARD_TOWER_ATTACK_COOLDOWN[1])),
+  compiletime(calculateStandardDamageValues(GUARD_TOWER_STD_DMG_INPUTS, 2, GUARD_TOWER_ATTACK_COOLDOWN[2]))
+]
+
+constant string array[3]        GUARD_TOWER_NAME                          = ["Guard Tower I", "Guard Tower II", "Guard Tower III"]
+constant int                    ACTIVE_SIGHT_ABILITY_ID                   = compiletime(ABIL_ID_GEN.next())
+constant int array[3]           GUARD_TOWER_ACTIVE_ICON_ABILITY_ID        = [compiletime(ABIL_ID_GEN.next()), compiletime(ABIL_ID_GEN.next()), compiletime(ABIL_ID_GEN.next())]
+constant int array[3]           GUARD_TOWER_INACTIVE_ICON_ABILITY_ID      = [compiletime(ABIL_ID_GEN.next()), compiletime(ABIL_ID_GEN.next()), compiletime(ABIL_ID_GEN.next())]
+
+// ============================================================================
+public class GuardTowerDefinition extends TlsBuildingDefinition
+
+  // --------------------------------------------------------------------------
+  construct(int newId)
+    super(newId, UnitIds.guardtower)
+    addUndeadTargetBuildingDefinition(newId, false)
+    setName("Guard Tower")
+    setButtonPositionX(2)
+    setButtonPositionY(0)
+    setDeathTimeseconds(1.0)
+    //setIconGameInterface("ReplaceableTextures\\CommandButtons\\BTNWorkbench.dds")
+    //setModelFile("Units\\Workbench\\Workbench.mdx")
+    setScalingValue(1.0)
+    setSelectionScale(3.0)
+    setTintingColorRed(200)
+    setTintingColorBlue(200)
+    setTintingColorGreen(200)
+    setPlacementRequires("unbuildable,unwalkable")
+    setHideMinimapDisplay(true)
+    setRepairTime(10)
+    setSightRadiusDay(STRUCTURE_LARGE_SIGHT_RANGE_DAY)
+    setSightRadiusNight(STRUCTURE_LARGE_SIGHT_RANGE_NIGHT)
+    setRequirements(commaList(TlsUnitIds.workshop))
+    setUpgradesUsed(commaList(TlsUpgradeIds.campDefense, TlsUpgradeIds.guardTowerAttackDamage))
+    setNormalAbilities(commaList(
+      TlsAbilityIds.recycle,
+      TlsAbilityIds.blightDispelSmall,
+      TlsAbilityIds.workstationLoadUnit,
+      TlsAbilityIds.workstationUnloadUnit,
+      TlsAbilityIds.inventory2Slots))
+    setUnitsTrained("")
+    setUpgradesTo("")
+
+    setAttack1TargetsAllowed("ground,structure,air,ward")
+    setAttack1AttackType(AttackType.Pierce)
+    setAttacksEnabled(1)
+    
+    setHitPointsMaximumBase(1000)
+    setArmorType(ArmorType.Fortified)
+    setDefenseBase(0)
+
+    this.setCommonBuildingProperties()    
+
+    setHotkey("G")
+    setTooltipBasic("Build Guard Tower")
+
+  // --------------------------------------------------------------------------
+  static function getAttack1Dps(int towerLevel, int upgradeLevel, int operatorLevel) returns rangeReal
+    let baseDmg = GUARD_TOWER_STD_DMG_OUTPUTS[towerLevel].dice.base
+    let finalDmg = baseDmg
+      + upgradeLevel * GUARD_TOWER_STD_DMG_OUTPUTS[towerLevel].damageDelta * GUARD_TOWER_STD_DMG_OUTPUTS[towerLevel].upScalar
+      + operatorLevel * GUARD_TOWER_STD_DMG_OUTPUTS[towerLevel].damageDelta * GUARD_TOWER_STD_DMG_OUTPUTS[towerLevel].opScalar
+    let cooldown = getAttack1CooldownTime(towerLevel)
+    return rangeReal(baseDmg.toReal(), finalDmg) * cooldown
+
+  // --------------------------------------------------------------------------
+  static function getUpgradeBonusDamageScalar(int towerLevel, int upgradeLevel) returns real
+    return upgradeLevel * GUARD_TOWER_STD_DMG_OUTPUTS[towerLevel].upScalar / GUARD_TOWER_STD_DMG_INPUTS.upLevels
+
+  // --------------------------------------------------------------------------
+  static function getOperatorBonusDamageScalar(int towerLevel, int operatorLevel) returns real
+    return operatorLevel * GUARD_TOWER_STD_DMG_OUTPUTS[towerLevel].opScalar / GUARD_TOWER_STD_DMG_INPUTS.opLevels
+
+  // --------------------------------------------------------------------------
+  static function getAttack1DamageDice(int towerLevel) returns dice
+    return GUARD_TOWER_STD_DMG_OUTPUTS[towerLevel].dice
+
+  // --------------------------------------------------------------------------
+  static function getAttack1CooldownTime(int towerLevel) returns real
+    return GUARD_TOWER_ATTACK_COOLDOWN[clamp(towerLevel, 0, 2)]
+
+  // --------------------------------------------------------------------------
+  static function getAttack1OperatorAttackBonus(int towerLevel, int operatorLevel) returns int
+    return (GUARD_TOWER_STD_DMG_OUTPUTS[towerLevel].damageDelta * getOperatorBonusDamageScalar(towerLevel, operatorLevel)).floor()
+
+// ============================================================================
+@compiletime function createObjectDefinitions()
+
+  g_guardTowerDefinition[0] = new GuardTowerDefinition(TlsUnitIds.guardTowers[0])
+    ..setName(GUARD_TOWER_NAME[0])
+    ..setTooltipBasic("Build " + GUARD_TOWER_NAME[0])
+    ..setScalingValue(0.9)
+    ..addUnitClass(TlsUnitClassification.BUILDING)
+    ..addUnitClass(TlsUnitClassification.RANGED)
+    ..addUnitClass(TlsUnitClassification.WORKSTATION)
+    ..setAttack1CooldownTime(GuardTowerDefinition.getAttack1CooldownTime(0))
+    ..setAttack1DamageDice(GuardTowerDefinition.getAttack1DamageDice(0))
+    ..setAttack1Range(800)
+    ..setHitPointsMaximumBase(1000)
+    ..setUpgradesTo(commaList(TlsUnitIds.guardTowers[1]))
+    ..setGoldCost(2)
+    ..setMaterialCost(600)
+    ..build("A tall tower fitted with a crossbow that can fire a variable distance when operated by a survivor.",
+      tooltipBuilder -> begin
+        let workstationItem = new WorkstationOperatorBonusesTooltipItem()
+        ..addValue("Increased attack damage")
+        tooltipBuilder.addItem(workstationItem)
+      end)
+
+  g_guardTowerDefinition[1] = new GuardTowerDefinition(TlsUnitIds.guardTowers[1])
+    ..setName(GUARD_TOWER_NAME[1])
+    ..setTooltipBasic("Upgrade to " + GUARD_TOWER_NAME[1])
+    ..setScalingValue(1.0)
+    ..addUnitClass(TlsUnitClassification.BUILDING)
+    ..addUnitClass(TlsUnitClassification.RANGED)
+    ..addUnitClass(TlsUnitClassification.WORKSTATION)
+    ..setAttack1CooldownTime(GuardTowerDefinition.getAttack1CooldownTime(1))
+    ..setAttack1DamageDice(GuardTowerDefinition.getAttack1DamageDice(1))
+    ..setAttack1Range(1200)
+    ..setHitPointsMaximumBase(2000)
+    ..setUpgradesTo(commaList(TlsUnitIds.guardTowers[2]))
+    ..setButtonPositionX(0)
+    ..setButtonPositionY(1)
+    ..setGoldCost(4)
+    ..setLumberCost(1200)
+    ..build("A slightly taller tower fitted with a crossbow that can fire a variable distance when operated by a survivor.",
+      tooltipBuilder -> begin
+        let workstationItem = new WorkstationOperatorBonusesTooltipItem()
+        ..addValue("Increased attack damage")
+        tooltipBuilder.addItem(workstationItem)
+      end)
+
+  g_guardTowerDefinition[2] = new GuardTowerDefinition(TlsUnitIds.guardTowers[2])
+    ..setName(GUARD_TOWER_NAME[2])
+    ..setTooltipBasic("Upgrade to " + GUARD_TOWER_NAME[2])
+    ..setScalingValue(1.1)
+    ..addUnitClass(TlsUnitClassification.BUILDING)
+    ..addUnitClass(TlsUnitClassification.RANGED)
+    ..addUnitClass(TlsUnitClassification.WORKSTATION)
+    ..setAttack1CooldownTime(GuardTowerDefinition.getAttack1CooldownTime(2))
+    ..setAttack1DamageDice(GuardTowerDefinition.getAttack1DamageDice(2))
+    ..setAttack1Range(1600)
+    ..setHitPointsMaximumBase(4000)
+    ..setButtonPositionX(0)
+    ..setButtonPositionY(1)
+    ..setGoldCost(8)
+    ..setLumberCost(2400)
+    ..build("A slightly taller tower fitted with a crossbow that can fire a variable distance when operated by a survivor.",
+      tooltipBuilder -> begin
+        let workstationItem = new WorkstationOperatorBonusesTooltipItem()
+        ..addValue("Increased attack damage")
+        tooltipBuilder.addItem(workstationItem)
+      end)
+
+  new AbilityDefinitionSightBonus(ACTIVE_SIGHT_ABILITY_ID)
+  ..setSightRangeBonus(1, 800)
+
+  for i = 0 to 2
+    createWorkstationAbilities(i)
+
+  new TlsUpgradeDefinition(TlsUpgradeIds.guardTowerAttackDamage, GUARD_TOWER_UPGRADE_LEVELS)
+    ..setButtonPositionX(2)
+    ..setButtonPositionY(1)
+    ..addEffectAttackDiceBonus(1, 1)
+    ..setClass(UpgradeClass.Artillery)
+    ..setGoldCostBase(0)
+    ..setGoldCostIncrement(1)
+    ..setLumberCostBase(300)
+    ..setLumberCostIncrement(300)
+    ..setRace(Race.Human)
+    ..setTimeBase(30)
+    ..setTimeIncrement(5)
+    ..presetIcon(lvl -> Icons.bTNGuardTower)
+    ..setRequirements(1, commaList(TlsUnitIds.headquarters1))
+    ..setRequirements(2, commaList(TlsUnitIds.headquarters2))
+    ..setRequirements(3, commaList(TlsUnitIds.headquarters3))
+    ..setRequirements(4, commaList(TlsUnitIds.headquarters4))
+    ..setRequirements(5, commaList(TlsUnitIds.headquarters5))
+    ..presetName(lvl -> "Guard Tower Attack Damage")
+    ..presetTooltip(lvl -> "Upgrade Guard Tower Attack Damage")
+    ..setTooltipExtended(1, "Increases the attack damage of Guard Towers.")
+    ..setTooltipExtended(2, "Further increases the attack damage of Guard Towers.")
+    ..setTooltipExtended(3, "Further increases the attack damage of Guard Towers.")
+    ..setTooltipExtended(4, "Further increases the attack damage of Guard Towers.")
+    ..setTooltipExtended(5, "Further increases the attack damage of Guard Towers.")
+    ..setTooltipExtended(6, "Further increases the attack damage of Guard Towers.")
+
+// ============================================================================
+function createWorkstationAbilities(int towerLevel)
+  let activeWorkstationIconTooltipBuilder = new WorkstationIconTooltipBuilder(true)..setDescription(g_guardTowerDefinition[towerLevel].getTooltipExtended())
+  let inactiveWorkstationIconTooltipBuilder = new WorkstationIconTooltipBuilder(false)..setDescription(g_guardTowerDefinition[towerLevel].getTooltipExtended())
+
+  let properties = new WorkstationOperatorLevelBonusesTooltipItem()
+  ..addValue(lvl -> "Damage increased by {0}".format(GuardTowerDefinition.getOperatorBonusDamageScalar(towerLevel, lvl).toPercentageString01()))
+  activeWorkstationIconTooltipBuilder.addItem(properties)
+
+  new AbilityActiveWorkstationIconDefinition(GUARD_TOWER_ACTIVE_ICON_ABILITY_ID[towerLevel])
+    ..setName(GUARD_TOWER_NAME[towerLevel])
+    ..presetTooltipNormalExtended(lvl -> activeWorkstationIconTooltipBuilder.getTooltipExtended(lvl))
+
+  new AbilityInactiveWorkstationIconDefinition(GUARD_TOWER_INACTIVE_ICON_ABILITY_ID[towerLevel])
+    ..setName(GUARD_TOWER_NAME[towerLevel])
+    ..presetTooltipNormalExtended(lvl -> inactiveWorkstationIconTooltipBuilder.getTooltipExtended(lvl))
+
+  destroy activeWorkstationIconTooltipBuilder
+  destroy inactiveWorkstationIconTooltipBuilder
+
+// ============================================================================
+public class GuardTowerComponent extends UnitComponent
+  private _handle m_workerEnteredCallback = INVALID_HANDLE
+  private _handle m_workerExitedCallback = INVALID_HANDLE
+  private _handle m_workerLeveledCallback = INVALID_HANDLE
+  private _handle m_attackBonusAffector = INVALID_HANDLE
+  private bool m_activated = false
+
+  // --------------------------------------------------------------------------
+  construct (IUnitMetadata metadata)
+    super(metadata)
+
+  // --------------------------------------------------------------------------
+  override function onEnabled()
+    super.onEnabled()
+    
+    let workstationComponent = getOwner().getOrAddWorkstationComponent()
+    m_workerEnteredCallback = workstationComponent.onWorkedEntered().registerDispatched(this, () -> onWorkerEntered())
+    m_workerExitedCallback = workstationComponent.onWorkedExited().registerDispatched(this, () -> onWorkedExited())
+    m_workerLeveledCallback = workstationComponent.onWorkedLeveled().registerDispatched(this, () -> onWorkerLeveled())
+
+    updateState()
+
+  // --------------------------------------------------------------------------
+  override function onDisabled()
+    super.onDisabled()
+
+    let workstationComponent = getOwner().getWorkstationComponent()
+    if (workstationComponent != null)
+      workstationComponent.onWorkedEntered().unregister(m_workerEnteredCallback)
+      workstationComponent.onWorkedExited().unregister(m_workerExitedCallback)
+      workstationComponent.onWorkedLeveled().unregister(m_workerLeveledCallback)
+
+    deactivate()
+    
+  // --------------------------------------------------------------------------
+  private function onWorkerEntered()
+
+    let workstationComponent = getOwner().getOrAddWorkstationComponent()
+    getOwnerUnit().setXpTarget(workstationComponent.getLoadedUnitAt(0))
+
+    if (getNumberOfWorkers() == 1)
+      activate()
+
+  // --------------------------------------------------------------------------
+  private function onWorkedExited()
+    
+    getOwnerUnit().clearXpTarget()
+
+    if (getNumberOfWorkers() == 0)
+      deactivate()
+
+  // --------------------------------------------------------------------------
+  private function onWorkerLeveled()
+    updateState()
+
+  // --------------------------------------------------------------------------
+  private function getNumberOfWorkers() returns int
+    let workstationComponent = getOwner().getWorkstationComponent()
+    return workstationComponent != null ? workstationComponent.getLoadedUnitCount() : 0
+
+  // --------------------------------------------------------------------------
+  private function activate()
+    setActive(true)
+
+  // --------------------------------------------------------------------------
+  private function deactivate()
+    setActive(false)
+
+  // --------------------------------------------------------------------------
+  private function setActive(bool active)
+    if (m_activated == active)
+      return
+    m_activated = active
+    updateState()
+
+  // --------------------------------------------------------------------------
+  protected function updateState()
+
+    let ownerUnit = getOwnerUnit()
+
+    if (m_activated)
+      ownerUnit.addAbility(ACTIVE_SIGHT_ABILITY_ID)
+    else
+      ownerUnit.removeAbility(ACTIVE_SIGHT_ABILITY_ID)
+
+    ownerUnit.setFieldWeapon(UNIT_WEAPON_BF_ATTACKS_ENABLED, 0, m_activated)
+
+    var towerLevel = 0
+
+    switch (ownerUnit.getTypeId())
+      case TlsUnitIds.guardTowers[1]
+        towerLevel = 1
+      case TlsUnitIds.guardTowers[2]
+        towerLevel = 2
+
+    var operatorLevel = 1
+
+    if (m_activated)
+      let workstationComponent = getOwner().getWorkstationComponent()
+      if (workstationComponent != null)
+        operatorLevel = workstationComponent.getMaxOperatorLevel()
+
+    let attackBonusProp = ownerUnit.getProperty(UnitProperty.ATTACK_BONUS)
+
+    if (attackBonusProp != null and m_attackBonusAffector != INVALID_HANDLE)
+      attackBonusProp.remove(m_attackBonusAffector)
+      m_attackBonusAffector = INVALID_HANDLE
+
+    if (m_activated)
+    //{
+      
+      if (attackBonusProp != null)
+        m_attackBonusAffector = attackBonusProp.affectAdd(
+          GuardTowerDefinition.getAttack1OperatorAttackBonus(towerLevel, operatorLevel).toReal())
+
+      for i = 0 to 2
+        ownerUnit.removeAbility(GUARD_TOWER_INACTIVE_ICON_ABILITY_ID[i])
+      ownerUnit.addAbility(GUARD_TOWER_ACTIVE_ICON_ABILITY_ID[towerLevel])
+      ownerUnit.setAbilityLevel(GUARD_TOWER_ACTIVE_ICON_ABILITY_ID[towerLevel], operatorLevel)
+    //}
+    else
+      for i = 0 to 2
+        ownerUnit.removeAbility(GUARD_TOWER_ACTIVE_ICON_ABILITY_ID[i])
+      ownerUnit.addAbility(GUARD_TOWER_INACTIVE_ICON_ABILITY_ID[towerLevel])
+
+// ============================================================================
+public function IUnitMetadata.getGuardTowerComponent() returns GuardTowerComponent
+  return this.getComponent(GuardTowerComponent.typeId) castTo GuardTowerComponent
+
+// ============================================================================
+function onUnitKilled()
+  let killingUnit = GetKillingUnit()
+
+  let metadata = killingUnit.getMetadata()
+  if (metadata == null)
+    return
+
+  let comp = metadata.getGuardTowerComponent()
+  if (comp == null or not comp.getEnabled())
+    return
+
+  let xpComp = metadata.getOrAddExperienceComponent()
+  if (xpComp == null or not xpComp.getEnabled())
+    return
+
+  let xp = xpComp.getXpValueForKilledUnit(GetDyingUnit())
+
+  // Just show the FX, the xp will be given to the operator elsewhere since it is the XP target of the tower
+  FX.createGainedXPTag(killingUnit.getPos(), xp, killingUnit.getOwner())
+
+// ============================================================================
+function onUnitUpgraded()
+  let upgradedUnit = GetTriggerUnit()
+
+  let metadata = upgradedUnit.getMetadata()
+  if (metadata == null)
+    return
+
+  let comp = metadata.getGuardTowerComponent()
+  if (comp != null)
+    comp.updateState()
+
+// ============================================================================
+init
+  createObjectDefinitions()
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_DEATH, function onUnitKilled)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_UPGRADE_FINISH, function onUnitUpgraded)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_UPGRADE_CANCEL, function onUnitUpgraded)
+
+// ============================================================================
+@test function asdf()
+
+  let inputs = GUARD_TOWER_STD_DMG_INPUTS
+
+  var cooldown = GUARD_TOWER_ATTACK_COOLDOWN[0]
+  var outputs = GUARD_TOWER_STD_DMG_OUTPUTS[0]
+  Log.info("dice: " + outputs.dice.toString())
+  Log.info("upScalar: " + outputs.upScalar.toString() + " = " + (outputs.damageDelta * (outputs.upScalar / inputs.upLevels)).toString())
+  Log.info("opScalar: " + outputs.opScalar.toString() + " = " + (outputs.damageDelta * (outputs.opScalar / inputs.opLevels)).toString())
+  var final = (outputs.dice.base + outputs.damageDelta * outputs.upScalar + outputs.damageDelta * outputs.opScalar)
+  Log.info("final: " + final.toString())
+  Log.info("dps: " + (outputs.dice.base / cooldown).toString() + " -> " + (final / cooldown).toString())
+
+  cooldown = GUARD_TOWER_ATTACK_COOLDOWN[1]
+  outputs = GUARD_TOWER_STD_DMG_OUTPUTS[1]
+  Log.info("")
+  Log.info("dice: " + outputs.dice.toString())
+  Log.info("upScalar: " + outputs.upScalar.toString() + " = " + (outputs.damageDelta * (outputs.upScalar / inputs.upLevels)).toString())
+  Log.info("opScalar: " + outputs.opScalar.toString() + " = " + (outputs.damageDelta * (outputs.opScalar / inputs.opLevels)).toString())
+  final = (outputs.dice.base + outputs.damageDelta * outputs.upScalar + outputs.damageDelta * outputs.opScalar)
+  Log.info("final: " + final.toString())
+  Log.info("dps: " + (outputs.dice.base / cooldown).toString() + " -> " + (final / cooldown).toString())
+
+  cooldown = GUARD_TOWER_ATTACK_COOLDOWN[2]
+  outputs = GUARD_TOWER_STD_DMG_OUTPUTS[2]
+  Log.info("")
+  Log.info("dice: " + outputs.dice.toString())
+  Log.info("upScalar: " + outputs.upScalar.toString() + " = " + (outputs.damageDelta * (outputs.upScalar / inputs.upLevels)).toString())
+  Log.info("opScalar: " + outputs.opScalar.toString() + " = " + (outputs.damageDelta * (outputs.opScalar / inputs.opLevels)).toString())
+  final = (outputs.dice.base + outputs.damageDelta * outputs.upScalar + outputs.damageDelta * outputs.opScalar)
+  Log.info("final: " + final.toString())
+  Log.info("dps: " + (outputs.dice.base / cooldown).toString() + " -> " + (final / cooldown).toString())
+
+  Log.info("")
+  for i = 1 to 10
+    Log.info("damage bonus " + i.toString() + ": " + GuardTowerDefinition.getAttack1OperatorAttackBonus(0, i).toString())
+
+// ============================================================================
+@test function asdfasdf()
+  
+  if (g_guardTowerDefinition[0] == null)
+    createObjectDefinitions()
+
+  let activeWorkstationIconTooltipBuilder = new WorkstationIconTooltipBuilder(true)..setDescription(g_guardTowerDefinition[0].getTooltipExtended())
+
+  let properties = new WorkstationOperatorLevelBonusesTooltipItem()
+  ..addValue(lvl -> "Damage increased by {0}".format(GuardTowerDefinition.getOperatorBonusDamageScalar(0, lvl).toPercentageString01(0)))
+  activeWorkstationIconTooltipBuilder.addItem(properties)
+
+  Log.info(g_guardTowerDefinition[0].getTooltipExtended())
+
+  for i = 1 to 10
+    Log.info(activeWorkstationIconTooltipBuilder.getTooltipExtended(i))

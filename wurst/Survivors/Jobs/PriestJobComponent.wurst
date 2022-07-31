@@ -1,0 +1,73 @@
+package PriestJobComponent
+import SurvivorJobComponent
+import UnitMetadata
+import ExperienceComponent
+import RangedTargetXpReceieverComponent
+import TlsAbilityIds
+import SurvivorJobs
+
+// ============================================================================
+public class PriestJobComponent extends SurvivorJobComponent
+  
+  // --------------------------------------------------------------------------
+  construct(IUnitMetadata owner)
+    super(owner)
+
+  // --------------------------------------------------------------------------
+  override function getJob() returns SurvivorJobDefinition
+    return SurvivorJobs.priest
+
+  // --------------------------------------------------------------------------
+  protected override function onEnabled()
+    super.onEnabled()
+    
+    getOwner().getOrAddRangedTargetXpRecieverComponent().setEnabled(true)
+    getOwner().getOrAddExperienceComponent().setEnabled(true)
+
+    updateAbilities()
+
+  // --------------------------------------------------------------------------
+  protected override function onDisabled()
+    super.onDisabled()
+
+    let owner = getOwner()
+    if (owner == null)
+      return
+    
+    let rangedTargetXpReceieverComponent = owner.getRangedTargetXpRecieverComponent()
+    if (rangedTargetXpReceieverComponent != null)
+      rangedTargetXpReceieverComponent.setEnabled(false)
+
+    let gainXpPerKillComponent = owner.getOrAddExperienceComponent()
+    if (gainXpPerKillComponent != null)
+      gainXpPerKillComponent.setEnabled(false)
+
+  // --------------------------------------------------------------------------
+  override function onLevelChanged()
+    super.onLevelChanged()
+    updateAbilities()
+
+  // --------------------------------------------------------------------------
+  private function updateAbilities()
+    let ownerUnit = getOwnerUnit()
+    
+    if (not ownerUnit.hasAbility(TlsAbilityIds.heal))
+      ownerUnit.addAbility(TlsAbilityIds.heal)
+    
+    ownerUnit.setAbilityLevel(TlsAbilityIds.heal, ownerUnit.getLevel())
+
+// ============================================================================
+public function IUnitMetadata.getPriestJobComponent() returns PriestJobComponent
+  return this.getComponent(PriestJobComponent.typeId) castTo PriestJobComponent
+
+// ============================================================================
+public function IUnitMetadata.getOrAddPriestJobComponent() returns PriestJobComponent
+  var component = this.getPriestJobComponent()
+  if (component == null)
+    component = this.addComponent(new PriestJobComponent(this), false) castTo PriestJobComponent
+  return component
+
+// ============================================================================
+init
+  SurvivorJobComponent.registerSurvivorJobComponentGetter(SurvivorJobType.Priest, PriestJobComponent.typeId)
+  SurvivorJobComponent.registerSurvivorJobComponentFactory(SurvivorJobType.Priest, metadata -> metadata.getOrAddPriestJobComponent())

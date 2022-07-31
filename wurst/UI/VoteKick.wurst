@@ -1,0 +1,383 @@
+// package VoteKick
+// import DisplayTextToPlayer
+// import ColorUtility
+// import Notifications
+// import Events
+// import HumanPlayers
+// import FullscreenFrame
+// import Command
+// import DialogBox
+// import LinkedList
+// import RegisterEvents
+// import HumanPlayerComponent
+// import LoadToc
+// import GameConstants
+// import TimerUtils
+
+// constant real VOTE_KICK_VOTE_DURATION = 30.0
+// constant real VOTE_KICK_COOLDOWN_DURATION = 30.0
+
+// public enum PlayerVoteState
+//   No
+//   Yes
+//   Undecided
+
+// // ============================================================================
+// public class VoteKick
+
+//   private static timer m_timer
+//   private static timer m_cooldown
+//   private static player m_playerRequesting
+//   private static player m_playerToKick
+//   private static PlayerVoteState array m_playerVotes
+//   private static Event1<player> m_onPlayerVoteCast = new Event1<player>()
+//   private static Event1<bool> m_onVotingComplete = new Event1<bool>()
+//   private static DialogBox array m_voteKickDialogs
+//   private static LinkedList<player> m_votingPlayers = new LinkedList<player>()
+//   private static Event1<bool> m_onVoteDecided = new Event1<bool>()
+
+//   // --------------------------------------------------------------------------
+//   static function isActive() returns bool
+//     return getTimeRemaining() > 0
+
+//   // --------------------------------------------------------------------------
+//   static function getTimeRemaining() returns real
+//     return m_timer != null ? m_timer.getRemaining() : 0
+
+//   // --------------------------------------------------------------------------
+//   static function isCoolingDown() returns bool
+//     return getCooldownTimeRemaining() > 0
+
+//   // --------------------------------------------------------------------------
+//   static function getCooldownTimeRemaining() returns real
+//     return m_cooldown != null ? m_cooldown.getRemaining() : 0
+
+//   // --------------------------------------------------------------------------
+//   static function getRequestingPlayer() returns player
+//     return m_playerRequesting
+
+//   // --------------------------------------------------------------------------
+//   static function getPlayerToKick() returns player
+//     return m_playerToKick
+
+//   // --------------------------------------------------------------------------
+//   static function onPlayerVoteCast() returns IEvent1<player>
+//     return m_onPlayerVoteCast
+
+//   // --------------------------------------------------------------------------
+//   static function onVotingComplete() returns IEvent1<bool>
+//     return m_onVotingComplete
+
+//   // --------------------------------------------------------------------------
+//   static function getVotingPlayers() returns LinkedList<player>
+//     return m_votingPlayers
+
+//   // --------------------------------------------------------------------------
+//   static function getVoteCast(player byPlayer) returns PlayerVoteState
+//     return m_playerVotes[byPlayer.getId()]
+
+//   // --------------------------------------------------------------------------
+//   static function start(player playerRequesting, player playerToKick)
+
+//     if (isActive())
+//       displayMessageToPlayer(playerRequesting, "A vote is already in progress".colorize(Colors.red))
+//       return
+
+//     if (isCoolingDown())
+//       displayMessageToPlayer(playerRequesting, "Please wait {0} seconds".format(getCooldownTimeRemaining().round().toString()).colorize(Colors.red))
+//       return
+
+//     m_votingPlayers.clear()
+
+//     for p in g_PlayingHumanPlayers
+//       m_playerVotes[p.getId()] = Undecided
+//       if (p != playerRequesting and p != playerToKick)
+//         m_votingPlayers.add(p)
+
+//     if (m_votingPlayers.isEmpty())
+//       displayMessageToPlayer(playerRequesting, "Not enough players to vote")
+//       return
+
+//     m_playerRequesting = playerRequesting
+//     m_playerToKick = playerToKick
+
+//     m_timer = getTimer()
+//     m_timer.start(VOTE_KICK_VOTE_DURATION, function onVoteKickExpired)
+
+//     new VoteKickNotification(NotificationManager.nextNotificationId(), m_playerRequesting)
+//     ..setMessage("Voting to kick {0}".format(m_playerToKick.getDisplayNameColored()))
+//     ..setIconPath("ui\\player-lost.dds")
+//     ..show(m_playerRequesting)
+
+//     for p in m_votingPlayers
+//       new VoteKickNotification(NotificationManager.nextNotificationId(), p)
+//       ..setMessage("Kick {0}?".format(m_playerToKick.getDisplayNameColored()))
+//       ..setIconPath("ui\\player-lost.dds")
+//       ..show(p)
+
+//   // --------------------------------------------------------------------------
+//   static function cancel()
+
+//     if (not isActive())
+//       return
+
+//     for p in m_votingPlayers
+//       notifyPlayer(p, "Vote kick canceled")
+
+//     m_onVoteDecided.call(false)
+
+//     cleanup()
+
+//   // --------------------------------------------------------------------------
+//   static function onVoteKickExpired()
+//     if (not evaluateVotesCast())
+//       onVoteDecided(false)
+
+//   // --------------------------------------------------------------------------
+//   static function onVoteDecided() returns IEvent1<bool>
+//     return m_onVoteDecided
+
+//   // --------------------------------------------------------------------------
+//   private static function onVoteDecided(bool value)
+
+//     let notificationMessage = (value ? "{0} was kicked" : "{0} was not kicked").format(m_playerToKick.getNameColored())
+
+//     for p in m_votingPlayers
+//       notifyPlayer(p, notificationMessage)
+
+//     if (value)
+//       CustomDefeatBJ(m_playerToKick, "Players voted to kick you from the game")
+//       m_playerToKick.setDisplayName(m_playerToKick.getName() + " <Kicked>")
+
+//     m_onVoteDecided.call(value)
+
+//     cleanup()
+
+//   // --------------------------------------------------------------------------
+//   private static function evaluateVotesCast() returns bool
+
+//     // Include requesting player and their yes vote
+//     var playerCount = 1
+//     var voteYesCount = 1
+//     var voteNoCount = 0
+
+//     for p in m_votingPlayers
+//       if (p.isIngame())
+//         playerCount++
+//         if (m_playerVotes[p.getId()] == Yes)
+//           voteYesCount++
+//         else if (m_playerVotes[p.getId()] == No)
+//           voteNoCount++
+
+//     let halfPlayerCount = (playerCount / 2).ceil()
+
+//     Log.info("halfPlayerCount: " + halfPlayerCount.toString() + " yes: " + voteYesCount.toString())
+
+//     if (voteYesCount > halfPlayerCount)
+//       onVoteDecided(true)
+//       return true
+//     else if (voteNoCount > halfPlayerCount)
+//       onVoteDecided(false)
+//       return true
+
+//     return false
+
+//   // --------------------------------------------------------------------------
+//   private static function cleanup()
+
+//     m_timer.release()
+//     m_timer = null
+
+//     m_playerRequesting = null
+//     m_playerToKick = null
+//     m_votingPlayers.clear()
+    
+//     for p in g_PlayingHumanPlayers
+//       closeVoteKickDialog(p)
+
+//     m_cooldown = getTimer()
+//     m_cooldown.start(VOTE_KICK_COOLDOWN_DURATION, function onCooldownTimerExpired)
+
+//   // --------------------------------------------------------------------------
+//   private static function onCooldownTimerExpired()
+//     m_cooldown.release()
+//     m_cooldown = null
+
+//   // --------------------------------------------------------------------------
+//   static function castVote(player votingPlayer, bool value)
+    
+//     if (not isActive())
+//       return
+
+//     if (m_playerVotes[votingPlayer.getId()] != Undecided)
+//       return
+
+//     let voteValue = value ? PlayerVoteState.Yes : PlayerVoteState.No
+//     if (m_playerVotes[votingPlayer.getId()] == voteValue)
+//       return
+
+//     m_playerVotes[votingPlayer.getId()] = voteValue
+
+//     m_onPlayerVoteCast.call(votingPlayer)
+    
+//     evaluateVotesCast()
+
+//   // --------------------------------------------------------------------------
+//   static function isVoteKickDialogVisible(player forPlayer) returns bool
+//     return m_voteKickDialogs[forPlayer.getId()] != null
+
+//   // --------------------------------------------------------------------------
+//   static function showVoteKickDialog(player toPlayer)
+
+//     if (isVoteKickDialogVisible(toPlayer) or getVoteCast(toPlayer) != Undecided)
+//       return
+
+//     let dialogBox = new DialogBox("{0} wants to kick {1}".format(m_playerRequesting.getNameColored(), m_playerToKick.getNameColored()))
+    
+//     dialogBox.addButton("Vote Yes", 'Y') () ->
+//       destroy dialogBox
+//       m_voteKickDialogs[toPlayer.getId()] = null
+//       castVote(toPlayer, true)
+
+//     dialogBox.addButton("Vote No", 'N') () ->
+//       destroy dialogBox
+//       m_voteKickDialogs[toPlayer.getId()] = null
+//       castVote(toPlayer, false)
+
+//     dialogBox.addButton("Close", 'C') -> 
+//       destroy dialogBox
+//       m_voteKickDialogs[toPlayer.getId()] = null
+
+//     dialogBox.display(toPlayer, true)
+
+//     m_voteKickDialogs[toPlayer.getId()] = dialogBox
+
+//   // --------------------------------------------------------------------------
+//   static function closeVoteKickDialog(player p)
+//     if (m_voteKickDialogs[p.getId()] != null)
+//       destroy m_voteKickDialogs[p.getId()]
+//       m_voteKickDialogs[p.getId()] = null
+
+//   // --------------------------------------------------------------------------
+//   protected static function onPlayerLeave(player leavingPlayer)
+
+//     if (leavingPlayer == m_playerRequesting or leavingPlayer == m_playerToKick)
+//       cancel()
+//       return
+
+//     if (m_votingPlayers.remove(leavingPlayer) == false)
+//       return
+
+// // ============================================================================
+// public class VoteKickNotification extends Notification
+//   private player m_votingPlayer
+//   private _handle m_onPlayerVoteCast
+//   private _handle m_onVoteDecided
+
+//   // --------------------------------------------------------------------------
+//   construct(int id, player votingPlayer)
+//     super(id, VOTE_KICK_VOTE_DURATION)
+//     m_votingPlayer = votingPlayer
+
+//     setCloseCommand(null)
+//     setClickCommand(new RoutedCommand(() -> onClick(), () -> canClick()))
+
+//     m_onPlayerVoteCast = VoteKick.onPlayerVoteCast().register() (p) ->
+//       onPlayerVoteCast(p)
+
+//     m_onVoteDecided = VoteKick.onVoteDecided().register() (v) ->
+//       close()
+
+//   // --------------------------------------------------------------------------
+//   ondestroy
+
+//     VoteKick.onPlayerVoteCast().unregister(m_onPlayerVoteCast)
+//     m_onPlayerVoteCast = INVALID_HANDLE
+
+//     VoteKick.onVoteDecided().unregister(m_onVoteDecided)
+//     m_onVoteDecided = INVALID_HANDLE
+
+//   // --------------------------------------------------------------------------
+//   private function onClick()
+//     VoteKick.showVoteKickDialog(m_votingPlayer)
+
+//   // --------------------------------------------------------------------------
+//   private function canClick() returns bool
+//     return VoteKick.getVoteCast(m_votingPlayer) == Undecided
+
+//   // --------------------------------------------------------------------------
+//   override function canClose() returns bool
+//     return false
+
+//   // --------------------------------------------------------------------------
+//   private function onPlayerVoteCast(player votingPlayer)
+//     if (votingPlayer == m_votingPlayer)
+//       setMessage("Vote cast!")
+
+// // --------------------------------------------------------------------------
+// public class VoteKickNotificationFrame extends TextSimpleNotificationFrame
+//   private _handle m_onPlayerVoteCast
+//   private framehandle array[MAX_PLAYER_COUNT] m_voteStateFrames
+//   private framehandle m_voteStateContainer
+
+//   // --------------------------------------------------------------------------
+//   construct()
+//     super(createFrame("VoteKickNotification", CONSOLE_UI_BACKDROP, 0, 0))
+
+//     m_voteStateContainer = getFrame("VoteStateContainer")
+
+//     for i = 0 to MAX_PLAYER_COUNT-1
+//       m_voteStateFrames[i] = getFrame("VoteStateBackdrop" + i.toString())
+//       ..hide()
+
+//     m_onPlayerVoteCast = VoteKick.onPlayerVoteCast().register() (player votingPlayer) ->
+//       updateFrame()
+      
+//   // --------------------------------------------------------------------------
+//   ondestroy
+    
+//     VoteKick.onPlayerVoteCast().unregister(m_onPlayerVoteCast)
+//     m_onPlayerVoteCast = INVALID_HANDLE
+
+//     for i = 0 to MAX_PLAYER_COUNT-1
+//       m_voteStateFrames[i].hide()
+
+//   // --------------------------------------------------------------------------
+//   protected override function updateFrame()
+//     super.updateFrame()
+
+//     let requestingPlayer = VoteKick.getRequestingPlayer()
+
+//     var index = 0
+//     for p in VoteKick.getVotingPlayers()
+//       let vote = p == requestingPlayer ? PlayerVoteState.Yes : VoteKick.getVoteCast(p)
+//       switch (vote)
+//         case PlayerVoteState.Yes
+//           m_voteStateFrames[index].setTexture("ui\\icon-checkmark.dds", 0, true)
+//         case PlayerVoteState.No
+//           m_voteStateFrames[index].setTexture("ui\\icon-x.dds", 0, true)
+//         case PlayerVoteState.Undecided
+//           m_voteStateFrames[index].setTexture("ui\\icon-question.dds", 0, true)
+//       index++
+
+//     let w = 0.012
+//     let totalContainerWidth = 0.1666 - (0.045 + 0.005) // from fdf
+//     let s = (totalContainerWidth - index * w) / (index - 1)
+//     var offset = 0.0
+
+//     for i = 0 to MAX_PLAYER_COUNT-1
+//       m_voteStateFrames[i].setVisible(i < index)
+//       if (i < index)
+//         m_voteStateFrames[i].setPoint(FRAMEPOINT_CENTER, m_voteStateContainer, FRAMEPOINT_LEFT, vec2(offset, 0.0))
+//         offset += w + s
+
+// // ============================================================================
+// function onPlayerLeave()
+//   VoteKick.onPlayerLeave(GetTriggerPlayer())
+
+// // ============================================================================
+// init
+//   ensureTocIsLoaded()
+//   registerPlayerEvent(EVENT_PLAYER_LEAVE, function onPlayerLeave)
+
+//   NotificationManager.notificationFrameFactory.registerFactory(VoteKickNotification.typeId, () -> new VoteKickNotificationFrame())

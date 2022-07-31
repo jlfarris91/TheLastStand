@@ -1,60 +1,65 @@
 package WirtsPipe
-import TlsItemIds
 import UnitMetadata
 import UnitPropertiesComponent
 import ItemEffectComponent
+import ItemAcquiredPropertyAffectComponent
+import SmartValue
+import StringBuilder
+import TlsItemDefinition
+import ColorUtility
+import Icons
 
-constant real CRIT_CHANCE = 10.0
+constant real CRIT_CHANCE = 0.1
 
 // ============================================================================
-public class WirtsPipeItemEffectComponent extends ItemEffectComponent
+class WirtsPipeItemEffectComponent extends ItemAcquiredPropertyAffectComponent
 
   // --------------------------------------------------------------------------
   construct (IUnitMetadata owner)
-    super(owner)
-
-    setMode(ItemEffectApplication.ACQUIRED)
-    setItemTypeId(TlsItemIds.wirtsPipe)
-    setDestroyOnDrop(true)
-
+    super(owner, TlsItemIds.wirtsPipe, UnitProperty.CRIT_CHANCE_01, AffectorType.BASE)
+  
   // --------------------------------------------------------------------------
-  protected override function onApplied(int stacks)
-    super.onApplied(stacks)
-
-    if (stacks == 0)
-      return
-
-    let comp = getOwner().getOrAddUnitPropertiesComponent()
-    comp.setCritChancePercentage(comp.getCritChancePercentage() + stacks * CRIT_CHANCE)
-
-  // --------------------------------------------------------------------------
-  protected override function onReverted(int stacks)
-    super.onReverted(stacks)
-
-    if (stacks == 0)
-      return
-
-    let comp = getOwner().getOrAddUnitPropertiesComponent()
-    comp.setCritChancePercentage(comp.getCritChancePercentage() - stacks * CRIT_CHANCE)
+  override function getUnitPropertyAffectorValue(int stacks) returns real
+    return stacks * CRIT_CHANCE
 
 // ============================================================================
-function IUnitMetadata.getWirtsPipeItemEffectComponent() returns WirtsPipeItemEffectComponent
-  return this.getComponent(WirtsPipeItemEffectComponent.typeId) castTo WirtsPipeItemEffectComponent
+@compiletime function createItem()
 
-// ============================================================================
-function IUnitMetadata.getOrAddWirtsPipeItemEffectComponent() returns WirtsPipeItemEffectComponent
-  var component = this.getWirtsPipeItemEffectComponent()
-  if (component == null)
-    component = this.addComponent(new WirtsPipeItemEffectComponent(this)) castTo WirtsPipeItemEffectComponent
-  return component
+  let sb = new StringBuilder()
+  sb.appendLine("Increases critical strike chance by 10% per stack.")
+  sb.appendLine()
+  sb.append("Each additional stack increases critical strike chance by 10%.".colorize(Colors.gold))
+  let tooltipExtended = sb.toStringAndDestroy()
+
+  new TlsItemDefinition(TlsItemIds.wirtsPipe, 'wtlg')
+  ..setName("Wirt's Pipe")
+  ..setDescription("A pipe crafted with masterful ability from thousand year old Elven oak and intricately woven threads of gold. A puff from this pipe can focus even the most scrambled of minds.")
+  ..setTooltipBasic("Purchase Wirt's Pipe")
+  ..setTooltipExtended(tooltipExtended)
+  ..setAbilities("")
+  ..setInterfaceIcon(Icons.bTNPipeOfInsight)
+  ..setGoldCost(0)
+  ..setLumberCost(350)
+  ..setStockInitial(1)
+  ..setStockMaximum(3)
+  ..setStockStartDelay(0)
+  ..setStockReplenishInterval(120)
+  ..setNumberofCharges(1)
+  ..addTlsUnitClassifications(TlsUnitClassification.HUMAN)
+  ..build()
 
 // ============================================================================
 init
-  g_itemIdToComponentFactoryMap.put(TlsItemIds.wirtsPipe) _unit ->
+  if (not compiletime)
+    createItem()
+
+  ItemEffectComponent.registerComponentFactory(TlsItemIds.wirtsPipe) _unit ->
   //{
     let metadata = _unit.getMetadata()
     ItemEffectComponent comp = null
     if (metadata != null)
-      comp = metadata.getOrAddWirtsPipeItemEffectComponent()
+      comp = metadata.getComponent(WirtsPipeItemEffectComponent.typeId) castTo WirtsPipeItemEffectComponent
+      if (comp == null)
+        comp = metadata.addComponent(new WirtsPipeItemEffectComponent(metadata)) castTo WirtsPipeItemEffectComponent
     return comp
   //}

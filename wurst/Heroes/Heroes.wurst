@@ -5,36 +5,33 @@ import HumanPlayerComponent
 import UnitMetadata
 import GameSettings
 import Orders
-import MainItemLibrary
 import TlsItemIds
-import SurvivorSpawnManager
 import GameConstants
 import InvulnerableComponent
+import Spawning
+import PlayerSetup
+import TlsJobItemIds
+import ItemType
 
 // ============================================================================
 public function spawnHeroForPlayer(player p, vec2 pos, bool firstTime) returns unit
   let playerMetadata = p.getMetadata()
   let playerComp = playerMetadata.getHumanPlayerComponent()
 
-  unit hero = null
-  let heroMetadata = playerComp.getHero()
-
-  var spawnPos = pos
-
-  // The hero has been respawned and the metadata already exists
-  if (heroMetadata != null)
-    hero = heroMetadata.getUnit()
-    spawnPos = hero.getPos()
-    hero.revive(spawnPos, false)
+  unit hero = playerComp.getHero()
+  let firstTimeSpawned = hero == null
 
   // This is the first time the hero has been spawned for the player
   // new hero metadata will be automatically generated
-  if (hero == null)
-    hero = createUnitTLS(p, TlsUnitIds.hero, spawnPos.x, spawnPos.y, 270)
+  if (firstTimeSpawned)
+    hero = createUnitTLS(p, playerComp.getHeroTypeId(), pos, 270.0.asAngleDegrees())
+    PlayerSetup.getSetupForPlayer(p).setupHero(hero)
+  else
+    hero.revive(pos, false)
 
   // Reset player's camera to look at new hero
-  if (p == GetLocalPlayer())
-    PanCameraToTimedForPlayer(p, spawnPos.x, spawnPos.y, 0)
+  if (p == localPlayer)
+    PanCameraToTimedForPlayer(p, pos.x, pos.y, 0)
   
   SelectUnitForPlayerSingle(hero, p)
 
@@ -42,7 +39,12 @@ public function spawnHeroForPlayer(player p, vec2 pos, bool firstTime) returns u
   playerMetadata.resetDisplayName()
 
   // Give starting items
-  g_MainItemLibrary.createItemForUnit(hero, TlsItemIds.headquarters1)
+  if (playerComp.getHQTent() == null)
+    ItemType.createItemForUnit(TlsItemIds.headquarters1, hero)
+
+  if (firstTimeSpawned)
+    ItemType.createItemForUnit(TlsJobItemIds.acolyte1, hero)
+    ItemType.createItemForUnit(TlsItemIds.flintAndTinder, hero)
 
   // Make hero invulnerable for a short period of time
   if (not firstTime)
@@ -52,7 +54,7 @@ public function spawnHeroForPlayer(player p, vec2 pos, bool firstTime) returns u
 
 // ============================================================================
 public function spawnInitialPlayerUnitsAtRandomPoint(player p, bool firstTime)
-  let sp = getPlayerSurvivorSpawnManager(p).getRandomSpawnPointInPlayableMap()
+  let sp = getDynamicFriendlySpawnPointProvider(p).getRandomSpawnPointInPlayableMap()
   if (not sp.succeeded)
     error("Could not find a safe spawn point to spawn hero for player " + p.getName())
     return
@@ -66,5 +68,5 @@ public function spawnInitialPlayerUnitsAtRandomPoint(player p, bool firstTime)
 function spawnInitialSurvivorsForPlayer(player p, unit hero)
   let pos = hero.getPos()
   for i = 1 to GameSettings.startingSurvivors
-    let survivor = createUnitTLS(p, TlsUnitIds.Survivors.survivorMale, pos.x, pos.y, GetRandomDirectionDeg())
+    let survivor = createUnitTLS(p, TlsUnitIds.Survivors.survivorMale, pos, GetRandomDirectionDeg().asAngleDegrees())
     survivor.issueTargetOrderById(OrderIds.move, hero)

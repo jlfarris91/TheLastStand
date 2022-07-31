@@ -4,8 +4,11 @@ import RegisterEvents
 import Unit2
 import HashMap
 import Func
+import Classification
+import ObjectIds
+import ErrorHandling
 
-public HashMap<int, Func1<unit, ItemEffectComponent>> g_itemIdToComponentFactoryMap = new HashMap<int, Func1<unit, ItemEffectComponent>>()
+HashMap<int, Func1<unit, ItemEffectComponent>> g_itemIdToComponentFactoryMap = new HashMap<int, Func1<unit, ItemEffectComponent>>()
 
 // ============================================================================
 public enum ItemEffectApplication
@@ -24,6 +27,14 @@ public abstract class ItemEffectComponent extends UnitComponent
   // --------------------------------------------------------------------------
   construct (IUnitMetadata owner)
     super(owner)
+
+  // --------------------------------------------------------------------------
+  function getItemTypeId() returns int
+    return m_itemTypeId
+
+  // --------------------------------------------------------------------------
+  function setItemTypeId(int value)
+    m_itemTypeId = value
 
   // --------------------------------------------------------------------------
   function getMode() returns ItemEffectApplication
@@ -48,14 +59,6 @@ public abstract class ItemEffectComponent extends UnitComponent
   // --------------------------------------------------------------------------
   function getStacksWhenApplied() returns int
     return m_stacksWhenApplied
-
-  // --------------------------------------------------------------------------
-  function getItemTypeId() returns int
-    return m_itemTypeId
-
-  // --------------------------------------------------------------------------
-  function setItemTypeId(int value)
-    m_itemTypeId = value
 
   // --------------------------------------------------------------------------
   function getDestroyOnDrop() returns bool
@@ -150,8 +153,21 @@ public abstract class ItemEffectComponent extends UnitComponent
   private function updateStacks(item ignoreItem)
     m_stacks = getTotalItemCharges(ignoreItem)
 
+  // --------------------------------------------------------------------------
+  static function registerComponentFactory(int itemTypeId, Func1<unit, ItemEffectComponent> factory)
+    if (g_itemIdToComponentFactoryMap.has(itemTypeId))
+      error("ItemEffectComponent factory already registered for item " + itemTypeId.toRawCode())
+    g_itemIdToComponentFactoryMap.put(itemTypeId, factory.acquire())
+
 // ============================================================================
 function getComponentForItem(unit _unit, item _item) returns ItemEffectComponent
+  if (not g_itemIdToComponentFactoryMap.has(_item.getTypeId()))
+    return null
+  let compTypeFunc = g_itemIdToComponentFactoryMap.get(_item.getTypeId())
+  return compTypeFunc.call(_unit)
+
+// ============================================================================
+function getOrAddComponentForItem(unit _unit, item _item) returns ItemEffectComponent
   if (not g_itemIdToComponentFactoryMap.has(_item.getTypeId()))
     return null
   let compTypeFunc = g_itemIdToComponentFactoryMap.get(_item.getTypeId())
@@ -161,6 +177,9 @@ function getComponentForItem(unit _unit, item _item) returns ItemEffectComponent
 function onUnitAcquiredItem()
   let manipulatingUnit = GetManipulatingUnit()
   let manipulatingItem = GetManipulatedItem()
+
+  if (not manipulatingItem.canBeUsedBy(manipulatingUnit))
+    return
 
   let comp = getComponentForItem(manipulatingUnit, manipulatingItem)
   if (comp == null)
@@ -185,6 +204,9 @@ function onUnitDroppedItem()
 function onUnitUsedItem()
   let manipulatingUnit = GetManipulatingUnit()
   let manipulatingItem = GetManipulatedItem()
+
+  if (not manipulatingItem.canBeUsedBy(manipulatingUnit))
+    return
 
   let comp = getComponentForItem(manipulatingUnit, manipulatingItem)
   if (comp == null)

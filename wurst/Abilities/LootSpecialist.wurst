@@ -1,0 +1,129 @@
+package LootSpecialist
+import ChannelAbilityPreset
+import RealExtensions
+import SmartValue
+import Range
+import Icons
+import HeroAbilities
+import TlsAbilityIds
+import SoundUtils
+import UnitPropertiesComponent
+import Handle
+import Math
+
+constant rangeReal ABIL_DAMAGE_DISTANCE_SCALE = rangeReal(1.0, 0.5)
+
+constant SoundDefinition g_attackSound = new SoundDefinition("units\\human\\rifleman\\riflemanattack1.flac", false, true)
+
+// ============================================================================
+class LootSpecialist
+
+  // --------------------------------------------------------------------------
+  static function getLootDurationScale01(int effectiveAbilityLevel) returns real
+    return clamp(0.1 + max(effectiveAbilityLevel - 1, 0) * 0.1, 0.1, 0.5)
+
+  // --------------------------------------------------------------------------
+  static function getTooltipNormal(int effectiveAbilityLevel, int learnedAbilityLevel) returns string
+    return "Looting Specialist - [{0}]".format("Level {0}".format(
+      effectiveAbilityLevel.toString()).colorizeTooltipForHeroAbility(effectiveAbilityLevel, learnedAbilityLevel))
+
+  // --------------------------------------------------------------------------
+  static function getTooltipNormalExtended(int effectiveAbilityLevel, int learnedAbilityLevel) returns string
+    return "This survivor is profficient at looting and loots {0} faster.".format(getLootDurationScale01(effectiveAbilityLevel).toPercentageString01().colorizeTooltipForHeroAbility(effectiveAbilityLevel, learnedAbilityLevel))
+
+// ============================================================================
+public class LootSpecialistComponent extends HeroAbilityComponent
+
+  private _handle m_lootDurPropAffector = INVALID_HANDLE
+
+  // --------------------------------------------------------------------------
+  construct (IUnitMetadata owner)
+    super(owner, TlsAbilityIds.Hero.lootSpecialist, TlsAbilityIds.Hero.lootSpecialist_learn)
+
+  // --------------------------------------------------------------------------
+  override protected function onDisabled()
+    super.onDisabled()
+
+    if (m_lootDurPropAffector != INVALID_HANDLE)
+    //{
+      let lootDurationProp = getOwnerUnit().getProperty(UnitProperty.LOOT_DURATION_SCALE)
+      if (lootDurationProp != null)
+        lootDurationProp.remove(m_lootDurPropAffector)
+        m_lootDurPropAffector = INVALID_HANDLE
+    //}
+
+  // --------------------------------------------------------------------------
+  override protected function updateAbilityState()
+    super.updateAbilityState()
+
+    let ownerUnit = getOwnerUnit()
+    
+    let abilityLevelAdjusted = abilityLevel.getIntValue()
+
+    let lootDurationProp = ownerUnit.getProperty(UnitProperty.LOOT_DURATION_SCALE)
+    if (lootDurationProp != null)
+    //{
+      if (m_lootDurPropAffector != INVALID_HANDLE)
+        lootDurationProp.remove(m_lootDurPropAffector)
+        m_lootDurPropAffector = INVALID_HANDLE
+
+      if (abilityLevelAdjusted > 0)
+        let lootDurationScale = LootSpecialist.getLootDurationScale01(abilityLevelAdjusted)
+        m_lootDurPropAffector = lootDurationProp.affectSub(lootDurationScale)
+    //}
+
+  // --------------------------------------------------------------------------
+  protected override function getTooltipNormal(int effectiveAbilityLevel, int learnedAbilityLevel) returns string
+    return LootSpecialist.getTooltipNormal(effectiveAbilityLevel, learnedAbilityLevel)
+    
+  // --------------------------------------------------------------------------
+  protected override function getTooltipNormalExtended(int effectiveAbilityLevel, int learnedAbilityLevel) returns string
+    return LootSpecialist.getTooltipNormalExtended(effectiveAbilityLevel, learnedAbilityLevel)
+
+// ============================================================================
+public function IUnitMetadata.getLootSpecialistComponent() returns LootSpecialistComponent
+  return this.getComponent(LootSpecialistComponent.typeId) castTo LootSpecialistComponent
+
+// ============================================================================
+public function IUnitMetadata.getOrAddLootSpecialistComponent() returns LootSpecialistComponent
+  var component = this.getLootSpecialistComponent()
+  if (component == null)
+    component = this.addComponent(new LootSpecialistComponent(this)) castTo LootSpecialistComponent
+  return component
+
+// ============================================================================
+public function unit.getLootSpecialistComponent() returns LootSpecialistComponent
+  let metadata = this.getMetadata()
+  return metadata != null ? metadata.getLootSpecialistComponent() : null
+
+// ============================================================================
+public function unit.getOrAddLootSpecialistComponent() returns LootSpecialistComponent
+  let metadata = this.getMetadata()
+  return metadata != null ? metadata.getOrAddLootSpecialistComponent() : null
+
+// ============================================================================
+@compiletime function createObjects()
+
+  new AbilityDefinition(TlsAbilityIds.Hero.lootSpecialist, 'Ahan')
+    ..setLevels(10)
+    ..setupHeroAbilityGroup(HeroAbilityGroup.R)
+    ..setName("Looting Specialist")
+    ..presetTooltipNormal(lvl -> LootSpecialist.getTooltipNormal(lvl, lvl))
+    ..presetTooltipNormalExtended(lvl -> LootSpecialist.getTooltipNormalExtended(lvl, lvl))
+    ..setIconNormal(Icons.bTNTelescope)
+
+  new HeroLearnAbilityDefinition(TlsAbilityIds.Hero.lootSpecialist_learn, 3)
+    ..setupHeroAbilityGroup(HeroAbilityGroup.R)
+    ..setName("Looting Specialist")
+    ..setTooltipLearn("Learn Looting Specialist - [|cFFFFCC00 Level %d|r]")
+    ..setTooltipLearnExtended("Study the art of looting to become a master looter.|n|n|cFFFFCC00Level 1|r - Loot {0} faster|n|cFFFFCC00Level 2|r - Loot {1} faster|n|cFFFFCC00Level 3|r - Loot {2} faster".format(
+      LootSpecialist.getLootDurationScale01(1).toPercentageString01(),
+      LootSpecialist.getLootDurationScale01(2).toPercentageString01(),
+      LootSpecialist.getLootDurationScale01(3).toPercentageString01()))
+    ..setIconResearch(Icons.bTNTelescope)
+    ..presetCooldown(lvl -> 0)
+    ..presetManaCost(lvl -> 0)
+
+// ============================================================================
+init
+  registerHeroAbilityComponent(LootSpecialistComponent.typeId)

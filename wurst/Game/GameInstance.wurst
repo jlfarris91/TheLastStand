@@ -5,28 +5,27 @@ import HumanPlayers
 import HumanPlayerComponent
 import Heroes
 import ClosureTimers
-import TlsSounds
-import initlater PlayerWaves
-import IWaveGenerator
-import initlater DayWave
-import NightWave
-import initlater NormalNightWaveGenerator
-import initlater NormalDayWaveGenerator
-import WaveMultiboard
 import BaseUnitsRectProvider
 import Time
 import RandomWeatherPlayer
 import DisplayTextToPlayer
-import initlater GameStatsMultiboard
 import ColorUtility
 import Bases
 import Execute
 import ErrorHandling
+import PlayerSaveData
 
-public GameInstance g_GameInstance
+import initlater PlayerWaves
+import initlater IWaveGenerator
+import initlater GameStatsMultiboard
+import initlater NightWaveGenerator
+import initlater DayWaveGenerator
+import Math
+import SmartValue
+import GameProperties
+import Dialog
 
-constant real TIME_OF_DAY_INITIAL = 5.5
-constant real GAME_SPEED_INITIAL = 100.0
+public GameInstance g_GameInstance = new GameInstance()
 
 // ============================================================================
 public class GameInstance
@@ -34,13 +33,16 @@ public class GameInstance
   private bool m_updateGracePeriod
   private int m_day
   private int m_night
+  private real m_gameDifficulty = 1.0
   private PlayerWavesMap m_playerWaves
-  private IWaveGenerator<DayWave> m_dayWaveGenerator
-  private IWaveGenerator<NightWave> m_nightWaveGenerator
-  private WaveMultiboard m_waveMultiboard
+  private IDayWaveGenerator m_staticDayWaveGenerator
+  private IDayWaveGenerator m_randomDayWaveGenerator
+  private INightWaveGenerator m_staticNightWaveGenerator
+  private INightWaveGenerator m_randomNightWaveGenerator
   private RandomWeatherPlayer m_weatherPlayer
   private time m_startTime
   private time m_endTime
+  private bool m_hasStarted = false
 
   // --------------------------------------------------------------------------
   ondestroy
@@ -75,6 +77,47 @@ public class GameInstance
     m_updateGracePeriod = value
 
   // --------------------------------------------------------------------------
+  function getGameDifficulty01() returns real
+    return m_gameDifficulty
+
+  // --------------------------------------------------------------------------
+  function updateGameDifficulty()
+    int alivePlayerCount = 0
+    real totalDifficulty = 0.0
+    
+    for _player in g_PlayingHumanPlayers
+    //{
+      let metadata = _player.getMetadata()
+      let playerComp = metadata.getHumanPlayerComponent()
+      if (metadata != null and not metadata.getHasLeftGame() and not metadata.getHasLostGame())
+        alivePlayerCount++    
+        totalDifficulty += playerComp.getDifficulty()
+    //}
+
+    m_gameDifficulty = alivePlayerCount == 0 ? 1.0 : totalDifficulty / alivePlayerCount
+
+    updatePlayerTierChances()
+
+  // --------------------------------------------------------------------------
+  private function updatePlayerTierChances()
+    for _player in g_PlayingHumanPlayers
+    //{
+      let metadata = _player.getMetadata()
+      if (metadata != null and not metadata.getHasLeftGame() and not metadata.getHasLostGame())
+      //{
+        let playerComp = metadata.getHumanPlayerComponent()
+        let waveDifficulty = playerComp.getDifficulty()
+        
+        let d = clamp(waveDifficulty.floor(), 0, NUM_TIER_CHANCES-1)
+        let d2 = clamp(d + 1, 0, NUM_TIER_CHANCES-1)
+        let t = waveDifficulty - d
+
+        playerComp.setTierWeight(0, lerp(TIER_1_CHANCES[d], TIER_1_CHANCES[d2], t))
+        playerComp.setTierWeight(1, lerp(TIER_2_CHANCES[d], TIER_2_CHANCES[d2], t))
+        playerComp.setTierWeight(2, lerp(TIER_3_CHANCES[d], TIER_3_CHANCES[d2], t))
+    //}
+
+  // --------------------------------------------------------------------------
   function getWaves() returns PlayerWavesMap
     return m_playerWaves
 
@@ -95,16 +138,14 @@ public class GameInstance
     SetTimeOfDay(TIME_OF_NIGHT)
 
   // --------------------------------------------------------------------------
-  function getWaveMultiboard() returns WaveMultiboard
-    return m_waveMultiboard
-
-  // --------------------------------------------------------------------------
   function skipToDay(int day)
     m_day = day - 1
+    m_night = day - 1
     startNextDay()
 
   // --------------------------------------------------------------------------
   function skipToNight(int night)
+    m_day = night
     m_night = night - 1
     startNextNight()
 
@@ -113,23 +154,39 @@ public class GameInstance
     m_day = 0
     m_night = 0
     SetTimeOfDay(TIME_OF_DAY_INITIAL)
-    SetTimeOfDayScalePercentBJ(GAME_SPEED_INITIAL)
+    g_GameProperties.setTODScale(TOD_SCALE_INITIAL)
 
   // --------------------------------------------------------------------------
   function start()
 
     m_updateGracePeriod = true
 
+    g_GameProperties.setTODScale(0.0)
+    SetTimeOfDay(TIME_OF_DAY - 0.5)
+
+    m_hasStarted = true
+
     m_startTime = makeTime(getGameTime().getDay(), TIME_OF_DAY.floor(), 0)
     m_endTime = m_startTime + makeTimespan(TOTAL_NIGHTS, 0, 0)
 
     // These should move to a place that sets up the GameInstance
-    m_dayWaveGenerator = new NormalDayWaveGenerator()
-    m_nightWaveGenerator = new NormalNightWaveGenerator()
-    m_waveMultiboard = new WaveMultiboard()
+    execute() () ->
+      m_staticDayWaveGenerator = new StaticDayWaveGenerator()
+      
+    execute() () ->
+      m_randomDayWaveGenerator = new RandomDayWaveGenerator()
+    
+    execute() () ->
+      m_staticNightWaveGenerator = new StaticNightWaveGenerator()
+      
+    execute() () ->
+      m_randomNightWaveGenerator = new RandomNightWaveGenerator()
+
     m_weatherPlayer = new RandomWeatherPlayer()
 
     m_weatherPlayer.start()
+
+    updateGameDifficulty()
 
     initializeGeneral()
     initializeAlliances()
@@ -137,6 +194,10 @@ public class GameInstance
 
     doAfter(1.0) ->
       postStart()
+
+  // ----------------------------------------------------------------------------
+  function onTODScaleValueChanged()
+
 
   // --------------------------------------------------------------------------
   function complete()
@@ -146,17 +207,21 @@ public class GameInstance
     destroy m_playerWaves
     m_playerWaves = null
 
-    if (m_nightWaveGenerator != null)
-      destroy m_nightWaveGenerator
-      m_nightWaveGenerator = null
+    if (m_staticNightWaveGenerator != null)
+      destroy m_staticNightWaveGenerator
+      m_staticNightWaveGenerator = null
 
-    if (m_dayWaveGenerator != null)
-      destroy m_dayWaveGenerator
-      m_dayWaveGenerator = null
+    if (m_randomNightWaveGenerator != null)
+      destroy m_randomNightWaveGenerator
+      m_randomNightWaveGenerator = null
 
-    if (m_waveMultiboard != null)
-      destroy m_waveMultiboard
-      m_waveMultiboard = null
+    if (m_staticDayWaveGenerator != null)
+      destroy m_staticDayWaveGenerator
+      m_staticDayWaveGenerator = null
+
+    if (m_randomDayWaveGenerator != null)
+      destroy m_randomDayWaveGenerator
+      m_randomDayWaveGenerator = null
 
   // --------------------------------------------------------------------------
   private function postStart()
@@ -196,11 +261,12 @@ public class GameInstance
 
   // --------------------------------------------------------------------------
   function startDay()
+    if (not m_hasStarted)
+      return
+
     m_day++
 
     Log.debug("Starting day {0}...".format(m_day.toString()))
-
-    PlaySoundBJ(TlsSounds.questCompleted)
 
     if (GameSettings.allowRespawn and m_gracePeriod)
       respawnDeadPlayers()
@@ -212,6 +278,8 @@ public class GameInstance
     if (m_day == 1)
       showMultiboardsForPlayers()
 
+    g_GameProperties.getProperty(GameProperty.TOD_SCALE).setBase(TOD_DAY_SCALARS[m_day - 1])
+
     // Start day waves for players
     for p in g_PlayingHumanPlayers
       let waves = m_playerWaves.getOrCreatePlayerWaves(p)
@@ -222,26 +290,39 @@ public class GameInstance
 
     // End the game
     if (m_day > TOTAL_NIGHTS)
+    //{
+      g_GameProperties.setTODScale(0.0)
       doAfter(30.0) () ->
         for p in g_PlayingHumanPlayers
-          if (p.getMetadata().getHasLostGame())
-            CustomDefeatBJ( p, "You lose. Better luck next time!" )
-          else
-            CustomVictoryBJ( p, true, true )
+        //{
+          PlayerSaveData.save(p)
+          
+          let d = DialogCreate()
+          d.setMessage(p.getMetadata().getHasLostGame() ? "You lose. Better luck next time!" : "You win!")
+          d.addButton("OK")
+          d.display(p, true)
+        //}
+    //}
 
   // --------------------------------------------------------------------------
   function showMultiboardsForPlayers()
-    for _player in g_PlayingHumanPlayers
-      new GameStatsMultiboard(_player).show()
+    for _player in g_HumanPlayersInGame
+      showGameStatsMultiboard(_player)
   
     if (PLAYER_SPECTATOR.isPlayingHumanPlayer())
-      new GameStatsMultiboard(PLAYER_SPECTATOR).show()
+      showGameStatsMultiboard(PLAYER_SPECTATOR)
 
   // --------------------------------------------------------------------------
   function startNight()
+
+    if (not m_hasStarted)
+      return
+
     m_night++
 
     Log.debug("Starting night {0}...".format(m_night.toString()))
+
+    g_GameProperties.getProperty(GameProperty.TOD_SCALE).setBase(TOD_NIGHT_SCALARS[m_night - 1])
 
     // Start night waves for players
     for p in g_PlayingHumanPlayers
@@ -263,7 +344,8 @@ public class GameInstance
     SetPlayerFlagBJ(PLAYER_STATE_GIVES_BOUNTY, true, PLAYER_UNDEAD)
     CameraSetSmoothingFactor(5.0)
     SetCreepCampFilterState(false)
-    SetTimeOfDayScalePercentBJ(GAME_SPEED_INITIAL)
+
+    g_GameProperties.setTODScale(TOD_SCALE_INITIAL)
     SetTimeOfDay(TIME_OF_DAY_INITIAL)
 
     // Tells the AI to not use guard positions?
@@ -272,8 +354,7 @@ public class GameInstance
     FogEnableOn()
     FogMaskEnableOff()
     
-    createFogOfWar(PLAYER_UNDEAD, GetPlayableMapRect(), false, false).start()
-    createBlackMask(PLAYER_UNDEAD, GetPlayableMapRect(), false, false).start()
+    CreateFogModifierRectBJ(true, PLAYER_UNDEAD, FOG_OF_WAR_VISIBLE, GetPlayableMapRect())
 
     initializeSpectator()
 
@@ -298,20 +379,35 @@ public class GameInstance
       argumentNullError("_player")
 
     let playerWaves = m_playerWaves.getOrCreatePlayerWaves(_player)
+    let playerDifficulty = _player.getHumanPlayerComponentRequired().getDifficulty()
+    let playerNightWaveGenerator = getNightWaveGenerator(playerDifficulty)
+    let playerDayWaveGenerator = getDayWaveGenerator(playerDifficulty)
 
     execute() () ->
       Log.debug("Generating night waves for player " + _player.getName() + " ...")
       let nightWaves = playerWaves.getNightWaves()
-      if (m_nightWaveGenerator != null)
-        m_nightWaveGenerator.generateWavesForPlayer(_player, nightWaves)
+      playerNightWaveGenerator.generateWavesForPlayer(_player, nightWaves)
 
     execute() () ->
       Log.debug("Generating day waves for player " + _player.getName() + " ...")
       let dayWaves = playerWaves.getDayWaves()
-      if (m_dayWaveGenerator != null)
-        m_dayWaveGenerator.generateWavesForPlayer(_player, dayWaves)
+      playerDayWaveGenerator.generateWavesForPlayer(_player, dayWaves)
 
     return true
+
+  // --------------------------------------------------------------------------
+  private function getNightWaveGenerator(real difficulty) returns INightWaveGenerator
+    if (difficulty < DIFFICULTY_START_RANDOM_WAVES)
+      return m_staticNightWaveGenerator
+    else
+      return m_randomNightWaveGenerator
+
+  // --------------------------------------------------------------------------
+  private function getDayWaveGenerator(real difficulty) returns IDayWaveGenerator
+    if (difficulty < DIFFICULTY_START_RANDOM_WAVES)
+      return m_staticDayWaveGenerator
+    else
+      return m_randomDayWaveGenerator
 
   // --------------------------------------------------------------------------
   private function initializeAlliances()  
@@ -365,10 +461,5 @@ function onNightStart()
 
 // ============================================================================
 init
-  g_GameInstance = new GameInstance()
-
   registerDayEvent(function onDayStart)
   registerNightEvent(function onNightStart)
-
-  doAfter(0.1) ->
-    g_GameInstance.start()

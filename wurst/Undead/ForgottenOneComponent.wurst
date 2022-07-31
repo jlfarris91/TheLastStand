@@ -1,0 +1,118 @@
+package ForgottenOneComponent
+import UnitComponent
+import Trace
+import Spawning
+import UndeadTargetingComponent
+import UndeadTargetService
+import TlsAbilityIds
+import HashMap
+import Orders
+
+constant int SUMMON_ORDER_ID = OrderIds.ward
+HashMap<unit, unit> g_summonedToSummonerMap = new HashMap<unit, unit>()
+
+// ============================================================================
+public class ForgottenOneComponent extends UnitComponent
+  private TentacleSpawnRequest m_spawnRequest
+
+  // --------------------------------------------------------------------------
+  construct (IUnitMetadata owner)
+    super(owner)
+
+  // --------------------------------------------------------------------------
+  override function onEnabled()
+    super.onEnabled()
+    m_spawnRequest = new TentacleSpawnRequest(getOwnerUnit())
+    SpawnController.enqueue(m_spawnRequest)
+
+  // --------------------------------------------------------------------------
+  override function onDisabled()
+    super.onDisabled()
+
+    if (m_spawnRequest != null)
+      SpawnController.remove(m_spawnRequest)
+      destroy m_spawnRequest
+      m_spawnRequest = null
+
+// ============================================================================
+class TentacleSpawnRequest extends SpawnRequestBase
+  private unit m_owner
+  private timer m_timer
+
+  // --------------------------------------------------------------------------
+  construct(unit owner)
+    super(300.0)
+    m_owner = owner
+    m_timer = CreateTimer()
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    m_timer.destr()
+    m_timer = null
+
+  // --------------------------------------------------------------------------
+  override function next() returns int
+
+    if (m_owner == null or not m_owner.isAlive())
+      return 0
+
+    if (m_timer.getRemaining() > 0)
+      return 0
+
+    let comp = m_owner.getForgottenOneComponent()
+    if (comp == null)
+      return 0
+
+    let utc = m_owner.getUndeadTargetingComponent()
+    if (utc == null)
+      return 0
+
+    let utp = getUndeadTargetProviderForPlayer(utc.getTargetPlayer())
+    if (utp == null)
+      return 0
+
+    let targetUnit = utp.getRandomTargetUnit(true)
+
+    if (m_owner.issuePointOrderById(SUMMON_ORDER_ID, targetUnit.getPos()))
+      Trace.trace("ForgottenOne.summon")
+      let abilLvl = m_owner.getAbilityLevel(TlsAbilityIds.spawnTentacles)
+      let cooldown = m_owner.getAbilityCooldown(TlsAbilityIds.spawnTentacles, abilLvl)
+      m_timer.start(cooldown, null)
+      return 1
+
+    // Try again after a random number of seconds
+    m_timer.start(GetRandomReal(1.0, 5.0), null)
+    return 0
+
+  // --------------------------------------------------------------------------
+  override function hasNext() returns bool
+    return m_owner != null and m_owner.isAlive()
+
+  // --------------------------------------------------------------------------
+  override function getDebuggerStateString() returns string
+    return "Tentacles " + m_timer.getRemaining().toString() + "s"
+
+  // --------------------------------------------------------------------------
+  override function close()
+    // don't destroy automatically
+
+// ============================================================================
+public function IUnitMetadata.getForgottenOneComponent() returns ForgottenOneComponent
+  return this.getComponent(ForgottenOneComponent.typeId) castTo ForgottenOneComponent
+
+// ============================================================================
+public function IUnitMetadata.getOrAddForgottenOneComponent() returns ForgottenOneComponent
+  var component = this.getForgottenOneComponent()
+  if (component == null)
+    component = this.addComponent(new ForgottenOneComponent(this)) castTo ForgottenOneComponent
+  return component
+
+// ============================================================================
+public function unit.getForgottenOneComponent() returns ForgottenOneComponent
+  let metadata = this.getMetadata()
+  return metadata != null ? metadata.getForgottenOneComponent() : null
+
+// ============================================================================
+public function unit.getOrAddForgottenOneComponent() returns ForgottenOneComponent
+  let metadata = this.getMetadata()
+  return metadata != null ? metadata.getOrAddForgottenOneComponent() : null

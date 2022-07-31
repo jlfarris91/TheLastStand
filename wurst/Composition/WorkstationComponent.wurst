@@ -1,0 +1,490 @@
+package WorkstationComponent
+import UnitComponent
+import Events
+import Loaded
+import Orders
+import TooltipBuilder
+import ColorUtility
+import StringBuilder
+import Icons
+import Func
+import ErrorHandling
+import HashList
+import Suspend
+import SoundUtils
+import ChannelAbilityPreset
+import TlsAbilityIds
+import ClosureEvents
+import BuffObjEditing
+import UnitPropertiesComponent
+import HashMap
+
+constant SoundDefinition g_loadingSoundDef = new SoundDefinition(Sounds.loading, false, true)
+
+constant buffTuple WORKSTATION_ACTIVE_BUFF = compiletime(createDummyBuffObject("Workstation Active", "This workstation is actively being operated by a survivor", Icons.bTNEngineeringUpgrade, "abilities\\workstation\\workstationactiveoverhead.mdl", "overhead"))
+
+// ============================================================================
+public class WorkstationComponent extends UnitComponent
+  private group m_loadedUnits
+  private HashList<int> m_allowedUnitTypes
+  private int m_maxUnits = 1
+  private timer m_soundTimer
+  private Event m_workerEntered = null
+  private Event m_workerExited = null
+  private Event m_workerLeveled = null
+  private HashMap<unit, _handle> m_unitPropertyEventHandles = new HashMap<unit, _handle>()
+
+  // --------------------------------------------------------------------------
+  construct (IUnitMetadata owner)
+    super(owner)
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    if (m_loadedUnits != null)
+      m_loadedUnits.destr()
+      m_loadedUnits = null
+
+    if (m_allowedUnitTypes != null)
+      destroy m_allowedUnitTypes
+      m_allowedUnitTypes = null
+
+    if (m_soundTimer != null)
+      m_soundTimer.destr()
+      m_soundTimer = null
+
+    if (m_workerEntered != null)
+      destroy m_workerEntered
+      m_workerEntered = null
+
+    if (m_workerExited != null)
+      destroy m_workerExited
+      m_workerExited = null
+
+    if (m_workerLeveled != null)
+      destroy m_workerLeveled
+      m_workerLeveled = null
+
+    destroy m_unitPropertyEventHandles
+    m_unitPropertyEventHandles = null
+
+  // --------------------------------------------------------------------------
+  function onWorkedEntered() returns IEvent
+    if (m_workerEntered == null)
+      m_workerEntered = new Event()
+    return m_workerEntered
+  
+  // --------------------------------------------------------------------------
+  function onWorkedExited() returns IEvent
+    if (m_workerExited == null)
+      m_workerExited = new Event()
+    return m_workerExited
+
+  // --------------------------------------------------------------------------
+  function onWorkedLeveled() returns IEvent
+    if (m_workerLeveled == null)
+      m_workerLeveled = new Event()
+    return m_workerLeveled
+
+  // --------------------------------------------------------------------------
+  function setMaxUnits(int value)
+    if (m_maxUnits != value)
+      m_maxUnits = max(value, 0)
+
+      if (m_loadedUnits != null)
+        while (m_loadedUnits.size() > m_maxUnits)
+          unloadUnit(m_loadedUnits.getUnitAt(m_loadedUnits.size()-1))
+
+  // --------------------------------------------------------------------------
+  function getMaxUnits() returns int
+    return m_maxUnits
+
+  // --------------------------------------------------------------------------
+  function addAllowedUnitType(int unitTypeId)
+    getAllowedUnitTypes().add(unitTypeId)
+
+  // --------------------------------------------------------------------------
+  function isUnitLoaded(unit u) returns bool
+    return m_loadedUnits != null and m_loadedUnits.contains(u)
+
+  // --------------------------------------------------------------------------
+  function getLoadedUnitCount() returns int
+    return m_loadedUnits.size()
+
+  // --------------------------------------------------------------------------
+  function getLoadedUnitAt(int index) returns unit
+    return m_loadedUnits.getUnitAt(index)
+
+  // --------------------------------------------------------------------------
+  function getMaxOperatorLevel() returns int
+    var operatorLevel = 1
+
+    for _unit in m_loadedUnits
+    //{
+      var unitOperatorLevel = _unit.getLevel()
+
+      let unitProps = _unit.getUnitPropertiesComponent()
+      if (unitProps != null)
+        unitOperatorLevel = unitProps.getPropertyIntValue(UnitProperty.OPERATOR_LEVEL)
+
+      operatorLevel = max(operatorLevel, unitOperatorLevel)
+    //}
+    
+    // The workstation can add to the operator level, too
+    let workstationProps = getOwnerUnit().getUnitPropertiesComponent()
+    if (workstationProps != null and workstationProps.hasProperty(UnitProperty.OPERATOR_LEVEL))
+      operatorLevel += workstationProps.getPropertyIntValue(UnitProperty.OPERATOR_LEVEL) - 1
+    
+    return operatorLevel
+
+  // --------------------------------------------------------------------------
+  function loadUnit(unit u) returns bool
+    
+    if (isUnitLoaded(u))
+      error("Unit is already loaded into workstation")
+      return false
+    
+    if (m_loadedUnits != null and m_loadedUnits.size() >= m_maxUnits)
+      DisplayTextToPlayer(getOwnerUnit().getOwner(), 0, 0, "Workstation is full".colorize(Colors.red))
+      return false
+
+    if (m_allowedUnitTypes != null and m_allowedUnitTypes.isEmpty() and not m_allowedUnitTypes.has(u.getTypeId()))
+      DisplayTextToPlayer(getOwnerUnit().getOwner(), 0, 0, u.getName() + " cannot operate this Workstation".colorize(Colors.red))
+      return false
+
+    onUnitLoaded(u)
+    return true
+
+  // --------------------------------------------------------------------------
+  function unloadUnit(unit u) returns bool
+    if (isUnitLoaded(u) == false)
+      error("Unit is not loaded into workstation")
+      return false
+    onUnitUnloaded(u)
+    return true
+
+  // --------------------------------------------------------------------------
+  function unloadAllUnits()
+    if (m_loadedUnits != null)
+      while (m_loadedUnits.isEmpty() == false)
+        unloadUnit(m_loadedUnits.getUnitAt(0))
+
+  // --------------------------------------------------------------------------
+  override protected function onDisabled()
+    super.onDisabled()
+    unloadAllUnits()
+
+  // --------------------------------------------------------------------------
+  protected function onWorkerLeveled(unit worker)
+    if (not m_loadedUnits.contains(worker))
+      return
+    if (m_workerLeveled != null)
+      m_workerLeveled.call()
+
+  // --------------------------------------------------------------------------
+  protected function onUnitUpgradeFinish()
+    if (getLoadedUnitCount() > 0)
+      applyBuff()
+
+  // --------------------------------------------------------------------------
+  protected function onUnitUpgradeCanceled()
+    if (getLoadedUnitCount() > 0)
+      applyBuff()
+
+  // --------------------------------------------------------------------------
+  private function onUnitLoaded(unit u)
+    getLoadedUnits().addUnit(u)
+    u.hide()
+    u.setInvulnerable(true)
+    u.suspend()
+    playSound()
+
+    let unitPropsComp = u.getUnitPropertiesComponent()
+    if (unitPropsComp != null)
+      let handler = unitPropsComp.getProperty(UnitProperty.OPERATOR_LEVEL)
+                      .onValueChanged().registerDispatched(this, () -> onWorkerLeveled(u))
+      m_unitPropertyEventHandles.put(u, handler)
+
+    if (m_workerEntered != null)
+      m_workerEntered.call()
+
+    if (getLoadedUnitCount() == 1)
+      applyBuff()
+
+  // --------------------------------------------------------------------------
+  private function applyBuff()
+    let ownerUnit = getOwnerUnit()
+    if (ownerUnit.hasAbility(WORKSTATION_ACTIVE_BUFF.abilId) == false)
+      ownerUnit.addAnimationProperties("work")
+      ownerUnit.addAbility(WORKSTATION_ACTIVE_BUFF.abilId)
+
+  // --------------------------------------------------------------------------
+  private function onUnitUnloaded(unit u)
+    getLoadedUnits().removeUnit(u)
+    u.unsuspend()
+    u.setInvulnerable(false)
+    u.show()
+    playSound()
+
+    let unitPropsComp = u.getUnitPropertiesComponent()
+    if (unitPropsComp != null)
+      let handler = m_unitPropertyEventHandles.get(u)
+      m_unitPropertyEventHandles.remove(u)
+      unitPropsComp.getProperty(UnitProperty.OPERATOR_LEVEL).onValueChanged().unregister(handler)      
+
+    if (m_workerExited != null)
+      m_workerExited.call()
+
+    if (getLoadedUnitCount() == 0)
+      let ownerUnit = getOwnerUnit()
+      ownerUnit.removeAnimationProperties("work")
+      ownerUnit.removeAbility(WORKSTATION_ACTIVE_BUFF.abilId)
+      ownerUnit.removeAbility(WORKSTATION_ACTIVE_BUFF.buffId)
+
+  // --------------------------------------------------------------------------
+  private function getLoadedUnits() returns group
+    if (m_loadedUnits == null)
+      m_loadedUnits = CreateGroup()
+    return m_loadedUnits
+
+  // --------------------------------------------------------------------------
+  private function getAllowedUnitTypes() returns HashList<int>
+    if (m_allowedUnitTypes == null)
+      m_allowedUnitTypes = new HashList<int>()
+    return m_allowedUnitTypes
+
+  // --------------------------------------------------------------------------
+  private function playSound()
+    if (m_soundTimer == null)
+      m_soundTimer = CreateTimer()
+    if (m_soundTimer.getRemaining() > 0.0)
+      return
+    m_soundTimer.start(1.0, null)
+    g_loadingSoundDef.playOnPoint(getOwnerUnit().getPos().withTerrainZ())
+
+// ============================================================================
+public function IUnitMetadata.getWorkstationComponent() returns WorkstationComponent
+  return this.getComponent(WorkstationComponent.typeId) castTo WorkstationComponent
+
+// ============================================================================
+public function IUnitMetadata.getOrAddWorkstationComponent() returns WorkstationComponent
+  var component = this.getWorkstationComponent()
+  if (component == null)
+    component = this.addComponent(new WorkstationComponent(this)) castTo WorkstationComponent
+  return component
+
+// ============================================================================
+/*
+    [Workstation - Active]
+    A unit is currently operating this Workstation.
+
+    Operator Level 5
+    + 10% sight range
+    + 10% bonus damage to target
+*/
+public class WorkstationIconTooltipBuilder extends TooltipBuilder
+  private bool m_active
+
+  // --------------------------------------------------------------------------
+  construct(bool active)
+    m_active = active
+
+  // --------------------------------------------------------------------------
+  override function getDescription(int level) returns string
+    let sb = new StringBuilder()
+    
+    if (m_active)
+      sb.appendLine("A unit is currently operating this workstation.".colorize(Colors.gold))
+    else
+      sb.appendLine("Load a unit into this workstation to begin operations.".colorize(Colors.gold))
+    
+    return sb.toStringAndDestroy()
+
+  // --------------------------------------------------------------------------
+  override function getTooltipExtended(int level) returns string
+    let sb = new StringBuilder()
+
+    let desc = getDescription(level)
+    if (desc.isNotBlank())
+      sb.append(desc)
+
+    let tooltip = super.getTooltipExtended(level)
+    if (tooltip.isNotBlank())
+      sb.append(tooltip)
+
+    return sb.toStringAndDestroy()
+
+// ============================================================================
+public class WorkstationOperatorBonusesTooltipItem extends TooltipItem
+
+  // --------------------------------------------------------------------------
+  construct()
+    super("Operator Bonuses")
+    setAlwaysPutSubItemsOnNewLine(true)
+    setPrependSpacerLine(true)
+
+// ============================================================================
+public class WorkstationOperatorLevelBonusesTooltipItem extends TooltipItem
+  private static Func1<int, string> s_nameGetter = null
+
+  // --------------------------------------------------------------------------
+  construct()
+    super(getStaticNameGetter())
+    setAlwaysPutSubItemsOnNewLine(true)
+    setPrependSpacerLine(true)
+
+  // --------------------------------------------------------------------------
+  private static function getStaticNameGetter() returns Func1<int, string>
+    if (s_nameGetter == null)
+      s_nameGetter = (int lvl) -> "Operator Level " + lvl.toString()
+      s_nameGetter.acquire() // keep alive forever
+    return s_nameGetter
+
+// ============================================================================
+public class AbilityActiveWorkstationIconDefinition extends AbilityDefinition
+
+  // --------------------------------------------------------------------------
+  construct(int newId)
+    super (newId, 'Ahan')
+    setLevels(20)
+    setButtonPositionNormalX(0)
+    setButtonPositionNormalY(2)
+    setIconNormal(Icons.bTNEngineeringUpgrade)
+    presetTooltipNormal(lvl -> "Workstation {0}".format("Operating".colorize(Colors.green)))
+
+// ============================================================================
+public class AbilityInactiveWorkstationIconDefinition extends AbilityDefinition
+
+  // --------------------------------------------------------------------------
+  construct(int newId)
+    super (newId, 'Ahan')
+    setLevels(1)
+    setButtonPositionNormalX(0)
+    setButtonPositionNormalY(2)
+    setIconNormal(Icons.dISBTNEngineeringUpgrade)
+    setTooltipNormal(1, "Workstation {0}".format("Unoperated".colorize(Colors.gray)))
+
+// ============================================================================
+function onLoadUnitAbilCast(unit caster, unit target)
+
+  let metadata = caster.getMetadata()
+  if (metadata == null)
+    return
+
+  let comp = metadata.getWorkstationComponent()
+  if (comp == null)
+    return
+
+  comp.loadUnit(target)
+
+// ============================================================================
+function onUnloadAllAbilCast(unit caster)
+
+  let metadata = caster.getMetadata()
+  if (metadata == null)
+    return
+
+  let comp = metadata.getWorkstationComponent()
+  if (comp == null)
+    return
+
+  comp.unloadAllUnits()
+
+// ============================================================================
+function onUnitIssuedTargetOrder()
+  let orderId = GetIssuedOrderId()
+  if (orderId != OrderIds.smart)
+    return
+
+  let orderedUnit = GetOrderedUnit()
+  let targetUnit = GetOrderTargetUnit()
+
+  let targetUnitMetadata = targetUnit.getMetadata()
+  if (targetUnitMetadata != null)
+    let workstationComponent = targetUnitMetadata.getWorkstationComponent()
+    if (workstationComponent != null)
+      targetUnit.issueTargetOrderById(OrderIds.load, orderedUnit)
+
+// ============================================================================
+function onUnitLeveled()
+  let levelingUnit = GetLevelingUnit()
+
+  let holdingUnit = getTransportUnit(levelingUnit)
+  if (holdingUnit == null)
+    return
+
+  let metadata = holdingUnit.getMetadata()
+  if (metadata == null)
+    return
+
+  let comp = metadata.getWorkstationComponent()
+  if (comp != null)
+    comp.onWorkerLeveled(levelingUnit)
+
+// ============================================================================
+function onUnitUpgradeFinished()
+  let upgradingUnit = GetTriggerUnit()
+
+  let metadata = upgradingUnit.getMetadata()
+  if (metadata == null)
+    return
+
+  let comp = metadata.getWorkstationComponent()
+  if (comp != null)
+    comp.onUnitUpgradeFinish()
+
+// ============================================================================
+function onUnitUpgradeCanceled()
+  let upgradingUnit = GetTriggerUnit()
+
+  let metadata = upgradingUnit.getMetadata()
+  if (metadata == null)
+    return
+
+  let comp = metadata.getWorkstationComponent()
+  if (comp != null)
+    comp.onUnitUpgradeCanceled()
+
+// ============================================================================
+@compiletime function createObjects()
+
+  new ChannelAbilityPreset(TlsAbilityIds.workstationLoadUnit, 1, true)
+    ..setHeroAbility(false)
+    ..setItemAbility(false)
+    ..presetTargetTypes(Targettype.UNIT)
+    ..removeChannelProperties(true, true)
+    ..presetBaseOrderID((lvl) -> "load")
+    ..setIconNormal(Icons.bTNLoad)
+    ..setName("Load Operator")
+    ..setTooltipNormal(1, "Load Operator")
+    ..setTooltipNormalExtended(1, "Loads a target survivor to operate this workstation.")
+    ..presetCastRange((int lvl) -> 80.0)
+    ..presetTargetsAllowed((int lvl) -> "ground,friend,vulnerable,invulnerable")
+    ..setButtonPositionNormalX(1)
+    ..setButtonPositionNormalY(2)
+    ..setHotkeyNormal("L")
+
+  new ChannelAbilityPreset(TlsAbilityIds.workstationUnloadUnit, 1, true)
+    ..setHeroAbility(false)
+    ..setItemAbility(false)
+    ..presetTargetTypes(Targettype.NONE)
+    ..removeChannelProperties(true, true)
+    ..presetBaseOrderID((lvl) -> "unload")
+    ..setIconNormal(Icons.bTNUnLoad)
+    ..setName("Dismiss Operators")
+    ..setTooltipNormal(1, "Dismiss Operators")
+    ..setTooltipNormalExtended(1, "Dismiss the survivors operating this workstation.")
+    ..presetCastRange((int lvl) -> 80.0)
+    ..presetTargetsAllowed((int lvl) -> "")
+    ..setButtonPositionNormalX(2)
+    ..setButtonPositionNormalY(2)
+    ..setHotkeyNormal("U")
+
+// ============================================================================
+init
+  EventListener.onTargetCast(TlsAbilityIds.workstationLoadUnit, (caster, target) -> onLoadUnitAbilCast(caster, target))
+  EventListener.onCast(TlsAbilityIds.workstationUnloadUnit, (caster) -> onUnloadAllAbilCast(caster))
+  
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ISSUED_UNIT_ORDER, function onUnitIssuedTargetOrder)
+  registerPlayerUnitEvent(EVENT_PLAYER_HERO_LEVEL, function onUnitLeveled)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_UPGRADE_FINISH, function onUnitUpgradeFinished)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_UPGRADE_CANCEL, function onUnitUpgradeCanceled)

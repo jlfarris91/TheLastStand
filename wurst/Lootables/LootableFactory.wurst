@@ -1,8 +1,5 @@
 package LootableFactory
-import LootableTypes
 import UnitMetadata
-import initlater Lootables
-import MainItemLibrary
 import LootableGoldReward
 import Range
 import LootableComponent
@@ -11,25 +8,34 @@ import Math
 import ObjEditingCommons
 import UnitExtensions
 import UnitModifiers
+import LootableTypes
+import LootableMaterialsReward
+import LootableItemReward
+import LootableSurvivorReward
+import LootableZombieReward
+import GroupExtensions
+import TlsItemLibrary
 
-constant ItemChances g_smallLootableItemChances_Start = ItemChances(64.0, 24.0, 8.0, 2.0)
-constant ItemChances g_smallLootableItemChances_End = ItemChances(36.0, 32.0, 12.0, 6.0)
+constant ItemChances g_smallLootableItemChances_Start = ItemChances(80.0, 15.0, 4.0, 1.0)
+constant ItemChances g_smallLootableItemChances_End = ItemChances(60.0, 30.0, 8.0, 2.0)
 
-constant ItemChances g_mediumLootableItemChances_Start = ItemChances(60.0, 32.0, 14.0, 4.0)
-constant ItemChances g_mediumLootableItemChances_End = ItemChances(32.0, 32.0, 18.0, 8.0)
+constant ItemChances g_mediumLootableItemChances_Start = ItemChances(60.0, 30.0, 8.0, 2.0)
+constant ItemChances g_mediumLootableItemChances_End = ItemChances(40.0, 40.0, 16.0, 4.0)
 
-constant ItemChances g_largeLootableItemChances_Start = ItemChances(56.0, 40.0, 20.0, 6.0)
-constant ItemChances g_largeLootableItemChances_End = ItemChances(28.0, 32.0, 24.0, 10.0)
+constant ItemChances g_largeLootableItemChances_Start = ItemChances(30.0, 50.0, 16.0, 3.0)
+constant ItemChances g_largeLootableItemChances_End = ItemChances(20.0, 42.0, 32.0, 6.0)
 
 HashList<int> g_smallLootables = new HashList<int>()
 HashList<int> g_mediumLootables = new HashList<int>()
 HashList<int> g_largeLootables = new HashList<int>()
 
+group g_spawnOverrides
+
 // ============================================================================
-public class LootableFactory implements IUnitMetadataFactory
+public class LootableUnitComponentGenerator implements IUnitComponentGenerator
 
   // --------------------------------------------------------------------------
-  override function createUnit(IUnitMetadata metadata) returns bool
+  override function generateComponents(IUnitMetadata metadata) returns bool
     let u = metadata.getUnit()
     let id = u.getTypeId()
 
@@ -53,14 +59,17 @@ public class LootableFactory implements IUnitMetadataFactory
     ..setSearchDuration(5.0)
     ..setChanceToRetrigger(0.01)
 
-    let goldReward = new LootableGoldReward(rangeInt(1,2), rangeInt(2, 6))
-    let materialsReward = new LootableMaterialsReward(rangeInt(20, 50), rangeInt(40, 100))
+    let materialsRewardStart = rangeInt(50, 100)
+    let materialsRewardEnd = rangeInt(100, 200)
+    let materialsReward = new LootableMaterialsReward(materialsRewardStart, materialsRewardEnd)
+    
     let itemReward = new LootableItemReward(g_smallLootableItemChances_Start, g_smallLootableItemChances_End)
     
     lootable.getRewardsSet()
-    ..add(goldReward, 4)
-    ..add(materialsReward, 72)
-    ..add(itemReward, 24)
+    ..add(materialsReward, 90)
+    ..add(itemReward, 10)
+
+    assignClosestSpawnOverride(lootable)
 
   // --------------------------------------------------------------------------
   private function createMediumLootable(IUnitMetadata metadata)
@@ -69,12 +78,12 @@ public class LootableFactory implements IUnitMetadataFactory
     ..setSearchDuration(10.0)
     ..setChanceToRetrigger(0.05)
 
-    let goldRewardStart = rangeInt(2, 3)
-    let goldRewardEnd = rangeInt(3, 8)
+    let goldRewardStart = rangeInt(1, 1)
+    let goldRewardEnd = rangeInt(1, 2)
     let goldReward = new LootableGoldReward(goldRewardStart, goldRewardEnd)
 
-    let materialsRewardStart = rangeInt(40, 80)
-    let materialsRewardEnd = rangeInt(80, 160)
+    let materialsRewardStart = rangeInt(75, 150)
+    let materialsRewardEnd = rangeInt(150, 300)
     let materialsReward = new LootableMaterialsReward(materialsRewardStart, materialsRewardEnd)
 
     let itemReward = new LootableItemReward(g_mediumLootableItemChances_Start, g_mediumLootableItemChances_End)
@@ -84,7 +93,7 @@ public class LootableFactory implements IUnitMetadataFactory
     let zombieReward = new LootableZombieReward()
     ..setMinZombies(4)
     ..setMaxZombies(8)
-    ..setItemChances(g_mediumLootableItemChances_Start, g_mediumLootableItemChances_End)
+    ..setItemChances(g_smallLootableItemChances_Start, g_mediumLootableItemChances_End)
     ..setUnitModifier() (unit u, real t) ->
       u.setMaxHPandHP(lerpInt(60, 1000, t))
       u.setArmor(lerp(0.0, 2.0, t))
@@ -94,11 +103,13 @@ public class LootableFactory implements IUnitMetadataFactory
       u.awardLumberOnDeath(lerp(materialsRewardStart, materialsRewardEnd, t) / 8.0, 1.0)
     
     lootable.getRewardsSet()
-    ..add(goldReward, 4)
-    ..add(materialsReward, 60)
-    ..add(itemReward, 24)
-    ..add(survivorReward, 5)
-    ..add(zombieReward, 6)
+    ..add(goldReward, 2)
+    ..add(materialsReward, 78)
+    ..add(itemReward, 12)
+    ..add(survivorReward, 3)
+    ..add(zombieReward, 5)
+
+    assignClosestSpawnOverride(lootable)
 
   // --------------------------------------------------------------------------
   private function createLargeLootable(IUnitMetadata metadata)
@@ -107,12 +118,12 @@ public class LootableFactory implements IUnitMetadataFactory
     ..setSearchDuration(20.0)
     ..setChanceToRetrigger(0.1)
 
-    let goldRewardStart = rangeInt(3, 4)
-    let goldRewardEnd = rangeInt(4, 12)
+    let goldRewardStart = rangeInt(1, 1)
+    let goldRewardEnd = rangeInt(1, 3)
     let goldReward = new LootableGoldReward(goldRewardStart, goldRewardEnd)
 
-    let materialsRewardStart = rangeInt(70, 120)
-    let materialsRewardEnd = rangeInt(140, 240)
+    let materialsRewardStart = rangeInt(125, 250)
+    let materialsRewardEnd = rangeInt(250, 500)
     let materialsReward = new LootableMaterialsReward(materialsRewardStart, materialsRewardEnd)
 
     let itemReward = new LootableItemReward(g_largeLootableItemChances_Start, g_largeLootableItemChances_End)
@@ -122,7 +133,7 @@ public class LootableFactory implements IUnitMetadataFactory
     let zombieReward = new LootableZombieReward()
     ..setMinZombies(10)
     ..setMaxZombies(15)
-    ..setItemChances(g_largeLootableItemChances_Start, g_largeLootableItemChances_End)
+    ..setItemChances(g_mediumLootableItemChances_Start, g_largeLootableItemChances_End)
     ..setUnitModifier() (unit u, real t) ->
       u.setMaxHPandHP(lerpInt(60, 1000, t))
       u.setArmor(lerp(0.0, 2.0, t))
@@ -132,11 +143,23 @@ public class LootableFactory implements IUnitMetadataFactory
       u.awardLumberOnDeath(lerp(materialsRewardStart, materialsRewardEnd, t) / 15.0, 1.0)
     
     lootable.getRewardsSet()
-    ..add(goldReward, 6)
-    ..add(materialsReward, 52)
-    ..add(itemReward, 24)
+    ..add(goldReward, 3)
+    ..add(materialsReward, 67)
+    ..add(itemReward, 14)
     ..add(survivorReward, 6)
-    ..add(zombieReward, 12)
+    ..add(zombieReward, 10)
+
+    assignClosestSpawnOverride(lootable)
+
+// ============================================================================
+function assignClosestSpawnOverride(LootableComponent comp)
+  let pos = comp.getOwnerUnit().getPos()
+
+  let closestSpawnOverride = g_spawnOverrides.getClosestUnit(pos, 512.0)
+  if (closestSpawnOverride != null)
+    comp.setSpawnPosition(closestSpawnOverride.getPos())
+    g_spawnOverrides.removeUnit(closestSpawnOverride)
+    closestSpawnOverride.remove()
 
 // ============================================================================
 init
@@ -179,3 +202,6 @@ init
     UNIT_ID_LOOTABLE_SHIPYARD,
     UNIT_ID_LOOTABLE_TAVERN
   )
+
+  g_spawnOverrides = CreateGroup()
+  g_spawnOverrides.enumUnitsOfType(UNIT_ID_LOOTABLE_SPAWN_OVERRIDE, null)

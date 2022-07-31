@@ -1,0 +1,37 @@
+package KillWaveProgress
+import WaveSpawning
+import Runnable
+import Math
+import Handle
+
+// ============================================================================
+public class KillWaveProgress extends Runnable
+  private SpawnWaveContext m_context
+  private _handle m_onUnitKilledHandler
+
+  // --------------------------------------------------------------------------
+  construct (SpawnWaveContext context)
+    m_context = context
+
+    m_onUnitKilledHandler = m_context.onUnitKilled().register() () ->
+      onUnitKilled()
+
+  // --------------------------------------------------------------------------
+  ondestroy
+
+    if (m_onUnitKilledHandler != INVALID_HANDLE and m_context != null)
+      m_context.onUnitKilled().unregister(m_onUnitKilledHandler)
+      m_onUnitKilledHandler = INVALID_HANDLE
+
+  // --------------------------------------------------------------------------
+  override function getProgress() returns real
+    let maxSpawnCount = m_context.definition.getMaxSpawnCount(m_context)
+    if (maxSpawnCount == 0)
+      return 0.0
+    return clamp01(m_context.getKillCount().toReal() / maxSpawnCount)
+    
+  // --------------------------------------------------------------------------
+  private function onUnitKilled()
+    raiseProgressChangedEvent()
+    if (getProgress() == 1.0)
+      complete()

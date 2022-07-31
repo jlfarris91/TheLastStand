@@ -7,30 +7,29 @@ import DisplayTextToPlayer
 import Orders
 import ColorUtility
 import ErrorHandling
-import SurvivorSpawnManager
 import ClosureTimers
 import GameConstants
 import FX
 import Bounds
 import Range
 import HumanPlayers
-import RandomSpawnPointProvider
 import UnitExtensions
 import SurvivorJobs
 import SurvivorComponent
 import PlayerExtensions
 import Math
 import GameInstance
-import FriendlyGridCachedSpawnManager
+import Spawning
+import Notifications
 
 group g_tempGroup = CreateGroup()
-WeightedSet<SurvivorJobDefinition> g_weightedSurvivorJobSet
+WeightedSet<SurvivorJobType> g_weightedSurvivorJobSet
 
 // ============================================================================
 public class SurvivorUtility
     
   // --------------------------------------------------------------------------
-  static function orderSelectedUnitsToActivateJob(player owner, SurvivorJobDefinition job)
+  static function orderSelectedUnitsToActivateJob(player owner, SurvivorJobType job)
 
     let selectedUnits = owner.getSelectedUnits()
 
@@ -49,7 +48,7 @@ public class SurvivorUtility
     destroy selectedUnits
 
   // --------------------------------------------------------------------------
-  static function orderSelectedUnitsToUnlearnJob(player owner, SurvivorJobDefinition job)
+  static function orderSelectedUnitsToUnlearnJob(player owner, SurvivorJobType job)
 
     let selectedUnits = owner.getSelectedUnits()
 
@@ -66,6 +65,9 @@ public class SurvivorUtility
     destroy selectedUnits
     
   // --------------------------------------------------------------------------
+  private static SurvivorComponent array[12] g_selectedSurvivorComps
+
+  // --------------------------------------------------------------------------
   static function orderSelectedUnitsToToggleActivateJob(player owner)
 
     let selectedUnits = owner.getSelectedUnits()
@@ -73,24 +75,27 @@ public class SurvivorUtility
     // Only switch to the last active job if everyone is already jobless
     var switchToLastActiveJob = true
 
+    var i = 0
     for u in selectedUnits
     //{
       if (owner.controlsUnit(u))
       //{
         let survivor = u.getSurvivorComponent()
-        if (survivor != null and survivor.getActiveJob() != SurvivorJobs.none)
+        g_selectedSurvivorComps[i] = survivor
+        if (survivor != null and survivor.getActiveJob() != SurvivorJobType.None)
           switchToLastActiveJob = false
       //}
     //}
 
+    i = 0
     for u in selectedUnits
     //{
       if (owner.controlsUnit(u))
       //{
-        let survivor = u.getSurvivorComponent()
+        let survivor = g_selectedSurvivorComps[i]
         if (survivor != null)
         //{
-          SurvivorJobDefinition job = SurvivorJobs.none 
+          var job = SurvivorJobType.None
 
           if (switchToLastActiveJob)
             let lastActiveJob = survivor.getLastActiveJob()
@@ -110,9 +115,11 @@ public class SurvivorUtility
     return spawnSurvivorWithRandomJob(forPlayer, pos, g_weightedSurvivorJobSet)
 
   // --------------------------------------------------------------------------
-  static function spawnSurvivorWithRandomJob(player forPlayer, vec2 pos, WeightedSet<SurvivorJobDefinition> jobSet) returns unit
+  static function spawnSurvivorWithRandomJob(player forPlayer, vec2 pos, WeightedSet<SurvivorJobType> jobSet) returns unit
 
-    let survivor = createUnitTLS(forPlayer, jobSet.getRandom().getInitialUnitType(), pos, GetRandomDirectionDeg())
+    let jobDef = SurvivorJobs.getJobDefinition(jobSet.getRandom())
+
+    let survivor = createUnitTLS(forPlayer, jobDef.getInitialUnitType(), pos, GetRandomDirectionDeg().asAngleDegrees())
 
     // Scale survivor level with game progress
     let gameProgress01 = clamp01(g_GameInstance.getGameProgress01())
@@ -158,10 +165,16 @@ public class SurvivorUtility
 
     survivor.issuePointOrderById(OrderIds.move, playerHumanComp.getCampCenter())
     
+    let job = SurvivorJobs.getJobDefinitionForUnitType(survivor.getTypeId())
+
     let message = "{0} {1} has joined your camp!".format(
-      survivor.getName().colorize(Colors.gold),
+      job.getTitle(survivor.getTypeId()).colorize(Colors.gold),
       survivor.getProperName())
-    displayMessageToPlayer(_player, message)
+
+    notifyPlayer(_player, message, survivor.getIconPath()) () ->
+      GetTriggerPlayer().selectSingle(survivor)
+      if (GetTriggerPlayer() == localPlayer)
+        PanCameraToForPlayer(localPlayer, survivor.getX(), survivor.getY())
 
     AddIndicator(survivor, 0, 255, 0, 255)
 
@@ -231,11 +244,8 @@ function getSpawnPoint(player p) returns spawnPointResult
   if (playerHumanComp == null)
     return spawnPointResult(false, ZERO2)
 
-  let currentSpawnManager = getPlayerCachedFriendlySpawnManager(p)
-  let fallbackSpawnManager = getPlayerSurvivorSpawnManager(p)
-  let spawnPointProvider = new RandomSpawnPointProvider(currentSpawnManager, fallbackSpawnManager)
-  let result = spawnPointProvider.getRandomSpawnPointInRange(playerHumanComp.getCampCenter(), SpawnRange.CLOSE)
-  destroy spawnPointProvider
+  let spawnPointProvider = getFriendlySpawnPointProviderForPlayer(p)
+  let result = spawnPointProvider.getRandomSpawnPointInRange(playerHumanComp.getCampCenter(), SpawnRange.CLOSE.toRangeReal())
   
   return result
 
@@ -253,12 +263,12 @@ public function unit.isRescuableSurvivor() returns bool
 
 // ============================================================================
 init
-  g_weightedSurvivorJobSet = new WeightedSet<SurvivorJobDefinition>()
-    ..add(SurvivorJobs.none, 50)
-    // ..add(SurvivorJobs.builder, 1)
-    // ..add(SurvivorJobs.militia, 1)
-    // ..add(SurvivorJobs.spearman, 1)
-    // ..add(SurvivorJobs.medic, 1)
-    // ..add(SurvivorJobs.marksman, 1)
-    // ..add(SurvivorJobs.acolyte, 1)
-    // ..add(SurvivorJobs.engineer, 1)
+  g_weightedSurvivorJobSet = new WeightedSet<SurvivorJobType>()
+    ..add(SurvivorJobType.None, 50)
+    // ..add(SurvivorJobType.Builder, 1)
+    // ..add(SurvivorJobType.Militia, 1)
+    // ..add(SurvivorJobType.Spearman, 1)
+    // ..add(SurvivorJobType.Medic, 1)
+    // ..add(SurvivorJobType.Marksman, 1)
+    // ..add(SurvivorJobType.Acolyte, 1)
+    // ..add(SurvivorJobType.Engineer, 1)

@@ -9,8 +9,14 @@ import RealtimeUnitComponent
 import DamageEvent
 import Damage
 import Orders
-import Time
+// import Time
 import HashList
+import Math
+import StunUnit
+import PlayerProperties
+import UnitIndexer
+import RealTime
+import TlsBuffIds
 
 constant real SPIKE4_TIMESCALE_ENABLED = 1.0
 constant real SPIKE4_TIMESCALE_DISABLED = 0.0
@@ -19,14 +25,19 @@ constant real SPIKE4_ATTACKTIMER_DURATION = 1.0
 constant int SPIKE_DISABLED_ABILITY_ID = compiletime(ABIL_ID_GEN.next())
 constant string SPIKE_DISABLED_EFFECT_PATH = "Abilities\\Disarm\\Disarm Red\\Disarm Red.mdx"
 constant int SPIKE_REPAIR_ENABLED_TARGETFLAG = 4 // TARGET_FLAG_AIR
-constant int SPIKE_REPAIR_DISABLED_TARGETFLAG = 0 // TARGET_FLAG_...invulnerable?
+constant int SPIKE_REPAIR_DISABLED_TARGETFLAG = 16 // TARGET_FLAG_WARD
 HashList<SpikesComponent> g_activeSpikeComponents = new HashList<SpikesComponent>()
+constant real STUN_COOLDOWN = 10.0
+constant int ENEMY_NEARBY_COOLDOWN = 3
+
+int array g_lastTimeStunned
 
 // ============================================================================
 public class SpikesComponent extends RealtimeUnitComponent
   private CallbackManual m_spike4AttackTimerCallback
   private bool m_spikesEnabled
   private effect m_disabledEffect
+  private int m_timeSinceLastEnemyNearby = 0
 
   // --------------------------------------------------------------------------
   construct (IUnitMetadata owner)
@@ -46,6 +57,11 @@ public class SpikesComponent extends RealtimeUnitComponent
   // --------------------------------------------------------------------------
   override function onEnabled()
     super.onEnabled()
+    
+    m_timeSinceLastEnemyNearby = 0
+    
+    this.registerForRealtimeUpdate(RealtimeUpdatePriority.Background)
+  
     forceUpdate()
     updateRepairEnabled()
 
@@ -60,6 +76,8 @@ public class SpikesComponent extends RealtimeUnitComponent
     releaseSpike4AttackTimer()
     updateRepairEnabled()
 
+    this.unregisterForRealtimeUpdate()
+
   // --------------------------------------------------------------------------
   function getSpikesEnabled() returns bool
     return m_spikesEnabled
@@ -67,6 +85,7 @@ public class SpikesComponent extends RealtimeUnitComponent
   // --------------------------------------------------------------------------
   function update()
     updateSpikesEnabled()
+    updateRepairEnabled()
 
   // --------------------------------------------------------------------------
   private function forceUpdate()
@@ -92,8 +111,6 @@ public class SpikesComponent extends RealtimeUnitComponent
     let ownerUnit = getOwnerUnit()
     let ownerUnitId = ownerUnit.getTypeId()
     let ownerUnitLvl = getOwnerUnitLevel() + 1
-
-    this.unregisterForRealtimeUpdate()
 
     // Remove abilities for disabled state
     if (ownerUnit.hasAbility(TlsAbilityIds.spikeDisabledIcon))
@@ -128,8 +145,6 @@ public class SpikesComponent extends RealtimeUnitComponent
   function onSpikesDisabled()
     let ownerUnit = getOwnerUnit()
     let ownerUnitLvl = getOwnerUnitLevel() + 1
-
-    this.registerForRealtimeUpdate(RealtimeUpdatePriority.Background)
 
     // Remove abilities for enabled state
     if (ownerUnit.hasAbility(TlsAbilityIds.spikeSlowAura))
@@ -188,7 +203,18 @@ public class SpikesComponent extends RealtimeUnitComponent
 
   // --------------------------------------------------------------------------
   function updateRepairEnabled()
-    setRepairEnabled(isDay())
+    
+    let isRepairable = not getOwnerUnit().hasAbility(TlsBuffIds.enemiesNearby)
+
+    let timeNow = getRealTimeSeconds()
+    let timeSinceLastEnemyNearby = timeNow - m_timeSinceLastEnemyNearby
+
+    if (timeSinceLastEnemyNearby <= ENEMY_NEARBY_COOLDOWN)
+      return
+
+    m_timeSinceLastEnemyNearby = isRepairable ? 0 : timeNow
+
+    setRepairEnabled(isRepairable)
 
   // --------------------------------------------------------------------------
   private function playSpike4AttackAnimation()
@@ -279,6 +305,37 @@ function onDamageEventShield()
   DamageEvent.setAmount(0)
 
 // ============================================================================
+function onDamageEventFinal()
+  let source = DamageEvent.getSource()
+
+  if (not source.isSpikes() or DamageEvent.getAmount() <= 0.0)
+    return
+
+  let metadata = source.getMetadata()
+  if (metadata == null)
+    return
+
+  let comp = metadata.getSpikesComponent()
+  if (comp == null)
+    return
+
+  let ownerPlayer = source.getOwner()
+  let target = DamageEvent.getTarget()
+
+  let stunDuration = ownerPlayer.getPropertyValue(PlayerProperty.SPIKE_STUN_DURATION)
+  let deltaSeconds = getRealTimeSeconds() - g_lastTimeStunned[target.getIndex()]
+
+  if (deltaSeconds < STUN_COOLDOWN)
+    return
+
+  let stunChance = ownerPlayer.getPropertyValue(PlayerProperty.SPIKE_STUN_CHANCE_01)
+  if (not passesChanceCheck01(stunChance))
+    return
+
+  g_lastTimeStunned[target.getIndex()] = getRealTimeSeconds()
+  stunUnit(source.getOwner(), target, stunDuration)
+
+// ============================================================================
 function onUnitAttacked()
   let attacker = GetAttacker()
 
@@ -330,5 +387,6 @@ init
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ISSUED_TARGET_ORDER, function onUnitIssuedTargetOrder)
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ATTACKED, function onUnitAttacked)
   DamageEvent.addListener(DAMAGE_EVENT_PRIO_SHIELD, () -> onDamageEventShield())
-  registerDayEvent(function onDayStart)
-  registerNightEvent(function onNightStart)
+  DamageEvent.addListener(DAMAGE_EVENT_PRIO_FINAL, () -> onDamageEventFinal())
+  // registerDayEvent(function onDayStart)
+  // registerNightEvent(function onNightStart)

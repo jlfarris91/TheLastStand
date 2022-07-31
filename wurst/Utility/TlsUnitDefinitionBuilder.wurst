@@ -1,0 +1,77 @@
+package TlsUnitDefinitionBuilder
+import public TooltipBuilder
+import TlsUnitDefinition
+import HashList
+import ColorUtility
+import HashListExtensions
+import TlsUnitDefinitionExtensions
+import Range
+import LinkedList
+import public Classification
+import Action
+import Dice
+
+constant string UNIT_NAME_FORMAT_STRING = "{1} {0}"
+constant string UNIT_TOOLTIP_EX_FORMAT_STRING = "{0}|n|n{1}"
+
+// ============================================================================
+public function ITlsUnitDefinition.build(string description, Action1<TooltipBuilder> tooltipBuilder)
+
+  if (tooltipBuilder != null)
+    tooltipBuilder.acquire()
+
+  let unitClass = this.getTlsUnitClass()
+
+  let symbolString = unitClass.getTlsUnitClassSymbolsColored()
+  this.setName(UNIT_NAME_FORMAT_STRING.format(symbolString, this.getName()))
+
+  let builder = new TooltipBuilder()
+
+  builder.setDescription(description)
+  
+  let isBuildingUndeadTarget = this.getAttack1DamageDice() == dice(0, 1, 1)
+
+  let attacksEnabled = this.getAttacksEnabled()
+  let allTargetsAllowed = new HashList<string>()
+  if (attacksEnabled.bitAnd(0x1) != 0)
+    allTargetsAllowed.addAll(this.getAttack1Targets())
+  if (attacksEnabled.bitAnd(0x2) != 0)
+    allTargetsAllowed.addAll(this.getAttack2Targets())
+
+  if (attacksEnabled == 0 or isBuildingUndeadTarget)
+    builder.addItem("Does not attack!".colorize(Colors.red))
+  else if (not allTargetsAllowed.has("Air"))
+    builder.addItem("Attacks ground only!".colorize(Colors.red))
+
+  builder.addItem("Health: ", this.calculateHealthMaximum(1).toString())
+
+  if (attacksEnabled != 0 and not isBuildingUndeadTarget)
+  //{
+    let attackRange = this.getAttack1Range()
+    // 150 is an arbitrary minimum distance to be considered "melee"
+    if (this.getAttack1Range() < 150)
+      builder.addItem("Range: ", "Melee")
+    else
+      builder.addItem("Range: ", attackRange.toString())
+
+    builder.addItem("Damage: ", "{0} ({1})".format(
+      this.calculateDamageRange(0, 1).toDamageRangeString(),
+      this.calculateApproximateDPS(0, 1).toApproxDPSString()))
+    
+    builder.addItem("Attack: ", this.getAttack1AttackType().toString())
+
+    if (not allTargetsAllowed.isEmpty())
+      builder.addItem("Targets: ", allTargetsAllowed.joinBy(", "))
+  //}
+
+  destroy allTargetsAllowed
+  
+  builder.addItem("Armor: ", this.getArmorType().toString())
+
+  if (tooltipBuilder != null)
+    tooltipBuilder.call(builder)
+    tooltipBuilder.release()
+
+  this.setTooltipExtended(builder.getTooltipExtended())
+
+  destroy builder

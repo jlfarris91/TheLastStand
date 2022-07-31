@@ -1,16 +1,19 @@
 package PlayerCommands
 import ChatCommands
 import Bases
-import DisplayTextToPlayer
 import GameConstants
-import TLSMenuBar
-import CameraButton
 import ClosureTimers
 import RegisterEvents
 import PlayerExtensions
 import MainItemLibrary
 import HumanPlayers
 import ColorUtility
+import HumanPlayerComponent
+import ItemType
+// import VoteKick
+import PlayerUtility
+import Notifications
+import SyncSimpleExtensions
 
 constant string COMMAND_BASE = "base"
 constant string COMMAND_BASES = "bases"
@@ -21,8 +24,12 @@ constant string COMMAND_CAM = "cam"
 constant string COMMAND_SPLIT = "split"
 constant string COMMAND_GIVEGOLD = "givegold"
 constant string COMMAND_GIVEGOLD_ALIAS = "giveg"
+constant string COMMAND_GIVEGOLD_ALIAS2 = "gg"
 constant string COMMAND_GIVELUMB = "givelumber"
 constant string COMMAND_GIVELUMB_ALIAS = "givel"
+constant string COMMAND_GIVELUMB_ALIAS2 = "gl"
+constant string COMMAND_SAVE = "save"
+// constant string COMMAND_VOTEKICK = "votekick"
 
 public quest g_playerCommandsQuest
 ChatCommandHandler g_playerChatCommandHandler
@@ -46,7 +53,7 @@ function showPlayerBasesCommand()
       difficulty = BaseDifficulty.HARD
 
   showPlayerBases(commandPlayer, difficulty, 30.0)
-  displayMessageToPlayer(commandPlayer, "Showing {0} bases for 15 seconds".format(difficultyStr))
+  chatCommandPrintToPlayer(commandPlayer, "Showing {0} bases for 15 seconds".format(difficultyStr))
 
 // ============================================================================
 function clearText()
@@ -68,9 +75,7 @@ function setCameraDistance()
 
   SetCameraFieldForPlayer(commandPlayer, CAMERA_FIELD_TARGET_DISTANCE, distance, CAMERA_DISTANCE_SMOOTH)
 
-  let menu = getTLSMenu(commandPlayer)
-  let cameraButton = menu.m_items[MENU_ITEM_CAMERA] castTo CameraToggleButton
-  cameraButton.setCameraDistance(distance)
+  commandPlayer.getHumanPlayerComponentRequired().setCameraDistance(distance)
 
 // ============================================================================
 function splitItemStack()
@@ -96,35 +101,12 @@ function splitItemsInSlot(unit _unit, int index) returns bool
     return false
   bool successfullySplit = false
   for i = 0 to charges - 1
-    let splitItem = itemSet.createItem(itemId, _unit.getPos())
+    let splitItem = ItemType.createItem(itemId, _unit.getPos())
     if (splitItem != null)
       successfullySplit = true
   if (successfullySplit)
     _item.remove()
   return successfullySplit
-
-// ============================================================================
-function getPlayerFromPartialNameColorOrId(string playerPartialNameColorOrId, player ignore) returns player  
-  // Check for an ID match first since toInt() will return -1 when parsing an int fails
-  let playerId = playerPartialNameColorOrId.toInt()
-  if (playerId != -1)
-    let p = Player(playerId)
-    if (p != ignore and p != null)
-      return p
-  // Then check for exact player name match
-  for p in g_PlayingHumanPlayers
-    if (p != ignore and p.getName() == playerPartialNameColorOrId)
-      return p
-  // Then, partial player name match
-  for p in g_PlayingHumanPlayers
-    if (p != ignore and p.getName().startsWith(playerPartialNameColorOrId))
-      return p
-  // Then player color
-  let playerColor  = playerPartialNameColorOrId.toPlayerColor()
-  for p in g_PlayingHumanPlayers
-    if (p != ignore and p.getColor() == playerColor)
-      return p
-  return null
 
 // ============================================================================
 function giveGold()
@@ -138,11 +120,11 @@ function giveGold()
 
   let targetPlayer = getPlayerFromPartialNameColorOrId(playerPartialNameColorOrId, commandPlayer)
   if (targetPlayer == null)
-    displayMessageToPlayer(commandPlayer, "Could not find player " + playerPartialNameColorOrId)
+    chatCommandPrintToPlayer(commandPlayer, "Could not find player " + playerPartialNameColorOrId)
     return
 
   if (not targetPlayer.isHumanPlayer())
-    displayMessageToPlayer(commandPlayer, "Player {0} is not a playing human player".format(targetPlayer.getName()))
+    chatCommandPrintToPlayer(commandPlayer, "Player {0} is not a playing human player".format(targetPlayer.getName()))
     return
 
   goldToGive = min(commandPlayer.getGold(), goldToGive)
@@ -150,8 +132,8 @@ function giveGold()
   commandPlayer.subGold(goldToGive)
   targetPlayer.addGold(goldToGive)
 
-  displayMessageToPlayer(commandPlayer, "Gave {0} gold to {1}".format(goldToGive.toString(), targetPlayer.getName()).colorize(Colors.gold))
-  displayMessageToPlayer(targetPlayer, "{0} gave you {1} gold".format(commandPlayer.getName(), goldToGive.toString()).colorize(Colors.gold))
+  chatCommandPrintToPlayer(commandPlayer, "Gave {0} gold to {1}".format(goldToGive.toString(), targetPlayer.getName()).colorize(Colors.gold))
+  chatCommandPrintToPlayer(targetPlayer, "{0} gave you {1} gold".format(commandPlayer.getName(), goldToGive.toString()).colorize(Colors.gold))
 
 // ============================================================================
 function giveLumber()
@@ -165,20 +147,41 @@ function giveLumber()
 
   let targetPlayer = getPlayerFromPartialNameColorOrId(playerPartialNameColorOrId, commandPlayer)
   if (targetPlayer == null)
-    displayMessageToPlayer(commandPlayer, "Could not find player " + playerPartialNameColorOrId)
+    chatCommandPrintToPlayer(commandPlayer, "Could not find player " + playerPartialNameColorOrId)
     return
 
   if (not targetPlayer.isHumanPlayer())
-    displayMessageToPlayer(commandPlayer, "Player {0} is not a playing human player".format(targetPlayer.getName()))
+    chatCommandPrintToPlayer(commandPlayer, "Player {0} is not a playing human player".format(targetPlayer.getName()))
     return
 
-  lumberToGive = min(commandPlayer.getGold(), lumberToGive)
+  lumberToGive = min(commandPlayer.getLumber(), lumberToGive)
 
   commandPlayer.subLumber(lumberToGive)
   targetPlayer.addLumber(lumberToGive)
 
-  displayMessageToPlayer(commandPlayer, "Gave {0} lumber to {1}".format(lumberToGive.toString(), targetPlayer.getName()).colorize(Colors.gold))
-  displayMessageToPlayer(targetPlayer, "{0} gave you {1} lumber".format(commandPlayer.getName(), lumberToGive.toString()).colorize(Colors.gold))
+  chatCommandPrintToPlayer(commandPlayer, "Gave {0} lumber to {1}".format(lumberToGive.toString(), targetPlayer.getName()).colorize(Colors.gold))
+  chatCommandPrintToPlayer(targetPlayer, "{0} gave you {1} lumber".format(commandPlayer.getName(), lumberToGive.toString()).colorize(Colors.gold))
+
+// ============================================================================
+function savePlayerData()
+  getChatCommandPlayer().getHumanPlayerComponentRequired().save()
+
+// // ============================================================================
+// function startVoteKick()
+//   let command = getChatCommand()
+//   let commandPlayer = getChatCommandPlayer()
+//   let playerPartialNameColorOrId = command.getArgument(0).getString()
+
+//   let targetPlayer = getPlayerFromPartialNameColorOrId(playerPartialNameColorOrId, commandPlayer)
+//   if (targetPlayer == null)
+//     chatCommandPrintToPlayer(commandPlayer, "Could not find player " + playerPartialNameColorOrId)
+//     return
+
+//   if (not targetPlayer.isHumanPlayer())
+//     chatCommandPrintToPlayer(commandPlayer, "Player {0} is not a playing human player".format(targetPlayer.getName()))
+//     return
+
+//   VoteKick.start(commandPlayer, targetPlayer)
 
 // ============================================================================
 function setupPlayerCommandsQuest()
@@ -217,12 +220,21 @@ function registerDebugCommands()
     ..addStringArgument("PLAYER_NAME_PARTIAL_OR_ID", false)
     ..addIntegerArgument("GOLD_AMOUNT", false)
     ..addAlias(COMMAND_GIVEGOLD_ALIAS)
+    ..addAlias(COMMAND_GIVEGOLD_ALIAS2)
 
   g_playerChatCommandHandler.registerCommandDefinition(COMMAND_GIVELUMB, function giveLumber)
     ..setDescription("Gives the target player a specific amount of lumber.")
     ..addStringArgument("PLAYER_NAME_PARTIAL_OR_ID", false)
     ..addIntegerArgument("LUMBER_AMOUNT", false)
     ..addAlias(COMMAND_GIVELUMB_ALIAS)
+    ..addAlias(COMMAND_GIVELUMB_ALIAS2)
+
+  g_playerChatCommandHandler.registerCommandDefinition(COMMAND_SAVE, function savePlayerData)
+    ..setDescription("Saves data for the player to a file on the disk")
+
+  // g_playerChatCommandHandler.registerCommandDefinition(COMMAND_VOTEKICK, function startVoteKick)
+  //   ..setDescription("Start a vote to kick a player")
+  //   ..addStringArgument("PLAYER_NAME_PARTIAL_OR_ID", false)
 
   g_playerChatCommandHandler.addQuestItems()
 
@@ -232,6 +244,8 @@ function onPlayerEndCinematic()
   let playerForce = CreateForce()..addPlayer(triggerPlayer)
   ClearTextMessagesBJ(playerForce)
   playerForce.destr()
+
+  sync(triggerPlayer, () -> NotificationManager.getInstance().clear(triggerPlayer))
 
 // ============================================================================
 init

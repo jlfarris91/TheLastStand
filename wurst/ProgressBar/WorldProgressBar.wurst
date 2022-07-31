@@ -1,0 +1,279 @@
+package WorldProgressBar
+import UnitRecycler
+import ClosureTimers
+import Unit_ProgressBar
+import Math
+import LinkedList
+import Trace
+
+constant player PROGRESS_BAR_OWNER = DUMMY_PLAYER
+constant real PROGRESS_BAR_UPDATE_PROGRESS_INTERVAL = ANIMATION_PERIOD//0.01
+constant real PROGRESS_BAR_UPDATE_POSITION_INTERVAL = ANIMATION_PERIOD
+constant int DEATH_ANIMATION_INDEX = 101
+constant int ZERO_ANIMATION_INDEX = 0
+
+LinkedList<WorldProgressBar> g_updateVisuals
+CallbackPeriodic g_updateVisualsCallback
+
+LinkedList<WorldProgressBar> g_updatePositions
+CallbackPeriodic g_updatePositionsCallback
+
+// ============================================================================
+public class WorldProgressBar
+  private unit _bar
+  private unit _target
+  private vec2 _offset
+  private real _currentValue
+  private real _targetValue
+  private real _speed
+  private colorA _color
+
+  private real _currentAlpha
+  private real _targetAlpha
+  private real _alphaSpeed
+
+  // --------------------------------------------------------------------------
+  construct()
+    _bar = getDummyUnit(PROGRESS_BAR_DUMMY_ID)
+    _target = null
+    _offset = ZERO2
+    _currentValue = 0.0
+    _targetValue = 0.0
+    _speed = 1.0
+    _color = COLOR_WHITE
+    _currentAlpha = 1.0
+    _targetAlpha = 1.0
+    _alphaSpeed = 3.0
+
+    hide()
+    reset()
+  
+  // --------------------------------------------------------------------------
+  ondestroy
+    unregisterForVisualUpdate(this)
+    unregisterForPositionUpdate(this)
+    releaseDummyUnit(_bar)
+    _bar = null
+    _target = null
+    _currentValue = 0
+    _targetValue = 0
+
+  // --------------------------------------------------------------------------
+  function setPercentage(real percentage01)
+    setPercentage(percentage01, _speed)
+
+  // --------------------------------------------------------------------------
+  function setPercentage(real percentage01, real speed)
+    let delta = RAbsBJ(percentage01 - _currentValue)
+    if (delta > 0.01)
+      _targetValue = percentage01
+      _speed = speed
+      registerForVisualUpdate(this)
+
+  // --------------------------------------------------------------------------
+  function setPercentageNow(real percentage01)
+    _currentValue = percentage01
+    _targetValue = percentage01
+    setAnimationIndexByPercentage(percentage01)
+
+  // --------------------------------------------------------------------------
+  function getPercentage() returns real
+    return _currentValue
+
+  // --------------------------------------------------------------------------
+  function getPos() returns vec2
+    return _bar.getPos() - _offset
+
+  // --------------------------------------------------------------------------
+  function setPos(vec2 pos)
+    _bar.setPos(pos + _offset)
+
+  // --------------------------------------------------------------------------
+  function getOffset() returns vec2
+    return _offset
+
+  // --------------------------------------------------------------------------
+  function setOffset(vec2 pos)
+    _offset = pos
+
+  // --------------------------------------------------------------------------
+  function getHeight() returns real
+    return _bar.getFlyHeight()
+
+  // --------------------------------------------------------------------------
+  function setHeight(real offset)
+    _bar.setFlyHeight(offset, 0)
+
+  // --------------------------------------------------------------------------
+  function setScale(real scale)
+    _bar.setScale(scale)
+
+  // --------------------------------------------------------------------------
+  function setColor(playercolor color)
+    _bar.setColor(color)
+
+  // --------------------------------------------------------------------------
+  function setColor(colorA color)
+    _bar.setVertexColor(color)
+    _color = color
+    registerForVisualUpdate(this)
+
+  // --------------------------------------------------------------------------
+  function setTarget(unit u)
+    _target = u
+    updatePosition()
+    if (u != null)
+      registerForPositionUpdate(this)
+
+  // --------------------------------------------------------------------------
+  function getTarget() returns unit
+    return _target
+
+  // --------------------------------------------------------------------------
+  function setSpeed(real speed)
+    _speed = speed
+  
+  // --------------------------------------------------------------------------
+  function getSpeed() returns real
+    return _speed
+
+  // --------------------------------------------------------------------------
+  function fadeIn()
+    registerForVisualUpdate(this)
+    _targetAlpha = 1.0
+
+  // --------------------------------------------------------------------------
+  function fadeOut()
+    registerForVisualUpdate(this)
+    _targetAlpha = 0.0
+
+  // --------------------------------------------------------------------------
+  function getIsVisible() returns bool
+    return _bar.isHidden() == false
+
+  // --------------------------------------------------------------------------
+  function setVisible(bool visible)
+    if (visible)
+      show()
+    else
+      hide()
+
+  // --------------------------------------------------------------------------
+  function show()
+    _bar.show()
+
+  // --------------------------------------------------------------------------
+  function hide()
+    _bar.hide()
+
+  // --------------------------------------------------------------------------
+  function reset()
+    _bar.setAnimation(ZERO_ANIMATION_INDEX)
+    _currentValue = 0.0
+
+  // --------------------------------------------------------------------------
+  function updateVisuals(real dt)
+    let doneUpdatingProgress = updateProgress(dt)
+    let doneUpdatingAlpha = updateAlpha(dt)
+    if (doneUpdatingProgress and doneUpdatingAlpha)
+      unregisterForVisualUpdate(this)
+    if (_currentAlpha < 0.01)
+      hide()
+    if (_currentAlpha > 0.01)
+      show()
+        
+  // --------------------------------------------------------------------------
+  function updatePosition()
+    if (_target != null)
+      setPos(_target.getPos())
+
+  // --------------------------------------------------------------------------
+  private function updateProgress(real dt) returns bool
+    _currentValue = moveTowards(_currentValue, _targetValue, _speed * dt)
+    setAnimationIndexByPercentage(_currentValue)
+
+    let valueDelta = RAbsBJ(_targetValue - _currentValue)
+    if (valueDelta <= EPSILON)
+      _currentValue = _targetValue
+      return true
+
+    return false
+
+  // --------------------------------------------------------------------------
+  private function updateAlpha(real dt) returns bool
+    _currentAlpha = moveTowards(_currentAlpha, _targetAlpha, _alphaSpeed * dt)
+    
+    let alpha = lerpInt(0, 255, _currentAlpha)
+    _bar.setVertexColor(colorA(_color.red, _color.green, _color.blue, alpha))
+
+    let alphaDelta = RAbsBJ(_targetAlpha - _currentAlpha)
+    if (alphaDelta <= EPSILON)
+      _currentAlpha = _targetAlpha
+      return true
+
+    return false
+
+  // --------------------------------------------------------------------------
+  private function setAnimationIndexByPercentage(real t)
+    let animationIndex = clamp(R2I(t * 100.0), 0, 100)
+    _bar.setAnimation(animationIndex)
+
+// ============================================================================
+function getDummyUnit(int unitId) returns unit
+  return createUnitRecycled(PROGRESS_BAR_OWNER, unitId, ZERO2, angle(0))
+
+// ============================================================================
+function releaseDummyUnit(unit u)
+  u.setAnimation(DEATH_ANIMATION_INDEX)
+  u.stock()
+
+// ============================================================================
+function updateVisuals()
+  for progressBar in g_updateVisuals
+    if (progressBar != null)
+      progressBar.updateVisuals(PROGRESS_BAR_UPDATE_PROGRESS_INTERVAL)
+  Trace.trace("WorldProgressBar.visuals", g_updateVisuals.size())
+
+// ============================================================================
+function registerForVisualUpdate(WorldProgressBar progressBar)
+  if (g_updateVisuals.has(progressBar))
+    return
+  g_updateVisuals.add(progressBar)
+  if (not g_updateVisuals.isEmpty() and g_updateVisualsCallback == null)
+    g_updateVisualsCallback = doPeriodically(PROGRESS_BAR_UPDATE_PROGRESS_INTERVAL, cb -> updateVisuals())
+
+// ============================================================================
+function unregisterForVisualUpdate(WorldProgressBar progressBar)
+  if (not g_updateVisuals.remove(progressBar))
+    return
+  if (g_updateVisuals.isEmpty() and g_updateVisualsCallback != null)
+    destroy g_updateVisualsCallback
+    g_updateVisualsCallback = null
+
+// ============================================================================
+function updatePositions()
+  for progressBar in g_updatePositions
+    if (progressBar != null)
+      progressBar.updateVisuals(PROGRESS_BAR_UPDATE_POSITION_INTERVAL)
+  Trace.trace("WorldProgressBar.positions", g_updateVisuals.size())
+
+// ============================================================================
+function registerForPositionUpdate(WorldProgressBar progressBar)
+  if (g_updatePositions.has(progressBar))
+    return
+  g_updatePositions.add(progressBar)
+  if (not g_updatePositions.isEmpty() and g_updatePositionsCallback == null)
+    g_updatePositionsCallback = doPeriodically(PROGRESS_BAR_UPDATE_POSITION_INTERVAL, cb -> updatePositions())
+
+// ============================================================================
+function unregisterForPositionUpdate(WorldProgressBar progressBar)
+  if (not g_updatePositions.remove(progressBar))
+    return
+  if (g_updatePositions.isEmpty() and g_updatePositionsCallback != null)
+    destroy g_updatePositionsCallback
+    g_updatePositionsCallback = null
+
+// ============================================================================
+init
+  g_updateVisuals = new LinkedList<WorldProgressBar>()
+  g_updatePositions = new LinkedList<WorldProgressBar>()

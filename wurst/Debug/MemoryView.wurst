@@ -1,0 +1,658 @@
+package MemoryView
+import ClosureTimers
+import Frame
+import DebuggerDialog
+import LinkedList
+import HashMap
+import Range
+import DockPanel
+import Layout
+import WrapPanel
+import ClosureFrames
+import Math
+import StackPanel
+import Execute
+import ListBox
+import Vector
+import Object
+import Func
+import Events
+import HashList
+import Tasks
+import IterativeQuickSort
+import RealExtensions
+import ProjectConstants
+
+LinkedList<TypeInfo> g_typeInfos = new LinkedList<TypeInfo>()
+HashMap<int, TypeInfo> g_typeInfoLookup = new HashMap<int, TypeInfo>()
+int g_typeNameMaxLen = 50
+int g_typeId
+
+constant string g_typeNameCharString = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_."
+HashList<int> g_typeNameCharSet = new HashList<int>()
+
+TaskDefinition g_takeSnapshotTaskDef
+TaskDefinition g_sortSnapshotTaskDef
+
+// ============================================================================
+class TypeInfo
+
+  int m_typeId
+  int m_instanceCount
+  int m_instanceDelta
+  int m_instanceDeltaStartCount
+  int m_instanceTotal
+  int m_instanceMax
+  string m_typeName
+  string m_columnTypeName
+  bool m_passedFilter
+
+  Event1<string> propertyChanged = new Event1<string>()
+
+  // --------------------------------------------------------------------------
+  construct(int id)
+    m_typeId = id
+    m_typeName = typeIdToTypeName(id)
+    // m_columnTypeName = "{0} ({1}):".format(shortenName(m_typeName), m_typeId.toString())
+    m_columnTypeName = "{0} ({1}):".format(m_typeName, m_typeId.toString())
+    m_instanceDeltaStartCount = instanceCount(m_typeId)
+
+  // --------------------------------------------------------------------------
+  function shortenName(string typeName) returns string
+
+    let typeNameLength = typeName.length()
+
+    if (typeNameLength < g_typeNameMaxLen)
+      return typeName
+
+    var result = ""
+
+    for i = 0 to typeNameLength - 1
+      let char = typeName.charAt(i)
+      if (g_typeNameCharSet.has(char.getHash()))
+        result += char
+
+    return result
+
+  // --------------------------------------------------------------------------
+  function update()
+    m_instanceMax = maxInstanceCount(m_typeId)    
+    let newInstanceCount = instanceCount(m_typeId)    
+    m_instanceDelta = newInstanceCount - m_instanceDeltaStartCount    
+    m_instanceCount = newInstanceCount
+    propertyChanged.call(null)
+
+// ============================================================================
+enum SortProperty
+  TYPENAME
+  INSTANCE_COUNT
+  INSTANCE_DELTA
+  INSTANCE_MAX
+  COUNT
+
+// ============================================================================
+function SortProperty.toString() returns string
+  switch (this)
+    case TYPENAME
+      return "Name"
+    case INSTANCE_COUNT
+      return "Count"
+    case INSTANCE_DELTA
+      return "Delta"
+    case INSTANCE_MAX
+      return "Max"
+    case COUNT
+      return "COUNT"
+
+// ============================================================================
+enum SortDirection 
+  ASCENDING
+  DESCENDING
+  COUNT
+
+// ============================================================================
+function SortDirection.toString() returns string
+  switch (this)
+    case ASCENDING
+      return "Ascending"
+    case DESCENDING
+      return "Descending"
+    case COUNT
+      return "COUNT"
+
+// ============================================================================
+class MemoryItemFrame extends Frame
+  private framehandle m_headerTextFrame
+  private framehandle m_instanceCountTextFrame
+  private framehandle m_instanceDeltaTextFrame
+  private framehandle m_instanceMaxTextFrame
+
+  private _handle m_propertyChangedEventHandler
+
+  // --------------------------------------------------------------------------
+  construct(framehandle frame)
+    super(frame)
+
+    m_headerTextFrame = getFrame("MemoryViewItemHeaderText")
+    m_instanceCountTextFrame = getFrame("MemoryViewItemCountText")
+    m_instanceDeltaTextFrame = getFrame("MemoryViewItemDeltaText")
+    m_instanceMaxTextFrame = getFrame("MemoryViewItemMaxText")
+
+  // --------------------------------------------------------------------------
+  override protected function onDataContextChanged(object oldValue, object newValue)
+
+    if (m_propertyChangedEventHandler != INVALID_HANDLE)
+      let oldTypeInfo = oldValue.as<TypeInfo>(TypeInfo.typeId)
+      if (oldTypeInfo != null)
+        oldTypeInfo.propertyChanged.unregister(m_propertyChangedEventHandler)
+        m_propertyChangedEventHandler = INVALID_HANDLE
+
+    let newTypeInfo = newValue.as<TypeInfo>(TypeInfo.typeId)
+    if (newTypeInfo != null)
+      m_propertyChangedEventHandler = newTypeInfo.propertyChanged.register((propertyName) -> onDataContextPropertyChanged(propertyName))
+    
+    updateFrame()
+
+  // --------------------------------------------------------------------------
+  private function onDataContextPropertyChanged(string _propertyName)
+    updateFrame()
+
+  // --------------------------------------------------------------------------
+  private function updateFrame()
+
+    let typeInfo = getDataContext().as<TypeInfo>(TypeInfo.typeId)
+
+    if (m_headerTextFrame != null)
+      m_headerTextFrame.setText(typeInfo != null ? typeInfo.m_columnTypeName : "")
+
+    if (m_instanceCountTextFrame != null)
+      m_instanceCountTextFrame.setText(typeInfo != null ? typeInfo.m_instanceCount.toString() : "")
+
+    if (m_instanceDeltaTextFrame != null)
+      m_instanceDeltaTextFrame.setText(typeInfo != null ? typeInfo.m_instanceDelta.toString() : "")
+
+    if (m_instanceMaxTextFrame != null)
+      m_instanceMaxTextFrame.setText(typeInfo != null ? typeInfo.m_instanceMax.toString() : "")
+
+// ============================================================================
+class MemoryView extends DockPanel
+  private SortProperty m_sortProperty = SortProperty.INSTANCE_COUNT
+  private SortDirection m_sortDirection = SortDirection.DESCENDING
+  private Comparator<object> m_comparator
+  private string m_typeNameFilter = null
+  private rangeInt m_valueRange = rangeInt(1, 9999)
+
+  private ListBox m_listBox
+  private Vector<object> m_listSource
+
+  // private Frame m_topPanelFrame
+  private Frame m_typeNameFilterEditBox
+  private Frame m_minEditBox
+  private Frame m_maxEditBox
+  private Frame m_sortPropertyButton
+  private Frame m_sortDirectionButton
+  private Frame m_takeSnapshotButton
+  // private Frame m_loadingText
+  
+  private framehandle m_loadingPopup
+  private framehandle m_loadingPopupText
+
+  private Task m_takeSnapshotTask
+  private Task m_sortSnapshotTask
+  private UpdateSnapshotTaskContext m_takeMemorySnapshotTaskContext
+  private SortSnapshotTaskContext m_sortSnapshotTaskContext
+  private Progress m_progress
+
+  // --------------------------------------------------------------------------
+  construct(string name)
+    super(name)
+
+    setLastChildFills(true)
+
+    execute() () -> 
+      let stackPanel = new StackPanel("SP")
+      ..setDock(Dock.TOP)
+      ..setOrientation(LayoutOrientation.TOPTOBOTTOM)
+      addChild(stackPanel)
+
+      let topDockPanel = new DockPanel("TP")
+      ..setLastChildFills(true)
+      stackPanel.addChild(topDockPanel)
+
+      let stackPanel2 = new StackPanel("SP2")
+      ..setDock(Dock.RIGHT)
+      ..setOrientation(LayoutOrientation.LEFTTORIGHT)
+      topDockPanel.addChild(stackPanel2)
+
+      m_minEditBox = new Frame(createFrame("GLUEEDITBOX", "MNEB", GAME_UI, "MemoryViewPageEditBox", 0))
+      ..setSize(vec2(0.06, 0.03))
+      ..setText(m_valueRange.min.toString())
+      m_minEditBox.getFrameHandle().onEditboxEnter() -> 
+        m_valueRange.min = min(m_valueRange.max, m_minEditBox.getText().toInt())
+        m_minEditBox.setText(m_valueRange.min.toString())
+        filterAndSortSnapshot()
+      stackPanel2.addChild(m_minEditBox)
+
+      m_maxEditBox = new Frame(createFrame("GLUEEDITBOX", "MXEB", GAME_UI, "MemoryViewPageEditBox", 0))
+      ..setSize(vec2(0.06, 0.03))
+      ..setText(m_valueRange.max.toString())
+      m_maxEditBox.getFrameHandle().onEditboxEnter() -> 
+        m_valueRange.max = max(m_valueRange.min, m_maxEditBox.getText().toInt())
+        m_maxEditBox.setText(m_valueRange.max.toString())
+        filterAndSortSnapshot()
+      stackPanel2.addChild(m_maxEditBox)
+      m_maxEditBox.getFrameHandle().setParent(GAME_UI)
+      
+      m_typeNameFilterEditBox = new Frame(createFrame("GLUEEDITBOX", "TNEB", GAME_UI, "MemoryViewPageEditBox", 0))
+      ..setHeight(0.03)
+      m_typeNameFilterEditBox.getFrameHandle().onEditboxEnter() -> 
+        m_typeNameFilter = m_typeNameFilterEditBox.getText()
+        filterAndSortSnapshot()
+      topDockPanel.addChild(m_typeNameFilterEditBox)
+
+      let buttons = new WrapPanel("WP")
+      ..setOrientation(Orientation.HORIZONTAL)
+      ..setStretchItems(true)
+      stackPanel.addChild(buttons)
+
+      m_sortPropertyButton = new Frame(createFrame("GLUETEXTBUTTON", "SPB", GAME_UI, "MemoryViewPageButton", 0))
+      ..setHeight(0.02)
+      ..setText(m_sortProperty.toString())
+      m_sortPropertyButton.getFrameHandle().onClick() () ->
+        m_sortProperty = wrap((m_sortProperty castTo int) + 1, 0, (SortProperty.COUNT castTo int) - 1) castTo SortProperty
+        m_sortPropertyButton.setText(m_sortProperty.toString())
+        filterAndSortSnapshot()
+      buttons.addChild(m_sortPropertyButton)
+
+      m_sortDirectionButton = new Frame(createFrame("GLUETEXTBUTTON", "SDB", GAME_UI, "MemoryViewPageButton", 0))
+      ..setHeight(0.02)
+      ..setText(m_sortDirection.toString())
+      m_sortDirectionButton.getFrameHandle().onClick() () ->
+        m_sortDirection = wrap((m_sortDirection castTo int) + 1, 0, (SortDirection.COUNT castTo int) - 1) castTo SortDirection
+        m_sortDirectionButton.setText(m_sortDirection.toString())
+        filterAndSortSnapshot()
+      buttons.addChild(m_sortDirectionButton)
+
+      m_takeSnapshotButton = new Frame(createFrame("GLUETEXTBUTTON", "PAUS", GAME_UI, "MemoryViewPageButton", 0))
+      ..setHeight(0.02)
+      ..setText("Take Snapshot")
+      m_takeSnapshotButton.getFrameHandle().onClick() () ->
+        takeSnapshot()
+      buttons.addChild(m_takeSnapshotButton)
+
+      let resetDeltaButton = new Frame(createFrame("GLUETEXTBUTTON", "RSTDLT", GAME_UI, "MemoryViewPageButton", 0))
+      ..setHeight(0.02)
+      ..setText("Reset Delta")
+      resetDeltaButton.getFrameHandle().onClick() () ->
+        for typeInfo in g_typeInfos
+          typeInfo.m_instanceDeltaStartCount = typeInfo.m_instanceCount
+        takeSnapshot()
+      buttons.addChild(resetDeltaButton)      
+
+    m_loadingPopup = createFrame("LoadingPopupTemplate")
+    ..setParent(getFrameHandle())
+    ..setPoint(FRAMEPOINT_CENTER, getFrameHandle(), FRAMEPOINT_CENTER)
+    ..setLevel(10)
+    ..hide()
+
+    m_loadingPopupText = getFrame("LoadingPopupText", 0)
+
+    m_listSource = new Vector<object>(g_typeInfos.size())..fill(NULL)
+
+    let frameTemplate = new FrameTemplate()
+    ..setFrameDefinition(new NativeFrameDefinition("MemoryViewItemTemplate"))
+    ..setItemFrameFactory((framehandle frameHandle) -> new MemoryItemFrame(frameHandle))
+
+    m_listBox = new ListBox("LSTBX")
+    ..setOrientation(LayoutOrientation.TOPTOBOTTOM)
+    ..setItemsSource(m_listSource)
+    ..setItemFrameTemplate(frameTemplate)
+    addChild(m_listBox)
+
+    m_comparator = (object a, object b) -> compareTypeInfo(a.castUnsafe<TypeInfo>(), b.castUnsafe<TypeInfo>())
+    m_progress = new Progress(m_loadingPopupText)    
+    m_takeMemorySnapshotTaskContext = new UpdateSnapshotTaskContext(g_typeInfos, m_listSource, m_progress)
+    m_sortSnapshotTaskContext = new SortSnapshotTaskContext(g_typeInfos, m_listSource, m_comparator, m_progress, typeInfo -> filter(typeInfo))
+
+  // --------------------------------------------------------------------------
+  function getCaptureInProgress() returns bool
+    return m_takeSnapshotTask != null and m_takeSnapshotTask.running()
+
+  // --------------------------------------------------------------------------
+  function getSortingInProgress() returns bool
+    return m_sortSnapshotTask != null and m_sortSnapshotTask.running()
+
+  // --------------------------------------------------------------------------
+  private function takeSnapshot()
+    if (getCaptureInProgress() or getSortingInProgress())
+      return
+
+    m_takeMemorySnapshotTaskContext.reset()
+
+    m_loadingPopup.show()
+
+    m_takeSnapshotTask = g_takeSnapshotTaskDef.run(m_takeMemorySnapshotTaskContext)
+    ..setDestroyOnCompletion(true)
+    ..onCompleted((Task task) -> nullTimer(() -> filterAndSortSnapshot()))
+    m_takeSnapshotTask.onDestroy().register() (Task task) ->
+      m_takeSnapshotTask = null
+      m_loadingPopup.hide()
+
+  // --------------------------------------------------------------------------
+  private function filterAndSortSnapshot()
+    if (getCaptureInProgress() or getSortingInProgress())
+      return
+
+    m_sortSnapshotTaskContext.reset()
+
+    m_loadingPopup.show()
+
+    m_sortSnapshotTask = g_sortSnapshotTaskDef.run(m_sortSnapshotTaskContext)
+    ..setDestroyOnCompletion(true)
+    ..onCompleted((task) -> m_listBox.onItemSourceChanged())
+    m_sortSnapshotTask.onDestroy().register() (Task task) ->
+      m_sortSnapshotTask = null
+      m_loadingPopup.hide()
+
+  // --------------------------------------------------------------------------
+  private function compareTypeInfo(TypeInfo a, TypeInfo b) returns int
+    var sortValue = 0
+    switch (m_sortProperty)
+      case INSTANCE_COUNT
+        sortValue = a.m_instanceCount - b.m_instanceCount
+      case INSTANCE_DELTA
+        sortValue = a.m_instanceDelta - b.m_instanceDelta
+      case INSTANCE_MAX
+        sortValue = a.m_instanceMax - b.m_instanceMax
+      case TYPENAME | COUNT
+        skip
+    if (sortValue == 0)
+      sortValue = a.m_typeId - b.m_typeId
+    return m_sortDirection == SortDirection.ASCENDING ? sortValue : (sortValue * -1)
+
+  // --------------------------------------------------------------------------
+  private function filter(TypeInfo typeInfo) returns bool
+
+    if (m_valueRange.min != 0 and m_valueRange.max != 0)
+    //{
+      switch (m_sortProperty)
+        case INSTANCE_COUNT
+          if (typeInfo.m_instanceCount.isBetween(m_valueRange.min, m_valueRange.max) == false)
+            return false
+        case INSTANCE_DELTA
+          if (typeInfo.m_instanceDelta.isBetween(m_valueRange.min, m_valueRange.max) == false)
+            return false
+        case INSTANCE_MAX
+          if (typeInfo.m_instanceMax.isBetween(m_valueRange.min, m_valueRange.max) == false)
+            return false
+        case TYPENAME | COUNT
+          skip
+    //}
+
+    return m_typeNameFilter == null or m_typeNameFilter == "" or typeInfo.m_typeName.contains(m_typeNameFilter)
+
+// ============================================================================
+class Progress
+  private framehandle m_textFrame
+  private string m_text
+  private int m_progressMax
+  private int m_progressCounter
+
+  // --------------------------------------------------------------------------
+  construct (framehandle textFrame)
+    m_textFrame = textFrame
+
+  // --------------------------------------------------------------------------
+  function getText() returns string
+    return m_text
+
+  // --------------------------------------------------------------------------
+  function setText(string value)
+    m_text = value
+    updateTextFrame()
+
+  // --------------------------------------------------------------------------
+  function setWorkCount(int count)
+    m_progressMax = count
+
+  // --------------------------------------------------------------------------
+  function getWorkCount() returns int
+    return m_progressMax
+
+  // --------------------------------------------------------------------------
+  function getProgress01() returns real
+    return m_progressMax != 0 ? m_progressCounter / m_progressMax.toReal() : 0
+
+  // --------------------------------------------------------------------------
+  function reset()
+    m_progressCounter = 0
+    updateTextFrame()
+
+  // --------------------------------------------------------------------------
+  function progress()
+    m_progressCounter++
+    updateTextFrame()
+
+  // --------------------------------------------------------------------------
+  function progress(int count)
+    m_progressCounter += count
+    updateTextFrame()
+
+  // --------------------------------------------------------------------------
+  function progress(string text, int count)
+    m_text = text
+    m_progressCounter += count
+    updateTextFrame()
+
+  // --------------------------------------------------------------------------
+  private function updateTextFrame()
+    m_textFrame.setText(m_text + " " + getProgress01().toPercentageString01())
+
+// ============================================================================
+class SortSnapshotTaskContext
+  private LinkedList<TypeInfo> m_typeInfos = null
+  private Vector<object> m_listSource = null
+  private Comparator<object> m_comparator = null
+  private Func1<TypeInfo, bool> m_filter = null
+  private Progress m_progress = null
+  private IterativeQuickSort<object> m_sorter = null
+  private int m_readIndex
+  private int m_writeIndex
+  private int m_listSourceSize
+  private int m_maxIterations = 10
+  private int m_totalIterations
+
+  // --------------------------------------------------------------------------
+  construct(LinkedList<TypeInfo> typeInfos, Vector<object> listSource, Comparator<object> comparator, Progress progress, Func1<TypeInfo, bool> filter)
+    m_typeInfos = typeInfos
+    m_listSource = listSource
+    m_comparator = comparator
+    m_progress = progress
+    m_filter = filter.acquire()
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    m_listSource = null
+    m_comparator = null
+    m_filter.release()
+    m_progress = null
+
+    if (m_sorter != null)
+      destroy m_sorter
+      m_sorter = null
+
+  // --------------------------------------------------------------------------
+  function getTypeInfos() returns LinkedList<TypeInfo>
+    return m_typeInfos
+
+  // --------------------------------------------------------------------------
+  function reset()
+    m_progress.reset()
+
+    m_readIndex = 1
+    m_writeIndex = 0
+    m_totalIterations = 0
+
+    m_listSource.setSize(m_typeInfos.size())
+    m_listSourceSize = m_listSource.size()
+
+    if (m_sorter != null)
+      destroy m_sorter
+      m_sorter = null
+
+    m_progress.reset()
+    m_progress.setWorkCount(1)
+    m_progress.setText("Sorting snapshot...")
+
+  // --------------------------------------------------------------------------
+  function filterTypeInfo(TypeInfo typeInfo)
+    typeInfo.m_passedFilter = m_filter.call(typeInfo)
+
+  // --------------------------------------------------------------------------
+  function filterSwapInPlace() returns bool
+
+    var done = m_readIndex >= m_listSourceSize
+    var iterations = 0
+
+    while (iterations < m_maxIterations and not done)
+    //{
+      let itemAtWriteIndex = m_listSource.get(m_writeIndex).castUnsafe<TypeInfo>()
+      
+      var incrementWriteIndex = false
+
+      if (itemAtWriteIndex.m_passedFilter)
+        incrementWriteIndex = true
+      else
+        let itemAtReadIndex = m_listSource.get(m_readIndex).castUnsafe<TypeInfo>()
+        // We found an item that passes the filter, swap with it
+        if (itemAtReadIndex.m_passedFilter)
+          m_listSource.swap(m_writeIndex, m_readIndex)
+          incrementWriteIndex = true
+
+      if (incrementWriteIndex)
+        m_writeIndex++
+
+      m_readIndex++
+      iterations++
+      m_totalIterations++
+      done = m_readIndex >= m_listSourceSize
+    //}
+
+    if (done and m_writeIndex > 0)
+      m_listSource.setSize(m_writeIndex)
+      m_sorter = m_listSource.iterativeQuickSort(100, 1000, 0, m_writeIndex-1, m_comparator)
+
+    return not done
+
+  // --------------------------------------------------------------------------
+  function sort() returns bool
+    if (m_sorter == null)
+      return false
+    
+    if (m_sorter.hasNext())
+      m_sorter.next()
+
+    if (m_sorter.hasNext() == false)
+      m_progress.progress()
+
+    return m_sorter.hasNext()
+
+// ============================================================================
+class UpdateSnapshotTaskContext
+  private LinkedList<TypeInfo> m_typeInfos = null
+  private Vector<object> m_listSource = null
+  private Progress m_progress = null
+  private LLIterator<TypeInfo> m_typeInfoIterator = null
+  private int m_listSourceIndex = 0
+  private int m_maxIterations = 10
+  private int m_totalIterations = 0
+
+  // --------------------------------------------------------------------------
+  construct(LinkedList<TypeInfo> typeInfos, Vector<object> listSource, Progress progress)
+    m_typeInfos = typeInfos
+    m_listSource = listSource
+    m_progress = progress
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    m_typeInfos = null
+    m_listSource = null
+    m_progress = null
+
+    if (m_typeInfoIterator != null)
+      m_typeInfoIterator.close()
+      m_typeInfoIterator = null
+
+  // --------------------------------------------------------------------------
+  function reset()
+    m_listSourceIndex = 0
+    m_totalIterations = 0
+    
+    if (m_typeInfoIterator == null)
+      m_typeInfoIterator = m_typeInfos.iterator()
+    m_typeInfoIterator.reset()
+
+    m_listSource.setSize(m_typeInfos.size())
+    
+    m_progress.reset()
+    m_progress.setWorkCount(m_typeInfos.size())
+    m_progress.setText("Capturing snapshot...")
+
+  // --------------------------------------------------------------------------
+  function getTotalIterations() returns int
+    return m_totalIterations
+
+  // --------------------------------------------------------------------------
+  function updateTypeInfoBatch() returns bool
+    var iterations = 0
+    var done = m_listSourceIndex >= m_listSource.size() or not m_typeInfoIterator.hasNext()
+    while (iterations < m_maxIterations and not done)
+    //{
+      let typeInfo = m_typeInfoIterator.next()
+      typeInfo.update()
+      m_listSource.set(m_listSourceIndex, toObject(typeInfo, TypeInfo.typeId))
+      m_listSourceIndex++
+      iterations++
+      m_totalIterations++
+      done = m_listSourceIndex >= m_listSource.size() or not m_typeInfoIterator.hasNext()
+    //}
+    if (iterations > 0)
+      m_progress.progress(iterations)
+    return not done
+
+// ============================================================================
+init
+  Meta.register("MemoryView", registrar -> registerPackageMetadata(registrar))    
+
+  if (DEV_ENVIRONMENT)
+  //{
+    for i = 0 to g_typeNameCharString.length() - 1
+      g_typeNameCharSet.add(g_typeNameCharString.charAt(i).getHash())
+
+    g_typeId = 1
+    let maxTypeId = maxTypeId()
+    executeWhile(100, () -> g_typeId < maxTypeId) ->
+      if (typeIdToTypeName(g_typeId).contains("ObjEdit") == false)
+        let typeInfo = new TypeInfo(g_typeId)
+        g_typeInfoLookup.put(g_typeId, typeInfo)
+        g_typeInfos.add(typeInfo)
+      g_typeId++
+
+    g_takeSnapshotTaskDef = new ExecuteWhileTask2Definition<UpdateSnapshotTaskContext>(
+      null, "UpdateTypeInfos", 0.01, 1, (Task task, UpdateSnapshotTaskContext snapshot) -> snapshot.updateTypeInfoBatch())
+
+    g_sortSnapshotTaskDef = TaskDefinition.build(
+      builder -> begin
+        builder
+        ..forEachWhile2<SortSnapshotTaskContext, TypeInfo>("FilterTypeInfos", 0.01, 100, (Task task, SortSnapshotTaskContext snapshot) -> snapshot.getTypeInfos(), (Task task, SortSnapshotTaskContext snapshot, TypeInfo typeInfo) -> snapshot.filterTypeInfo(typeInfo))
+        ..executeWhile2<SortSnapshotTaskContext>("FilterSwapInPlace", 0.01, 1, (Task task, SortSnapshotTaskContext snapshot) -> snapshot.filterSwapInPlace())
+        ..executeWhile2<SortSnapshotTaskContext>("SortItemSource", 0.01, 1, (Task task, SortSnapshotTaskContext snapshot) -> snapshot.sort())
+      end)
+
+    DebuggerDialog.registerFrame("MEM", () -> new MemoryView("MEM"))
+  //}
+
+///////////////////////////////////////////////////////////////////////////////
+function registerPackageMetadata(MetaRegistrar registrar)
+  registrar.registerClass(TypeInfo.typeId)
+///////////////////////////////////////////////////////////////////////////////

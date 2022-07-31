@@ -3,8 +3,10 @@ import TlsUnitDefinition
 import HashList
 import DamageEvent
 import Damage
+import Dice
 
 HashList<int> g_undeadTargetBuildings = new HashList<int>()
+HashList<int> g_ignoreDamage = new HashList<int>()
 
 // ============================================================================
 public function BuildingDefinition.makeBuildingUndeadTarget()
@@ -13,9 +15,7 @@ public function BuildingDefinition.makeBuildingUndeadTarget()
   ..setAcquisitionRange(128)
   ..setAttack1AttackType(AttackType.Unknown)
   ..setAttack1CooldownTime(1.0)
-  ..setAttack1DamageBase(0)
-  ..setAttack1DamageNumberofDice(1)
-  ..setAttack1DamageSidesperDie(1)
+  ..setAttack1DamageDice(dice(0, 1, 1))
   ..setAttack1MaximumNumberofTargets(6)
   ..setAttack1Range(128)
   ..setAttack1RangeMotionBuffer(250.0)
@@ -31,18 +31,32 @@ public function BuildingDefinition.makeBuildingUndeadTarget()
   // ..setAttack1ProjectileSpeed(900)
   // ..setAttack1WeaponType(WeaponType.Missile)
 
-  g_undeadTargetBuildings.add(this.getNewId())
+  addUndeadTargetBuildingDefinition(this.getNewId(), true)
+
+// ============================================================================
+public function addUndeadTargetBuildingDefinition(int unitTypeId, bool ignoreDamage)
+  g_undeadTargetBuildings.add(unitTypeId)
+  if (ignoreDamage)
+    g_ignoreDamage.add(unitTypeId)
+
+// ============================================================================
+public function ITlsUnitDefinition.isBuildingUndeadTarget() returns bool
+  return g_undeadTargetBuildings != null and g_undeadTargetBuildings.has(this.getNewId())
 
 // ============================================================================
 public function unit.isBuildingUndeadTarget() returns bool
-  return g_undeadTargetBuildings.has(this.getTypeId())
+  return g_undeadTargetBuildings != null and g_undeadTargetBuildings.has(this.getTypeId())
+
+// ============================================================================
+public function unit.isBuildingUndeadTargetWithSpecialDamage() returns bool
+  return g_ignoreDamage != null and g_ignoreDamage.has(this.getTypeId())
 
 // ============================================================================
 function onUnitDamageDealt()
   let source = DamageEvent.getSource()
-  if (g_undeadTargetBuildings.has(source.getTypeId()))
+  if (g_ignoreDamage.has(source.getTypeId()))
     DamageEvent.setAmount(0)
 
 // ============================================================================
 init
-  DamageEvent.addListener(DAMAGE_EVENT_PRIO_FINAL, () -> onUnitDamageDealt())
+  DamageEvent.addListener(DAMAGE_EVENT_PRIO_ABSOLUTE, () -> onUnitDamageDealt())

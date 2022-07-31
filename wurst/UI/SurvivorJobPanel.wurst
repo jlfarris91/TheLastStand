@@ -1,13 +1,10 @@
 package SurvivorJobPanel
-import TLSFrame
+import Frame
 import ClosureTimers
-import LinkedList
 import SurvivorJobs
 import HashMap
 import SurvivorComponent
 import TlsUnitDefinition
-import StackPanelLayout
-import WrapPanelLayout
 import SurvivorJobFrame
 import HumanPlayers
 import LoadToc
@@ -15,14 +12,20 @@ import SurvivorJobComponent
 import ClosureKeyPresses
 import Survivors
 import TlsItemDefinition
+import StackPanel
+import Layout
 import BitSet
+import Vector
+import RealtimeUpdate
 
 constant string TOGGLEJOBSYNCDATAPREFIX = "TJK"
+constant rectr PANEL_AREA = rectr(0.21, 0.14, REAL_MAX, 0.035)
 
 HashMap<player, SurvivorJobPanel> g_playerSurvivorJobPanels = new HashMap<player, SurvivorJobPanel>()
-HashMap<SurvivorJobDefinition, SurvivorJobFrameUpdateData> g_survivorJobFrameUpdateDataMap = new HashMap<SurvivorJobDefinition, SurvivorJobFrameUpdateData>()
-group g_sharedSelectedUnitsGroup = CreateGroup()
+SurvivorJobFrameUpdateData array[g_survivorJobCount] g_survivorJobFrameUpdateData
 boolexpr g_selectedUnitsFilter = Condition(function filterEnumSelectedUnits)
+
+tuple unitData(unit _unit, bool allied, SurvivorComponent survivorComp, SurvivorJobDefinition activeJobDef)
 
 // ============================================================================
 public function getSurvivorJobPanel(player _player) returns SurvivorJobPanel
@@ -32,12 +35,9 @@ public function getSurvivorJobPanel(player _player) returns SurvivorJobPanel
 class SurvivorJobFrameUpdateData
   SurvivorJobDefinition m_job
   SurvivorJobFrameEnabledState m_enabledState = DISABLED
-  int m_level = 1
-  bool m_levelTextVisible = true
   string m_iconPath = UNKNOWN_JOB_ICON_PATH
   string m_iconPathDisabled = UNKNOWN_JOB_ICON_PATH
   int m_highestTier = -1
-  bool m_indeterminate = false
   string m_jobTitle = ""
   string m_jobTooltip = ""
   int m_numberOfUnits
@@ -49,12 +49,9 @@ class SurvivorJobFrameUpdateData
   // --------------------------------------------------------------------------
   function reset(bool isJobKnownToPlayer)
     m_enabledState = DISABLED
-    m_level = 1
-    m_levelTextVisible = true
     m_iconPath = UNKNOWN_JOB_ICON_PATH
     m_iconPathDisabled = UNKNOWN_JOB_ICON_PATH
     m_highestTier = -1
-    m_indeterminate = false
     m_jobTitle = ""
     m_jobTooltip = ""
     m_numberOfUnits = 0
@@ -67,33 +64,18 @@ class SurvivorJobFrameUpdateData
       m_jobTooltip = initialUnitDef.getTooltipExtended()
 
   // --------------------------------------------------------------------------
-  function addUnit(unit _unit)
+  function addUnit(unitData unitData)
 
-    let survivor = _unit.getSurvivorComponent()
-    if (survivor == null)
-      return
-
-    let jobComponent = survivor.getJobComponent(m_job)
+    let jobComponent = unitData.survivorComp.getJobComponent(m_job.getType())
     if (jobComponent == null)
       return
 
     let unitId = jobComponent.getUnitId()
-    let activeJob = survivor.getChangingJobs() ? survivor.getLastActiveJob() : survivor.getActiveJob()
-    let isAssigned = survivor.getChangingJobs() ? true : jobComponent.getIsAssigned()
+    let isAssigned = unitData.survivorComp.getChangingJobs() or jobComponent.getIsAssigned()
 
     m_numberOfUnits++
 
-    // If this is the active job then use the unit's current level
-    var jobLevel = jobComponent.getLevel()
-    if (activeJob == m_job)
-      jobLevel = _unit.getLevel()
-    
-    if (m_level != jobLevel)
-      if (m_numberOfUnits > 1)
-        m_indeterminate = true
-      m_level = jobLevel
-
-    if (activeJob == m_job)
+    if (unitData.activeJobDef == m_job)
       m_enabledState = ACTIVE
     else if (isAssigned and m_enabledState == DISABLED)
       m_enabledState = ENABLED
@@ -109,11 +91,8 @@ class SurvivorJobFrameUpdateData
 
   // --------------------------------------------------------------------------
   function updateFrame(SurvivorJobFrame frame)
-    frame.setLevel(m_level)
-    frame.setLevelTextVisible(m_levelTextVisible)
     frame.setIconPath(m_iconPath)
     frame.setIconPathDisabled(m_iconPathDisabled)
-    frame.setIsIndeterminate(m_indeterminate)
     frame.setEnabledState(m_enabledState)
     frame.setJobTitle(m_jobTitle)
     frame.setJobTooltip(m_jobTooltip)
@@ -129,132 +108,105 @@ function filterEnumSelectedUnits() returns bool
   return comp != null and comp.getEnabled()
 
 // ============================================================================
-public class SurvivorJobPanel extends TLSFrame
-  private IterableMap<SurvivorJobDefinition, SurvivorJobFrame> m_jobDefToFrameMap
-  private bitset m_visibleJobs
+public class SurvivorJobPanel extends StackPanel implements IRealtimeListener
+  private SurvivorJobFrame array[g_survivorJobCount] m_frames
   private group m_selectedUnits = CreateGroup()
 
-  // --------------------------------------------------------------------------
-  construct()
-    super(createFrame("FRAME", "SurvivorJobPanel", GAME_UI, "", 0))
-    m_jobDefToFrameMap = new IterableMap<SurvivorJobDefinition, SurvivorJobFrame>()
+  // Max number that can be selected at a time is 12
+  private unitData array[12] m_selectedUnitData
+  private int m_numSelectedUnits = 0
+  private Vector<int> array[g_survivorJobCount] m_survivorsGroupedByJob
 
   // --------------------------------------------------------------------------
-  override function initialize()
-    super.initialize()
+  construct(player _player)
+    super("SJP")
 
-    let panel = getFrameHandle()
-    panel.setAbsPoint(FRAMEPOINT_BOTTOMLEFT, 0.21, 0.14)
-    panel.setSize(0.3, 0.35)
+    setPlayer(_player)
 
-    for jobDef in g_allJobDefinitions
+    setOrientation(LayoutOrientation.LEFTTORIGHT)
+    setVerticalAlignment(VerticalLayoutMode.CENTER)
+
+    for i = 0 to SurvivorJobs.count - 1
     //{
-      let jobFrame = new SurvivorJobFrame()
-        ..setParent(panel)
-        ..setPlayer(getPlayer())
-        ..setJobDef(jobDef)
-        ..initialize()
+      let jobDef = SurvivorJobs.allJobDefinitions[i]
+
+      let jobFrame = new SurvivorJobFrame(_player)
+        ..setMargin(thickness(0.002))
+        ..setJobDef(jobDef.getType())
         ..hide()
+
+      addChild(jobFrame)
         
       let jobItemDef = getItemDefinition(jobDef.getItemType())
       if (jobItemDef != null)
         jobFrame.setItemName(jobItemDef.getName())
 
-      m_jobDefToFrameMap.put(jobDef, jobFrame)
+      m_frames[i] = jobFrame
+
+      m_survivorsGroupedByJob[i] = new Vector<int>(12)
     //}
-
-    invalidateLayout()
-
-    doPeriodically(0.1) (CallbackPeriodic cb) ->
-      update()
+    
+    this.registerForRealtimeUpdate(RealtimeUpdatePriority.Fast)
 
   // --------------------------------------------------------------------------
-  override function setPlayer(player value)
-    super.setPlayer(value)
-    for key in m_jobDefToFrameMap
-      m_jobDefToFrameMap.get(key).setPlayer(value)
-
-  // --------------------------------------------------------------------------
-  function getJobFrame(SurvivorJobDefinition jobDef) returns SurvivorJobFrame
-    return m_jobDefToFrameMap.get(jobDef)
-
-  // --------------------------------------------------------------------------
-  function update()
+  override function realtimeUpdate(real _)
     update_impl()
 
   // --------------------------------------------------------------------------
   private function update_impl()
 
-    updateSelectedUnits()
-    
-    var visibleJobs = emptyBitset()
+    m_selectedUnits.enumUnitsSelected(getPlayer(), g_selectedUnitsFilter)
+    m_numSelectedUnits = m_selectedUnits.size()
 
-    var jobIndex = 0
-    for jobDef in g_allJobDefinitions
-      if (updateJobFrame(jobDef))
-        visibleJobs = visibleJobs.set(jobIndex)
-      jobIndex++
+    let _player = getPlayer()
 
-    if (m_visibleJobs.val != visibleJobs.val)
-      m_visibleJobs = visibleJobs
-      invalidateLayout()
+    for i = 0 to SurvivorJobs.count - 1
+      m_survivorsGroupedByJob[i].clear()
 
-  // --------------------------------------------------------------------------
-  private function updateSelectedUnits()
-    
-    let owningPlayer = getPlayer()
-
-    g_sharedSelectedUnitsGroup.enumUnitsSelected(owningPlayer, g_selectedUnitsFilter)
-
-    m_selectedUnits.addGroup(g_sharedSelectedUnitsGroup)
-
-    // Remove units that are not selected or in the middle of changing jobs
-    for u in m_selectedUnits
-      let comp = u.getSurvivorComponent()
-      if (comp == null or not g_sharedSelectedUnitsGroup.contains(u))
-        m_selectedUnits.removeUnit(u)
-
-  // --------------------------------------------------------------------------
-  function invalidateLayout()
-    
-    let panel = getFrameHandle()
-
-    let layout = new WrapPanelLayout()
-    ..setOrientation(LayoutOrientation.UP)
-    ..setSpacing(vec2(0.002, 0.002))
-    ..layoutBegin()
-
-    for jobDef in g_allJobDefinitions
+    for i = 0 to m_numSelectedUnits - 1
     //{
-      let jobFrame = getJobFrame(jobDef)
-      if (jobFrame != null and jobFrame.getEnabledState() != SurvivorJobFrameEnabledState.DISABLED)
-        layout.layoutNextFrame(jobFrame.getFrameHandle(), panel)
+      let _unit = m_selectedUnits.getUnitAt(i)
+      let owner = _unit.getOwner()
+      let allied = owner == _player or owner.isAllyOf(_player)
+
+      m_selectedUnitData[i]._unit = _unit
+
+      let survivorComp = _unit.getSurvivorComponent()
+
+      m_selectedUnitData[i].survivorComp = survivorComp
+      m_selectedUnitData[i].activeJobDef = null
+
+      if (survivorComp != null and allied)
+      //{
+        m_selectedUnitData[i].activeJobDef = SurvivorJobs.getJobDefinition(survivorComp.getChangingJobs() ? survivorComp.getLastActiveJob() : survivorComp.getActiveJob())
+        if (m_selectedUnitData[i].activeJobDef != null)
+          let assignedJobs = survivorComp.getAssignedJobs()
+          for j = 0 to g_survivorJobCount-1
+            if (assignedJobs.get(j))
+              m_survivorsGroupedByJob[j].add(i)
+      //}
     //}
 
-    panel.setHeight(layout.getHeight())
-
-    layout.layoutEnd()
-    destroy layout
+    for i = 0 to SurvivorJobs.count - 1
+      updateJobFrame(_player, SurvivorJobs.allJobDefinitions[i])
 
   // --------------------------------------------------------------------------
-  private function updateJobFrame(SurvivorJobDefinition jobDef) returns bool
-
-    let jobFrame = m_jobDefToFrameMap.get(jobDef)
-    if (jobFrame == null)
-      return false
-
-    let panelPlayer = getPlayer()
-    let isJobKnown = true or jobDef.getIsJobKnownToPlayer(panelPlayer)
-    let updateData = g_survivorJobFrameUpdateDataMap.get(jobDef)
+  private function updateJobFrame(player _player, SurvivorJobDefinition jobDef) returns bool
+    let jobId = jobDef.getType() castTo int
+    let jobFrame = m_frames[jobId]
+    let isJobKnown = true or jobDef.getIsJobKnownToPlayer(_player)
+    let updateData = g_survivorJobFrameUpdateData[jobId]
+    let survivors = m_survivorsGroupedByJob[jobId]
 
     updateData.reset(isJobKnown)
 
-    if (isJobKnown)
+    if (isJobKnown and not survivors.isEmpty())
     //{
-      for _unit in m_selectedUnits
-        let unitOwner = _unit.getOwner()
-        if (unitOwner == panelPlayer or unitOwner.isAllyOf(panelPlayer))
-          updateData.addUnit(_unit)
+      let iter = survivors.staticItr()
+      iter.reset()
+      while iter.hasNext()
+        updateData.addUnit(m_selectedUnitData[iter.next()])
+      iter.close()        
     //}
 
     updateData.updateFrame(jobFrame)
@@ -270,11 +222,7 @@ function onToggleJobKeyPressed()
   let keyPressingPlayer = GetTriggerPlayer()
 
   let jobPanel = getSurvivorJobPanel(keyPressingPlayer)
-  if (jobPanel == null)
-    return
-
-  let frameHandle = jobPanel.getFrameHandle()
-  if (frameHandle == null or not frameHandle.isVisible() or not frameHandle.isEnabled())
+  if (jobPanel == null or not jobPanel.isVisible())
     return
 
   keyPressingPlayer.sendSyncData(TOGGLEJOBSYNCDATAPREFIX, keyPressingPlayer.getId().toString())
@@ -283,7 +231,7 @@ function onToggleJobKeyPressed()
 function onSynchronizedToggleJobKeyPressed()
   let syncData = BlzGetTriggerSyncData()
   let playerId = syncData.toInt()
-  let p = Player(playerId)
+  let p = players[playerId]
   if (p == null)
     Log.error("Could not find player with id " + syncData)
     return
@@ -293,16 +241,15 @@ function onSynchronizedToggleJobKeyPressed()
 init
   ensureTocIsLoaded()
 
-  for job in g_allJobDefinitions
-    g_survivorJobFrameUpdateDataMap.put(job, new SurvivorJobFrameUpdateData(job))    
+  for i = 0 to SurvivorJobs.count - 1
+    g_survivorJobFrameUpdateData[i] = new SurvivorJobFrameUpdateData(SurvivorJobs.allJobDefinitions[i])
 
   nullTimer() () ->
-    for p in g_PlayingHumanPlayers
-      let survivorJobPanel = new SurvivorJobPanel()
-      ..setPlayer(p)
-      ..initialize()
-      ..show()
-      g_playerSurvivorJobPanels.put(p, survivorJobPanel)
+    for _player in g_PlayingHumanPlayers
+      let survivorJobPanel = new SurvivorJobPanel(_player)
+      ..setAbsArea(FRAMEPOINT_BOTTOMLEFT, PANEL_AREA) // TODO: set max to 0.3 once max size is implemented
+      ..showOnly(_player)
+      g_playerSurvivorJobPanels.put(_player, survivorJobPanel)
 
   onKeyPress(OSKEY_Z, () -> onToggleJobKeyPressed())
 

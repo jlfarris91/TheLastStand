@@ -3,14 +3,13 @@ import RegisterEvents
 import Orders
 import TlsAbilityIds
 import GameConstants
-import LootableTypes
 import Abilities
 import ClosureTimers
 import FX
 import DisplayTextToPlayer
 import ColorUtility
-
-constant int ABILITY_RESCUE_ORDER = Orders.innerfire
+import Ability_RescueSurvivor
+import LootableTypes
 
 // ============================================================================
 function onRescueCast()
@@ -36,22 +35,28 @@ function onRescueCast()
 
 // ============================================================================
 function onRightClick()
-  let order = GetIssuedOrderId()
+  let issuedOrder = GetIssuedOrderId()
   let orderedUnit = GetOrderedUnit()
   let targetUnit = GetOrderTargetUnit()
 
-  if (order != Orders.smart or not targetUnit.isRescuableUnit())
+  let orderedUnitCanRescue = orderedUnit.hasAbility(TlsAbilityIds.rescueSurvivorHero) or
+                             orderedUnit.hasAbility(TlsAbilityIds.rescueSurvivorUnit)
+  if (not orderedUnitCanRescue)
     return
 
-  if (not orderedUnit.hasAbility(TlsAbilityIds.rescueSurvivorHero) and
-      not orderedUnit.hasAbility(TlsAbilityIds.rescueSurvivorUnit))
+  if (issuedOrder == Orders.smart and targetUnit.isRescuableUnit())
+    if (not orderedUnit.issueTargetOrder(ABILITY_RESCUE_ORDER, targetUnit))
+      Log.debug("Failed to issue rescue order")
     return
 
-  orderedUnit.issueTargetOrderById(ABILITY_RESCUE_ORDER, targetUnit)
+  if (issuedOrder == OrderId(ABILITY_RESCUE_ORDER_HEROACTION) and targetUnit.isRescuableUnit())
+    if (not orderedUnit.issueTargetOrder(ABILITY_RESCUE_ORDER, targetUnit))
+      Log.debug("Failed to issue rescue order")
+    return  
 
 // ============================================================================
 function unit.isRescuableUnit() returns bool
-  return not this.isLootable() and this.getOwner() == PLAYER_VILLAGERS
+  return not this.isLootable() and this.getOwner() == PLAYER_VILLAGERS and not this.isInvulnerable()
 
 // ============================================================================
 init

@@ -1,22 +1,27 @@
 package LootOperationComponent
 import RealtimeUnitComponent
-// import TextProgressBarTag
 import LootableComponent
 import LinkedList
 import HashMap
-import TextProgressBar
 import TimerUtils
 import ClosureTimers
 import FX
-import LootableUtility
 import DisplayTextToPlayer
 import TlsAbilityIds
 import Orders
 import ColorUtility
-import LootableTypes
 import RegisterEvents
-import ProgressBar
+import WorldProgressBar
 import Math
+import Ability_Search
+import LootableUtility
+import LootableTypes
+import SoundUtils
+import RealTime
+import IProgress
+import Notifications
+import Icons
+import Command
 
 constant int PROGRESS_BAR_LENGTH = 20
 constant colorA PROGRESS_BAR_FOREGROUND = colorA(0, 170, 0, 255)
@@ -26,15 +31,18 @@ constant real PROGRESS_BAR_UPDATE_PERIOD = 0.1
 LinkedList<LootOperationComponent> g_activeOperations
 HashMap<unit, LootOperationComponent> g_looterToOperationMap = new HashMap<unit, LootOperationComponent>()
 
-TextProgressBar g_LootOperationProgressBar
+SoundDefinition g_notEnoughManaSoundDef
+SoundDefinition g_errorSoundDef
+int array g_notEnoughManaLastPlayedTime
 
 // ============================================================================
 public class LootOperationComponent extends RealtimeUnitComponent
   private unit m_lootingUnit
-  private ProgressBar m_progressBar
+  private WorldProgressBar m_worldProgressBar
+  private Progress m_progress
+  private Notification m_notification
   private real m_duration
   private timer m_timer
-  private timerdialog m_timerDialog
   private int m_secondsElapsed
   private real m_manaCost
   private bool m_isRunning
@@ -44,28 +52,35 @@ public class LootOperationComponent extends RealtimeUnitComponent
     super(owner)
     
     m_timer = getTimer()
-    m_timerDialog = CreateTimerDialog(m_timer)..display(false)
-    m_progressBar = new ProgressBar()..setHeight(128.0)..setScale(16.0)
+
+    m_worldProgressBar = new WorldProgressBar()
+    ..setHeight(128.0)
+    ..setScale(16.0)
 
   // --------------------------------------------------------------------------
   ondestroy
-
-    if (m_timerDialog != null)
-      m_timerDialog.destr()
-      m_timerDialog = null
 
     if (m_timer != null)
       m_timer.release()
       m_timer = null
     
-    if (m_progressBar != null)
-      destroy m_progressBar
-      m_progressBar = null
+    if (m_worldProgressBar != null)
+      destroy m_worldProgressBar
+      m_worldProgressBar = null
+
+    if (m_notification != null)
+      m_notification.close()
+      m_notification.release()
+      m_notification = null
+
+    if (m_progress != null)
+      destroy m_progress
+      m_progress = null
 
   // --------------------------------------------------------------------------
   override function onEnabled()
     super.onEnabled()
-    m_progressBar..setPos(getOwnerUnit().getPos())
+    m_worldProgressBar..setPos(getOwnerUnit().getPos())
 
   // --------------------------------------------------------------------------
   override function onDisabled()
@@ -91,10 +106,12 @@ public class LootOperationComponent extends RealtimeUnitComponent
 
     if (getIsRunning() == false)
       return
+    
+    let percentage01 = parameterize01(m_duration, 0.0, m_timer.getRemaining())
+    m_progress.report(percentage01)
 
-    if (m_progressBar != null)
-      let percentage01 = parameterize01(m_duration, 0.0, m_timer.getRemaining())
-      m_progressBar.setPercentageNow(percentage01)
+    if (m_worldProgressBar != null)
+      m_worldProgressBar.setPercentageNow(percentage01)
 
     // Remove mana per second
     let secondsElapsed = m_timer.getElapsed().floor()
@@ -113,20 +130,33 @@ public class LootOperationComponent extends RealtimeUnitComponent
     m_isRunning = true
     m_lootingUnit = looter
     m_duration = duration
+    
+    let lootingPlayer = looter.getOwner()
+    let cameraPos = getOwnerUnit().getPos()
 
     // Avoid implicit capture of 'this' by caching the result of m_lootableUnit
     let lootableUnitCached = getOwnerUnit()
     m_timer.doManual(duration, true, () -> onOperationFinished(lootableUnitCached))
 
-    // m_progressBar.showForPlayer(looter.getOwner())
-    m_progressBar
+    m_progress = new Progress()
+    m_progress.report("Looting {0}...".format(getOwnerUnit().getName()))
+
+    m_worldProgressBar
     ..setPos(looter.getPos())
     ..setSpeed(1.0 / m_duration)
     ..fadeIn()
 
-    m_timerDialog
-    ..setTitle("Looting {0}...".format(getOwnerUnit().getName()))
-    ..display(looter.getOwner(), true)
+    m_notification = new Notification(duration)
+    ..setProgress(m_progress)
+    ..setIconPath(Icons.bTNTelescope)
+    ..setMessage("Looting {0}...".format(getOwnerUnit().getName()))
+    ..setCanClose(false)
+    ..setClickCommand(new RoutedCommand(() -> begin
+      if (localPlayer == lootingPlayer)
+        PanCameraToTimedForPlayer(lootingPlayer, cameraPos.x, cameraPos.y, 0)
+    end))
+    ..show(lootingPlayer)
+    ..acquire()
 
     g_looterToOperationMap.put(looter, this)
 
@@ -169,8 +199,16 @@ public class LootOperationComponent extends RealtimeUnitComponent
     m_lootingUnit = null
 
     m_timer.pause()
-    m_progressBar.fadeOut()
-    m_timerDialog.display(false)
+    m_worldProgressBar.fadeOut()
+    
+    if (m_notification != null)
+      m_notification.close()
+      m_notification.release()
+      m_notification = null
+
+    if (m_progress != null)
+      destroy m_progress
+      m_progress = null
 
     this.unregisterForRealtimeUpdate()
 
@@ -235,6 +273,7 @@ function onSpellChannel()
 
   let lootingUnit = GetSpellAbilityUnit()
   let lootableUnit = GetSpellTargetUnit()
+  let lootingPlayer = lootingUnit.getOwner()
 
   let looterMetadata = lootingUnit.getMetadata()
   if (looterMetadata == null)
@@ -254,15 +293,24 @@ function onSpellChannel()
   if (lootable == null or not lootable.getEnabled())
     lootingUnit.issueImmediateOrderById(Orders.stop)
     lootingUnit.resetAbilityCooldown(TlsAbilityIds.search)
-    displayMessageToPlayer(lootingUnit.getOwner(), "Failed To Search".colorize(Colors.red) + " Must target a lootable unit to search")
+    displayMessageToPlayer(lootingPlayer, "Failed To Search".colorize(Colors.red) + " Must target a lootable unit to search")
+    g_errorSoundDef.playForPlayer(lootingPlayer)
     return
 
   let scaledSearchDuration = getUnitSearchDuration(lootingUnit, lootable.getSearchDuration())
-  if (canUnitSearchForDuration(lootingUnit, scaledSearchDuration) == false)
+  let manaRemainingAfterSearch = calculateManaRemainingAfterLootOperation(lootingUnit, scaledSearchDuration)
+  if (manaRemainingAfterSearch < 0)
+  //{
     lootingUnit.issueImmediateOrderById(Orders.stop)
     lootingUnit.resetAbilityCooldown(TlsAbilityIds.search)
-    displayMessageToPlayer(lootingUnit.getOwner(), "Failed To Search".colorize(Colors.red) + " You do not have enough mana to loot this structure.")
+    let manaNeeded = (lootingUnit.getMana() + manaRemainingAfterSearch.abs()).floor()
+    displayMessageToPlayer(lootingPlayer, "Failed To Search".colorize(Colors.red) + " You need {0} mana to loot this structure.".format(manaNeeded.toString()))
+    g_errorSoundDef.playForPlayer(lootingPlayer)
+    if (getRealTimeSeconds() - g_notEnoughManaLastPlayedTime[lootingPlayer.getId()] > 2)
+      g_notEnoughManaLastPlayedTime[lootingPlayer.getId()] = getRealTimeSeconds()
+      doAfter(0.5, () -> g_notEnoughManaSoundDef.playForPlayer(lootingPlayer))
     return
+  //}
 
   let lootOperation = lootableMetadata.getLootOperationComponent()
   if (lootOperation != null and lootOperation.getIsRunning())
@@ -270,7 +318,8 @@ function onSpellChannel()
     if (lootOperation.getLooter() != lootingUnit)
       lootingUnit.issueImmediateOrderById(Orders.stop)
       lootingUnit.resetAbilityCooldown(TlsAbilityIds.search)
-      displayMessageToPlayer(lootingUnit.getOwner(), "Failed To Search".colorize(Colors.red) + " Lootable is already being looted")
+      displayMessageToPlayer(lootingPlayer, "Failed To Search".colorize(Colors.red) + " Lootable is already being looted")
+      g_errorSoundDef.playForPlayer(lootingPlayer)
       return
     else
       let activeLootingOperation = g_looterToOperationMap.get(lootingUnit)
@@ -290,10 +339,18 @@ function onUnitIssuedUnitOrder()
   let targetUnit = GetOrderTargetUnit()
   let issuedOrder = GetIssuedOrderId()
 
+  let unitCanSearch = orderedUnit.hasAbility(TlsAbilityIds.search)
+
   // Stop and issue a search order instead
-  if (issuedOrder == Orders.smart and targetUnit.isLootable())
+  if (issuedOrder == Orders.smart and targetUnit.isLootable() and unitCanSearch)
     // Log.info("ordered to search instead")
-    orderedUnit.issueTargetOrderById(ABILITY_SEARCH_ORDER, targetUnit)
+    if (not orderedUnit.issueTargetOrder(ABILITY_SEARCH_ORDER, targetUnit))
+      Log.debug("Could not issue search order")
+    return
+
+  if (issuedOrder == OrderId(ABILITY_SEARCH_ORDER_HEROACTION) and targetUnit.isLootable() and unitCanSearch)
+    if (not orderedUnit.issueTargetOrder(ABILITY_SEARCH_ORDER, targetUnit))
+      Log.debug("Could not issue search order")
     return
 
   let lootingOperation = g_looterToOperationMap.get(orderedUnit) 
@@ -303,7 +360,7 @@ function onUnitIssuedUnitOrder()
 
   // If the order issued was search and its the same target lootable dont cancel the operation here.
   // Instead, we'll resume the loot operation as if nothing happened.
-  if (issuedOrder == ABILITY_SEARCH_ORDER and lootingOperation.getOwnerUnit() == targetUnit)
+  if (issuedOrder == OrderId(ABILITY_SEARCH_ORDER) and lootingOperation.getOwnerUnit() == targetUnit)
     // Log.info("ordered to search same lootable")
     return
 
@@ -322,8 +379,7 @@ function onUnitIssuedImmediateOrPointOrder()
 
 // ============================================================================
 init
-  
-  g_LootOperationProgressBar = new TextProgressBar(PROGRESS_BAR_LENGTH, PROGRESS_BAR_FOREGROUND, PROGRESS_BAR_BACKGROUND)
+
   g_activeOperations = new LinkedList<LootOperationComponent>()
   
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_SPELL_CHANNEL, function onSpellChannel)
@@ -331,3 +387,6 @@ init
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ISSUED_UNIT_ORDER, function onUnitIssuedUnitOrder)
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ISSUED_ORDER, function onUnitIssuedImmediateOrPointOrder)
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ISSUED_POINT_ORDER, function onUnitIssuedImmediateOrPointOrder)
+
+  g_errorSoundDef = new SoundDefinition("sound\\interface\\warning\\human\\error.flac")
+  g_notEnoughManaSoundDef = new SoundDefinition("sound\\dialogue\\genericwarnings\\genericwarningnomana1.flac")

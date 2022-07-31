@@ -1,0 +1,89 @@
+package SolarGeneratorComponent
+import UnitComponent
+import PowerSourceComponent
+import ClosureTimers
+import Time
+import HashList
+
+constant real GENERATE_POWER_INTERVAL = 1.0
+constant real GENERATE_POWER_RATE = 6.0
+HashList<unit> g_solarGenerators = new HashList<unit>()
+CallbackPeriodic g_generatePowerTimer
+
+// ============================================================================
+public class SolarGeneratorComponent extends UnitComponent
+  private PowerSourceComponent m_powerSource
+
+  // --------------------------------------------------------------------------
+  construct (IUnitMetadata metadata)
+    super(metadata)
+
+  // --------------------------------------------------------------------------
+  override function onEnabled()
+    super.onEnabled()
+    
+    m_powerSource = getOwner().getOrAddPowerSourceComponent()
+    m_powerSource.setMaxConsumers(3)
+    m_powerSource.setPowerDepletionRatePerConsumer(2)
+
+    registerActiveGenerator(getOwnerUnit())
+
+  // --------------------------------------------------------------------------
+  override function onDisabled()
+    super.onDisabled()
+    unregisterActiveGenerator(getOwnerUnit())
+
+  // --------------------------------------------------------------------------
+  protected function generatePower()
+    m_powerSource.generatePower(GENERATE_POWER_RATE)
+
+// ============================================================================
+public function IUnitMetadata.getSolarGeneratorComponent() returns SolarGeneratorComponent
+  return this.getComponent(SolarGeneratorComponent.typeId) castTo SolarGeneratorComponent
+
+// ============================================================================
+public function IUnitMetadata.getOrAddSolarGeneratorComponent() returns SolarGeneratorComponent
+  var component = this.getSolarGeneratorComponent()
+  if (component == null)
+    component = this.addComponent(new SolarGeneratorComponent(this)) castTo SolarGeneratorComponent
+  return component
+
+// ============================================================================
+function generatePower()
+  for powerSource in g_solarGenerators
+    let metadata = powerSource.getMetadata()
+    if (metadata != null)
+      let comp = metadata.getSolarGeneratorComponent()
+      if (comp != null)
+        comp.generatePower()
+
+// ============================================================================
+function registerActiveGenerator(unit generator)
+  g_solarGenerators.add(generator)
+  
+  if (g_solarGenerators.size() == 1 and g_generatePowerTimer == null)
+    g_generatePowerTimer = doPeriodically(GENERATE_POWER_INTERVAL, (CallbackPeriodic cb) -> generatePower())
+
+// ============================================================================
+function unregisterActiveGenerator(unit generator)
+  g_solarGenerators.remove(generator)
+  
+  if (g_solarGenerators.size() == 0 and g_generatePowerTimer != null)
+    destroy g_generatePowerTimer
+    g_generatePowerTimer = null
+
+// ============================================================================
+function onDayStarted()
+  if (not g_solarGenerators.isEmpty() and g_generatePowerTimer == null)
+    g_generatePowerTimer = doPeriodically(GENERATE_POWER_INTERVAL, (CallbackPeriodic cb) -> generatePower())
+
+// ============================================================================
+function onNightStarted()
+  if (g_generatePowerTimer != null)
+    destroy g_generatePowerTimer
+    g_generatePowerTimer = null
+
+// ============================================================================
+init
+  registerDayEvent(function onDayStarted)
+  registerNightEvent(function onNightStarted)

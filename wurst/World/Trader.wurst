@@ -1,0 +1,556 @@
+package Trader
+import GroupUtils
+import Transform
+import ClosureTimers
+import Vector
+import UnitIndexer
+// import FX
+// import Gradient
+import ColorUtility
+import Tasks
+import LinkedList
+import IterativeQuickSort
+import IProgress
+import ErrorHandling
+import DebuggerDialog
+import RealExtensions
+import ProjectConstants
+import Time
+import GameConstants
+import TlsUnitDefinition
+import GameInstance
+import Func
+import Bounds
+import Math
+import Quaternion
+import UnitExtensions
+import AbilityIds
+import MinimapIcon
+import HumanPlayers
+import Range
+import Host
+import PlayerExtensions
+import HumanPlayerComponent
+import ItemType
+import Notifications
+import Icons
+import Command
+import TlsItemDefinition
+import ObjectIdGenerator
+import RegisterEvents
+import FX
+import TlsSounds
+
+LinkedList<TradingPost> g_tradingPosts = new LinkedList<TradingPost>()
+Vector<TradingPost> g_tradingPostsSorted = new Vector<TradingPost>()
+group g_invalidatingUnits = CreateGroup()
+// GradientColorList g_debugGradient
+TaskDefinition g_updateTaskDef
+Task g_updateTask
+UpdateTraderPostTaskContext g_updateTaskContext
+Comparator<TradingPost> g_comparator
+Func1<unit, bool> g_doesUnitInvalidateTraderSpawnPoint
+
+// 2 | 1
+// --|--
+// 0 | 3
+bounds array[4] g_quadrants = [
+  bounds(boundMin, boundCenter),
+  bounds(boundCenter, boundMax),
+  bounds(boundMin + vec2(0, boundCenter.y - boundMin.y), boundCenter + vec2(0, boundMax.y - boundCenter.y)),
+  bounds(boundMin + vec2(boundCenter.x - boundMin.x, 0), boundCenter + vec2(boundMax.x - boundCenter.x, 0))
+]
+
+int g_currentQuadrant = GetRandomInt(0, 3)
+TradingPost g_currentTradingPost
+Vector<TradingPost> g_tradingPostCandidates = new Vector<TradingPost>()
+vec2 g_currentRevealCenter = ZERO2
+
+unit g_traderUnit
+unit g_traderHorseUnit
+constant transform g_traderLocalTransform = transform(ZERO3, ZERO3, IDENTITYQ, 1.0)
+constant transform g_traderHorseLocalTransform = transform(vec3(-32.0, -64.0, 0), ZERO3, eulerToQuat(124.0.toRadians(), 0, 0), 1.0)
+effect g_flareEffect
+
+minimapicon array g_playerHintAreaIcons
+bool array g_playerShowHintAreaIcons
+string array g_playerHintAreaListenerName
+bool array g_playerHasFoundTrader
+bool array g_playerHintRevealed
+constant color HINT_AREA_ICON_COLOR = Colors.gold.withoutAlpha()
+
+Vector<int> g_stockedItemTypeIds = new Vector<int>()
+
+constant int ITEM_ID_LUMBER_TO_GOLD = compiletime(ITEM_ID_GEN.next())
+constant int ITEM_ID_GOLD_TO_LUMBER = compiletime(ITEM_ID_GEN.next())
+
+// ============================================================================
+class TradingPost
+  transform transform
+  real dd
+  // effect debug
+
+// ============================================================================
+function indexAllBaseUnits()
+  let temp = getGroup()
+  temp.enumUnitsAll(null)
+  for _unit in temp
+    if (_unit.getTypeId() == TlsUnitIds.tradingPost)
+      indexTradingPostUnit(_unit)
+  temp.release()
+
+// ============================================================================
+function indexTradingPostUnit(unit tradingPostUnit)
+  let traderPost = new TradingPost()
+  traderPost.transform = tradingPostUnit.getTransform()
+  traderPost.dd = REAL_MAX
+  // traderPost.debug = FX.createEffect("UI\\Feedback\\WaypointFlags\\WaypointFlag.mdl", traderPost.transform.pos.toVec2())
+  //       // ..setColor(Colors.clear)
+  //       ..setScale(2.0)
+  g_tradingPosts.add(traderPost)
+  g_tradingPostsSorted.add(traderPost)
+  tradingPostUnit.remove()
+
+// ============================================================================
+function initialize()
+  indexAllBaseUnits()
+
+  g_traderUnit = createUnit(PLAYER_VILLAGERS, TlsUnitIds.trader, ZERO2, angle(0))..hide()
+  g_traderHorseUnit = createUnit(PLAYER_VILLAGERS, TlsUnitIds.traderHorse, ZERO2, angle(0))..hide()
+
+// ============================================================================
+function update(TradingPost ts)
+  let p = ts.transform.pos.toVec2()
+  ts.dd = REAL_MAX
+  for u in g_invalidatingUnits
+    let dd = p.distanceToSq(u.getPos())
+    ts.dd = min(ts.dd, dd)
+
+// ============================================================================
+function registerInvalidatingUnit(unit invalidatingUnit)
+  g_invalidatingUnits.addUnit(invalidatingUnit)
+  update()
+
+// ============================================================================
+function unregisterInvalidatingUnit(unit invalidatingUnit)
+  g_invalidatingUnits.removeUnit(invalidatingUnit)
+  update()
+
+// ============================================================================
+function update()
+  
+  if (g_updateTask != null)
+    g_updateTask.cancel()
+    g_updateTask = null
+
+  if (g_updateTaskContext != null)
+    error("Update task context is not null!")
+
+  g_updateTaskContext = new UpdateTraderPostTaskContext()
+  g_updateTask = g_updateTaskDef.run(g_updateTaskContext)
+  ..setDestroyOnCompletion(true)
+  ..onCompleted((Task arg1) -> begin
+    g_updateTask = null
+    if (g_updateTaskContext != null)
+      destroy g_updateTaskContext
+      g_updateTaskContext = null
+  end)
+
+// ============================================================================
+class UpdateTraderPostTaskContext
+  Progress progress
+  IterativeQuickSort<TradingPost> sorter
+  int traderPostIndex
+  int traderPostCount
+
+  // --------------------------------------------------------------------------
+  construct()
+    progress = new Progress()
+    sorter = g_tradingPostsSorted.iterativeQuickSort(10, 100, g_comparator)
+    traderPostIndex = 0
+    traderPostCount = g_tradingPostsSorted.size()
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    destroy progress
+    destroy sorter
+
+  // --------------------------------------------------------------------------
+  function updateNextTraderPost() returns bool
+    if (traderPostIndex >= traderPostCount)
+      return false
+    let progressT = traderPostIndex.toReal() / traderPostCount
+    progress.report(progressT, "Updating trader posts...")
+    let traderPost = g_tradingPosts.get(traderPostIndex)
+    update(traderPost)
+    traderPostIndex++
+    return traderPostIndex < traderPostCount
+
+  // --------------------------------------------------------------------------
+  function stepSort() returns bool
+    traderPostIndex = 0
+    if (not sorter.hasNext())
+      return false
+    progress.report(0.0, "Sorting ({0})...".format(sorter.getStackSize().toString()))
+    return sorter.next()
+
+  // // --------------------------------------------------------------------------
+  // function updateDebug()
+  //   let size = g_tradingPostsSorted.size()
+  //   for i = 0 to size-1
+  //     let ts = g_tradingPostsSorted.get(i)
+  //     if (ts.dd != REAL_MAX)
+  //       let t = i.toReal() / (size-1)
+  //       ts.debug.setColor(g_debugGradient.sample(t))
+  //     else
+  //       ts.debug.setColor(Colors.black)
+
+// ============================================================================
+public class TraderPostDebugger extends DebuggerRealtimeUpdateFrame
+
+  // --------------------------------------------------------------------------
+  construct()
+    super(createFrame("TEXTAREA", "TraderPostDebugger", GAME_UI, "", 0))
+
+  // --------------------------------------------------------------------------
+  override function realtimeUpdate(real _)
+    let frameHandle = getFrameHandle()
+
+    BlzFrameSetText(frameHandle, "Trading Posts: " + g_tradingPosts.size().toString())
+    BlzFrameAddText(frameHandle, "Quadrant: " + g_currentQuadrant.toString())
+    BlzFrameAddText(frameHandle, "Current: " + (g_currentTradingPost != null ? g_currentTradingPost.transform.pos.toVec2().toString() : "None"))
+    BlzFrameAddText(frameHandle, "Trader: " + (g_traderUnit.isHidden() ? "Hidden" : "Visible"))
+
+    if (g_updateTask == null or g_updateTaskContext == null)
+      BlzFrameAddText(frameHandle, "Operation: Standby")
+    else
+      BlzFrameAddText(frameHandle, "Operation: " + g_updateTaskContext.progress.getMessage() + " " + g_updateTaskContext.progress.getProgress().toPercentageString01())
+
+    let selectedUnit = g_HostPlayer.getFirstSelectedUnit()
+    if (selectedUnit == null)
+      BlzFrameSetText(frameHandle, "Select a unit for more info")
+      return
+
+    let selectedPlayer = selectedUnit.getOwner()
+    BlzFrameAddText(frameHandle, "Selected Player: " + selectedPlayer.getName())
+    BlzFrameAddText(frameHandle, "  Show Icon: " + g_playerShowHintAreaIcons[selectedPlayer.getId()].toString())
+    BlzFrameAddText(frameHandle, "  Listener: " + g_playerHintAreaListenerName[selectedPlayer.getId()])
+    BlzFrameAddText(frameHandle, "  Found Trader: " + g_playerHasFoundTrader[selectedPlayer.getId()].toString())
+    BlzFrameAddText(frameHandle, "  Hint Revealed: " + g_playerHintRevealed[selectedPlayer.getId()].toString())
+
+// ============================================================================
+function getNextTradingPost() returns TradingPost
+
+  g_currentQuadrant = wrap(g_currentQuadrant + 1, 0, 3)
+  let quadrant = g_quadrants[g_currentQuadrant]
+
+  g_tradingPostCandidates.clear()
+  let tradingPostCount = g_tradingPostsSorted.size()
+
+  var i = 0
+  while (g_tradingPostCandidates.size() < g_tradingPostCandidates.capacity() and i < tradingPostCount-1)
+  //{
+    let tp = g_tradingPostsSorted.get(i)
+    if (quadrant.contains(tp.transform.pos.toVec2()))
+      g_tradingPostCandidates.push(tp)
+    i++
+  //}
+
+  return g_tradingPostCandidates.getRandom()
+
+// ============================================================================
+function getNextHintAreaCenter() returns vec2
+  
+  if (g_currentTradingPost == null)
+    return vec2(REAL_MAX, REAL_MAX)
+  
+  var center = g_currentTradingPost.transform.pos.toVec2()
+  center = center.polarOffset(GetRandomReal(0, 360).asAngleDegrees(), GetRandomReal(0, 0.5) * TRADER_REVEAL_RADIUS)
+
+  var bounds = bounds(center, TRADER_REVEAL_RADIUS)
+  bounds = fitToBounds(mapBounds, bounds)
+
+  return bounds.center()
+
+// ============================================================================
+function selectNextTradingPost()
+  g_currentTradingPost = getNextTradingPost()
+  g_currentRevealCenter = getNextHintAreaCenter()
+
+  for p in g_PlayingHumanPlayers
+    g_playerHasFoundTrader[p.getId()] = false
+    g_playerHintRevealed[p.getId()] = false
+
+  updateStock()
+
+// ============================================================================
+function onDayStart()
+
+  if (g_GameInstance.getDay() < TRADER_START_DAY)
+    return
+
+  if (g_GameInstance.getDay() % TRADER_MOVE_INTERVAL == 0)
+    selectNextTradingPost()
+
+  if (g_currentTradingPost == null)
+    selectNextTradingPost()
+    if (g_currentTradingPost == null)
+      error("Current trading post is null")
+
+  let traderWorldTransform = g_currentTradingPost.transform.concat(g_traderLocalTransform)
+  let traderHorseWorldTransform = traderWorldTransform.concat(g_traderHorseLocalTransform)
+
+  traderWorldTransform.apply(g_traderUnit)
+  traderHorseWorldTransform.apply(g_traderHorseUnit)
+
+  g_traderUnit.fadeIn()
+  g_traderHorseUnit.fadeIn()
+
+  g_traderUnit.show()
+  g_traderHorseUnit.show()
+
+// ============================================================================
+function onNightStart()
+
+  if (g_GameInstance.getDay() < TRADER_START_DAY)
+    return
+
+  g_traderUnit.fadeOut()
+  g_traderHorseUnit.fadeOut()
+
+  doAfter(UNIT_FADE_DURATION) () ->
+    g_traderUnit.hide()
+    g_traderHorseUnit.hide()
+
+// ============================================================================
+function showTraderHintArea(player p, bool show)
+
+  if (g_playerHintAreaIcons[p.getId()] != null)
+    g_playerHintAreaIcons[p.getId()].destr()
+
+  if (not show or
+      not g_playerShowHintAreaIcons[p.getId()] or
+      g_playerHasFoundTrader[p.getId()] or
+      g_currentTradingPost == null or
+      g_currentRevealCenter == vec2(REAL_MAX, REAL_MAX))
+    return
+  
+  let icon = createMinimapIcon(g_currentRevealCenter, HINT_AREA_ICON_COLOR, "ui\\minimap\\TraderRevealCircle.mdl", FOG_OF_WAR_MASKED)..showFor(p)
+  g_playerHintAreaIcons[p.getId()] = icon
+
+  if (not g_playerHintRevealed[p.getId()])
+  //{
+    let listenerName = g_playerHintAreaListenerName[p.getId()]
+
+    string message
+
+    if (listenerName != null)
+      message = listenerName + " has spotted signs of the Trader"
+    else
+      message = "The general location of the Trader has been revealed on your minimap"
+
+    notifyPlayer(p, message, "ReplaceableTextures\\WorldEditUI\\Editor-Random-Item.blp")
+  //}
+
+  g_playerHintRevealed[p.getId()] = true
+
+// ============================================================================
+function updateStock()
+
+  for itemTypeId in g_stockedItemTypeIds
+    g_traderUnit.removeItemFromStock(itemTypeId)
+  g_stockedItemTypeIds.clear()
+
+  let itemTypes = new Vector<ItemType>(12)
+  g_MainItemLibrary.commonSet.getRandomItemTypes(4, itemTypes)
+  g_MainItemLibrary.rareSet.getRandomItemTypes(3, itemTypes)
+  g_MainItemLibrary.epicSet.getRandomItemTypes(2, itemTypes)
+  g_MainItemLibrary.legendarySet.getRandomItemTypes(1, itemTypes)
+
+  for itemType in itemTypes
+    g_traderUnit.addItemToStock(itemType.id, itemType.maxStock, itemType.maxStock)
+    g_stockedItemTypeIds.add(itemType.id)
+
+  destroy itemTypes
+
+// ============================================================================
+@compiletime function createObjects()
+
+  new TlsUnitDefinition(TlsUnitIds.trader, UnitIds.medivh)
+    ..setNormalAbilities(commaList(AbilityIds.invulnerable, AbilityIds.selectHero, AbilityIds.shopPurchaseItem, 'Asid'))
+    ..setCanFlee(false)
+    ..setName("Trader")
+    ..setItemsSold("")
+    ..setAttack1DamageRange(rangeInt(999,999))
+
+  new TlsUnitDefinition(TlsUnitIds.traderHorse, UnitIds.packhorse)
+    ..setNormalAbilities(commaList(AbilityIds.invulnerable, AbilityIds.selectHero, AbilityIds.shopPurchaseItem, 'Asid', AbilityIds.ghostVisible))
+    ..setCanFlee(false)
+    ..setCollisionSize(0.0)
+    ..setName("Redart")
+    ..setItemsSold(commaList(ITEM_ID_GOLD_TO_LUMBER, ITEM_ID_LUMBER_TO_GOLD))
+
+  new TlsItemDefinition(ITEM_ID_GOLD_TO_LUMBER, 'crys')
+    ..setAbilities("")
+    ..setButtonPositionX(0)
+    ..setButtonPositionY(0)
+    ..setInterfaceIcon(Icons.bTNGLExchange)
+    ..setName("Stack of Lumber")
+    ..setTooltipBasic("Purchase Lumber")
+    ..setTooltipExtended("Trade {0} gold for {1} lumber".format(TRADE_LUMBER_GOLD_COST.toString(), TRADE_GOLD_LUMBER_COST.toString()))
+    ..setGoldCost(TRADE_LUMBER_GOLD_COST)
+    ..setLumberCost(0)
+    ..setStockInitial(1)
+    ..setStockMaximum(99)
+    ..setStockReplenishInterval(0)
+    ..setStockStartDelay(0)
+
+  new TlsItemDefinition(ITEM_ID_LUMBER_TO_GOLD, 'crys')
+    ..setAbilities("")
+    ..setButtonPositionX(1)
+    ..setButtonPositionY(0)
+    ..setInterfaceIcon(Icons.bTNLGExchange)
+    ..setName("Gold Coin")
+    ..setTooltipBasic("Purchase Gold")
+    ..setTooltipExtended("Trade {0} lumber for {1} gold".format(TRADE_GOLD_LUMBER_COST.toString(), TRADE_LUMBER_GOLD_COST.toString()))
+    ..setGoldCost(0)
+    ..setLumberCost(TRADE_GOLD_LUMBER_COST)
+    ..setStockInitial(1)
+    ..setStockMaximum(99)
+    ..setStockReplenishInterval(0)
+    ..setStockStartDelay(0)
+
+// ============================================================================
+public function setTraderHintListener(player p, bool listening, string name)
+  g_playerShowHintAreaIcons[p.getId()] = listening
+  g_playerHintAreaListenerName[p.getId()] = name
+  showTraderHintArea(p, isTraderCurrentlyRevealed() or g_playerHintRevealed[p.getId()])
+
+// ============================================================================
+function isTraderCurrentlyRevealed() returns bool
+  return GetTimeOfDay().isBetween(TRADER_REVEAL_TOD_RANGE.min, TRADER_REVEAL_TOD_RANGE.max)
+
+// ============================================================================
+function onTraderRevealTODStart()
+
+  if (g_currentTradingPost == null)
+    return
+
+  for p in g_PlayingHumanPlayers
+    showTraderHintArea(p, true)
+
+  flashEffect("Abilities\\Spells\\Human\\Flare\\FlareCaster.mdl", g_traderUnit.getPos())
+
+// ============================================================================
+function onTraderRevealTODEnd()
+
+  for p in g_PlayingHumanPlayers
+    showTraderHintArea(p, false)
+
+// ============================================================================
+function hasPlayerRevealedTrader(player p) returns bool
+  if (IsUnitHidden(g_traderUnit) or
+      IsUnitFogged(g_traderUnit, p) or
+      IsUnitMasked(g_traderUnit, p) or
+      g_playerHasFoundTrader[p.getId()])
+    return false
+  let metadata = p.getMetadata()
+  return metadata != null and not metadata.getHasLostGame()
+
+// ============================================================================
+function checkIfTraderHasBeenFound()
+  for p in g_PlayingHumanPlayers
+    if (hasPlayerRevealedTrader(p))
+      onPlayerFoundTrader(p)
+
+// ============================================================================
+function onPlayerFoundTrader(player p)
+  if (g_playerHasFoundTrader[p.getId()])
+    return
+  
+  g_playerHasFoundTrader[p.getId()] = true
+  showTraderHintArea(p, false)
+
+  let traderPos = g_traderUnit.getPos()
+  PingMinimap(traderPos.x, traderPos.y, 3.0)
+
+  new Notification()
+  ..setMessage("You found the trader!")
+  ..setIconPath(Icons.bTNMedivh)
+  ..setClickCommand(new RoutedCommand(() -> begin
+    if (GetTriggerPlayer() == localPlayer)
+      PanCameraToTimedForPlayer(p, traderPos.x, traderPos.y, 0)
+  end))
+  ..show(p)
+
+// ============================================================================
+function onItemSold()
+  let itemSold = GetSoldItem()
+  let sellingUnit = GetSellingUnit()
+  let buyingUnit = GetBuyingUnit()
+
+  if (sellingUnit.getTypeId() != TlsUnitIds.trader and
+      sellingUnit.getTypeId() != TlsUnitIds.traderHorse)
+    return
+
+  let buyingPlayer = buyingUnit.getOwner()
+
+  if (itemSold.getTypeId() == ITEM_ID_GOLD_TO_LUMBER)
+    buyingUnit.getOwner().addLumber(TRADE_GOLD_LUMBER_COST)
+    itemSold.remove()
+    FX.createFoundMaterialsTag(buyingUnit.getPos(), TRADE_GOLD_LUMBER_COST, buyingPlayer)
+    TlsSounds.getRandomFoundLumber().playForPlayer(buyingPlayer)
+
+  if (itemSold.getTypeId() == ITEM_ID_LUMBER_TO_GOLD)
+    buyingUnit.getOwner().addGold(TRADE_LUMBER_GOLD_COST)
+    itemSold.remove()
+    FX.createFoundGoldTag(buyingUnit.getPos(), TRADE_LUMBER_GOLD_COST, buyingPlayer)
+    TlsSounds.getRandomFoundGold().playForPlayer(buyingPlayer)
+
+// ============================================================================
+init
+
+  g_comparator = (TradingPost a, TradingPost b) ->
+    var result = 0
+    if (a.dd < b.dd)
+      result = 1
+    else if (a.dd > b.dd)
+      result = -1
+    return result
+
+  g_updateTaskDef = TaskDefinition.build(
+      builder -> begin
+        builder
+        ..executeWhile2<UpdateTraderPostTaskContext>("Update", ANIMATION_PERIOD, 1, (Task task, UpdateTraderPostTaskContext context) -> context.updateNextTraderPost())
+        ..executeWhile2<UpdateTraderPostTaskContext>("Sort", ANIMATION_PERIOD, 1, (Task task, UpdateTraderPostTaskContext context) -> context.stepSort())
+        // ..execute<UpdateTraderPostTaskContext>((Task task, UpdateTraderPostTaskContext context) -> context.updateDebug())
+      end)
+
+  // g_debugGradient = new GradientColorList((a, b, t) -> a.lerp(b, t), Colors.black)
+  // ..addEntry(0.0, Colors.red)
+  // ..addEntry(1.0, Colors.green)
+
+  onUnitIndex() () ->
+    let indexingUnit = getIndexingUnit()
+    if (indexingUnit.isCampHeadquarters())
+      registerInvalidatingUnit(indexingUnit)
+
+  onUnitDeindex() () ->
+    let indexingUnit = getIndexingUnit()
+    if (indexingUnit.isCampHeadquarters())
+      unregisterInvalidatingUnit(indexingUnit)
+
+  nullTimer(() -> initialize())
+
+  registerDayEvent(function onDayStart)
+  registerNightEvent(function onNightStart)
+
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_SELL_ITEM, function onItemSold)
+
+  registerTimeOfDayEvent(TRADER_REVEAL_TOD_RANGE.min, function onTraderRevealTODStart)
+  registerTimeOfDayEvent(TRADER_REVEAL_TOD_RANGE.max, function onTraderRevealTODEnd)
+
+  doPeriodically(1.0, (cb) -> checkIfTraderHasBeenFound())
+
+  if (DEV_ENVIRONMENT)
+    DebuggerDialog.registerFrame("TRADE", () -> new TraderPostDebugger())

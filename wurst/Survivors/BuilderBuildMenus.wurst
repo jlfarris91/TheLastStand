@@ -1,0 +1,153 @@
+package BuilderBuildMenus
+import TechAvailabilityGroup
+import ClosureFrames
+import StandardTooltip
+import ClosureTimers
+import Math
+import SubgroupSelection
+import FramehandleExtensions
+import LoadToc
+import PlayerSaveData
+import TlsUnitIds
+import PlayerExtensions
+
+public bool BLDMENU_ENABLED = true
+
+constant int BLDG_ID_PAGES = 2
+TechAvailabilityGroup array g_builderTechPages = [
+  new TechAvailabilityGroup(),
+  new TechAvailabilityGroup()
+]
+
+string array g_builderTechPageNames = [ "Defense", "Military" ]
+
+BuildingPageManager array g_pageManagers
+  
+// ============================================================================
+class BuildingPageManager
+  private player m_player
+  private int m_pageIndex
+  private framehandle m_frame
+  private framehandle m_nextPageButton
+  private framehandle m_prevPageButton
+  private framehandle m_pageText
+  private framehandle m_highlight
+
+  // --------------------------------------------------------------------------
+  construct (player _player)
+    m_player = _player
+
+    let buildCommandBar = getOriginFrame(ORIGIN_FRAME_COMMAND_BUTTON, 8).getParent()
+
+    m_frame = createFrame("BuildPageNavTemplate")
+    ..setPoint(FRAMEPOINT_BOTTOM, buildCommandBar, FRAMEPOINT_TOP, vec2(-0.0025, 0.005))
+    ..onMouseEnter(() -> StandardTooltip.show("Builder Build Menu", "There are multiple pages in this unit's build menu.|nUse the buttons to navigate the pages.", m_player))
+    ..onMouseLeave(() -> StandardTooltip.hide(m_player))
+    ..hide()
+    
+    m_nextPageButton = getFrame("NextPageButton")
+    ..onClick(() -> onNextPageButtonClicked())
+    ..onMouseEnter(() -> StandardTooltip.show("Next Page", "Navigate to the next build menu page.", m_player))
+    ..onMouseLeave(() -> StandardTooltip.hide(m_player))
+    ..setEnabled(true)
+
+    m_prevPageButton = getFrame("PrevPageButton")
+    ..onClick(() -> onPrevPageButtonClicked())
+    ..onMouseEnter(() -> StandardTooltip.show("Previous Page", "Navigate to the previous build menu page.", m_player))
+    ..onMouseLeave(() -> StandardTooltip.hide(m_player))
+    ..setEnabled(true)
+
+    m_pageText = getFrame("PageText")
+
+    m_highlight = getFrame("Highlight")
+
+    updateAvailableTech()
+
+  // --------------------------------------------------------------------------
+  function setHighlightVisible(bool value)
+    m_highlight.setVisible(value)
+
+  // --------------------------------------------------------------------------
+  function setPageIndex(int value)
+    m_pageIndex = clamp(value, 0, BLDG_ID_PAGES-1)
+    updateAvailableTech()
+
+  // --------------------------------------------------------------------------
+  function incrementPageIndex()
+    setPageIndex(wrap(m_pageIndex + 1, 0, BLDG_ID_PAGES-1))
+
+  // --------------------------------------------------------------------------
+  function decrementPageIndex()
+    setPageIndex(wrap(m_pageIndex - 1, 0, BLDG_ID_PAGES-1))
+
+  // --------------------------------------------------------------------------
+  function updateAvailableTech()
+    for i = 0 to BLDG_ID_PAGES-1
+      g_builderTechPages[i].setEnabled(m_player, i == m_pageIndex)
+
+  // --------------------------------------------------------------------------
+  function updateButtonVisibility()
+    let selectedSubgroupUnit = m_player.getSelectedSubgroupUnit()
+    let buttonVisible = selectedSubgroupUnit != null
+                        and selectedSubgroupUnit.getTypeId() == TlsUnitIds.Survivors.builder1
+                        and m_player.controlsUnit(selectedSubgroupUnit)
+    if (m_player == localPlayer)
+      m_frame.setVisible(buttonVisible)
+      m_pageText.setText(g_builderTechPageNames[m_pageIndex])
+
+  // --------------------------------------------------------------------------
+  private function onPrevPageButtonClicked()
+    m_prevPageButton.clearFocus()
+    decrementPageIndex()
+    setHighlightVisible(false)
+    (PlayerSaveData.getPlayerSaveData(m_player) castTo PlayerSaveData_v800).showBuildMenuHighlight = false
+    if (m_player == localPlayer)
+      ForceUIKey("B")
+
+  // --------------------------------------------------------------------------
+  private function onNextPageButtonClicked()
+    m_nextPageButton.clearFocus()
+    incrementPageIndex()
+    setHighlightVisible(false)
+    (PlayerSaveData.getPlayerSaveData(m_player) castTo PlayerSaveData_v800).showBuildMenuHighlight = false
+    if (m_player == localPlayer)
+      ForceUIKey("B")
+
+// ============================================================================
+init
+
+  ensureTocIsLoaded()
+
+  nullTimer() -> 
+    // This frame blocks input to the page nav buttons. Resize it so that it doesn't.
+    getOriginFrame(ORIGIN_FRAME_SIMPLE_UI_PARENT).getChild(5).setHeight(0.129)
+
+  g_builderTechPages[0].add(TlsUnitIds.workshop)
+  g_builderTechPages[0].add(TlsUnitIds.scoutTower)
+  g_builderTechPages[0].add(TlsUnitIds.guardTowers[0])
+  g_builderTechPages[0].add(TlsUnitIds.cannonTowers[0])
+  g_builderTechPages[0].add(TlsUnitIds.tunnelEntrance)
+  
+  g_builderTechPages[1].add(TlsUnitIds.blacksmith)
+  g_builderTechPages[1].add(TlsUnitIds.spearmansTent)
+  g_builderTechPages[1].add(TlsUnitIds.munitionsDepot)
+  g_builderTechPages[1].add(TlsUnitIds.chapel)
+  g_builderTechPages[1].add(TlsUnitIds.rangedTarget)
+
+  for i = 0 to bj_MAX_PLAYER_SLOTS - 1
+    if (players[i].isIngame())
+      g_pageManagers[i] = new BuildingPageManager(players[i])
+      for j = 0 to BLDG_ID_PAGES-1
+        g_builderTechPages[j].setEnabled(players[i], j == 0)
+
+  doPeriodically(0.1) (CallbackPeriodic cb) ->
+    if (BLDMENU_ENABLED)
+      for i = 0 to bj_MAX_PLAYER_SLOTS - 1
+        if (g_pageManagers[i] != null and players[i].isIngame())
+          g_pageManagers[i].updateButtonVisibility()
+
+  PlayerSaveData.onLoadComplete().register() -> 
+    for i = 0 to bj_MAX_PLAYER_SLOTS - 1      
+      if (g_pageManagers[i] != null and players[i].isIngame())
+        let saveData = PlayerSaveData.getPlayerSaveData(players[i]) castTo PlayerSaveData_v800
+        g_pageManagers[i].setHighlightVisible(saveData.showBuildMenuHighlight)

@@ -2,18 +2,24 @@ package MarksmanJobComponent
 import UnitMetadata
 import SurvivorJobComponent
 import RangedTargetXpReceieverComponent
-import XpReceiverComponent
+import ExperienceComponent
 import UnitPropertiesComponent
 import SurvivorJobs
+import Handle
 
 constant real BONUS_DAMAGE_TO_NORMALS_PERCENTAGE = 0.0
-constant real BONUS_DAMAGE_TO_ELITES_PERCENTAGE = 10.0
-constant real BONUS_DAMAGE_TO_BOSS_PERCENTAGE = 20.0
-constant real BONUS_CRIT_CHANCE = 25.0
+constant real BONUS_DAMAGE_TO_ELITES_PERCENTAGE = 0.1
+constant real BONUS_DAMAGE_TO_BOSS_PERCENTAGE = 0.2
+constant real BONUS_CRIT_CHANCE = 0.25
 constant real BONUS_CRIT_MULT = 4.0
 
 // ============================================================================
 public class MarksmanJobComponent extends SurvivorJobComponent
+  private _handle m_dmgscalarnormal = INVALID_HANDLE
+  private _handle m_dmgscalarelite = INVALID_HANDLE
+  private _handle m_dmgscalarboss = INVALID_HANDLE
+  private _handle m_critchance = INVALID_HANDLE
+  private _handle m_critdamagescalar = INVALID_HANDLE
 
   // --------------------------------------------------------------------------
   construct(IUnitMetadata owner)
@@ -27,15 +33,14 @@ public class MarksmanJobComponent extends SurvivorJobComponent
   protected override function onEnabled()
     super.onEnabled()
     getOwner().getOrAddRangedTargetXpRecieverComponent().setEnabled(true)
-    getOwner().getOrAddXpReceiverComponent().setEnabled(true)
+    getOwner().getOrAddExperienceComponent().setEnabled(true)
 
     let unitPropsComp = getOwner().getOrAddUnitPropertiesComponent()
-    if (unitPropsComp != null)
-      unitPropsComp.setNormalDamagePercentage(unitPropsComp.getNormalDamagePercentage() + BONUS_DAMAGE_TO_NORMALS_PERCENTAGE)
-      unitPropsComp.setEliteDamagePercentage(unitPropsComp.getEliteDamagePercentage() + BONUS_DAMAGE_TO_ELITES_PERCENTAGE)
-      unitPropsComp.setBossDamagePercentage(unitPropsComp.getBossDamagePercentage() + BONUS_DAMAGE_TO_ELITES_PERCENTAGE)
-      unitPropsComp.setCritChancePercentage(unitPropsComp.getCritChancePercentage() + BONUS_CRIT_CHANCE)
-      unitPropsComp.setCritDamageMultiplier(unitPropsComp.getCritDamageMultiplier() + BONUS_CRIT_MULT)
+    m_dmgscalarnormal = unitPropsComp.getProperty(UnitProperty.DAMAGE_SCALAR_NORMAL).affectAdd(BONUS_DAMAGE_TO_NORMALS_PERCENTAGE)
+    m_dmgscalarelite = unitPropsComp.getProperty(UnitProperty.DAMAGE_SCALAR_ELITE).affectAdd(BONUS_DAMAGE_TO_ELITES_PERCENTAGE)
+    m_dmgscalarboss = unitPropsComp.getProperty(UnitProperty.DAMAGE_SCALAR_BOSS).affectAdd(BONUS_DAMAGE_TO_BOSS_PERCENTAGE)
+    m_critchance = unitPropsComp.getProperty(UnitProperty.CRIT_CHANCE_01).affectAdd(BONUS_CRIT_CHANCE)
+    m_critdamagescalar = unitPropsComp.getProperty(UnitProperty.CRIT_DAMAGE_SCALAR).affectAdd(BONUS_CRIT_MULT)
 
   // --------------------------------------------------------------------------
   protected override function onDisabled()
@@ -49,17 +54,23 @@ public class MarksmanJobComponent extends SurvivorJobComponent
     if (rangedTargetXpReceieverComponent != null)
       rangedTargetXpReceieverComponent.setEnabled(false)
 
-    let gainXpPerKillComponent = ownerUnit.getOrAddXpReceiverComponent()
+    let gainXpPerKillComponent = ownerUnit.getOrAddExperienceComponent()
     if (gainXpPerKillComponent != null)
       gainXpPerKillComponent.setEnabled(false)
 
-    let unitPropsComp = getOwner().getOrAddUnitPropertiesComponent()
+    let unitPropsComp = getOwner().getUnitPropertiesComponent()
     if (unitPropsComp != null)
-      unitPropsComp.setNormalDamagePercentage(unitPropsComp.getNormalDamagePercentage() - BONUS_DAMAGE_TO_NORMALS_PERCENTAGE)
-      unitPropsComp.setEliteDamagePercentage(unitPropsComp.getEliteDamagePercentage() - BONUS_DAMAGE_TO_ELITES_PERCENTAGE)
-      unitPropsComp.setBossDamagePercentage(unitPropsComp.getBossDamagePercentage() - BONUS_DAMAGE_TO_ELITES_PERCENTAGE)
-      unitPropsComp.setCritChancePercentage(unitPropsComp.getCritChancePercentage() - BONUS_CRIT_CHANCE)
-      unitPropsComp.setCritDamageMultiplier(unitPropsComp.getCritDamageMultiplier() - BONUS_CRIT_MULT)
+      unitPropsComp.getProperty(UnitProperty.DAMAGE_SCALAR_NORMAL).remove(m_dmgscalarnormal)
+      unitPropsComp.getProperty(UnitProperty.DAMAGE_SCALAR_ELITE).remove(m_dmgscalarelite)
+      unitPropsComp.getProperty(UnitProperty.DAMAGE_SCALAR_BOSS).remove(m_dmgscalarboss)
+      unitPropsComp.getProperty(UnitProperty.CRIT_CHANCE_01).remove(m_critchance)
+      unitPropsComp.getProperty(UnitProperty.CRIT_DAMAGE_SCALAR).remove(m_critdamagescalar)
+
+    m_dmgscalarnormal = INVALID_HANDLE
+    m_dmgscalarelite = INVALID_HANDLE
+    m_dmgscalarboss = INVALID_HANDLE
+    m_critchance = INVALID_HANDLE
+    m_critdamagescalar = INVALID_HANDLE
 
 // ============================================================================
 public function IUnitMetadata.getMarksmanJobComponent() returns MarksmanJobComponent
@@ -74,5 +85,5 @@ public function IUnitMetadata.getOrAddMarksmanJobComponent() returns MarksmanJob
 
 // ============================================================================
 init
-  SurvivorJobComponent.registerSurvivorJobComponentGetter(SurvivorJobs.marksman, metadata -> metadata.getMarksmanJobComponent())
-  SurvivorJobComponent.registerSurvivorJobComponentFactory(SurvivorJobs.marksman, metadata -> metadata.getOrAddMarksmanJobComponent())
+  SurvivorJobComponent.registerSurvivorJobComponentGetter(SurvivorJobType.Marksman, MarksmanJobComponent.typeId)
+  SurvivorJobComponent.registerSurvivorJobComponentFactory(SurvivorJobType.Marksman, metadata -> metadata.getOrAddMarksmanJobComponent())

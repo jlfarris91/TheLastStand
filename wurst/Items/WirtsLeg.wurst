@@ -1,60 +1,65 @@
 package WirtsLeg
-import TlsItemIds
 import UnitMetadata
 import UnitPropertiesComponent
 import ItemEffectComponent
+import SmartValue
+import ItemAcquiredPropertyAffectComponent
+import StringBuilder
+import ColorUtility
+import TlsItemDefinition
+import Icons
 
-constant real EVADE_CHANCE = 10.0
+constant real EVADE_CHANCE = 0.1
 
 // ============================================================================
-public class WirtsLegItemEffectComponent extends ItemEffectComponent
+class WirtsLegItemEffectComponent extends ItemAcquiredPropertyAffectComponent
 
   // --------------------------------------------------------------------------
   construct (IUnitMetadata owner)
-    super(owner)
-
-    setMode(ItemEffectApplication.ACQUIRED)
-    setItemTypeId(TlsItemIds.wirtsLeg)
-    setDestroyOnDrop(true)
-
+    super(owner, TlsItemIds.wirtsLeg, UnitProperty.EVADE_CHANCE_01, AffectorType.ABSOLUTE)
+  
   // --------------------------------------------------------------------------
-  protected override function onApplied(int stacks)
-    super.onApplied(stacks)
-
-    if (stacks == 0)
-      return
-
-    let comp = getOwner().getOrAddUnitPropertiesComponent()
-    comp.setEvadeChancePercentage(comp.getEvadeChancePercentage() + stacks * EVADE_CHANCE)
-
-  // --------------------------------------------------------------------------
-  protected override function onReverted(int stacks)
-    super.onReverted(stacks)
-
-    if (stacks == 0)
-      return
-
-    let comp = getOwner().getOrAddUnitPropertiesComponent()
-    comp.setEvadeChancePercentage(comp.getEvadeChancePercentage() - stacks * EVADE_CHANCE)
+  override function getUnitPropertyAffectorValue(int stacks) returns real
+    return stacks * EVADE_CHANCE
 
 // ============================================================================
-function IUnitMetadata.getWirtsLegItemEffectComponent() returns WirtsLegItemEffectComponent
-  return this.getComponent(WirtsLegItemEffectComponent.typeId) castTo WirtsLegItemEffectComponent
+@compiletime function createItem()
 
-// ============================================================================
-function IUnitMetadata.getOrAddWirtsLegItemEffectComponent() returns WirtsLegItemEffectComponent
-  var component = this.getWirtsLegItemEffectComponent()
-  if (component == null)
-    component = this.addComponent(new WirtsLegItemEffectComponent(this)) castTo WirtsLegItemEffectComponent
-  return component
+  let sb = new StringBuilder()
+  sb.appendLine("Increases chance to evade incoming attacks by 10%.")
+  sb.appendLine()
+  sb.append("Each additional stack increases chance to evade incoming attacks by 10%.".colorize(Colors.gold))
+  let tooltipExtended = sb.toStringAndDestroy()
+
+  new TlsItemDefinition(TlsItemIds.wirtsLeg, 'wtlg')
+  ..setName("Wirt's Leg")
+  ..setDescription("At first glance it appears simply to be the abandoned wooden leg of some unfortunate uniped.")
+  ..setTooltipBasic("Purchase Wirt's Leg")
+  ..setTooltipExtended(tooltipExtended)
+  ..setAbilities("")
+  ..setInterfaceIcon(Icons.bTNWirtsLeg)
+  ..setGoldCost(0)
+  ..setLumberCost(350)
+  ..setStockInitial(1)
+  ..setStockMaximum(3)
+  ..setStockStartDelay(0)
+  ..setStockReplenishInterval(120)
+  ..setNumberofCharges(1)
+  ..addTlsUnitClassifications(TlsUnitClassification.HUMAN)
+  ..build()
 
 // ============================================================================
 init
-  g_itemIdToComponentFactoryMap.put(TlsItemIds.wirtsLeg) _unit ->
+  if (not compiletime)
+    createItem()
+
+  ItemEffectComponent.registerComponentFactory(TlsItemIds.wirtsLeg) _unit ->
   //{
     let metadata = _unit.getMetadata()
     ItemEffectComponent comp = null
     if (metadata != null)
-      comp = metadata.getOrAddWirtsLegItemEffectComponent()
+      comp = metadata.getComponent(WirtsLegItemEffectComponent.typeId) castTo WirtsLegItemEffectComponent
+      if (comp == null)
+        comp = metadata.addComponent(new WirtsLegItemEffectComponent(metadata)) castTo WirtsLegItemEffectComponent
     return comp
   //}

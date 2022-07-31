@@ -13,9 +13,13 @@ import GameConstants
 import Action
 import UnitRecycler
 import Suspend
+import Preload
+import Trace
+
+public bool PATHCHECKER_ENABLED = true
 
 constant int PATH_CHECKER_UNIT_ID = compiletime(UNIT_ID_GEN.next())
-constant player PATH_CHECKER_OWNER = Player(GetPlayerNeutralPassive())
+constant player PATH_CHECKER_OWNER = players[GetPlayerNeutralPassive()]
 constant vec2 DEACTIVATED_POS = mapBounds.max
 constant real MIN_DISTANCE_MOVED_THRESHOLD = 64.0
 constant real MIN_DISTANCE_MOVED_THRESHOLD_SQ = MIN_DISTANCE_MOVED_THRESHOLD * MIN_DISTANCE_MOVED_THRESHOLD
@@ -26,7 +30,7 @@ constant real PATH_CHECKER_COLLISION_SIZE = 0
 HashList<unit> g_activePathCheckers = new HashList<unit>()
 CallbackPeriodic g_updatePathCheckerTimer
 
-UnitRecycler g_pathCheckerRecycler = new UnitRecycler(PATH_CHECKER_OWNER, PATH_CHECKER_UNIT_ID, 128)
+UnitRecycler g_pathCheckerRecycler = new UnitRecycler(PATH_CHECKER_OWNER, PATH_CHECKER_UNIT_ID)
 
 // ============================================================================
 @compiletime function createUnitDef()
@@ -53,11 +57,11 @@ UnitRecycler g_pathCheckerRecycler = new UnitRecycler(PATH_CHECKER_OWNER, PATH_C
 
 // ============================================================================
 public class PathCheckerComponent extends UnitComponent
-  private unit m_targetUnit
-  private vec2 m_lastPos
-  private Action1<PathCheckerComponent> m_callback
-  private bool m_foundPath
-  private real m_arrivalDistanceSq
+  private unit m_targetUnit = null
+  private vec2 m_lastPos = ZERO2
+  private Action1<PathCheckerComponent> m_callback = null
+  private bool m_foundPath = false
+  private real m_arrivalDistanceSq = 0.
   private bool m_autoRelease = true
   private bool m_hasMovedBeyondThreshold = false
 
@@ -71,7 +75,9 @@ public class PathCheckerComponent extends UnitComponent
 
   // --------------------------------------------------------------------------
   function setCallback(Action1<PathCheckerComponent> callback)
-    m_callback = callback
+    if (m_callback != null)
+      m_callback.release()
+    m_callback = callback.acquire()
 
   // --------------------------------------------------------------------------
   function getTargetUnit() returns unit
@@ -114,7 +120,7 @@ public class PathCheckerComponent extends UnitComponent
     m_foundPath = false
     m_hasMovedBeyondThreshold = false
 
-    destroyCallback()
+    releaseCallback()
 
     ownerUnit.hide()
     ownerUnit.setPos(DEACTIVATED_POS)
@@ -168,8 +174,7 @@ public class PathCheckerComponent extends UnitComponent
   function raiseCallback()
     if (m_callback != null)
       m_callback.call(this)
-      if (m_callback.getDestroyAfterUse())
-        destroy m_callback
+      releaseCallback()
 
   // --------------------------------------------------------------------------
   function activate(vec2 startPos)
@@ -184,8 +189,9 @@ public class PathCheckerComponent extends UnitComponent
     m_hasMovedBeyondThreshold = false
 
     let targetPos = m_targetUnit.getPos()
-    if (getOwnerUnit().issuePointOrderById(OrderIds.move, targetPos))
-      Log.debug("Started path check for unit " + m_targetUnit.getName())
+    getOwnerUnit().issuePointOrderById(OrderIds.move, targetPos)
+    // if (getOwnerUnit().issuePointOrderById(OrderIds.move, targetPos))
+    //   Log.debug("Started path check for unit " + m_targetUnit.getName())
 
     enable()
 
@@ -199,9 +205,9 @@ public class PathCheckerComponent extends UnitComponent
     g_pathCheckerRecycler.stock(getOwnerUnit())
 
   // --------------------------------------------------------------------------
-  function destroyCallback()
-    if (m_callback != null and m_callback.getDestroyAfterUse())
-      destroy m_callback
+  function releaseCallback()
+    if (m_callback != null)
+      m_callback.release()
     m_callback = null
 
 // ============================================================================
@@ -279,7 +285,7 @@ function registerActivePathChecker(unit pathChecker)
   if (g_activePathCheckers.has(pathChecker))
     return
   g_activePathCheckers.add(pathChecker)
-  if (g_activePathCheckers.size() == 1)
+  if (g_activePathCheckers.size() == 1 and g_updatePathCheckerTimer == null)
     g_updatePathCheckerTimer = doPeriodically(UPDATE_INTERVAL, (CallbackPeriodic cb) -> updatePathCheckers())
 
 // ============================================================================
@@ -293,7 +299,18 @@ function unregisterActivePathChecker(unit pathChecker)
 
 // ============================================================================
 function updatePathCheckers()
+
+  if (not PATHCHECKER_ENABLED)
+    return
+
+  Trace.trace("updatePathCheckers")
+
   for u in g_activePathCheckers
     let comp = u.getOrAddPathCheckerComponent()
     if (comp != null)
       comp.update()
+      Trace.trace("updatePathCheckers.active")
+
+// ============================================================================
+init
+  Preload.registerUnitRecycler(PATH_CHECKER_UNIT_ID, 128)

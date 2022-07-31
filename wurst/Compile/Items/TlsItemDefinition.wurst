@@ -6,6 +6,13 @@ import public TlsAbilityIds
 import public MainItemLibrary
 import public TlsObjEditingCommons
 import HashMap
+import public Classification
+import Flags
+import LinkedList
+import StringUtils
+import ItemType
+import Items
+import ColorUtility
 
 HashMap<int, TlsItemDefinition> g_itemIdToDefinitionMap = new HashMap<int, TlsItemDefinition>()
 
@@ -26,6 +33,9 @@ public class TlsItemDefinition extends ItemDefinition
   private int m_goldCost
   private int m_lumberCost
   private string m_iconPath
+  private bool m_activelyUsed
+  private int m_unitClassRequirements = 0
+  private LinkedList<int> m_abilities = new LinkedList<int>()
 
   // --------------------------------------------------------------------------
   construct (int newId, int baseId)
@@ -36,6 +46,7 @@ public class TlsItemDefinition extends ItemDefinition
     setLevelUnclassified(1)
     setNumberofCharges(0)
     setPriority(0)
+    setStockInitial(0)
     setStockMaximum(99)
     setStockReplenishInterval(0)
     setStockStartDelay(0)
@@ -43,10 +54,15 @@ public class TlsItemDefinition extends ItemDefinition
     setButtonPositionX(0)
     setButtonPositionY(0)
     setCanBeDropped(true)
-    setCanBeSoldToMerchants(false)
-    setCanBeSoldByMerchants(false)
+    setCanBeSoldToMerchants(true)
+    setCanBeSoldByMerchants(true)
+    setDroppedWhenCarrierDies(true)
     
     registerItemDefinition(newId, this)
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    destroy m_abilities
 
   // --------------------------------------------------------------------------
   function getName() returns string
@@ -85,6 +101,19 @@ public class TlsItemDefinition extends ItemDefinition
     m_tooltipExtended = value
 
   // --------------------------------------------------------------------------
+  override function setAbilities(string value)
+    super.setAbilities(value)
+    m_abilities.clear()
+    let abilRawCodes = value.split(",")
+    for rawCode in abilRawCodes
+      if (rawCode != "")
+        m_abilities.add(rawCode.fromRawCode())
+
+  // --------------------------------------------------------------------------
+  function getAbilities() returns LinkedList<int>
+    return m_abilities
+
+  // --------------------------------------------------------------------------
   function getGoldCost() returns int
     return m_goldCost
 
@@ -118,3 +147,63 @@ public class TlsItemDefinition extends ItemDefinition
   override function setInterfaceIcon(string value)
     super.setInterfaceIcon(value)
     m_iconPath = value
+
+  // --------------------------------------------------------------------------
+  function getActivelyUsed() returns bool
+    return m_activelyUsed
+
+  // --------------------------------------------------------------------------
+  override function setActivelyUsed(bool value)
+    super.setActivelyUsed(value)
+    m_activelyUsed = value
+
+  // --------------------------------------------------------------------------
+  function getTlsUnitClassRequirements() returns int
+    return m_unitClassRequirements
+
+  // --------------------------------------------------------------------------
+  function addTlsUnitClassifications(vararg TlsUnitClassification values)
+    for c in values
+      m_unitClassRequirements = m_unitClassRequirements.setBit(c castTo int)
+
+  // --------------------------------------------------------------------------
+  function hasTlsUnitClassRequirement(vararg TlsUnitClassification values) returns bool
+    for c in values
+      if (not m_unitClassRequirements.isBitSet(c castTo int))
+        return false
+    return true
+
+// ============================================================================
+public function TlsItemDefinition.build()
+  
+  // Required for ItemType.getItemType to return anything
+  defineItems()
+
+  let itemType = ItemType.getItemType(this.getNewId())
+  let itemRarity = itemType != null ? itemType.getRarity() : null
+  let unitClassRequirements = this.getTlsUnitClassRequirements()
+
+  var prefix = ""
+
+  if (itemRarity != null)
+    this.setName(this.getName().colorize(itemRarity.getColor()))
+    if (itemRarity.getApplyColorToItems())
+      this.setTintingColor1Red(itemRarity.getColor().red)
+      this.setTintingColor2Green(itemRarity.getColor().green)
+      this.setTintingColor3Blue(itemRarity.getColor().blue)
+    prefix += itemRarity.getName().colorize(itemRarity.getColor())
+
+  if (unitClassRequirements != 0)
+  //{
+    if (prefix != "")
+      prefix += " "
+
+    let symbolString = unitClassRequirements.getTlsUnitClassSymbolsColored()
+    prefix += symbolString
+  //}
+
+  if (prefix != "")
+    prefix += "|n|n"
+
+  this.setDescription(prefix + this.getDescription())
+  this.setTooltipExtended(prefix + this.getTooltipExtended())

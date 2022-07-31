@@ -5,7 +5,6 @@ import Range
 import WeightedSet
 import LootableReward
 import Math
-import LooterComponent
 import DisplayTextToPlayer
 import ColorUtility
 import ErrorHandling
@@ -14,13 +13,18 @@ import FX
 import Vector
 import initlater LootOperationComponent
 import LootableUtility
+import UnitPropertiesComponent
+import SoundUtils
+import ClosureTimers
+import Optional
 
 constant colorA LOOTABLE_COLOR = colorA(255, 255, 255, 255)
 constant colorA LOOTED_COLOR = colorA(150, 150, 150, 150)
 
 constant colorA COUNTDOWN_COLOR = colorA(0, 170, 0, 255)
 
-Vector<LootableComponent> g_lootableUnits
+Vector<LootableComponent> g_lootableUnits = null
+SoundDefinition array[3] g_lootFinishedSound
 
 // ============================================================================
 public class LootableComponent extends UnitComponent
@@ -31,7 +35,10 @@ public class LootableComponent extends UnitComponent
   private texttag m_cooldownDayTextTag
   private real m_chanceToRetrigger01
   private rangeInt m_cooldownDaysRange
-  private int m_lootRewardMultiplier = 1
+  private int m_lootRewardMultiplier = 1  
+  private int m_dueToLuckyHorseshoe = 0
+  private optionalVec2 m_spawnPosOverride = none_vec2()
+
   // --------------------------------------------------------------------------
   construct(IUnitMetadata owner)
     super(owner)
@@ -146,6 +153,14 @@ public class LootableComponent extends UnitComponent
       onLootable()
 
   // --------------------------------------------------------------------------
+  function getSpawnPosition() returns vec2
+    return m_spawnPosOverride.reduce(getOwnerUnit().getPos())
+
+  // --------------------------------------------------------------------------
+  function setSpawnPosition(vec2 value)
+    m_spawnPosOverride = some(value)
+
+  // --------------------------------------------------------------------------
   function resetCooldown()
     if (m_cooldownDays == 0)
       return
@@ -215,22 +230,28 @@ public class LootableComponent extends UnitComponent
     onLootable()
 
   // --------------------------------------------------------------------------
-  function displayLootRewardText(player _player, string message)
-    if (m_lootRewardMultiplier == 1)
-      displayMessageToPlayer(
-        _player,
-        "Finished Looting : ".colorize(Colors.gold) + message)
-    else
-      displayMessageToPlayer(
-        _player,
-        "Finished Looting x{0} : ".format(m_lootRewardMultiplier.toString()).colorize(Colors.gold) + message)
+  function showLootRewardNotification(player _player, LootRewardNotification notification)
+
+    let index = m_lootRewardMultiplier
+    let delay = (index - 1) * 0.6
+    let dueToLuckyHorseshoe = m_dueToLuckyHorseshoe > 0
+
+    doAfter(delay) () ->
+    //{
+      notification
+      ..setDueToLuckyHorseshoe(dueToLuckyHorseshoe)
+      ..show(_player)
+
+      g_lootFinishedSound[index.clamp(0, 2)].playForPlayer(_player)
+    //"
+
     m_lootRewardMultiplier++
 
   // --------------------------------------------------------------------------
   protected function giveRewards(unit lootingUnit)
     m_lootRewardMultiplier = 1
     let rewardsSet = new WeightedSet<ILootableReward>(m_rewards)
-    giveRewardsWithChanceToRetrigger(rewardsSet, lootingUnit, m_chanceToRetrigger01, true)
+    giveRewardsWithChanceToRetrigger(rewardsSet, lootingUnit, m_chanceToRetrigger01, true, false)
     destroy rewardsSet
 
   // --------------------------------------------------------------------------
@@ -238,24 +259,30 @@ public class LootableComponent extends UnitComponent
     WeightedSet<ILootableReward> rewards,
     unit lootingUnit,
     real chanceToRetrigger01,
-    bool allowLuckyHorseshoe)
+    bool allowLuckyHorseshoe,
+    bool rewardDueToLuckyHorseshoe)
 
     // No more rewards to give
     if (rewards.isEmpty())
       return
+
+    m_dueToLuckyHorseshoe += rewardDueToLuckyHorseshoe ? 1 : 0
 
     // Give the player their reward
     ILootableReward reward = null
     while (not rewards.isEmpty())
     //{
       reward = rewards.popRandom()
+
       if (reward == null)
         Log.debug("No reward registered for lootable")
-        return
+        break
 
       if (reward.giveReward(this, lootingUnit))
         break
     //}
+
+    m_dueToLuckyHorseshoe -= rewardDueToLuckyHorseshoe ? 1 : 0
 
     // Some rewards necessarily must stop the retrigger loop
     if (reward == null or reward.getStopsRetrigger())
@@ -263,13 +290,14 @@ public class LootableComponent extends UnitComponent
 
     var chanceToRetriggerWithHoreshoe01 = chanceToRetrigger01
     var mutableLuckyHorseshoe = allowLuckyHorseshoe
+    var mutableRewardDueToLuckyHorseshoe = false
 
     // Lucky Horseshoe item grants a small chance to immediately loot a second time
     let metadata = lootingUnit.getMetadata()
     if (metadata != null)
-      let comp = metadata.getLooterComponent()
+      let comp = metadata.getUnitPropertiesComponent()
       if (comp != null)
-        chanceToRetriggerWithHoreshoe01 = clamp01(chanceToRetriggerWithHoreshoe01 + comp.getChanceToLootTwice())
+        chanceToRetriggerWithHoreshoe01 = clamp01(chanceToRetriggerWithHoreshoe01 + comp.getPropertyValue(UnitProperty.LOOT_TWICE_CHANCE_01))
     
     let roll = GetRandomReal(0, 1)
     if (not passesChanceCheck(chanceToRetriggerWithHoreshoe01, roll))
@@ -279,9 +307,10 @@ public class LootableComponent extends UnitComponent
     if (not passesChanceCheck(chanceToRetrigger01, roll))
       displayMessageToPlayer(lootingUnit.getOwner(), "Lucky Horseshoe!".colorize(Colors.lightBlue) + " You found even more loot!")
       mutableLuckyHorseshoe = false // Lucky horseshoe can only fire once
+      mutableRewardDueToLuckyHorseshoe = true
 
     // Give the player another reward and give it another shot to retrigger
-    giveRewardsWithChanceToRetrigger(rewards, lootingUnit, chanceToRetrigger01 / 3.0, mutableLuckyHorseshoe)
+    giveRewardsWithChanceToRetrigger(rewards, lootingUnit, chanceToRetrigger01 / 3.0, mutableLuckyHorseshoe, mutableRewardDueToLuckyHorseshoe)
 
   // --------------------------------------------------------------------------
   private function onLooted()
@@ -309,9 +338,15 @@ public function IUnitMetadata.getOrAddLootableComponent() returns LootableCompon
 
 // ============================================================================
 function onDayStart()
-  for lootableUnit in g_lootableUnits
-    lootableUnit.decrementCooldown()
+  if (g_lootableUnits != null)
+    for lootableUnit in g_lootableUnits
+      lootableUnit.decrementCooldown()
 
 // ============================================================================
 init
   registerDayEvent(function onDayStart)
+  
+  for i = 0 to 2
+    g_lootFinishedSound[i] = new SoundDefinition("sound\\interface\\goodjob.flac", false, false)
+    g_lootFinishedSound[i].volume = 100
+    g_lootFinishedSound[i].pitch += i * 0.1

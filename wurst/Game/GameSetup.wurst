@@ -1,0 +1,239 @@
+package GameSetup
+import TimerUtils
+import ClosureTimers
+import GameInstance
+import HumanPlayers
+import TlsUnitIds
+import HashMap
+import HumanPlayerComponent
+import PlayerSaveData
+import PlayerSetup
+import IProgress
+import Preload
+import Handle
+import Tasks
+import ColorUtility
+import ProjectConstants
+import GameConstants
+import DifficultySelectionDialog
+import PlayerExtensions
+import ProgressBarUtils
+
+public GameSetup g_GameSetup = new GameSetup()
+trigger g_buttonPressedTrigger
+
+dialog g_heroSelectionDialog
+button g_heroButtonDefault
+button g_heroButtonScout
+button g_heroButtonSoldier
+button g_heroButtonPaladin
+button g_heroButtonEngineer
+
+PlayerSetup array g_playerSetups
+
+// ============================================================================
+public class GameSetup
+  private timer m_timer
+  private timerdialog m_timerDialog
+  private int m_numPlayersReady
+  private IterableMap<player, DifficultySelectionDialog> m_heroDifficultyDialogs = new IterableMap<player, DifficultySelectionDialog>()
+  private _handle m_onPlayerLoadCompleteHandler
+  private _handle m_onLoadCompleteHandler
+  private _handle m_onSynchronizedHandler
+  private Progress m_progress
+  private ProgressBar m_progressBarFrame
+  private Task m_preloaderTask
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    if (m_timer != null)
+      m_timer.release()
+      m_timer = null
+
+    if (m_timerDialog != null)
+      m_timerDialog.destr()
+      m_timerDialog = null
+
+    if (m_heroDifficultyDialogs != null)
+      for key in m_heroDifficultyDialogs
+        destroy m_heroDifficultyDialogs.get(key)
+      destroy m_heroDifficultyDialogs
+      m_heroDifficultyDialogs = null
+
+  // --------------------------------------------------------------------------
+  function load()
+
+    m_progress = new Progress()
+
+    m_progressBarFrame = getProgressBar()
+    ..setProgress(m_progress)
+    ..setBarColor(Colors.cornflowerBlue)
+    ..setAbsArea(FRAMEPOINT_CENTER, SCREEN_CENTER, vec2(0.25, 0.025))
+
+    // Skip preloading in debug builds
+    if (DEV_ENVIRONMENT)
+      doAfter(1.0, () -> loadPlayerSaveData(m_progress))
+    else
+      preload()
+
+  // --------------------------------------------------------------------------
+  private function preload()
+
+    m_progress.report(0.0, "Preloading assets...")
+
+    m_preloaderTask = Preload.runPreloader(m_progress)
+    ..onCompleted(task -> nullTimer(() -> loadPlayerSaveData(m_progress)))
+    ..setDestroyOnCompletion(true)
+
+  // --------------------------------------------------------------------------
+  private function loadPlayerSaveData(IProgressReporter progress)
+
+    progress.report(0.0, "Loading player save data...")
+
+    let totalSteps = g_HumanPlayerInGameCount
+    var steps = 0
+
+    m_onPlayerLoadCompleteHandler = PlayerSaveData.onPlayerLoadComplete().register() (p) ->
+      steps++
+      progress.report(steps / totalSteps.toReal())
+
+    m_onLoadCompleteHandler = PlayerSaveData.onLoadComplete().register() -> 
+      g_GameSetup.loadPlayerSaveDataComplete()
+
+    m_onSynchronizedHandler = PlayerSaveData.onSynchronized().register(() -> PlayerSaveData.load())
+
+    PlayerSaveData.synchronize()
+
+  // --------------------------------------------------------------------------
+  private function loadPlayerSaveDataComplete()
+
+    PlayerSaveData.onPlayerLoadComplete().unregister(m_onPlayerLoadCompleteHandler)
+    m_onPlayerLoadCompleteHandler = INVALID_HANDLE
+
+    PlayerSaveData.onLoadComplete().unregister(m_onLoadCompleteHandler)
+    m_onLoadCompleteHandler = INVALID_HANDLE
+
+    PlayerSaveData.onSynchronized().unregister(m_onSynchronizedHandler)
+    m_onSynchronizedHandler = INVALID_HANDLE
+
+    m_progress.report(1.0, "Done Loading!")
+
+    doAfter(2.0, () -> loadComplete())
+
+  // --------------------------------------------------------------------------
+  private function loadComplete()
+
+    m_progressBarFrame.release()
+    destroy m_progress
+
+    start()
+
+  // --------------------------------------------------------------------------
+  function start()
+
+    m_timer = getTimer()
+    m_timer.doAfter(60) () ->
+      onTimerExpired()
+      m_timer = null
+
+    m_timerDialog = CreateTimerDialogBJ(m_timer, "Game starts in... ")
+    m_timerDialog.display(true)
+
+    for _player in g_PlayingHumanPlayers
+      g_playerSetups[_player.getId()] = new PlayerSetup()
+      if (_player.isControlledByUser())
+        _player.getHumanPlayerComponentRequired().load()
+        showDifficultySelectionDialogToPlayer(_player)
+
+  // --------------------------------------------------------------------------
+  private function showDifficultySelectionDialogToPlayer(player _player)
+
+    let playerSaveData = PlayerSaveData.getPlayerSaveData(_player) castTo PlayerSaveData_v800
+
+    let vm = new DifficultyDialogVM(_player)
+    ..setSelectedDifficulty(playerSaveData.selectedDifficulty)
+
+    let difficultySelectDialog = new DifficultySelectionDialog()
+    ..setDataContext(vm)
+    
+    difficultySelectDialog.onDialogClosed()
+      ..register(() -> onPlayerDifficultyChosen(_player))
+
+    m_heroDifficultyDialogs.put(_player, difficultySelectDialog)
+    
+    difficultySelectDialog.getFramehandle()
+      ..setAbsPoint(FRAMEPOINT_CENTER, SCREEN_CENTER + vec2(0, 0.05))
+      ..setSize(0.4821, 0.2611)
+      ..hide()
+      ..show(_player)
+
+  // --------------------------------------------------------------------------
+  function getHasTimerExpired() returns bool
+    return m_timer != null and m_timer.getElapsed() >= 30.0
+
+  // --------------------------------------------------------------------------
+  private function onTimerExpired()
+    done()
+
+  // --------------------------------------------------------------------------
+  private function onPlayerDifficultyChosen(player _player)
+    if (getHasTimerExpired())
+      return
+
+    let difficultySelectDialog = m_heroDifficultyDialogs.get(_player)
+    let vm = difficultySelectDialog.getDataContext()
+    let selectedDifficulty = vm.getSelectedDifficulty()
+
+    let playerSaveData = PlayerSaveData.getPlayerSaveData(_player) castTo PlayerSaveData_v800
+    playerSaveData.selectedDifficulty = selectedDifficulty
+      
+    let setup = PlayerSetup.getSetupForPlayer(_player)
+    setup.setDifficulty(DIFFICULTIES[selectedDifficulty])
+
+    difficultySelectDialog.getFramehandle().hide()
+
+    m_numPlayersReady++
+    if (m_numPlayersReady >= g_PlayingHumanPlayerUserCount)
+      done()
+
+  // --------------------------------------------------------------------------
+  private function done()
+
+    m_timerDialog.display(false)
+    m_timerDialog.destr()
+    m_timerDialog = null
+
+    if (m_timer != null)
+      m_timer.release()
+      m_timer = null
+
+    // Assign the default hero to any players who still haven't decided
+    for _player in g_PlayingHumanPlayers
+    //{
+      let setup = PlayerSetup.getSetupForPlayer(_player)
+
+      if (setup.getHeroTypeId() == 0)
+        setup.setHeroTypeId(TlsUnitIds.heroDefault)
+
+      if (setup.getDifficulty() == 0)
+        setup.setDifficulty(DIFFICULTY_NORMAL)
+
+      setup.setupPlayer(_player)
+
+      if (_player.isControlledByUser())
+      //{
+        // Close the dialog for any players still looking at it
+        m_heroDifficultyDialogs.get(_player).getFramehandle().hide()
+
+        PlayerSaveData.save(_player)
+      //}
+    //}
+
+    // start the game!
+    g_GameInstance.start()
+
+// ============================================================================
+init
+
+  doAfter(1.0) () ->
+    g_GameSetup.load()

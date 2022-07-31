@@ -1,0 +1,101 @@
+package StandardUnitModifiers
+import UnitModifiers
+import Range
+import UnitExtensions
+import GameConstants
+import WaveSpawning
+
+rangeInt array[TOTAL_NIGHTS] g_goldRange
+
+// ============================================================================
+public class StandardUnitModifiers
+  rangeInt healthRange
+  rangeReal armorRange
+  rangeInt attack1MinDamageRange
+  rangeInt attack1MaxDamageRange
+  rangeReal attack1Cooldown
+  real attack1Range
+  real sightRange
+  bool preferOrganicTargets
+
+  // --------------------------------------------------------------------------
+  construct ()
+    skip
+
+  // --------------------------------------------------------------------------
+  construct (StandardUnitModifiers other)
+    healthRange = other.healthRange
+    armorRange = other.armorRange
+    attack1MinDamageRange = other.attack1MinDamageRange
+    attack1MaxDamageRange = other.attack1MaxDamageRange
+    attack1Cooldown = other.attack1Cooldown
+    attack1Range = other.attack1Range
+    sightRange = other.sightRange
+    preferOrganicTargets = other.preferOrganicTargets
+
+  // --------------------------------------------------------------------------
+  function apply(SpawnWaveContext context, unit _unit)
+    apply(context, _unit, 1.0)
+
+  // --------------------------------------------------------------------------
+  function apply(SpawnWaveContext context, unit _unit, real scale)
+    applyHealth(context, _unit, scale)
+    applyArmor(context, _unit, scale)
+    applyAttack1DamageRange(context, _unit, scale)
+    applyAttack1Cooldown(context, _unit, scale)
+    applyMisc(_unit)
+
+  // --------------------------------------------------------------------------
+  function getHealth(SpawnWaveContext context, real scale) returns int
+    let gameT = context.getUnitModifierGameProgress01()
+    let finalDifficultyScale = context.getUnitModifierDifficultyScalar01() * scale
+    return R2I(healthRange.lerp(gameT) * finalDifficultyScale)
+
+  // --------------------------------------------------------------------------
+  function applyHealth(SpawnWaveContext context, unit _unit, real scale)
+    _unit.setMaxHPandHP(getHealth(context, scale))
+
+  // --------------------------------------------------------------------------
+  function getArmor(SpawnWaveContext context, real scale) returns real
+    let gameT = context.getUnitModifierGameProgress01()
+    let finalDifficultyScale = context.getUnitModifierDifficultyScalar01() * scale
+    return armorRange.lerp(gameT) * finalDifficultyScale
+
+  // --------------------------------------------------------------------------
+  function applyArmor(SpawnWaveContext context, unit _unit, real scale)
+    _unit.setArmor(getArmor(context, scale))
+
+  // --------------------------------------------------------------------------
+  function getAttack1DamageRange(SpawnWaveContext context, real scale) returns rangeInt
+    let gameT = context.getUnitModifierGameProgress01()
+    let finalDifficultyScale = context.getUnitModifierDifficultyScalar01() * scale
+    var range = lerp(attack1MinDamageRange, attack1MaxDamageRange, gameT)
+    range.min = R2I(I2R(range.min) * finalDifficultyScale)
+    range.max = R2I(I2R(range.max) * finalDifficultyScale)
+    return range
+
+  // --------------------------------------------------------------------------
+  function applyAttack1DamageRange(SpawnWaveContext context, unit _unit, real scale)
+    _unit.setDamageRange(0, getAttack1DamageRange(context, scale))
+
+  // --------------------------------------------------------------------------
+  /** A higher number for scale results in a higher cooldown and slower attack speed */
+  function getAttack1Cooldown(SpawnWaveContext context, real scale) returns real
+    let gameT = context.getUnitModifierGameProgress01()
+    let cooldown = attack1Cooldown.lerp(gameT)
+    let cooldownScalar = (1.0 + ((1.0 / context.getUnitModifierDifficultyScalar01()) - 1.0) * ELITE_ATTACK_COOLDOWN_SCALAR)
+    return cooldown * cooldownScalar * scale
+
+  // --------------------------------------------------------------------------
+  /** A higher number for scale results in a higher cooldown and slower attack speed */
+  function applyAttack1Cooldown(SpawnWaveContext context, unit _unit, real scale)
+    _unit.setAttackCooldown(getAttack1Cooldown(context, scale), 0)
+  
+  // --------------------------------------------------------------------------
+  function applyMisc(unit _unit)
+    _unit.setAttackRange(0, attack1Range)
+    _unit.setAcquisitionRange(sightRange)
+    _unit.setSightRadius(sightRange)
+
+    if (preferOrganicTargets)
+      _unit.preferOrganicTargets()

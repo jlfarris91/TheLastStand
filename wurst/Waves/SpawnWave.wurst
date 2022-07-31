@@ -1,0 +1,602 @@
+package SpawnWave
+import WaveSpawning
+import Events
+import LinkedList
+import HumanPlayerComponent
+import GameConstants
+import ErrorHandling
+import ClosureEvents
+import Math
+import HashMap
+import UnitRecycler
+import UnitMetadata
+import UndeadTargetingComponent
+import Runnable
+import TlsItemIds
+import ItemSet
+import UnitModifiers
+import Coins
+import Range
+import Spawning
+import UnitExtensions
+import TlsUnitDefinition
+import SoundUtils
+import MinimapIconComponent
+import Elites
+import Suspend
+import UndeadTargetService
+import ClosureTimers
+import RealTime
+import ColorUtility
+import GroupUtils
+import BuffObjEditing
+
+constant real PROCESS_SPAWN_REQUEST_INTERVAL = 0.3
+constant int MAX_SPAWNS_PER_PROCESS = 1
+
+constant real GOLD_CHANCE_MIN = 0.01
+constant real GOLD_CHANCE_MAX = 1.0
+
+HashMap<unit, SpawnWave> g_unitToSpawnWaveMap
+
+@configurable public bool g_enableSpawnWaveLogging = false
+
+ItemSet g_coinItemSet = new ItemSet()
+
+constant buffTuple g_goldCarrierBuff = compiletime(createDummyBuffObject("Gold Carrier", "This unit is carrying gold!", "ReplaceableTextures\\CommandButtons\\BTNMGExchange.blp", "Abilities\\Spells\\NightElf\\FaerieFire\\FaerieFireTarget.mdl", "chest"))
+
+// ============================================================================
+enum SpawnRestriction
+  None  // Go ahead and spawn
+  Wait  // Waiting for full group
+  Done  // Done spawning units for this wave
+
+// ============================================================================
+public class SpawnWave extends Runnable
+  private SpawnWaveDefinition m_definition
+  private _handle m_onDefProgressChangedEventHandler
+  private LinkedList<unit> m_aliveSpawnedUnits
+  private int m_numSpawned
+  private int m_maxSpawnCount
+  private int m_groupId
+  private string m_id
+  protected player m_targetPlayer
+  private SpawnWaveContext m_context
+  private string m_debugState
+  private Runnable m_progress
+
+  private SpawnWaveSpawnRequest m_spawnRequest
+
+  // --------------------------------------------------------------------------
+  construct(player targetPlayer, int index, SpawnWaveDefinition def)
+    if (targetPlayer == null)
+      argumentNullError("targetPlayer")
+    if (def == null)
+      argumentNullError("def")
+
+    m_targetPlayer = targetPlayer
+    m_definition = def
+    m_aliveSpawnedUnits = new LinkedList<unit>()
+    m_numSpawned = 0
+    m_maxSpawnCount = 0
+    m_groupId = 0
+    m_id = def.getName()
+    m_debugState = ""
+
+    m_context = new SpawnWaveContext()
+    m_context.definition = m_definition
+    m_context.waveNumber = index
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    unlistenToDefProgressChangedEvent()
+    
+    m_aliveSpawnedUnits.clear()
+    destroy m_aliveSpawnedUnits
+    
+    m_definition = null
+
+    if (m_context != null)
+      destroy m_context
+      m_context = null
+
+    if (m_spawnRequest != null)
+      destroy m_spawnRequest
+      m_spawnRequest = null
+
+  // --------------------------------------------------------------------------
+  function getDefinition() returns SpawnWaveDefinition
+    return m_definition
+
+  // --------------------------------------------------------------------------
+  function getId() returns string
+    return m_id
+
+  // --------------------------------------------------------------------------
+  function getDebugState() returns string
+    return m_debugState
+
+  // --------------------------------------------------------------------------
+  override function onStarted()
+    super.onStarted()
+
+    m_aliveSpawnedUnits.clear()
+    m_numSpawned = 0
+
+    // Update context
+    let playerMetadata = m_targetPlayer.getHumanPlayerComponentRequired()
+    m_context.playerDifficulty = playerMetadata.getDifficulty()
+    for i = 0 to MAX_ELITE_TIER-1
+      m_context.tierChances[i] = playerMetadata.getTierChance(i)
+    m_context.unitTier = 0
+    m_context.waveTier = m_context.getRandomTier()
+    m_context.goldDrops = 0
+    m_context.goldAvailable = 0
+
+    m_maxSpawnCount = m_definition.getMaxSpawnCount(m_context)
+
+    let targetProvider = getUndeadTargetProviderForPlayer(m_targetPlayer)
+    if (targetProvider == null)
+      cancel()
+      return
+
+    m_spawnRequest = new SpawnWaveSpawnRequest(this, targetProvider)
+
+    m_progress = m_definition.getProgress(m_context)
+
+    listenToDefProgressChangedEvent()
+
+    // Do this one frame later so that all player spawn waves that share these
+    // spawn def services get started
+    nullTimer() () ->
+    //{
+      if (m_progress != null)
+        m_progress.start()
+
+      SpawnController.enqueue(m_spawnRequest)
+    //}
+
+  // --------------------------------------------------------------------------
+  override function onCompleted()
+    super.onCompleted()
+
+    unlistenToDefProgressChangedEvent()
+
+    // Do this one frame later so that all player spawn waves that share these
+    // spawn def services get completed first
+    nullTimer() () ->
+      if (m_progress != null)
+        m_progress.complete()
+
+    if (m_spawnRequest != null)
+      SpawnController.remove(m_spawnRequest)
+      m_spawnRequest.complete()
+      m_spawnRequest.close()
+      destroy m_spawnRequest
+      m_spawnRequest = null
+
+    // Show minimap icons for whatever units are left
+    for u in m_aliveSpawnedUnits
+      if (u.getMinimapIconComponent() == null)
+        let iconPath = getMinimapIconPath(u.getTypeId())
+        if (iconPath != null)
+          let iconComp = u.getOrAddMinimapIconComponent()
+          iconComp.update(iconPath, getMinimapIconColor(u.getTypeId()))
+          iconComp.showOnlyFor(m_targetPlayer)
+
+  // --------------------------------------------------------------------------
+  override function getProgress() returns real
+    return m_progress != null ? m_progress.getProgress() : 0.0
+
+  // --------------------------------------------------------------------------
+  function getContext() returns SpawnWaveContext
+    return m_context
+
+  // --------------------------------------------------------------------------
+  function debugActivate()
+    start()
+
+  // --------------------------------------------------------------------------
+  function registerSpawnedUnit(unit spawnedUnit)
+
+    if (g_unitToSpawnWaveMap.has(spawnedUnit))
+      return
+
+    g_unitToSpawnWaveMap.put(spawnedUnit, this)
+    m_aliveSpawnedUnits.add(spawnedUnit)
+    m_numSpawned++
+  
+  // --------------------------------------------------------------------------
+  function unregisterSpawnedUnit(unit spawnedUnit)
+    g_unitToSpawnWaveMap.remove(spawnedUnit)
+    m_aliveSpawnedUnits.remove(spawnedUnit)
+
+  // --------------------------------------------------------------------------
+  function getSpawnedCount() returns int
+    return m_numSpawned
+
+  // --------------------------------------------------------------------------
+  function getMaxSpawnCount() returns int
+    return m_maxSpawnCount
+
+  // --------------------------------------------------------------------------
+  function getAliveCount() returns int
+    return m_aliveSpawnedUnits.size()
+
+  // --------------------------------------------------------------------------
+  private function onDefProgressChanged()
+    raiseProgressChangedEvent()
+    if (m_progress != null)
+      m_context.waveProgress = m_progress.getProgress()
+    if (getProgress() == 1.0)
+      // log("onDefProgressChanged", m_targetPlayer.getName() + " : progress finished!")
+      complete()
+
+  // --------------------------------------------------------------------------
+  private function listenToDefProgressChangedEvent()
+    if (m_progress == null)
+      return
+
+    unlistenToDefProgressChangedEvent()
+
+    let progressChangedEvent = m_progress.onProgressChanged()
+    if (progressChangedEvent != null)
+      m_onDefProgressChangedEventHandler = progressChangedEvent.register((progress) -> onDefProgressChanged())
+
+  // --------------------------------------------------------------------------
+  private function unlistenToDefProgressChangedEvent()
+    if (m_progress == null)
+      return
+    let progressChangedEvent = m_progress.onProgressChanged()
+    if (progressChangedEvent != null)
+      progressChangedEvent.unregister(m_onDefProgressChangedEventHandler)
+    m_onDefProgressChangedEventHandler = INVALID_HANDLE
+
+  // --------------------------------------------------------------------------
+  protected function canSpawnNextUnit() returns bool
+    if (getSpawnedCount() >= getMaxSpawnCount())
+      return false
+    let metadata = m_targetPlayer.getMetadata()
+    if (metadata == null or metadata.getHasLostGame())
+      return false
+    return true
+
+  // --------------------------------------------------------------------------
+  protected function onUnitKilled(unit dyingUnit)
+    unregisterSpawnedUnit(dyingUnit)
+    m_context.incKillCount()
+
+// ============================================================================
+function onUnitDeath()
+  let dyingUnit = GetDyingUnit()
+  if (not g_unitToSpawnWaveMap.has(dyingUnit))
+    return
+  let spawnWave = g_unitToSpawnWaveMap.get(dyingUnit)
+  spawnWave.onUnitKilled(dyingUnit)
+
+// ============================================================================
+public class SpawnWaveSpawnRequest extends SpawnRequestBase
+
+  private SpawnWave m_spawnWave = null
+  private SpawnWaveDefinition m_definition = null
+  private SpawnWaveContext m_context = null
+  private UndeadTargetProvider m_targetProvider = null
+  private ISpawnPointProvider m_spawnPointProvider = null
+  private bool m_waitForFullSpawnGroup = false
+  private int m_maxAliveCount = 0
+
+  private int m_spawnsPerGoldDrop = 0
+  private int m_spawnsPerGoldDropCounter = 0
+
+  // All units spawned for the entire group, this includes all subgroups units spawned
+  private group m_spawnedUnits = null
+
+  private int m_groupSize = 1
+  private int m_groupId = -1
+  private unit m_groupTargetUnit = null
+
+  private SpawnWaveUnitTypeCollection m_unitTypes = null
+  private int m_unitTypeIndex = -1
+
+  // --------------------------------------------------------------------------
+  construct(SpawnWave spawnWave, UndeadTargetProvider targetProvider)
+    super(REAL_MAX)
+
+    m_startTime = getRealTimeSeconds()
+
+    m_spawnWave = spawnWave
+    m_definition = spawnWave.getDefinition()
+    m_context = spawnWave.getContext()
+    m_targetProvider = targetProvider..acquire()
+    m_spawnPointProvider = getSpawnPointProvider(spawnWave.m_targetPlayer, m_definition.getSpawnPointProviderType())
+    m_waitForFullSpawnGroup = m_definition.getWaitForFullSpawnGroup()
+    m_spawnsPerGoldDrop = m_definition.getSpawnsPerGoldDrop(m_context)
+    m_spawnsPerGoldDropCounter = 0
+    m_maxAliveCount = 0
+    m_spawnedUnits = getGroup()
+    m_groupSize = 0
+    m_groupId = -1
+    m_groupTargetUnit = null 
+
+    m_unitTypes = new SpawnWaveUnitTypeCollection()
+    m_unitTypeIndex = 0
+
+    nextGroup()
+
+  // --------------------------------------------------------------------------
+  ondestroy
+
+    m_targetProvider.release()
+
+    if (m_spawnedUnits != null)
+      m_spawnedUnits.release()
+      m_spawnedUnits = null
+
+    if (m_unitTypes != null)
+      destroy m_unitTypes
+      m_unitTypes = null
+
+  // --------------------------------------------------------------------------
+  override function next() returns int
+
+    let restriction = canSpawnNextUnit()
+
+    if (restriction == SpawnRestriction.Done)
+      // Wave is done spawning units
+      return 0
+
+    if (restriction == SpawnRestriction.Wait)
+      // Too many alive currently
+      return 0
+
+    let unitType = getNextUnitType()
+
+    m_context.groupId = m_groupId
+    m_context.waveProgress = m_spawnWave.getProgress()
+    m_context.unitTier = unitType.tier
+
+    if (m_context.unitTier == -1)
+      error("Unit tier is -1")
+
+    let spawnedUnit = createUnit(unitType.id)
+    if (spawnedUnit == null)
+      Log.error("SpawnWaveSpawnRequest", "next", "", "Unable to spawn unit " + UnitId2String(unitType.id))
+      return 0
+
+    if (not prepareUnit(spawnedUnit))
+      Log.error("SpawnWaveSpawnRequest", "next", "", "Unable to prepare unit " + UnitId2String(unitType.id))
+      return 0
+
+    m_spawnedUnits.addUnit(spawnedUnit)
+    m_spawnWave.registerSpawnedUnit(spawnedUnit)
+
+    m_context.groupId = -1
+    m_context.unitTier = 0
+
+    spawnedUnit.removeAbility(g_goldCarrierBuff.abilId)
+    spawnedUnit.removeAbility(g_goldCarrierBuff.buffId)
+
+    m_spawnsPerGoldDropCounter++
+    if (m_spawnsPerGoldDrop != 0 and m_spawnsPerGoldDropCounter == m_spawnsPerGoldDrop)
+      m_spawnsPerGoldDropCounter = 0
+      m_context.goldDrops++
+      makeSpawnedUnitDropGold(spawnedUnit)
+
+    if (m_spawnedUnits.size() == m_groupSize)
+      nextGroup()
+
+    return 1
+
+  // --------------------------------------------------------------------------
+  override function hasNext() returns bool
+    return m_spawnWave.canSpawnNextUnit()
+
+  // --------------------------------------------------------------------------
+  override function complete()
+    super.complete()
+    completeGroup()
+
+  // --------------------------------------------------------------------------
+  override function close()
+
+    for u in m_spawnedUnits
+      m_spawnWave.unregisterSpawnedUnit(u)
+      u.unsuspend()
+      let recycler = u.getRecycler()
+      if (recycler != null)
+        recycler.stock(u)
+      else
+        u.remove()
+
+  // --------------------------------------------------------------------------
+  private function nextGroup()
+
+    completeGroup()
+
+    if (m_spawnWave.getSpawnedCount() == m_spawnWave.getMaxSpawnCount())
+      return
+
+    m_groupTargetUnit = m_targetProvider.getRandomTargetUnit(false) // TODO: prefer organic targets?
+    m_unitTypeIndex = 0
+    m_groupId++
+
+    m_context.groupId = m_groupId
+    m_context.waveProgress = m_spawnWave.getProgress()
+    m_context.unitTier = -1
+
+    // These values may have changed since the last time we spawned a full group
+    // but we only cache them at the start of a new group
+    let spawnGroupingFactor = m_definition.getSpawnGroupingFactor(m_context)
+    m_maxAliveCount = m_definition.getMaxAliveCount(m_context)
+    m_groupSize = max(R2I(I2R(m_maxAliveCount) * spawnGroupingFactor), 1)
+    m_spawnsPerGoldDrop = m_definition.getSpawnsPerGoldDrop(m_context)
+
+    if (m_groupSize == 0)
+      error("Subgroup count cannot be 0")
+
+    // Get new unit types for next subgroup
+    m_unitTypes.clear()
+    m_definition.getUnitTypeProvider().getUnitTypes(m_context, m_groupSize, m_unitTypes)
+
+    m_context.groupId = -1
+
+  // --------------------------------------------------------------------------
+  private function completeGroup()
+
+    if (m_spawnedUnits.isEmpty())
+      return
+
+    let result = m_spawnPointProvider.getRandomSpawnPointInRange(m_groupTargetUnit.getPos(), m_definition.getSpawnRange().toRangeReal())
+    if (not result.succeeded)
+      Log.warn("[SpawnWave.onActivated] Found no spawn points!")
+      close()
+      return
+
+    for spawnedUnit in m_spawnedUnits
+    //{
+      spawnedUnit.setPos(result.spawnPoint)
+      spawnedUnit.unsuspend()
+      spawnedUnit.show()
+
+      let unitMetadata = spawnedUnit.getMetadata()
+
+      let utc = unitMetadata.getUndeadTargetingComponent()
+      if (utc != null)
+        utc.setTargetUnit(m_groupTargetUnit)
+
+      let unitDef = getUnitDefinition(spawnedUnit.getTypeId())
+      if (unitDef != null)
+        spawnedUnit.fadeIn(unitDef.getVertexColor())
+      else
+        spawnedUnit.fadeIn()
+
+      if (m_definition.getMinimapIconPath() != null)
+        spawnedUnit.getOrAddMinimapIconComponent()
+        ..update(m_definition.getMinimapIconPath(), m_definition.getMinimapIconColor())
+        ..showOnlyFor(m_groupTargetUnit.getOwner())
+    //}
+    
+    m_spawnedUnits.clear()
+
+    let targetPlayer = m_groupTargetUnit.getOwner()
+
+    if (localPlayer == targetPlayer and m_definition.getPingOnGroupSpawn())
+      let color = m_definition.getPingOnGroupSpawnColor()
+      PingMinimapEx(result.spawnPoint.x, result.spawnPoint.y, 3.0, color.red, color.green, color.blue, true)
+
+    let playSoundOnGroupSpawn = m_definition.getPlaySoundOnGroupSpawn()
+    if (playSoundOnGroupSpawn != null)
+      playSoundOnGroupSpawn.playForPlayer(targetPlayer)
+
+  // --------------------------------------------------------------------------
+  private function getNextUnitType() returns spawnWaveUnitType
+    let unitType = m_unitTypes.get(m_unitTypeIndex)
+    m_unitTypeIndex = wrap(m_unitTypeIndex + 1, 0, m_unitTypes.size() - 1)
+    return unitType
+  
+  // --------------------------------------------------------------------------
+  private function createUnit(int unitTypeId) returns unit
+
+    unit spawnedUnit
+
+    let facingAngleRange = m_definition.getFacingAngleRange()
+    let facingAngle = facingAngleRange.getRandom().asAngleDegrees()
+
+    if (m_definition.getUseUnitRecycler())
+      spawnedUnit = createUnitRecycled(PLAYER_UNDEAD, unitTypeId, ZERO2, facingAngle)
+    else
+      spawnedUnit = createUnitTLS(PLAYER_UNDEAD, unitTypeId, ZERO2, facingAngle)
+    
+    spawnedUnit.suspend()
+    spawnedUnit.hide()
+
+    return spawnedUnit
+
+  // --------------------------------------------------------------------------
+  private function prepareUnit(unit spawnedUnit) returns bool
+
+    let unitMetadata = spawnedUnit.getMetadata()
+    if (unitMetadata == null)
+      Log.error("[SpawnWave.setTargetPlayer] : Unit has no metadata! : {0} ({1} : {2})".format(
+        spawnedUnit.getName(),
+        spawnedUnit.getTypeId().toString(),
+        UnitId2StringBJ(spawnedUnit.getTypeId())))
+      return false
+
+    let commonUnitModifier = m_definition.getCommonUnitModifier()
+    if (commonUnitModifier != null)
+      commonUnitModifier.call(spawnedUnit, m_context)
+
+    let unitModifier = m_definition.getUnitModifier(spawnedUnit.getTypeId())
+    if (unitModifier != null)
+      unitModifier.call(spawnedUnit, m_context)
+
+    return true
+
+  // --------------------------------------------------------------------------
+  private function canSpawnNextUnit() returns SpawnRestriction
+  
+    if (m_spawnWave.isCompleted())
+      return SpawnRestriction.Done
+
+    if (m_spawnWave.getSpawnedCount() == m_spawnWave.getMaxSpawnCount())
+      return SpawnRestriction.Done
+
+    if (m_spawnWave.getAliveCount() == m_maxAliveCount)
+      return SpawnRestriction.Wait
+
+    if (m_spawnWave.m_targetPlayer == null)
+      return SpawnRestriction.Done
+
+    let playerMetadata = m_spawnWave.m_targetPlayer.getMetadata()
+    if (playerMetadata == null or playerMetadata.getHasLeftGame() or playerMetadata.getHasLostGame())
+      return SpawnRestriction.Done
+
+    return SpawnRestriction.None
+
+  // --------------------------------------------------------------------------
+  private function makeSpawnedUnitDropGold(unit spawnedUnit)
+    var goldDropAmount = m_definition.getGoldDropAmount(m_context)
+    // spawnedUnit.awardGoldOnDeath(goldDropAmount.toRange(), 1.0)
+    if (goldDropAmount == 0)
+      return
+    spawnedUnit.addAbility(g_goldCarrierBuff.abilId)
+    goldDropAmount = min(goldDropAmount, 50) // 5 10g coins max
+    while (goldDropAmount > 0)
+      let coinTypeId = getCoinItemTypeFromGoldReward(goldDropAmount)
+      spawnedUnit.awardItemOnDeath(g_coinItemSet, coinTypeId, 1.0)
+      let coinValue = getGoldRewardFromCoinItemType(coinTypeId)
+      goldDropAmount -= coinValue
+      m_context.goldAvailable += coinValue
+
+  // --------------------------------------------------------------------------
+  override function getDebuggerStateString() returns string
+
+    string state
+
+    switch (canSpawnNextUnit())
+      case SpawnRestriction.None
+        state = "Spwn"
+      case SpawnRestriction.Wait
+        state = "Wait"
+      case SpawnRestriction.Done
+        state = "Done"
+
+    return "{0} {1} ({2}/{3}) G{4} {5}s".format(
+      m_definition.getName(),
+      state,
+      m_spawnedUnits.size().toString(),
+      m_groupSize.toString(),
+      m_groupId.toString(),
+      (getRealTimeSeconds() - m_startTime).toString())
+      .colorize(m_spawnWave.m_targetPlayer.getColor().toColor())
+
+// ============================================================================
+init
+  g_unitToSpawnWaveMap = new HashMap<unit, SpawnWave>()
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_DEATH, function onUnitDeath)
+
+  g_coinItemSet.add(TlsItemIds.coinSmall, 1.0)
+  g_coinItemSet.add(TlsItemIds.coinMedium, 1.0)
+  g_coinItemSet.add(TlsItemIds.coinLarge, 1.0)
+  g_coinItemSet.add(TlsItemIds.coinEpic, 1.0)

@@ -3,7 +3,6 @@ import GameSettings
 import DisplayTextToPlayer
 import GameConstants
 import HumanPlayerComponent
-import UnitMetadata
 import GroupUtils
 import Survivors
 import HumanPlayers
@@ -18,10 +17,7 @@ import Unit_MetalWall
 import Unit_GateCommon
 import Unit_BrickWall
 import HeroHeart
-
-// ============================================================================
-function disableFogOfWarForPlayer(player p)
-  createVision(p, GetPlayableMapRect(), false).start()
+import Notifications
 
 // ============================================================================
 function onPlayerHeroDiedDuringGracePeriod(player _player)
@@ -59,10 +55,8 @@ function onPlayerUnitDied()
     return
 
   let hero = playerMetadata.getHero()
-  if (hero != null)
-    let heroUnit = hero.getUnit()
-    if (heroUnit != null and dyingUnit == heroUnit)
-      onPlayerHeroDied(owner, heroUnit)
+  if (hero != null and dyingUnit == hero)
+    onPlayerHeroDied(owner, hero)
 
   if (dyingUnit.isCampHeadquarters())
     onPlayerCampDied(owner)
@@ -75,12 +69,15 @@ function onPlayerLostGame(player losingPlayer)
     metadata.setHasLostGame(true)
     metadata.setDisplayName(metadata.getName() + " <Lost>")
 
-  disableFogOfWarForPlayer(losingPlayer)
   displayMessageToPlayer(losingPlayer, "Your camp tent has been destroyed. The game is over for you.".colorize(Colors.red))
   displayMessageToPlayer(losingPlayer, "If you have any feedback or would like to be alerted when new versions are released please join the Last Stand Discord server!")
   displayMessageToPlayer(losingPlayer, DISCORD_LINK.colorize(Colors.gold))
 
-  displayMessageToAllExceptPlayer(losingPlayer, "{0} has lost the game".format(losingPlayer.getNameColored()))
+  for p in g_PlayingHumanPlayers
+    if (p != losingPlayer)
+      notifyPlayer(p, "{0} lost the game".format(losingPlayer.getNameColored()), "ui\\player-lost.dds")
+
+  g_GameInstance.updateGameDifficulty()
 
 // ============================================================================
 function onPlayerLeftGame()
@@ -97,16 +94,18 @@ function onPlayerLeftGame()
       // Remove their hero
       let hero = humanPlayerComponent.getHero()
       if (hero != null)
-        let heroUnit = hero.getUnit()
-        if (heroUnit != null)
-          heroUnit.remove()
+        hero.remove()
   //}
 
   g_PlayingHumanPlayers.removePlayer(leavingPlayer)
   
   processRemainingPlayerUnits(leavingPlayer)
 
-  displayMessageToAllExceptPlayer(leavingPlayer, "{0} has left the game".format(leavingPlayer.getNameColored()))
+  for p in g_PlayingHumanPlayers
+    if (p != leavingPlayer)
+      notifyPlayer(p, "{0} left the game".format(leavingPlayer.getNameColored()), "ui\\player-left.dds")
+  
+  g_GameInstance.updateGameDifficulty()
 
 // ============================================================================
 function shouldBeDestroyed(unit _unit) returns bool
@@ -137,6 +136,7 @@ function processRemainingPlayerUnits(player _player)
   let tempGroup = getGroup()
   tempGroup.enumUnitsOfPlayer(_player, null)
   for u from tempGroup
+  //{
     if (u.isAlive())
       // We always destroy the camp headquarters and shelters
       if (shouldBeDestroyed(u))
@@ -148,14 +148,11 @@ function processRemainingPlayerUnits(player _player)
       else if (shouldBanishUnit(u))
         SurvivorUtility.banishSurvivor(u)
       // Finally, just remove the unit from the game
-      else
+      else if (not u.isTlsHero())
         u.remove()
+  //}
 
   tempGroup.release()
-
-  let heroItem = getHeartItem(_player)
-  if (heroItem != null)
-    destroyHeroHeartItem(heroItem)
 
 // ============================================================================
 init

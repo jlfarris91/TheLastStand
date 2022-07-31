@@ -1,0 +1,63 @@
+package GridCachedSpawnManagerDebugger
+import Frame
+import DebuggerDialog
+import ProjectConstants
+import GridCachedSpawnManager
+import PlayerSpawnPointProviders
+import Host
+import PlayerExtensions
+
+public GCSMDebugger g_gcsmDebugger
+
+// ============================================================================
+class GCSMDebugger extends DebuggerRealtimeUpdateFrame
+
+  // --------------------------------------------------------------------------
+  construct()
+    super(createFrame("TEXTAREA", "GCSMDebugger", GAME_UI, "", 0))
+
+  // --------------------------------------------------------------------------
+  override function realtimeUpdate(real _)
+
+    let frameHandle = getFrameHandle()
+
+    let selectedUnit = g_HostPlayer.getFirstSelectedUnit()
+    if (selectedUnit == null)
+      BlzFrameSetText(frameHandle, "Select a unit")
+      return
+
+    let selectedPlayer = selectedUnit.getOwner()
+
+    BlzFrameSetText(frameHandle, "===== Grid Spawn Manager =====")
+    BlzFrameAddText(frameHandle, "Requests : " + GCSM.updateRequests.getCount().toString() + "/" + GCSM.updateRequests.getCapacity().toString())
+    BlzFrameAddText(frameHandle, "Processed : " + GCSM.totalRequestsProcessed.toString())
+    BlzFrameAddText(frameHandle, "Attempts : " + GCSM.totalUpdateSpawnAreaAttempts.toString())
+    BlzFrameAddText(frameHandle, "Most Attempts : " + GCSM.mostAttempts.toString())
+    BlzFrameAddText(frameHandle, "Found : " + GCSM.totalFound.toString())
+    BlzFrameAddText(frameHandle, "Requeues : " + GCSM.totalRequeues.toString())
+    BlzFrameAddText(frameHandle, "Abandoned : " + GCSM.totalAbandoned.toString())
+    
+    let friendlySpawnManager = getCachedFriendlySpawnPointProvider(selectedPlayer) castTo GridCachedSpawnManager
+    if (friendlySpawnManager != null)
+      update_spawnManager(friendlySpawnManager)
+    
+    let hostileSpawnManager = getCachedHostileSpawnPointProvider(selectedPlayer) castTo GridCachedSpawnManager
+    if (hostileSpawnManager != null)
+      update_spawnManager(hostileSpawnManager)
+
+  // --------------------------------------------------------------------------
+  private function update_spawnManager(GridCachedSpawnManager spawnManager)
+    let frameHandle = getFrameHandle()
+    BlzFrameAddText(frameHandle, "----- {0} -----".format(spawnManager.getId()))
+    let camCursor = vec2(GetCameraTargetPositionX(), GetCameraTargetPositionY())
+    let camCell = GCSM.mapGrid.getCell(camCursor)
+    let spawnAreaData = spawnManager.getSpawnArea(GCSM.mapGrid.getIndex(camCell))
+    BlzFrameAddText(frameHandle, "Focused: {0} v:{1} r:{2}".format(
+      spawnAreaData.toString(),
+      spawnAreaData.valid.toString(),
+      spawnAreaData.processingRequest.toString()))
+
+// ============================================================================
+init
+  if (DEV_ENVIRONMENT)
+    DebuggerDialog.registerFrame("GCSM", () -> new GCSMDebugger())

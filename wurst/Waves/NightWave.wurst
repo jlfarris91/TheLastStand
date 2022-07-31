@@ -1,0 +1,95 @@
+package NightWave
+import Wave
+import DisplayTextToPlayer
+import TimeOfDayProgress
+import Events
+import ColorUtility
+import Vector
+import IProgress
+import TlsSounds
+
+// ============================================================================
+public class NightWave extends Wave
+  private int m_night
+  private _handle m_nightWaveProgressChangedHandler = INVALID_HANDLE
+
+  // --------------------------------------------------------------------------
+  construct(player p, int night)
+    super(p)
+    m_night = night
+
+    playSoundOnComplete(TlsSounds.questCompleted)
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    unlistenForNightProgressChanged()
+
+  // --------------------------------------------------------------------------
+  function getNight() returns int
+    return m_night
+
+  // --------------------------------------------------------------------------
+  override function getProgress() returns real
+    return (super.getProgress() + g_nightProgress.getProgress()) / 2.0
+
+  // --------------------------------------------------------------------------
+  override function onStarted()
+    super.onStarted()
+    FogMaskEnableOn()
+    listenForNightProgressChanged()
+
+  // --------------------------------------------------------------------------
+  override function onCompleted()
+    super.onCompleted()
+    unlistenForNightProgressChanged()
+
+  // --------------------------------------------------------------------------
+  private function listenForNightProgressChanged()
+    unlistenForNightProgressChanged()
+
+    m_nightWaveProgressChangedHandler = g_nightProgress.onProgressChanged()
+      .register((IProgress progress) -> onNightWaveProgressChanged(progress))
+
+  // --------------------------------------------------------------------------
+  private function unlistenForNightProgressChanged()
+    let progressChangedEvent = g_nightProgress.onProgressChanged()
+    if (progressChangedEvent != null)
+      progressChangedEvent.unregister(m_nightWaveProgressChangedHandler)
+    m_nightWaveProgressChangedHandler = INVALID_HANDLE
+
+  // --------------------------------------------------------------------------
+  private function onNightWaveProgressChanged(IProgress _progress)
+    raiseProgressChangedEvent()
+    if (getProgress() == 1.0)
+      complete()
+
+  // --------------------------------------------------------------------------
+  override function announceWaveToPlayer(player _player)
+    let spawnWaves = getSpawnWaves()
+    if (spawnWaves.isEmpty())
+      return
+
+    let spawnWavesCloned = spawnWaves.clone()
+
+    // Remove "Zombies" spawn wave that exists for every night after the first
+    if (getNight() > 1)
+      spawnWavesCloned.removeAt(0)
+
+    let firstSpawnWave = spawnWavesCloned.getFirst()
+    if (firstSpawnWave == null)
+      Log.error("NightWave {0} has no spawn waves".format(getId()))
+      return
+
+    let firstSpawnWaveDef = firstSpawnWave.getDefinition()
+    let spawnWaveName = firstSpawnWaveDef.getName()
+    let spawnWaveTagsStr = firstSpawnWaveDef.getTags().joinBy(", ")
+
+    destroy spawnWavesCloned
+
+    let message = "Night {0} - {1} ({2})".format(
+      getNight().toString(),
+      spawnWaveName.colorize(COLOR_GOLD),
+      spawnWaveTagsStr)
+    
+    // e.g. "Night 3 - Skeleton Archers"
+    displayMessageToPlayer(_player, message)
