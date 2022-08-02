@@ -49,7 +49,7 @@ if ($env:CI -eq "true") { $env:IsLocalBuild = 0 }
 
 $env:MapAuthor = "Ozymandias"
 
-if ($VersionInfo.BranchName -eq "develop") {
+if ($VersionInfo.PreReleaseTag -ne "") {
   $env:MapVersion = "{0}.{1}" -f $env:MapVersion, $VersionInfo.PreReleaseTag
 }
 
