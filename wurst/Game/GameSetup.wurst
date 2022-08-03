@@ -18,6 +18,7 @@ import GameConstants
 import DifficultySelectionDialog
 import PlayerExtensions
 import ProgressBarUtils
+import RegisterEvents
 
 public GameSetup g_GameSetup = new GameSetup()
 trigger g_buttonPressedTrigger
@@ -35,7 +36,7 @@ PlayerSetup array g_playerSetups
 public class GameSetup
   private timer m_timer
   private timerdialog m_timerDialog
-  private int m_numPlayersReady
+  private force m_readyPlayers = CreateForce()
   private IterableMap<player, DifficultySelectionDialog> m_heroDifficultyDialogs = new IterableMap<player, DifficultySelectionDialog>()
   private _handle m_onPlayerLoadCompleteHandler
   private _handle m_onLoadCompleteHandler
@@ -59,6 +60,9 @@ public class GameSetup
         destroy m_heroDifficultyDialogs.get(key)
       destroy m_heroDifficultyDialogs
       m_heroDifficultyDialogs = null
+
+    m_readyPlayers.destr()
+    m_readyPlayers = null
 
   // --------------------------------------------------------------------------
   function load()
@@ -139,9 +143,13 @@ public class GameSetup
     m_timerDialog = CreateTimerDialogBJ(m_timer, "Game starts in... ")
     m_timerDialog.display(true)
 
-    for _player in g_PlayingHumanPlayers
+    m_readyPlayers.clear()
+
+    Log.debug("GameSetup", "start", "", "players: " + g_HumanPlayersInGame.count().toString() + " " + g_HumanPlayerInGameCount.toString())
+
+    for _player in g_HumanPlayersInGame
       g_playerSetups[_player.getId()] = new PlayerSetup()
-      if (_player.isControlledByUser())
+      if (_player.isControlledByUser() and _player.isPlaying())
         _player.getHumanPlayerComponentRequired().load()
         showDifficultySelectionDialogToPlayer(_player)
 
@@ -149,6 +157,9 @@ public class GameSetup
   private function showDifficultySelectionDialogToPlayer(player _player)
 
     let playerSaveData = PlayerSaveData.getPlayerSaveData(_player) castTo PlayerSaveData_v800
+    if (playerSaveData == null)
+      Log.debug("GameSetup", "showDifficultySelectionDialogToPlayer", _player.getId().toString(), " Player save data is null")
+      return
 
     let vm = new DifficultyDialogVM(_player)
     ..setSelectedDifficulty(playerSaveData.selectedDifficulty)
@@ -185,15 +196,25 @@ public class GameSetup
     let selectedDifficulty = vm.getSelectedDifficulty()
 
     let playerSaveData = PlayerSaveData.getPlayerSaveData(_player) castTo PlayerSaveData_v800
-    playerSaveData.selectedDifficulty = selectedDifficulty
-      
-    let setup = PlayerSetup.getSetupForPlayer(_player)
-    setup.setDifficulty(DIFFICULTIES[selectedDifficulty])
+
+    if (playerSaveData != null)
+      playerSaveData.selectedDifficulty = selectedDifficulty
+      let setup = PlayerSetup.getSetupForPlayer(_player)
+      setup.setDifficulty(DIFFICULTIES[selectedDifficulty])
+      Log.debug("GameSetup", "onPlayerDifficultyChosen", _player.getId().toString(), "difficulty: " + selectedDifficulty.toString())
+    else
+      Log.debug("GameSetup", "onPlayerDifficultyChosen", _player.getId().toString(), " Player save data is null")
 
     difficultySelectDialog.getFramehandle().hide()
 
-    m_numPlayersReady++
-    if (m_numPlayersReady >= g_PlayingHumanPlayerUserCount)
+    m_readyPlayers.addPlayer(_player)
+    onPlayerReady(_player)
+
+  // --------------------------------------------------------------------------
+  private function onPlayerReady(player readyPlayer)
+    let numPlayersReady = m_readyPlayers.count()
+    Log.debug("GameSetup", "onPlayerReady", readyPlayer.getId().toString(), "ready: " + numPlayersReady.toString() + "/" + g_PlayingHumanPlayerUserCount.toString())
+    if (numPlayersReady >= g_HumanPlayerInGameCount)
       done()
 
   // --------------------------------------------------------------------------
@@ -223,7 +244,9 @@ public class GameSetup
       if (_player.isControlledByUser())
       //{
         // Close the dialog for any players still looking at it
-        m_heroDifficultyDialogs.get(_player).getFramehandle().hide()
+        let difficultyDialog = m_heroDifficultyDialogs.get(_player)
+        if (difficultyDialog != null)
+          difficultyDialog.getFramehandle().hide()
 
         PlayerSaveData.save(_player)
       //}
@@ -232,8 +255,25 @@ public class GameSetup
     // start the game!
     g_GameInstance.start()
 
+  // --------------------------------------------------------------------------
+  protected function onPlayerLeave(player leavingPlayer)
+
+    // Close the dialog for any players still looking at it
+    let difficultyDialog = m_heroDifficultyDialogs.get(leavingPlayer)
+    if (difficultyDialog != null)
+      difficultyDialog.getFramehandle().hide()    
+
+    m_readyPlayers.removePlayer(leavingPlayer)
+    onPlayerReady(leavingPlayer)
+
+// ============================================================================
+function onPlayerLeave()
+  g_GameSetup.onPlayerLeave(GetTriggerPlayer())
+
 // ============================================================================
 init
+
+  registerPlayerEvent(EVENT_PLAYER_LEAVE, function onPlayerLeave)
 
   doAfter(1.0) () ->
     g_GameSetup.load()

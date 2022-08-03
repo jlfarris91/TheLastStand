@@ -12,12 +12,14 @@ import initlater UndeadTargetingComponent
 import Trace
 import Events
 import RefObject
+import RegisterEvents
 
 public bool UTS_ENABLED = true
 
 @configurable constant public int VALID_HUMAN_STRUCTURE_TARGETS_ATTACKER_COUNT_THRESHOLD = 3
 constant real PROCESS_UPDATES_INTERVAL = 1.0
 constant real TARGET_STRUCTURE_SCORE_RANGE = 512.0
+constant real ATTACK_RANGE_SCALAR = 1.0
 
 UndeadTargetProvider array g_playerData
 int g_playerDataUpdateIndex = -1
@@ -156,18 +158,30 @@ public class UndeadTargetProvider
 
   // --------------------------------------------------------------------------
   function getClosestTargetUnit(vec2 pos, bool preferOrganic) returns unit
+    return getClosestTargetUnit(pos, REAL_MAX, preferOrganic)
+
+  // --------------------------------------------------------------------------
+  function getClosestTargetUnit(vec2 pos, real maxRange, bool preferOrganic) returns unit
 
     if ((preferOrganic or m_preferOrganicTargets) and not m_nonStructureTargets.isEmpty())
-      return m_nonStructureTargets.getClosestUnit(pos)
+      let target = m_nonStructureTargets.getClosestUnit(pos, maxRange)
+      if (target != null)
+        return target
 
     if (not m_structureTargets_HighPri.isEmpty())
-      return m_structureTargets_HighPri.getClosestUnit(pos)
+      let target = m_structureTargets_HighPri.getClosestUnit(pos)
+      if (target != null)
+        return target
 
     if (not m_structureTargets_LowPri.isEmpty())
-      return m_structureTargets_LowPri.getClosestUnit(pos)
+      let target = m_structureTargets_LowPri.getClosestUnit(pos)
+      if (target != null)
+        return target
 
     if (not m_nonStructureTargets.isEmpty())
-      return m_nonStructureTargets.getClosestUnit(pos)
+      let target = m_nonStructureTargets.getClosestUnit(pos)
+      if (target != null)
+        return target
     
     return null
 
@@ -336,11 +350,10 @@ public function unregisterTargetedUnit(unit targetedUnit)
     attackerGroup.release()
 
 // ============================================================================
-function clearLeavingLosingPlayerData()
-  let losingPlayer = getLosingPlayer()
-  let playerData = g_playerData[losingPlayer.getId()]
+function clearLeavingLosingPlayerData(player leavingLosingPlayer)
+  let playerData = g_playerData[leavingLosingPlayer.getId()]
   if (playerData != null)
-    playerData.removePlayer(losingPlayer)
+    playerData.removePlayer(leavingLosingPlayer)
 
 // ============================================================================
 function processUpdates()
@@ -397,10 +410,14 @@ function onUnitDeindexed()
     playerData.unregisterPlayerUnit(indexingUnit)
 
 // ============================================================================
+function onPlayerLeave()
+  clearLeavingLosingPlayerData(GetTriggerPlayer())
+
+// ============================================================================
 init
 
   onUnitIndex(() -> onUnitIndexed())
   onUnitDeindex(() -> onUnitDeindexed())
 
-  onPlayerLost(() -> clearLeavingLosingPlayerData())
-  onPlayerLeft(() -> clearLeavingLosingPlayerData())
+  onPlayerLost(() -> clearLeavingLosingPlayerData(getLosingPlayer()))
+  registerPlayerEvent(EVENT_PLAYER_LEAVE, function onPlayerLeave)
