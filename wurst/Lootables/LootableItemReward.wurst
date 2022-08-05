@@ -2,26 +2,24 @@ package LootableItemReward
 import LootableReward
 import MainItemLibrary
 import FX
-import DisplayTextToPlayer
 import LootableComponent
 import ColorUtility
-import UnitMetadata
-import LooterComponent
-import GameInstance
 import SoundUtils
 import ItemType
 import Notifications
 import TlsItemLibrary
+import Difficulties
+import GameInstance
 
 SoundDefinition g_lootRewardSound
 
 // ============================================================================
 public class LootableItemReward implements ILootableReward
-  private ItemChances m_itemChancesStart
-  private ItemChances m_itemChancesEnd
+  private itemChances m_itemChancesStart
+  private itemChances m_itemChancesEnd
 
   // --------------------------------------------------------------------------
-  construct(ItemChances chancesStart, ItemChances chancesEnd)
+  construct(itemChances chancesStart, itemChances chancesEnd)
     m_itemChancesStart = chancesStart
     m_itemChancesEnd = chancesEnd
 
@@ -32,46 +30,36 @@ public class LootableItemReward implements ILootableReward
   // --------------------------------------------------------------------------
   override function giveReward(LootableComponent lootable, unit looter) returns bool
 
-    var itemChances = lerp(m_itemChancesStart, m_itemChancesEnd, g_GameInstance.getGameProgress01())
+    let ownerPlayer = looter.getOwner()
 
-    var pendantApplied = false
-
-    // Treasure Hunter's Pendant increases rare item chances
-    let metadata = looter.getMetadata()
-    if (metadata != null)
-      let comp = metadata.getLooterComponent()
-      if (comp != null and comp.getEnabled() and comp.getOverrideItemChances())
-        itemChances = comp.getItemChances()
-        pendantApplied = true
-        displayMessageToPlayer(looter.getOwner(), "Treasure Hunter's Pendant!".colorize(Colors.lightBlue))
+    let itemFindQualityT = DifficultyScaling.getCombinedItemFindQuality01(ownerPlayer, looter, g_GameInstance.getGameProgress01())
+    let itemChances = lerp(m_itemChancesStart, m_itemChancesEnd, itemFindQualityT)
 
     let itm = g_MainItemLibrary.giveRandomItemToUnit(looter, itemChances)
-
-    if (itm == null)
-      Log.debug("LootableItemReward", "giveReward", "", "No item could be found in main item library")
+    if (itm == null or itm.getTypeId() == 0)
+      Log.error("LootableItemReward", "giveReward", "", "No item could be found in main item library")
       return false
 
-    let itemSet = g_MainItemLibrary.getOwningSet(itm.getTypeId())
-    if (itemSet == null)
-      Log.debug("LootableItemReward", "giveReward", "", "Could not find matching item set for item {0}".format(itm.getTypeId().toString()))
+    let itemTypeId = itm.getTypeId()
+    
+    let itemType = ItemType.getItemType(itemTypeId)
+    if (itemType == null)
+      Log.error("LootableItemReward", "giveReward", "", "No ItemType could be found for item with type id " + itemTypeId.toString())
       return false
 
-    let owner = looter.getOwner()
-    let itemType = ItemType.getItemType(itm.getTypeId())
+    FX.createFoundItemTag(looter.getPos(), ownerPlayer)
+
     let itemRarity = itemType.getRarity()
-
-    FX.createFoundItemTag(looter.getPos(), looter.getOwner())
 
     let notification = new LootRewardNotification(
       NotificationManager.nextNotificationId(),
-      owner,
+      ownerPlayer,
       looter.getPos(),
       g_lootRewardSound)
     ..setMessage("Found item " + itm.getName().colorize(itemRarity.getColor()))
     ..setIconPath(itm.getIconPath())
-    ..setAffectedByLuckyPendant(pendantApplied)
 
-    lootable.showLootRewardNotification(owner, notification)
+    lootable.showLootRewardNotification(ownerPlayer, notification)
 
     return true
 

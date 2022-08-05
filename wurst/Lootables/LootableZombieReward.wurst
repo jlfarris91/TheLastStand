@@ -18,6 +18,7 @@ import Notifications
 import Icons
 import LeashComponent
 import TlsItemLibrary
+import Difficulties
 
 constant real ZOMBIE_SPAWN_INTERVAL = 0.8
 SoundDefinition g_zombieSpawnSound
@@ -26,8 +27,8 @@ SoundDefinition g_zombieSpawnSound
 public class LootableZombieReward implements ILootableReward
   private int m_minZombies
   private int m_maxZombies
-  private ItemChances m_itemChancesStart
-  private ItemChances m_itemChancesEnd
+  private itemChances m_itemChancesStart
+  private itemChances m_itemChancesEnd
   private Action2<unit, real> m_zombieModifier
 
   // --------------------------------------------------------------------------
@@ -72,7 +73,7 @@ public class LootableZombieReward implements ILootableReward
     m_maxZombies = zombies
 
   // --------------------------------------------------------------------------
-  function setItemChances(ItemChances chancesStart, ItemChances chancesEnd)
+  function setItemChances(itemChances chancesStart, itemChances chancesEnd)
     m_itemChancesStart = chancesStart
     m_itemChancesEnd = chancesEnd
 
@@ -84,20 +85,22 @@ public class LootableZombieReward implements ILootableReward
   // --------------------------------------------------------------------------
   protected function spawnZombies(LootableComponent lootable, unit looter)
     let zombieCount = GetRandomInt(m_minZombies, m_maxZombies)
-    let owner = looter.getOwner()
+    let ownerPlayer = looter.getOwner()
     let spawnPos = lootable.getSpawnPosition()
 
     let notification = new LootRewardNotification(
       NotificationManager.nextNotificationId(),
-      owner,
+      ownerPlayer,
       looter.getPos(),
       g_zombieSpawnSound)
     ..setMessage("Found " + "ZOMBIES!".colorize(Colors.red))
     ..setIconPath(Icons.bTNZombie)
 
-    lootable.showLootRewardNotification(owner, notification)
+    lootable.showLootRewardNotification(ownerPlayer, notification)
 
     let gameProgressT = g_GameInstance.getGameProgress01()
+    let itemFindQualityT = DifficultyScaling.getCombinedItemFindQuality01(ownerPlayer, looter, gameProgressT)
+    let itemChances = lerp(m_itemChancesStart, m_itemChancesEnd, itemFindQualityT)
 
     doPeriodicallyCounted(ZOMBIE_SPAWN_INTERVAL, zombieCount) (cb) ->
     //{
@@ -123,7 +126,6 @@ public class LootableZombieReward implements ILootableReward
 
       // Give a random item to the last created zombie
       if (cb.isLast())
-        let itemChances = lerp(m_itemChancesStart, m_itemChancesEnd, g_GameInstance.getGameProgress01())
         g_MainItemLibrary.giveRandomItemToUnit(lastCreatedZombie, itemChances)
     //}
 

@@ -4,17 +4,46 @@ import ItemSet
 import WeightedItemSetSet
 import ItemSetLibrary
 import ItemType
+import ErrorHandling
+import RealExtensions
 
-public tuple ItemChances(real common, real rare, real epic, real legendary)
-
-constant real        ITEM_SET_CHANCE_COMMON = 8.0
-constant real        ITEM_SET_CHANCE_RARE = 4.0
-constant real        ITEM_SET_CHANCE_EPIC = 2.0
-constant real        ITEM_SET_CHANCE_LEGENDARY = 1.0
+public tuple itemChances(real common, real rare, real epic, real legendary)
 
 // ============================================================================
-public function lerp(ItemChances start, ItemChances _end, real t) returns ItemChances
-  return ItemChances(
+public function itemChances.toString() returns string
+  return "[c:{0} r:{1} e:{2} l:{3}]".format(
+    this.getCommonChance().toPercentageString01(),
+    this.getRareChance().toPercentageString01(),
+    this.getEpicChance().toPercentageString01(),
+    this.getLegendaryChance().toPercentageString01())
+
+// ============================================================================
+public function itemChances.getTotal() returns real
+  return this.common + this.rare + this.epic + this.legendary
+
+// ============================================================================
+public function itemChances.getCommonChance() returns real
+  let total = this.getTotal()
+  return this.common / (total != 0.0 ? total : 1.0)
+
+// ============================================================================
+public function itemChances.getRareChance() returns real
+  let total = this.getTotal()
+  return this.rare / (total != 0.0 ? total : 1.0)
+
+// ============================================================================
+public function itemChances.getEpicChance() returns real
+  let total = this.getTotal()
+  return this.epic / (total != 0.0 ? total : 1.0)
+
+// ============================================================================
+public function itemChances.getLegendaryChance() returns real
+  let total = this.getTotal()
+  return this.legendary / (total != 0.0 ? total : 1.0)
+
+// ============================================================================
+public function lerp(itemChances start, itemChances _end, real t) returns itemChances
+  return itemChances(
     lerp(start.common, _end.common, t),
     lerp(start.rare, _end.rare, t),
     lerp(start.epic, _end.epic, t),
@@ -36,13 +65,13 @@ public class TlsItemSetLibrary extends ItemSetLibrary
     legendarySet = new ItemSet()
     questSet = new ItemSet()
 
-    add(commonSet, ITEM_SET_CHANCE_COMMON)
-    add(rareSet, ITEM_SET_CHANCE_RARE)
-    add(epicSet, ITEM_SET_CHANCE_EPIC)
-    add(legendarySet, ITEM_SET_CHANCE_LEGENDARY)
+    add(commonSet, 1)
+    add(rareSet, 1)
+    add(epicSet, 1)
+    add(legendarySet, 1)
 
   // --------------------------------------------------------------------------
-  function getRandomItemSet(ItemChances chances) returns ItemSet
+  function getRandomItemSet(itemChances chances) returns ItemSet
     let tempSet = new WeightedItemSetSet()
 
     if (not commonSet.isEmpty())
@@ -57,28 +86,30 @@ public class TlsItemSetLibrary extends ItemSetLibrary
     ItemSet selectedItemSet = null
     if (not tempSet.isEmpty())
       selectedItemSet = tempSet.getRandom()
+      if (selectedItemSet == null)
+        error("Failed to select a random item set")
 
     destroy tempSet
     return selectedItemSet
 
   // --------------------------------------------------------------------------
-  function getRandomItemType(ItemChances chances) returns ItemType
+  function getRandomItemType(itemChances chances) returns ItemType
     let itemSet = this.getRandomItemSet(chances)
     return ItemType.getItemType(itemSet.getRandom())
 
   // --------------------------------------------------------------------------
-  function createRandomItem(vec2 pos, ItemChances chances) returns item
+  function createRandomItem(vec2 pos, itemChances chances) returns item
     let itemSet = this.getRandomItemSet(chances)
     if (itemSet == null)
-      Log.error("MainItemLibrary", "createRandomItem", "", "No item set found")
+      error("No item set found")
     return itemSet.createRandomItem(pos)
 
   // --------------------------------------------------------------------------
-  function giveRandomItemToUnit(unit u, ItemChances chances) returns item
+  function giveRandomItemToUnit(unit u, itemChances chances) returns item
     let itm = this.createRandomItem(u.getPos(), chances)
-    if (itm == null)
-      Log.error("MainItemLibrary", "giveRandomItemToUnit", "", "No item was created")
-    UnitAddItemSwapped(itm, u)
+    if (itm == null or itm.getTypeId() == 0)
+      error("No item was created")
+    UnitAddItem(u, itm)
     return itm
 
   // --------------------------------------------------------------------------
