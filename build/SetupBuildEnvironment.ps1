@@ -33,6 +33,9 @@ $env:ToolsRoot = [System.IO.Path]::Combine($env:ProjectRoot, $env:ToolsDirName)
 $env:WurstDirName = "wurst"
 $env:WurstRoot = [System.IO.Path]::Combine($env:ProjectRoot, $env:WurstDirName)
 
+$env:SrcDirName = "src"
+$env:SrcRoot = [System.IO.Path]::Combine($env:ProjectRoot, $env:SrcDirName)
+
 $env:ImportsDirName = "imports"
 $env:ImportsRoot = [System.IO.Path]::Combine($env:ProjectRoot, $env:ImportsDirName)
 
@@ -41,6 +44,9 @@ $env:TempRoot = [System.IO.Path]::Combine($env:ProjectRoot, $env:TempDirName)
 
 $env:ArtifactDirName = "_artifacts"
 $env:ArtifactRoot = [System.IO.Path]::Combine($env:ProjectRoot, $env:ArtifactDirName)
+
+$env:SaveProjectRelativeDir = "..\TheLastStand_Save"
+$env:SaveProjectDir = [System.IO.Path]::Combine($env:ProjectRoot, "..\TheLastStand_Save")
 
 $env:IsLocalBuild = 1
 if ($env:CI -eq "true") { $env:IsLocalBuild = 0 }
