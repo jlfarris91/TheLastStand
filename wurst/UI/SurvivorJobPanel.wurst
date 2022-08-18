@@ -17,8 +17,8 @@ import Layout
 import BitSet
 import Vector
 import RealtimeUpdate
+import SyncSimpleExtensions
 
-constant string TOGGLEJOBSYNCDATAPREFIX = "TJK"
 constant rectr PANEL_AREA = rectr(0.21, 0.14, REAL_MAX, 0.035)
 
 HashMap<player, SurvivorJobPanel> g_playerSurvivorJobPanels = new HashMap<player, SurvivorJobPanel>()
@@ -218,24 +218,26 @@ public class SurvivorJobPanel extends StackPanel implements IRealtimeListener
 // we want to order that player's selected units to switch jobs. However,
 // key presses are local-only events and so we need to synchronize the
 // event with all other players first. See SyncSimple for more details.
-function onToggleJobKeyPressed()
+timer array g_toggleJobKeyPressedTimer
+function onToggleJobKeyPressed_ASYNC()
   let keyPressingPlayer = GetTriggerPlayer()
 
   let jobPanel = getSurvivorJobPanel(keyPressingPlayer)
   if (jobPanel == null or not jobPanel.isVisible())
     return
 
-  keyPressingPlayer.sendSyncData(TOGGLEJOBSYNCDATAPREFIX, keyPressingPlayer.getId().toString())
+  keyPressingPlayer.sync() (p) ->
+  //{
+    var t = g_toggleJobKeyPressedTimer[p.getId()]
 
-// ============================================================================
-function onSynchronizedToggleJobKeyPressed()
-  let syncData = BlzGetTriggerSyncData()
-  let playerId = syncData.toInt()
-  let p = players[playerId]
-  if (p == null)
-    Log.error("Could not find player with id " + syncData)
-    return
-  SurvivorUtility.orderSelectedUnitsToToggleActivateJob(p)
+    if (t == null)
+      t = CreateTimer()
+      g_toggleJobKeyPressedTimer[p.getId()] = t
+
+    if (t.getRemaining() == 0)
+      SurvivorUtility.orderSelectedUnitsToToggleActivateJob(p)
+      t.start(1.0, null)
+  //}
 
 // ============================================================================
 init
@@ -251,10 +253,4 @@ init
       ..showOnly(_player)
       g_playerSurvivorJobPanels.put(_player, survivorJobPanel)
 
-  onKeyPress(OSKEY_Z, () -> onToggleJobKeyPressed())
-
-  let trig = CreateTrigger()
-  for playingPlayer in g_PlayingHumanPlayers
-    BlzTriggerRegisterPlayerSyncEvent(trig, playingPlayer, TOGGLEJOBSYNCDATAPREFIX, false)
-  trig.addCondition(Filter(() -> BlzGetTriggerSyncPrefix() == TOGGLEJOBSYNCDATAPREFIX))
-  trig.addAction(() -> onSynchronizedToggleJobKeyPressed())
+  onKeyPress(OSKEY_Z, () -> onToggleJobKeyPressed_ASYNC())
