@@ -17,9 +17,9 @@ import Layout
 import BitSet
 import Vector
 import RealtimeUpdate
+import SyncSimpleExtensions
 
-constant string TOGGLEJOBSYNCDATAPREFIX = "TJK"
-constant rectr PANEL_AREA = rectr(0.21, 0.14, REAL_MAX, 0.035)
+constant rectr PANEL_AREA = rectr(0.21, 0.14, REAL_MAX, 0.035 + 0.004 /* frame height + panel margin */)
 
 HashMap<player, SurvivorJobPanel> g_playerSurvivorJobPanels = new HashMap<player, SurvivorJobPanel>()
 SurvivorJobFrameUpdateData array[g_survivorJobCount] g_survivorJobFrameUpdateData
@@ -218,24 +218,31 @@ public class SurvivorJobPanel extends StackPanel implements IRealtimeListener
 // we want to order that player's selected units to switch jobs. However,
 // key presses are local-only events and so we need to synchronize the
 // event with all other players first. See SyncSimple for more details.
-function onToggleJobKeyPressed()
+timer array g_toggleJobKeyPressedTimer
+function onToggleJobKeyPressed_ASYNC()
   let keyPressingPlayer = GetTriggerPlayer()
 
   let jobPanel = getSurvivorJobPanel(keyPressingPlayer)
   if (jobPanel == null or not jobPanel.isVisible())
     return
 
-  keyPressingPlayer.sendSyncData(TOGGLEJOBSYNCDATAPREFIX, keyPressingPlayer.getId().toString())
-
-// ============================================================================
-function onSynchronizedToggleJobKeyPressed()
-  let syncData = BlzGetTriggerSyncData()
-  let playerId = syncData.toInt()
-  let p = players[playerId]
-  if (p == null)
-    Log.error("Could not find player with id " + syncData)
+  // Only allowed to read here since this function is executed asynchronously
+  if (g_toggleJobKeyPressedTimer[keyPressingPlayer.getId()] != null and
+      g_toggleJobKeyPressedTimer[keyPressingPlayer.getId()].getRemaining() > 0)
     return
-  SurvivorUtility.orderSelectedUnitsToToggleActivateJob(p)
+
+  keyPressingPlayer.sync() (p) ->
+  //{
+    var t = g_toggleJobKeyPressedTimer[p.getId()]
+
+    if (t == null)
+      t = CreateTimer()
+      g_toggleJobKeyPressedTimer[p.getId()] = t
+
+    if (t.getRemaining() == 0)
+      SurvivorUtility.orderSelectedUnitsToToggleActivateJob(p)
+      t.start(0.1, null)
+  //}
 
 // ============================================================================
 init
@@ -251,10 +258,4 @@ init
       ..showOnly(_player)
       g_playerSurvivorJobPanels.put(_player, survivorJobPanel)
 
-  onKeyPress(OSKEY_Z, () -> onToggleJobKeyPressed())
-
-  let trig = CreateTrigger()
-  for playingPlayer in g_PlayingHumanPlayers
-    BlzTriggerRegisterPlayerSyncEvent(trig, playingPlayer, TOGGLEJOBSYNCDATAPREFIX, false)
-  trig.addCondition(Filter(() -> BlzGetTriggerSyncPrefix() == TOGGLEJOBSYNCDATAPREFIX))
-  trig.addAction(() -> onSynchronizedToggleJobKeyPressed())
+  onKeyPress(OSKEY_Z, () -> onToggleJobKeyPressed_ASYNC())
