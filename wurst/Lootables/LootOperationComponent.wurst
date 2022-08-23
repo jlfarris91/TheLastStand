@@ -28,6 +28,7 @@ constant int PROGRESS_BAR_LENGTH = 20
 constant colorA PROGRESS_BAR_FOREGROUND = colorA(0, 170, 0, 255)
 constant colorA PROGRESS_BAR_BACKGROUND = colorA(0, 64, 0, 255)
 constant real PROGRESS_BAR_UPDATE_PERIOD = 0.1
+constant real LOOTER_STANDING_POS_THRESHOLD_SQ = 64.0 * 64.0
 
 LinkedList<LootOperationComponent> g_activeOperations
 HashMap<unit, LootOperationComponent> g_looterToOperationMap = new HashMap<unit, LootOperationComponent>()
@@ -46,6 +47,7 @@ public class LootOperationComponent extends RealtimeUnitComponent
   private int m_secondsElapsed
   private real m_manaCost
   private bool m_isRunning
+  private vec2 m_looterPos
 
   // --------------------------------------------------------------------------
   construct(IUnitMetadata owner)
@@ -106,6 +108,11 @@ public class LootOperationComponent extends RealtimeUnitComponent
 
     if (getIsRunning() == false)
       return
+
+    // Catch any edge-case order that would cause the looter to move while still looting
+    if (m_lootingUnit.getPos().distanceToSq(m_looterPos) > LOOTER_STANDING_POS_THRESHOLD_SQ)
+      cancel()
+      return
     
     let percentage01 = parameterize01(m_duration, 0.0, m_timer.getRemaining())
     m_progress.report(percentage01)
@@ -133,6 +140,8 @@ public class LootOperationComponent extends RealtimeUnitComponent
     
     let lootingPlayer = looter.getOwner()
     let cameraPos = getOwnerUnit().getPos()
+
+    m_looterPos = looter.getPos()
 
     // Avoid implicit capture of 'this' by caching the result of m_lootableUnit
     let lootableUnitCached = getOwnerUnit()
