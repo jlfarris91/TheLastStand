@@ -22,6 +22,8 @@ import GameInstance
 import Spawning
 import Notifications
 
+constant real SURVIVOR_SPAWN_TELEPORT_THRESHOLD_SQ = 4000.0*4000.0
+
 group g_tempGroup = CreateGroup()
 WeightedSet<SurvivorJobType> g_weightedSurvivorJobSet
 
@@ -155,13 +157,19 @@ public class SurvivorUtility
       return null
 
     let spawnPointResult = getSpawnPoint(_player)
-    if (not spawnPointResult.succeeded)
-      Log.debug("[spawnSurvivorUnitForPlayer] Failed to find spawn point for survivor, trying again")
-      // try again
-      doAfter(1.0, () -> spawnSurvivorUnitForPlayer(_player))
-      return null
 
-    let survivor = spawnSurvivorWithRandomJob(_player, spawnPointResult.spawnPoint, g_weightedSurvivorJobSet)
+    let campCenter = playerHumanComp.getCampCenter()
+
+    var spawnPoint = spawnPointResult.spawnPoint
+
+    // If a player builds their HQ tent before the grid-based spawn system is ready then the spawn
+    // point request will fail or it will succeed and return a spawn point in the subset of grid
+    // cells that have completed initialization which may be very far away from the camp center.
+    // In those cases just teleport the survivor to the camp center.
+    if (not spawnPointResult.succeeded or spawnPoint.distanceToSq(campCenter) > SURVIVOR_SPAWN_TELEPORT_THRESHOLD_SQ)
+      spawnPoint = campCenter
+
+    let survivor = spawnSurvivorWithRandomJob(_player, spawnPoint, g_weightedSurvivorJobSet)
 
     survivor.issuePointOrderById(OrderIds.move, playerHumanComp.getCampCenter())
     
