@@ -154,7 +154,7 @@ public class CryptFiendComponent extends UnitComponent
     // Play the stand alternate animation
     ownerUnit.setAnimation(STAND_ALTERNATE_ANIM_INDEX)
     
-    comp.m_burrowTravelOperation = new BurrowTravelOperation(ownerUnit, ownerUnit.getPos(), comp.m_targetUnit.getPos())
+    comp.m_burrowTravelOperation = new BurrowTravelOperation(ownerUnit, ownerUnit.getPos(), comp.m_targetUnit)
 
   // --------------------------------------------------------------------------
   function unburrow()
@@ -204,7 +204,7 @@ public class CryptFiendComponent extends UnitComponent
       if (comp != null and utc != null)
         utc.setTargetUnit(comp.m_targetUnit)
 
-    flashEffect("Abilities\\Spells\\NightElf\\BattleRoar\\RoarCaster.mdl", ownerUnit.getPos())
+    flashEffect("Abilities\\Spells\\Other\\HowlOfTerror\\HowlCaster.mdl", ownerUnit.getPos())
 
     g_tempGroup.enumUnitsInRange(ownerUnit.getPos(), FEAR_RANGE, g_burrowTargetFilter)
     for u in g_tempGroup
@@ -289,17 +289,18 @@ public class CryptFiendComponent extends UnitComponent
 // ============================================================================
 class BurrowTravelOperation implements IRealtimeListener
   constant real MAX_DIST_SQ = 40.0*40.0
+  constant real ARRIVAL_DIST_SQ = 100.0*100.0
   constant real DIST_PER_SEC = 64.0
 
   protected unit m_fiend
   protected vec2 m_start
   protected vec2 m_curr
-  protected vec2 m_target
+  protected unit m_target
   protected vec2 m_vel
   protected vec2 m_lastClumpPos
 
   // --------------------------------------------------------------------------
-  construct (unit fiend, vec2 start, vec2 target)
+  construct (unit fiend, vec2 start, unit target)
     m_fiend = fiend
     m_start = start
     m_curr = start
@@ -316,17 +317,24 @@ class BurrowTravelOperation implements IRealtimeListener
   // --------------------------------------------------------------------------
   override function realtimeUpdate(real dt)
 
-    let result = smoothDamp(m_curr, m_target, m_vel, 0.05, 400, dt)
+    if (m_target == null or not m_target.isAlive())
+      this.unregisterForRealtimeUpdate()
+      doAfter(BURROW_SETTLE_DURATION, () -> delayedUnborrow(m_fiend))
+      return
+
+    let targetPos = m_target.getPos()
+
+    let result = smoothDamp(m_curr, targetPos, m_vel, 0.05, 400, dt)
     m_curr = result.value
     m_vel = result.vel
 
     if (m_lastClumpPos.distanceToSq(m_curr) > MAX_DIST_SQ)
       m_lastClumpPos = m_curr
-      createBurrowDirtClump(m_curr, m_curr.angleBetween(m_target))
+      createBurrowDirtClump(m_curr, m_curr.angleBetween(targetPos))
 
-    if (m_lastClumpPos.distanceToSq(m_target) < MAX_DIST_SQ)
+    if (m_lastClumpPos.distanceToSq(targetPos) < MAX_DIST_SQ)
       m_lastClumpPos = m_curr
-      createBurrowDirtClump(m_curr, m_curr.angleBetween(m_target))
+      createBurrowDirtClump(m_curr, m_curr.angleBetween(targetPos))
       this.unregisterForRealtimeUpdate()
       doAfter(BURROW_SETTLE_DURATION, () -> delayedUnborrow(m_fiend))
 
