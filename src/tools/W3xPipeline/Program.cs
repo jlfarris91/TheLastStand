@@ -41,6 +41,7 @@
                 sLogger.Log($"Intermediate dir: {args.IntermediateDirectory.FullName}");
                 sLogger.Log($"Output Spawn Region Script File: {args.OutputSpawnRegionScriptFile.FullName}");
                 sLogger.Log($"War3 Archive dir: {args.W3ModBasePath.FullName}");
+                sLogger.Log($"Write regions to archive: {args.WriteRegionsToArchive}");
 
                 if (args.OutputListFilePath != null)
                     sLogger.Log($"Output List File: {args.OutputListFilePath.FullName}");
@@ -145,7 +146,7 @@
 
                     // Map archive is now done being loaded
                     sLogger.Log($"Mounting archive '{intermediateMpqPath}' at priority {MAP_PRI}");
-                    fileSystem.AddSystem(new MpqFileSystem(newMapArchive), MAP_PRI);
+                    fileSystem.AddSystem(new MpqArchiveFileSystem(newMapArchive), MAP_PRI);
                     entityLibrary.AddLibrary(ReadDoodadLibrary(fileSystem));
 
                     // Build the entity library
@@ -165,7 +166,7 @@
                             assetManager,
                             pathMapFileBinaryDeserializer,
                             destructibleLibrary,
-                            args.OutputSpawnRegionScriptFile.FullName)
+                            args.OutputSpawnRegionScriptFile.FullName) { WriteRegionsToArchive = args.WriteRegionsToArchive }
                     };
 
                     // Run all of the pipeline steps
@@ -232,7 +233,7 @@
                 case "blp":
                     return new BlpImageDeserializer();
                 case "tga":
-                    return new TargaBitmapDeserializer();
+                    return new TargaImageDeserializer();
             }
 
             return null;

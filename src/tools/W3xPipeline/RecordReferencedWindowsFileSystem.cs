@@ -42,10 +42,22 @@
             return File.OpenWrite(MakeAbsolutePath(path));
         }
 
-        public bool Exists(string path)
+        public Stream Open(string path, FileMode fileMode, FileAccess fileAccess)
+        {
+            RecordReferencePath(path);
+            return File.Open(MakeAbsolutePath(path), fileMode, fileAccess);
+        }
+
+        public bool FileExists(string path)
         {
             RecordReferencePath(path);
             return File.Exists(MakeAbsolutePath(path));
+        }
+
+        public bool DirectoryExists(string path)
+        {
+            RecordReferencePath(path);
+            return Directory.Exists(MakeAbsolutePath(path));
         }
 
         public void Delete(string path)
@@ -59,9 +71,14 @@
             File.Copy(MakeAbsolutePath(sourcePath), MakeAbsolutePath(destinationPath));
         }
 
-        private string MakeAbsolutePath(string relativePath)
+        public string MakeAbsolutePath(string relativePath)
         {
             return Path.Combine(m_root.FullName, relativePath);
+        }
+
+        public string MakeRelativePath(string absolutePath)
+        {
+            return PathUtility.GetRelativePath(m_root.FullName, absolutePath, StringComparison.InvariantCultureIgnoreCase);
         }
 
         private void RecordReferencePath(string relativePath)
@@ -71,6 +88,11 @@
             {
                 m_recordReferencedPath(absolutePath);
             }
+        }
+
+        public FileReference[] GetFilesRelative(string path, string searchPattern, EnumerationOption enumerationOption)
+        {
+            throw new NotImplementedException();
         }
     }
 }

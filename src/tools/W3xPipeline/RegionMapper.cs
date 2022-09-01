@@ -58,7 +58,7 @@
             m_generatedScriptFile = generatedScriptFile;
         }
 
-        public bool WriteRegionsToArchive { get; private set; }
+        public bool WriteRegionsToArchive { get; set; }
 
         public void FindIslands(PathMap map)
         {
@@ -504,9 +504,9 @@
 
             try
             {
-                m_assetManager.FindAsset(pt)
-                    .Map(assetRef => m_imageProvider.GetImage(assetRef))
-                    .Do(UpdatePathMap);
+                var assetRef = m_assetManager.FindAsset(pt);
+                var image = m_imageProvider.GetImage(assetRef);
+                UpdatePathMap(image);
             }
             catch (Exception)
             {
