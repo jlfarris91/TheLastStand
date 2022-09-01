@@ -63,7 +63,7 @@ $env:SourceMapFileName = "TheLastStand.w3x"
 
 $env:MapName = "The Last Stand"
 $env:MapNameVersioned = "{0} {1}" -f $env:MapName, $env:MapVersion
-$env:MapNameColored = "|cffffcc00T|r|cffffaa00he|r |cffffcc00L|r|cffffaa00ast|r |cffffcc00S|r|cffffaa00tand|r"
+$env:MapNameColored = "|cffffcc00L|r|cffffaa00ast|r |cffffcc00S|r|cffffaa00tand|r"
 $env:MapNameVersionedColored = "{0} |cff0055ff{1}|r" -f $env:MapNameColored, $env:MapVersion
 
 $env:MapNameNoSpaces = "TheLastStand"
