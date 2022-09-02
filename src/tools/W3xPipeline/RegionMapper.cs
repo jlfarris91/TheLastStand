@@ -379,7 +379,6 @@
                 MapRegions mapRegions;
                 DoodadFile doodads;
                 PathMap pathMap;
-                CustomEntityFile customEntityFile;
 
                 using (MpqFileStream file = archive.OpenFile(ARCHIVE_TERRAIN_FILE_PATH))
                 using (var reader = new BinaryReader(file))
@@ -405,6 +404,7 @@
                     doodads = new DoodadFileBinaryDeserializer().Deserialize(reader);
                 }
 
+                CustomEntityFile customEntityFile;
                 using (MpqFileStream file = archive.OpenFile("war3map.w3b"))
                 using (var reader = new BinaryReader(file))
                 {
@@ -417,6 +417,24 @@
                     foreach (CustomEntityMod mod in entityDef.Modifications)
                     {
                         entity.SetValue(mod.Id, mod.Index, mod.Value);
+                    }
+                }
+
+                if (archive.HasFile("war3mapSkin.w3b"))
+                {
+                    using (MpqFileStream file = archive.OpenFile("war3mapSkin.w3b"))
+                    using (var reader = new BinaryReader(file))
+                    {
+                        customEntityFile = new CustomEntityFileBinaryDeserializer(m_objectLibrary).Deserialize(reader);
+                    }
+
+                    foreach (CustomEntityDefinition entityDef in customEntityFile.OriginalEntries)
+                    {
+                        DestructibleEntity entity = m_destructibleLibrary.GetEntity(entityDef.Id);
+                        foreach (CustomEntityMod mod in entityDef.Modifications)
+                        {
+                            entity.SetValue(mod.Id, mod.Index, mod.Value);
+                        }
                     }
                 }
 
