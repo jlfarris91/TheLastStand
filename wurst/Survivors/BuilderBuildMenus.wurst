@@ -1,163 +1,163 @@
-package BuilderBuildMenus
-import TechAvailabilityGroup
-import ClosureFrames
-import StandardTooltip
-import ClosureTimers
-import Math
-import SubgroupSelection
-import FramehandleExtensions
-import LoadToc
-import PlayerSaveData
-import TlsUnitIds
-import PlayerExtensions
+// package BuilderBuildMenus
+// import TechAvailabilityGroup
+// import ClosureFrames
+// import StandardTooltip
+// import ClosureTimers
+// import Math
+// import SubgroupSelection
+// import FramehandleExtensions
+// import LoadToc
+// import PlayerSaveData
+// import TlsUnitIds
+// import PlayerExtensions
 
-public bool BLDMENU_ENABLED = true
+// public bool BLDMENU_ENABLED = true
 
-constant int BLDG_ID_PAGES = 2
-TechAvailabilityGroup array g_builderTechPages = [
-  new TechAvailabilityGroup(),
-  new TechAvailabilityGroup()
-]
+// constant int BLDG_ID_PAGES = 2
+// TechAvailabilityGroup array g_builderTechPages = [
+//   new TechAvailabilityGroup(),
+//   new TechAvailabilityGroup()
+// ]
 
-string array g_builderTechPageNames = [ "Defense", "Military" ]
+// string array g_builderTechPageNames = [ "Defense", "Military" ]
 
-BuildingPageManager array g_pageManagers
+// BuildingPageManager array g_pageManagers
   
-// ============================================================================
-class BuildingPageManager
-  private player m_player
-  private int m_pageIndex
-  private framehandle m_frame
-  private framehandle m_nextPageButton
-  private framehandle m_prevPageButton
-  private framehandle m_pageText
-  private framehandle m_highlight
+// // ============================================================================
+// class BuildingPageManager
+//   private player m_player
+//   private int m_pageIndex
+//   private framehandle m_frame
+//   private framehandle m_nextPageButton
+//   private framehandle m_prevPageButton
+//   private framehandle m_pageText
+//   private framehandle m_highlight
 
-  // --------------------------------------------------------------------------
-  construct (player _player)
-    m_player = _player
+//   // --------------------------------------------------------------------------
+//   construct (player _player)
+//     m_player = _player
 
-    m_frame = createFrame("BuildPageNavTemplate")
-    ..setPoint(FRAMEPOINT_BOTTOM, GAME_UI, FRAMEPOINT_BOTTOMRIGHT, vec2(-0.098, 0.138))
-    ..onMouseEnter(() -> StandardTooltip.show("Builder Build Menu", "There are multiple pages in this unit's build menu.|nUse the buttons to navigate the pages.", m_player))
-    ..onMouseLeave(() -> StandardTooltip.hide(m_player))
-    ..hide()
+//     m_frame = createFrame("BuildPageNavTemplate")
+//     ..setPoint(FRAMEPOINT_BOTTOM, GAME_UI, FRAMEPOINT_BOTTOMRIGHT, vec2(-0.098, 0.138))
+//     ..onMouseEnter(() -> StandardTooltip.show("Builder Build Menu", "There are multiple pages in this unit's build menu.|nUse the buttons to navigate the pages.", m_player))
+//     ..onMouseLeave(() -> StandardTooltip.hide(m_player))
+//     ..hide()
     
-    m_nextPageButton = getFrame("NextPageButton")
-    ..onClick(() -> onNextPageButtonClicked())
-    ..onMouseEnter(() -> StandardTooltip.show("Next Page", "Navigate to the next build menu page.", m_player))
-    ..onMouseLeave(() -> StandardTooltip.hide(m_player))
-    ..setEnabled(true)
+//     m_nextPageButton = getFrame("NextPageButton")
+//     ..onClick(() -> onNextPageButtonClicked())
+//     ..onMouseEnter(() -> StandardTooltip.show("Next Page", "Navigate to the next build menu page.", m_player))
+//     ..onMouseLeave(() -> StandardTooltip.hide(m_player))
+//     ..setEnabled(true)
 
-    m_prevPageButton = getFrame("PrevPageButton")
-    ..onClick(() -> onPrevPageButtonClicked())
-    ..onMouseEnter(() -> StandardTooltip.show("Previous Page", "Navigate to the previous build menu page.", m_player))
-    ..onMouseLeave(() -> StandardTooltip.hide(m_player))
-    ..setEnabled(true)
+//     m_prevPageButton = getFrame("PrevPageButton")
+//     ..onClick(() -> onPrevPageButtonClicked())
+//     ..onMouseEnter(() -> StandardTooltip.show("Previous Page", "Navigate to the previous build menu page.", m_player))
+//     ..onMouseLeave(() -> StandardTooltip.hide(m_player))
+//     ..setEnabled(true)
 
-    m_pageText = getFrame("PageText")
+//     m_pageText = getFrame("PageText")
 
-    m_highlight = getFrame("Highlight")
+//     m_highlight = getFrame("Highlight")
 
-    updateAvailableTech()
+//     updateAvailableTech()
 
-  // --------------------------------------------------------------------------
-  function setHighlightVisible(bool value)
-    m_highlight.setVisible(value)
+//   // --------------------------------------------------------------------------
+//   function setHighlightVisible(bool value)
+//     m_highlight.setVisible(value)
 
-  // --------------------------------------------------------------------------
-  function setPageIndex(int value)
-    m_pageIndex = clamp(value, 0, BLDG_ID_PAGES-1)
-    updateAvailableTech()
+//   // --------------------------------------------------------------------------
+//   function setPageIndex(int value)
+//     m_pageIndex = clamp(value, 0, BLDG_ID_PAGES-1)
+//     updateAvailableTech()
 
-  // --------------------------------------------------------------------------
-  function incrementPageIndex()
-    setPageIndex(wrap(m_pageIndex + 1, 0, BLDG_ID_PAGES-1))
+//   // --------------------------------------------------------------------------
+//   function incrementPageIndex()
+//     setPageIndex(wrap(m_pageIndex + 1, 0, BLDG_ID_PAGES-1))
 
-  // --------------------------------------------------------------------------
-  function decrementPageIndex()
-    setPageIndex(wrap(m_pageIndex - 1, 0, BLDG_ID_PAGES-1))
+//   // --------------------------------------------------------------------------
+//   function decrementPageIndex()
+//     setPageIndex(wrap(m_pageIndex - 1, 0, BLDG_ID_PAGES-1))
 
-  // --------------------------------------------------------------------------
-  function updateAvailableTech()
-    for i = 0 to BLDG_ID_PAGES-1
-      g_builderTechPages[i].setEnabled(m_player, i == m_pageIndex)
+//   // --------------------------------------------------------------------------
+//   function updateAvailableTech()
+//     for i = 0 to BLDG_ID_PAGES-1
+//       g_builderTechPages[i].setEnabled(m_player, i == m_pageIndex)
 
-  // --------------------------------------------------------------------------
-  function updateButtonVisibility()
-    let selectedSubgroupUnit = m_player.getSelectedSubgroupUnit()
-    let buttonVisible = selectedSubgroupUnit != null
-                        and selectedSubgroupUnit.getTypeId() == TlsUnitIds.Survivors.builder1
-                        and m_player.controlsUnit(selectedSubgroupUnit)
-    if (m_player == localPlayer)
-      m_frame.setVisible(buttonVisible)
-      m_pageText.setText(g_builderTechPageNames[m_pageIndex])
+//   // --------------------------------------------------------------------------
+//   function updateButtonVisibility()
+//     let selectedSubgroupUnit = m_player.getSelectedSubgroupUnit()
+//     let buttonVisible = selectedSubgroupUnit != null
+//                         and selectedSubgroupUnit.getTypeId() == TlsUnitIds.Survivors.builder1
+//                         and m_player.controlsUnit(selectedSubgroupUnit)
+//     if (m_player == localPlayer)
+//       m_frame.setVisible(buttonVisible)
+//       m_pageText.setText(g_builderTechPageNames[m_pageIndex])
 
-  // --------------------------------------------------------------------------
-  private function onPrevPageButtonClicked()
-    m_prevPageButton.clearFocus()
-    decrementPageIndex()
-    setHighlightVisible(false)
+//   // --------------------------------------------------------------------------
+//   private function onPrevPageButtonClicked()
+//     m_prevPageButton.clearFocus()
+//     decrementPageIndex()
+//     setHighlightVisible(false)
 
-    let playerSaveData = PlayerSaveDataVersioned.getPlayerSaveData(m_player)
-    if (playerSaveData == null)
-      Log.debug("BBM", "onPrevPageButtonClicked", m_player.getId().toString(), " Player save data is null")
-      return
+//     let playerSaveData = PlayerSaveDataVersioned.getPlayerSaveData(m_player)
+//     if (playerSaveData == null)
+//       Log.debug("BBM", "onPrevPageButtonClicked", m_player.getId().toString(), " Player save data is null")
+//       return
 
-    playerSaveData.showBuildMenuHighlight = false
-    if (m_player == localPlayer)
-      ForceUIKey("B")
+//     playerSaveData.showBuildMenuHighlight = false
+//     if (m_player == localPlayer)
+//       ForceUIKey("B")
 
-  // --------------------------------------------------------------------------
-  private function onNextPageButtonClicked()
-    m_nextPageButton.clearFocus()
-    incrementPageIndex()
-    setHighlightVisible(false)
+//   // --------------------------------------------------------------------------
+//   private function onNextPageButtonClicked()
+//     m_nextPageButton.clearFocus()
+//     incrementPageIndex()
+//     setHighlightVisible(false)
 
-    let playerSaveData = PlayerSaveDataVersioned.getPlayerSaveData(m_player)
-    if (playerSaveData == null)
-      Log.debug("BBM", "onNextPageButtonClicked", m_player.getId().toString(), " Player save data is null")
-      return
+//     let playerSaveData = PlayerSaveDataVersioned.getPlayerSaveData(m_player)
+//     if (playerSaveData == null)
+//       Log.debug("BBM", "onNextPageButtonClicked", m_player.getId().toString(), " Player save data is null")
+//       return
 
-    playerSaveData.showBuildMenuHighlight = false
-    if (m_player == localPlayer)
-      ForceUIKey("B")
+//     playerSaveData.showBuildMenuHighlight = false
+//     if (m_player == localPlayer)
+//       ForceUIKey("B")
 
-// ============================================================================
-init
+// // ============================================================================
+// init
 
-  ensureTocIsLoaded()
+//   ensureTocIsLoaded()
 
-  nullTimer() -> 
-    // This frame blocks input to the page nav buttons. Resize it so that it doesn't.
-    getOriginFrame(ORIGIN_FRAME_SIMPLE_UI_PARENT).getChild(5).setHeight(0.129)
+//   nullTimer() -> 
+//     // This frame blocks input to the page nav buttons. Resize it so that it doesn't.
+//     getOriginFrame(ORIGIN_FRAME_SIMPLE_UI_PARENT).getChild(5).setHeight(0.129)
 
-  g_builderTechPages[0].add(TlsUnitIds.workshop)
-  g_builderTechPages[0].add(TlsUnitIds.scoutTower)
-  g_builderTechPages[0].add(TlsUnitIds.guardTowers[0])
-  g_builderTechPages[0].add(TlsUnitIds.cannonTowers[0])
-  g_builderTechPages[0].add(TlsUnitIds.tunnelEntrance)
+//   g_builderTechPages[0].add(TlsUnitIds.workshop)
+//   g_builderTechPages[0].add(TlsUnitIds.scoutTower)
+//   g_builderTechPages[0].add(TlsUnitIds.guardTowers[0])
+//   g_builderTechPages[0].add(TlsUnitIds.cannonTowers[0])
+//   g_builderTechPages[0].add(TlsUnitIds.tunnelEntrance)
   
-  g_builderTechPages[1].add(TlsUnitIds.blacksmith)
-  g_builderTechPages[1].add(TlsUnitIds.spearmansTent)
-  g_builderTechPages[1].add(TlsUnitIds.munitionsDepot)
-  g_builderTechPages[1].add(TlsUnitIds.chapel)
-  g_builderTechPages[1].add(TlsUnitIds.rangedTarget)
+//   g_builderTechPages[1].add(TlsUnitIds.blacksmith)
+//   g_builderTechPages[1].add(TlsUnitIds.spearmansTent)
+//   g_builderTechPages[1].add(TlsUnitIds.munitionsDepot)
+//   g_builderTechPages[1].add(TlsUnitIds.chapel)
+//   g_builderTechPages[1].add(TlsUnitIds.rangedTarget)
 
-  for i = 0 to bj_MAX_PLAYER_SLOTS - 1
-    if (players[i].isIngame())
-      g_pageManagers[i] = new BuildingPageManager(players[i])
-      for j = 0 to BLDG_ID_PAGES-1
-        g_builderTechPages[j].setEnabled(players[i], j == 0)
+//   for i = 0 to bj_MAX_PLAYER_SLOTS - 1
+//     if (players[i].isIngame())
+//       g_pageManagers[i] = new BuildingPageManager(players[i])
+//       for j = 0 to BLDG_ID_PAGES-1
+//         g_builderTechPages[j].setEnabled(players[i], j == 0)
 
-  doPeriodically(0.1) (CallbackPeriodic cb) ->
-    if (BLDMENU_ENABLED)
-      for i = 0 to bj_MAX_PLAYER_SLOTS - 1
-        if (g_pageManagers[i] != null and players[i].isIngame())
-          g_pageManagers[i].updateButtonVisibility()
+//   doPeriodically(0.1) (CallbackPeriodic cb) ->
+//     if (BLDMENU_ENABLED)
+//       for i = 0 to bj_MAX_PLAYER_SLOTS - 1
+//         if (g_pageManagers[i] != null and players[i].isIngame())
+//           g_pageManagers[i].updateButtonVisibility()
 
-  PlayerSaveData.onLoadComplete().register() -> 
-    for i = 0 to bj_MAX_PLAYER_SLOTS - 1      
-      if (g_pageManagers[i] != null and players[i].isIngame())
-        let saveData = PlayerSaveDataVersioned.getPlayerSaveData(players[i])
-        g_pageManagers[i].setHighlightVisible(saveData.showBuildMenuHighlight)
+//   PlayerSaveData.onLoadComplete().register() -> 
+//     for i = 0 to bj_MAX_PLAYER_SLOTS - 1      
+//       if (g_pageManagers[i] != null and players[i].isIngame())
+//         let saveData = PlayerSaveDataVersioned.getPlayerSaveData(players[i])
+//         g_pageManagers[i].setHighlightVisible(saveData.showBuildMenuHighlight)
