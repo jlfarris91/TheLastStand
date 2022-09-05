@@ -32,7 +32,7 @@
 
         private readonly ILogger m_logger;
         private readonly IReadOnlyFileSystem m_fileSystem;
-        private readonly IReadOnlyEntityLibrary m_objectLibrary;
+        private readonly IEntityLibrary m_objectLibrary;
         private readonly IImageProvider m_imageProvider;
         private readonly IAssetManager m_assetManager;
         private readonly IDataDeserializer<BinaryReader, PathMapFile> m_pathMapFileDeserializer;
@@ -41,7 +41,7 @@
 
         public RegionMapper(ILogger logger,
                             IReadOnlyFileSystem fileSystem,
-                            IReadOnlyEntityLibrary objectLibrary,
+                            IEntityLibrary objectLibrary,
                             IImageProvider imageProvider,
                             IAssetManager assetManager,
                             IDataDeserializer<BinaryReader, PathMapFile> pathMapFileDeserializer,
@@ -414,9 +414,9 @@
                 foreach (CustomEntityDefinition entityDef in customEntityFile.OriginalEntries)
                 {
                     DestructibleEntity entity = m_destructibleLibrary.GetEntity(entityDef.Id);
-                    foreach (CustomEntityMod mod in entityDef.Modifications)
+                    foreach (var mod in entityDef.Variations.SelectMany(_ => _))
                     {
-                        entity.SetValue(mod.Id, mod.Index, mod.Value);
+                        entity.SetValue(mod.Id, mod.RepeatIndex, mod.Value);
                     }
                 }
 
@@ -431,9 +431,9 @@
                     foreach (CustomEntityDefinition entityDef in customEntityFile.OriginalEntries)
                     {
                         DestructibleEntity entity = m_destructibleLibrary.GetEntity(entityDef.Id);
-                        foreach (CustomEntityMod mod in entityDef.Modifications)
+                        foreach (CustomEntityField mod in entityDef.Variations.SelectMany(_ => _))
                         {
-                            entity.SetValue(mod.Id, mod.Index, mod.Value);
+                            entity.SetValue(mod.Id, mod.RepeatIndex, mod.Value);
                         }
                     }
                 }

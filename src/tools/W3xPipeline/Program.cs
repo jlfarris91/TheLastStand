@@ -41,10 +41,15 @@
                 sLogger.Log($"Intermediate dir: {args.IntermediateDirectory.FullName}");
                 sLogger.Log($"Output Spawn Region Script File: {args.OutputSpawnRegionScriptFile.FullName}");
                 sLogger.Log($"War3 Archive dir: {args.W3ModBasePath.FullName}");
-                sLogger.Log($"Write regions to archive: {args.WriteRegionsToArchive}");
 
                 if (args.OutputListFilePath != null)
                     sLogger.Log($"Output List File: {args.OutputListFilePath.FullName}");
+
+                if (args.WriteRegionsToArchive)
+                    sLogger.Log($"Write regions to archive");
+
+                if (args.MergeWar3MapSkinFiles)
+                    sLogger.Log($"Merge custom data files");
 
                 sLogger.Log("------------------------");
             }
@@ -124,8 +129,7 @@
 
                 sLogger.Log($"Creating intermediate archive {intermediateMpqPath}");
 
-                FileInfo[] filesToAdd =
-                    args.SourceMapDirectory.EnumerateFiles("*.*", SearchOption.AllDirectories).ToArray();
+                FileInfo[] filesToAdd = args.SourceMapDirectory.EnumerateFiles("*.*", SearchOption.AllDirectories).ToArray();
 
                 // Create the map file
                 using (MpqArchive newMapArchive = MpqArchive.CreateNew(
@@ -138,8 +142,7 @@
                     // Add each file from the source map dir into the archive
                     foreach (FileInfo fileInfo in filesToAdd)
                     {
-                        string archiveFilePath =
-                            MakeRelativeToDirectory(args.SourceMapDirectory.FullName, fileInfo.FullName);
+                        string archiveFilePath = MakeRelativeToDirectory(args.SourceMapDirectory.FullName, fileInfo.FullName);
                         newMapArchive.AddFileFromDisk(fileInfo.FullName, archiveFilePath);
                         sLogger.Log($"Added file {fileInfo.FullName} -> {archiveFilePath}");
                     }
@@ -156,7 +159,7 @@
                     var unitLibrary = (UnitLibrary) ReadUnitLibrary(fileSystem);
                     entityLibrary.AddLibrary(unitLibrary);
 
-                    var objects = new IPipelineObject[]
+                    var objects = new List<IPipelineObject>
                     {
                         new PathMapBuildabilityModifier(pathMapFileBinaryDeserializer, pathMapFileBinarySerializer),
                         new RegionMapper(sLogger,
@@ -166,8 +169,11 @@
                             assetManager,
                             pathMapFileBinaryDeserializer,
                             destructibleLibrary,
-                            args.OutputSpawnRegionScriptFile.FullName) { WriteRegionsToArchive = args.WriteRegionsToArchive }
+                            args.OutputSpawnRegionScriptFile.FullName) { WriteRegionsToArchive = args.WriteRegionsToArchive },
                     };
+
+                    if (args.MergeWar3MapSkinFiles)
+                        objects.Add(new War3MapSkinMerger(sLogger, args.IntermediateDirectory.FullName));
 
                     // Run all of the pipeline steps
                     sLogger.Log("Running pipeline...");

@@ -11,6 +11,7 @@
         public DirectoryInfo W3ModBasePath { get; set; }
         public FileInfo OutputListFilePath { get; set; }
         public bool WriteRegionsToArchive { get; set; }
+        public bool MergeWar3MapSkinFiles { get; set; }
 
         public static ProgramArgs Parse(string[] args)
         {
@@ -42,6 +43,9 @@
                         break;
                     case "--writeRegionsToArchive":
                         result.WriteRegionsToArchive = true;
+                        break;
+                    case "--mergeWar3MapSkinFiles":
+                        result.MergeWar3MapSkinFiles = true;
                         break;
                 }
             }
