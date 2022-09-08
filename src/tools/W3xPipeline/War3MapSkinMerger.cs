@@ -55,7 +55,7 @@ namespace W3xPipeline
 
                     foreach (var entitySkin in war3mapSkinEntityFile.OriginalEntries)
                     {
-                        var entityBase = war3mapEntityFile.OriginalEntries.FirstOrDefault(entry => entry.Id == entitySkin.Id);
+                        var entityBase = war3mapEntityFile.OriginalEntries.FirstOrDefault(entry => entry.BaseId == entitySkin.BaseId);
 
                         if (!entityBase.Variations.Any())
                             entityBase.Variations = new[] { new List<CustomEntityField>() };
@@ -75,7 +75,7 @@ namespace W3xPipeline
 
                     foreach (var entitySkin in war3mapSkinEntityFile.CustomEntries)
                     {
-                        var entityBase = war3mapEntityFile.CustomEntries.FirstOrDefault(entry => entry.Id == entitySkin.Id);
+                        var entityBase = war3mapEntityFile.CustomEntries.FirstOrDefault(entry => entry.NewId == entitySkin.NewId);
 
                         if (!entityBase.Variations.Any())
                             entityBase.Variations = new[] { new List<CustomEntityField>() };

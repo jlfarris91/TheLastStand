@@ -32,20 +32,18 @@
 
         private readonly ILogger m_logger;
         private readonly IReadOnlyFileSystem m_fileSystem;
-        private readonly IEntityLibrary m_objectLibrary;
+        private readonly IReadOnlyEntityLibrary m_objectLibrary;
         private readonly IImageProvider m_imageProvider;
         private readonly IAssetManager m_assetManager;
         private readonly IDataDeserializer<BinaryReader, PathMapFile> m_pathMapFileDeserializer;
-        private readonly DestructibleLibrary m_destructibleLibrary;
         private readonly string m_generatedScriptFile;
 
         public RegionMapper(ILogger logger,
                             IReadOnlyFileSystem fileSystem,
-                            IEntityLibrary objectLibrary,
+                            IReadOnlyEntityLibrary objectLibrary,
                             IImageProvider imageProvider,
                             IAssetManager assetManager,
                             IDataDeserializer<BinaryReader, PathMapFile> pathMapFileDeserializer,
-                            DestructibleLibrary destructibleLibrary,
                             string generatedScriptFile)
         {
             m_logger = logger;
@@ -54,7 +52,6 @@
             m_imageProvider = imageProvider;
             m_assetManager = assetManager;
             m_pathMapFileDeserializer = pathMapFileDeserializer;
-            m_destructibleLibrary = destructibleLibrary;
             m_generatedScriptFile = generatedScriptFile;
         }
 
@@ -404,40 +401,6 @@
                     doodads = new DoodadFileBinaryDeserializer().Deserialize(reader);
                 }
 
-                CustomEntityFile customEntityFile;
-                using (MpqFileStream file = archive.OpenFile("war3map.w3b"))
-                using (var reader = new BinaryReader(file))
-                {
-                    customEntityFile = new CustomEntityFileBinaryDeserializer(m_objectLibrary).Deserialize(reader);
-                }
-
-                foreach (CustomEntityDefinition entityDef in customEntityFile.OriginalEntries)
-                {
-                    DestructibleEntity entity = m_destructibleLibrary.GetEntity(entityDef.Id);
-                    foreach (var mod in entityDef.Variations.SelectMany(_ => _))
-                    {
-                        entity.SetValue(mod.Id, mod.RepeatIndex, mod.Value);
-                    }
-                }
-
-                if (archive.HasFile("war3mapSkin.w3b"))
-                {
-                    using (MpqFileStream file = archive.OpenFile("war3mapSkin.w3b"))
-                    using (var reader = new BinaryReader(file))
-                    {
-                        customEntityFile = new CustomEntityFileBinaryDeserializer(m_objectLibrary).Deserialize(reader);
-                    }
-
-                    foreach (CustomEntityDefinition entityDef in customEntityFile.OriginalEntries)
-                    {
-                        DestructibleEntity entity = m_destructibleLibrary.GetEntity(entityDef.Id);
-                        foreach (CustomEntityField mod in entityDef.Variations.SelectMany(_ => _))
-                        {
-                            entity.SetValue(mod.Id, mod.RepeatIndex, mod.Value);
-                        }
-                    }
-                }
-
                 UpdatePathingMap(doodads, pathMap);
 
                 m_logger.Log($"Removed {oldSpawnRegions.Length} existing spawn regions in map");
@@ -513,16 +476,20 @@
                 return;
             }
 
-            if (entity is DoodadEntity)
-            {
-                return;
-            }
-
             string pt = affectsPathing.PathingTexture;
+
+            if (string.IsNullOrEmpty(pt) || string.IsNullOrWhiteSpace(pt) || pt == "none" || pt == "_")
+                return;
 
             try
             {
                 var assetRef = m_assetManager.FindAsset(pt);
+                if (!assetRef.IsValid)
+                {
+                    m_logger.Log($"Failed to update pathing map for placement {placement.Id} with pathing texture {pt}");
+                    return;
+                }
+
                 var image = m_imageProvider.GetImage(assetRef);
                 UpdatePathMap(image);
             }

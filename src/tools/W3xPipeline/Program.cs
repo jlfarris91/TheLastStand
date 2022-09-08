@@ -5,6 +5,7 @@
     using System.IO;
     using System.Linq;
     using StormLibSharp;
+    using War3.Net;
     using War3.Net.Assets;
     using War3.Net.Data;
     using War3.Net.Data.Units;
@@ -61,7 +62,6 @@
 
             // Services
             var fileSystem = new LayeredFileSystem();
-            var entityLibrary = new AggregateEntityLibrary();
             var assetManager = new AssetManager(fileSystem);
             var imageCache = new ImageCache("ImageCache");
             var imageProvider = new ImageProvider(imageCache, ImageDeserializerProvider);
@@ -150,25 +150,21 @@
                     // Map archive is now done being loaded
                     sLogger.Log($"Mounting archive '{intermediateMpqPath}' at priority {MAP_PRI}");
                     fileSystem.AddSystem(new MpqArchiveFileSystem(newMapArchive), MAP_PRI);
-                    entityLibrary.AddLibrary(ReadDoodadLibrary(fileSystem));
 
-                    // Build the entity library
-                    var destructibleLibrary = (DestructibleLibrary) ReadDestructibleLibrary(fileSystem);
-                    entityLibrary.AddLibrary(destructibleLibrary);
+                    sLogger.Log($"Loading base object data...");
+                    var libraries = LoadCustomObjectLibraries(fileSystem);
 
-                    var unitLibrary = (UnitLibrary) ReadUnitLibrary(fileSystem);
-                    entityLibrary.AddLibrary(unitLibrary);
+                    var objectLibrary = new AggregateEntityLibrary(libraries);
 
                     var objects = new List<IPipelineObject>
                     {
                         new PathMapBuildabilityModifier(pathMapFileBinaryDeserializer, pathMapFileBinarySerializer),
                         new RegionMapper(sLogger,
                             fileSystem,
-                            entityLibrary,
+                            objectLibrary,
                             imageProvider,
                             assetManager,
                             pathMapFileBinaryDeserializer,
-                            destructibleLibrary,
                             args.OutputSpawnRegionScriptFile.FullName) { WriteRegionsToArchive = args.WriteRegionsToArchive },
                     };
 
@@ -250,69 +246,60 @@
             return file.Replace(dir, string.Empty).Replace('/', '\\').Trim('\\');
         }
 
-        private static IEntityLibrary ReadDoodadLibrary(IReadOnlyFileSystem fileSystem)
+        private static IEnumerable<IEntityLibrary> LoadCustomObjectLibraries(IReadOnlyFileSystem fileSystem)
         {
-            sLogger.Log($"Reading doodad library...");
-            StringDataTable doodadData = ReadSlk(fileSystem, "Doodads/Doodads.slk", "doodID");
-            StringDataTable doodadMetadata = ReadSlk(fileSystem, "Doodads/DoodadMetaData.slk", "ID");
-            var deserializer = new DoodadLibrarySerializer(ObjectSerializationHelper.DeserializeObject);
-            DoodadLibrary library = deserializer.LoadLibrary(doodadData, doodadMetadata);
+            var deserializer = new WarcraftDataLibrarySerializer(ObjectSerializationHelper.DeserializeObject);
 
-            var adjustmentFiles = new string[]
-            {
-                "Doodads/DoodadSkins.txt",
-            };
+            var baseDestructableLibrary = new EntityLibrary();
 
-            foreach (string file in adjustmentFiles)
-            {
-                ReadAdjustmentFile(fileSystem, library, file);
-            }
-
-            return library;
-        }
-
-        private static IEntityLibrary ReadDestructibleLibrary(IReadOnlyFileSystem fileSystem)
-        {
-            sLogger.Log($"Reading destructible library...");
+            sLogger.Log($"Reading destructible data...");
             StringDataTable destructibleData = ReadSlk(fileSystem, "Units/DestructableData.slk", "DestructableID");
             StringDataTable destructibleMetadata = ReadSlk(fileSystem, "Units/DestructableMetaData.slk", "ID");
-            var deserializer = new DestructibleLibrarySerializer(ObjectSerializationHelper.DeserializeObject);
-            DestructibleLibrary library = deserializer.LoadLibrary(destructibleData, destructibleMetadata);
+            deserializer.LoadLibrary(baseDestructableLibrary, destructibleData, destructibleMetadata, typeof(DestructibleEntity));
 
-            var adjustmentFiles = new string[]
+            ReadSkinFiles(fileSystem, baseDestructableLibrary, new string[]
             {
                 "Units/DestructableSkin.txt",
-            };
+            });
 
-            foreach (string file in adjustmentFiles)
+            var customDestructableLibrary = new EntityLibrary(baseDestructableLibrary);
+            LoadCustomEntityLibrary(fileSystem, customDestructableLibrary, "w3b", typeof(DestructibleEntity));
+
+            yield return customDestructableLibrary;
+
+            var baseDoodadLibrary = new EntityLibrary();
+
+            StringDataTable doodadData = ReadSlk(fileSystem, "Doodads/Doodads.slk", "doodID");
+            StringDataTable doodadMetadata = ReadSlk(fileSystem, "Doodads/DoodadMetaData.slk", "ID");
+            deserializer.LoadLibrary(baseDoodadLibrary, doodadData, doodadMetadata, typeof(DoodadEntity));
+
+            ReadSkinFiles(fileSystem, baseDoodadLibrary, new string[]
             {
-                ReadAdjustmentFile(fileSystem, library, file);
-            }
+                "Doodads/DoodadSkins.txt",
+            });
 
-            return library;
-        }
+            var customDoodadLibrary = new EntityLibrary(baseDoodadLibrary);
+            LoadCustomEntityLibrary(fileSystem, customDoodadLibrary, "w3d", typeof(DoodadEntity));
 
-        private static IEntityLibrary ReadUnitLibrary(IReadOnlyFileSystem fileSystem)
-        {
-            sLogger.Log($"Reading unit library...");
-            StringDataTable unitDataTable = ReadSlk(fileSystem, "Units/UnitData.slk", "unitID");
-            StringDataTable unitWeaponDataTable = ReadSlk(fileSystem, "Units/UnitWeapons.slk", "unitWeaponID");
-            StringDataTable unitBalanceDataTable = ReadSlk(fileSystem, "Units/UnitBalance.slk", "unitBalanceID");
-            StringDataTable unitArtDataTable = ReadSlk(fileSystem, "Units/UnitUI.slk", "unitUIID");
+            yield return customDoodadLibrary;
 
-            unitDataTable.Join(unitWeaponDataTable, unitBalanceDataTable, unitArtDataTable);
+            var baseUnitLibrary = new EntityLibrary();
 
             StringDataTable unitDataMetadataTable = ReadSlk(fileSystem, "Units/UnitMetaData.slk", "ID");
 
-            var deserializer = new UnitLibrarySerializer(ObjectSerializationHelper.DeserializeObject);
-            UnitLibrary library = deserializer.LoadLibrary(
-                unitDataTable,
-                unitDataMetadataTable,
-                unitWeaponDataTable,
-                unitBalanceDataTable,
-                unitArtDataTable);
+            StringDataTable unitDataTable = ReadSlk(fileSystem, "Units/UnitData.slk", "unitID");
+            deserializer.LoadLibrary(baseUnitLibrary, unitDataTable, unitDataMetadataTable, typeof(UnitEntity));
 
-            var adjustmentFiles = new[]
+            StringDataTable unitWeaponDataTable = ReadSlk(fileSystem, "Units/UnitWeapons.slk", "unitWeaponID");
+            deserializer.LoadLibrary(baseUnitLibrary, unitWeaponDataTable, unitDataMetadataTable, typeof(UnitEntity));
+
+            StringDataTable unitBalanceDataTable = ReadSlk(fileSystem, "Units/UnitBalance.slk", "unitBalanceID");
+            deserializer.LoadLibrary(baseUnitLibrary, unitBalanceDataTable, unitDataMetadataTable, typeof(UnitEntity));
+
+            StringDataTable unitArtDataTable = ReadSlk(fileSystem, "Units/UnitUI.slk", "unitUIID");
+            deserializer.LoadLibrary(baseUnitLibrary, unitArtDataTable, unitDataMetadataTable, typeof(UnitEntity));
+
+            ReadSkinFiles(fileSystem, baseUnitLibrary, new string[]
             {
                 "Units/CampaignUnitFunc.txt",
                 "Units/CampaignUnitStrings.txt",
@@ -326,32 +313,74 @@
                 "Units/OrcUnitStrings.txt",
                 "Units/UndeadUnitFunc.txt",
                 "Units/UndeadUnitStrings.txt",
-            };
+            });
 
-            foreach (string file in adjustmentFiles)
-            {
-                ReadAdjustmentFile(fileSystem, library, file);
-            }
-
-            return library;
+            var customUnitLibrary = new EntityLibrary(baseUnitLibrary);
+            LoadCustomEntityLibrary(fileSystem, customUnitLibrary, "w3u", typeof(UnitEntity));
+            
+            yield return customUnitLibrary;
         }
 
-        private static void ReadAdjustmentFile(IReadOnlyFileSystem fileSystem, IEntityLibrary library, string filePath)
+        private static void ReadSkinFiles(IReadOnlyFileSystem fileSystem, IEntityLibrary library, string[] skinFiles)
         {
-
-            try
+            foreach (string skinFile in skinFiles)
             {
-                sLogger.Log($"Reading adjustment file {filePath}...");
-                using (Stream file = fileSystem.OpenRead(filePath))
-                using (var reader = new StreamReader(file))
+                try
                 {
-                    new ProfileFileDeserializer().ReadProfile(library, reader);
+                    sLogger.Log($"Reading adjustment file {skinFile}...");
+                    using (Stream file = fileSystem.OpenRead(skinFile))
+                    using (var reader = new StreamReader(file))
+                    {
+                        new ProfileFileDeserializer().ReadProfile(library, reader);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    sLogger.Log($"Unable to read adjustment file {skinFile}: {ex.Message}");
                 }
             }
-            catch (Exception ex)
+        }
+
+        private static void LoadCustomEntityLibrary(IReadOnlyFileSystem fileSystem, IEntityLibrary library, string customDataExtension, Type entityType)
+        {
+            bool extraInfo(int version) => customDataExtension == "w3a" || customDataExtension == "w3q" || (customDataExtension == "w3d" && version >= 2);
+            var deserializer = new CustomEntityFileBinaryDeserializer(library) { ReadExtraInfo = extraInfo };
+
+            void ReadEntityFile(string filePath)
             {
-                sLogger.Log($"Unable to read adjustment file {filePath}: {ex.Message}");
+                CustomEntityFile entityFile;
+                using (var file = fileSystem.OpenRead(filePath))
+                using (var reader = new BinaryReader(file))
+                {
+                    entityFile = deserializer.Deserialize(reader);
+                }
+                foreach (var originalEntity in entityFile.OriginalEntries)
+                {
+                    var entity = library.GetEntity(originalEntity.BaseId) ?? library.AddEntity(Tag.Invalid, originalEntity.BaseId, entityType);
+
+                    // TODO: not sure what to do with these variations atm so for now stomp with last
+                    foreach (var field in originalEntity.Variations.SelectMany(_ => _))
+                    {
+                        entity.SetValue(field.Id, field.Value);
+                    }
+                }
+                foreach (var customEntity in entityFile.CustomEntries)
+                {
+                    var entity = library.GetEntity(customEntity.NewId) ?? library.AddEntity(customEntity.NewId, customEntity.BaseId, entityType);
+
+                    // TODO: not sure what to do with these variations atm so for now stomp with last
+                    foreach (var field in customEntity.Variations.SelectMany(_ => _))
+                    {
+                        entity.SetValue(field.Id, field.Value);
+                    }
+                }
             }
+
+            var war3mapFilePath = $"war3map.{customDataExtension}";
+            if (fileSystem.FileExists(war3mapFilePath)) ReadEntityFile(war3mapFilePath);
+
+            var war3mapSkinFilePath = $"war3mapSkin.{customDataExtension}";
+            if (fileSystem.FileExists(war3mapSkinFilePath)) ReadEntityFile(war3mapSkinFilePath);
         }
 
         private static StringDataTable ReadSlk(IReadOnlyFileSystem fileSystem, string filePath, string primaryKey)
