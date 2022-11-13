@@ -1,0 +1,199 @@
+package Obelisk
+import TlsBuildingDefinition
+import BuildingUndeadTarget
+import TlsUpgradeIds
+import StringBuilder
+import ColorUtility
+import BuildItems
+import TlsItemDefinition
+import ItemBuildUnitDefinition
+import Icons
+import RegisterEvents
+import Preload
+import UnitIndexer
+import GroupUtils
+import DisplayTextToPlayer
+import ItemType
+import AbilityObjEditing
+
+public TlsBuildingAndHeroDefinition g_obeliskDefinition
+public TlsItemDefinition g_obeliskItemDefinition
+
+// ============================================================================
+function createBaseObeliskDefinition(int newId) returns TlsBuildingAndHeroDefinition
+  return new TlsBuildingAndHeroDefinition(newId, UnitIds.townhall)
+    ..makeBuildingUndeadTarget()
+    ..setSelectionScale(5.0)
+    ..setGroundTexture("HMED")
+    ..setArmorType(ArmorType.Fortified)
+    ..setCollisionSize(128.0)
+    ..setModelFile("Doodads\\Cityscape\\Props\\CrystalShield\\CrystalShield")
+    ..setShadowTextureBuilding("ShadowGoblinMerchant")
+    ..setPathingMap("PathTextures\\4x4Default.tga")
+    ..setPlacementRequires("unbuildable,unwalkable")
+    ..setUnitSoundSet("ArcaneTower")
+    ..setFoodProduced(0)
+    ..setFoodCost(1)
+    ..setRepairTime(10)
+    ..setRepairGoldCost(0)
+    ..setRepairLumberCost(0)
+    ..setSightRadiusDay(1024)
+    ..setSightRadiusNight(1024)
+    ..setButtonPositionX(0)
+    ..setButtonPositionY(0)
+    ..setGoldCost(0)
+    ..setLumberCost(0)
+    ..setResearchesAvailable("")
+    ..setBuildTime(30)
+    ..setHideMinimapDisplay(true)
+    ..setHitPointsMaximumBase(500)
+    ..setArmorType(ArmorType.Fortified)
+    ..setDefenseBase(0)
+    ..setUnitsTrained("")
+
+// ============================================================================
+function onUnitTrained()
+  let trainedUnit = GetTrainedUnit()
+  let trainingUnit = GetTriggerUnit()
+  let trainedUnitId = trainedUnit.getTypeId()
+
+  // The player is moving the Obelisk so remove it
+  if (trainedUnitId == TlsUnitIds.BuildItemUnits.obelisk and trainingUnit.isObelisk())
+    trainingUnit.remove()
+
+// ============================================================================
+function onUnitIndexedDeindexed()
+
+  if (Preload.isPreloading())
+    return
+
+  let _unit = getIndexingUnit()
+  if (_unit.isObelisk())
+    destroyObeliskIfPlayerAlreadyHasOne(_unit)
+
+// ============================================================================
+function isEnumUnitObelisk() returns bool
+  return GetEnumUnit().isObelisk()
+
+// ============================================================================
+function countNumberOfObelisks(player _player) returns int
+  var count = 0
+  let temp = getGroup()
+  temp.enumUnitsOfPlayer(_player, null)
+  for _unit in temp
+    if (_unit.isObelisk() and _unit.isAlive())
+      count++
+  temp.release()
+  return count
+
+// ============================================================================
+function destroyObeliskIfPlayerAlreadyHasOne(unit _unit) returns bool
+  if (not _unit.isObelisk())
+    return false
+
+  // This is the one and only alive obelisk unit
+  if (countNumberOfObelisks(_unit.getOwner()) <= 1)
+    return false
+
+  // This unit shouldn't have been created
+  _unit.remove()
+  
+  // Warn the player and create an item on the ground
+  displayMessageToPlayer(_unit.getOwner(), "You can only build one Obelisk".colorize(Colors.red))
+
+  // Convert the unit to it's item form
+  spawnObelisk(_unit.getTypeId(), _unit.getPos())
+
+  return true
+
+// ============================================================================
+function spawnObelisk(int _unitTypeId, vec2 pos)
+  ItemType.createItem(TlsItemIds.obelisk, pos)
+
+// ============================================================================
+function onConstructCanceled()
+  let structure = GetTriggerUnit()
+  if (structure.isObelisk())
+    spawnObelisk(structure.getTypeId(), structure.getPos())
+
+// ============================================================================
+@compiletime function createDefinitions()
+
+  g_obeliskDefinition = createBaseObeliskDefinition(TlsUnitIds.obelisk)
+    ..setName("Magical Obelisk")
+    ..setTooltipBasic("Build Magical Obelisk")
+    ..setIconGameInterface("ReplaceableTextures\\CommandButtons\\BTNPowerGenerator.blp")
+    ..setScalingValue(1.0)
+    ..setHitPointsMaximumBase(500)
+    ..setUpgradesTo("")
+    ..setUpgradesUsed(commaList(TlsUpgradeIds.campDefense))
+    ..setUnitsTrained("")
+    ..setResearchesAvailable("")
+    ..setFoodProduced(3)
+    ..setNormalAbilities(commaList(AbilityIds.blightDispelLarge))
+    ..setUnitsTrained(commaList(TlsUnitIds.BuildItemUnits.obelisk))
+    ..setHeroAbilities(commaList(TlsAbilityIds.obeliskLightning))
+    ..setCommonBuildingProperties()
+    ..setManaMaximum(100)
+    ..setManaInitialAmount(0)
+    ..setManaRegeneration(0.6)
+    ..setProperNames("Charging...")
+
+  let sb = new StringBuilder()
+  sb.appendLine("A crystal eminating pure light held in place by a structure reinforced with magic. You are told its power increases with each new day and that soon it will have the strength to stop Archimonde and his undead armies.")
+  sb.appendLine()
+  sb.appendLine("Your task is to build this Magical Crystal and defend it until it reaches its maximum power.".colorize(Colors.gold))
+  sb.appendLine()
+  sb.appendLine("Required to build any structure. Only one can be built at a time.".colorize(Colors.red))
+  sb.appendLine()
+  g_obeliskDefinition.setTooltipExtended(sb.toStringAndDestroy())
+
+  g_obeliskItemDefinition = new TlsItemDefinition(TlsItemIds.obelisk, 'tbsm')
+  ..setName(g_obeliskDefinition.getName())
+  ..setDescription("Constructs a {0} at a chosen location.".format(g_obeliskDefinition.getName()))
+  ..setTooltipBasic("Assemble {0}".format(g_obeliskDefinition.getName()))
+  ..setTooltipExtended("Constructs a {0} at a chosen location.|n|n{1}".format(g_obeliskDefinition.getName(), g_obeliskDefinition.getTooltipExtended()))
+  ..setAbilities(commaList(TlsAbilityIds.buildObelisk))
+  ..setInterfaceIcon("ReplaceableTextures\\CommandButtons\\BTNPowerGenerator.blp")
+  ..setGoldCost(0)
+  ..setLumberCost(0)
+  ..setCanBeDropped(true)
+  ..setDroppedWhenCarrierDies(false)
+  ..setCanBeSoldByMerchants(false)
+  ..setCanBeSoldToMerchants(false)
+  ..setNumberofCharges(1)
+  ..build()
+
+  new ItemBuildUnitDefinition(TlsUnitIds.BuildItemUnits.obelisk)
+  ..setName("Disassemble Magical Obelisk")
+  ..setTooltipBasic("Disassemble Magical Obelisk")
+  ..setTooltipExtended("Disassemble the Magical Obelisk in order to move it to a new location.|n|n{0}".format("The Magical Obelisk's power level will be reset".colorize(Colors.red)))
+  ..setDescription(g_obeliskItemDefinition.getDescription())
+  ..setGoldCost(0)
+  ..setLumberCost(0)
+  ..setIconGameInterface(Icons.bTNPillage)
+  ..setBuildTime(30)
+  ..setButtonPositionX(3)
+  ..setButtonPositionY(2)
+  ..setRequirements("")
+  ..setGoldCost(1)
+
+  new AbilityDefinitionBuildTinyScoutTower(TlsAbilityIds.buildObelisk)
+    ..setDurationNormal(1, 30.0)
+    ..setUnitCreatedperplayerrace(1, commaList(TlsUnitIds.obelisk))
+    ..setIconNormal("ReplaceableTextures\\CommandButtons\\BTNPowerGenerator.blp")
+
+  new AbilityDefinitionFarseerChainLightning(TlsAbilityIds.obeliskLightning)
+    ..presetManaCost(lvl -> 100)
+    ..presetCooldown(lvl -> 60.0)
+
+// ============================================================================
+init
+  if (g_obeliskDefinition == null)
+    createDefinitions()
+
+  BuildItems.register(TlsItemIds.obelisk, TlsUnitIds.BuildItemUnits.obelisk)
+
+  onUnitIndex(function onUnitIndexedDeindexed)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_TRAIN_FINISH, function onUnitTrained)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_CONSTRUCT_CANCEL, function onConstructCanceled)

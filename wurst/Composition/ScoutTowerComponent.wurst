@@ -1,5 +1,4 @@
 package ScoutTowerComponent
-import Events
 import WorkstationComponent
 import Range
 import TooltipBuilder
@@ -104,10 +103,7 @@ function isFilterUnitValidTargetForMarking() returns bool
     ..setHotkeyNormal("Q")
 
 // ============================================================================
-public class ScoutTowerComponent extends RealtimeUnitComponent
-  private _handle m_workedEnteredCallback = INVALID_HANDLE
-  private _handle m_workedExitedCallback = INVALID_HANDLE
-  private _handle m_workedLeveledCallback = INVALID_HANDLE
+public class ScoutTowerComponent extends WorkstationAbilityComponent
   private bool m_activated = false
   private LinkedList<unit> m_markedTargets = new LinkedList<unit>()
   private SmartValue m_maxTargets
@@ -122,32 +118,19 @@ public class ScoutTowerComponent extends RealtimeUnitComponent
 
   // --------------------------------------------------------------------------
   override function onEnabled()
-    super.onEnabled()
     
-    let workstationComponent = getOwner().getOrAddWorkstationComponent()
-    m_workedEnteredCallback = workstationComponent.onWorkedEntered().registerDispatched(this, () -> onWorkerEntered())
-    m_workedExitedCallback = workstationComponent.onWorkedExited().registerDispatched(this, () -> onWorkedExited())
-    m_workedLeveledCallback = workstationComponent.onWorkedLeveled().registerDispatched(this, () -> onWorkerLeveled())
-
     m_maxTargets = getOwnerUnit().getOwner().getProperty(PlayerProperty.SCOUT_TOWER_TARGETS).attach(this)
-
-    updateState()
+    
+    super.onEnabled()    
 
   // --------------------------------------------------------------------------
   override function onDisabled()
     super.onDisabled()
 
-    let workstationComponent = getOwner().getWorkstationComponent()
-    if (workstationComponent != null)
-      workstationComponent.onWorkedEntered().unregister(m_workedEnteredCallback)
-      workstationComponent.onWorkedExited().unregister(m_workedExitedCallback)
-      workstationComponent.onWorkedLeveled().unregister(m_workedLeveledCallback)
-
     if (m_maxTargets != null)
       destroy m_maxTargets
       m_maxTargets = null
 
-    deactivate()
     clearMarkedTargets()
 
     // Stop listening for trader reveal events
@@ -276,56 +259,21 @@ public class ScoutTowerComponent extends RealtimeUnitComponent
         nullTimer(() -> onMarkedTargetLost(target, true))
     
   // --------------------------------------------------------------------------
-  private function onWorkerEntered()
+  override protected function onWorkerEntered()
+    super.onWorkerEntered()
 
     let workstationComponent = getOwner().getOrAddWorkstationComponent()
     getOwnerUnit().setXpTarget(workstationComponent.getLoadedUnitAt(0))
 
-    if (getNumberOfWorkers() == 1)
-      activate()
-
   // --------------------------------------------------------------------------
-  private function onWorkedExited()
-
+  override protected function onWorkerExited()
+    super.onWorkerExited()
     getOwnerUnit().clearXpTarget()
 
-    if (getNumberOfWorkers() == 0)
-      deactivate()
-
   // --------------------------------------------------------------------------
-  private function onWorkerLeveled()
-    updateState()
+  override protected function updateState()
+    super.updateState()
 
-  // --------------------------------------------------------------------------
-  private function getNumberOfWorkers() returns int
-    let workstationComponent = getOwner().getWorkstationComponent()
-    return workstationComponent != null ? workstationComponent.getLoadedUnitCount() : 0
-
-  // --------------------------------------------------------------------------
-  private function activate()
-    setActive(true)
-
-  // --------------------------------------------------------------------------
-  private function deactivate()
-    setActive(false)
-
-  // --------------------------------------------------------------------------
-  private function setActive(bool active)
-    if (m_activated == active)
-      return
-    m_activated = active
-    updateState()
-
-  // --------------------------------------------------------------------------
-  private function getOperatorLevel() returns int
-    if (m_activated)
-      let workstationComponent = getOwner().getWorkstationComponent()
-      if (workstationComponent != null)
-        return workstationComponent.getMaxOperatorLevel()
-    return 1
-
-  // --------------------------------------------------------------------------
-  protected function updateState()
     let ownerUnit = getOwnerUnit()
 
     let operatorLevel = getOperatorLevel()
@@ -428,22 +376,8 @@ function canUnitDealExtraDamageToMarkedTargets(unit source) returns bool
   return not source.isBuildingUndeadTarget() and not source.isSpikes()
 
 // ============================================================================
-function onUnitUpgraded()
-  let upgradedUnit = GetTriggerUnit()
-
-  let metadata = upgradedUnit.getMetadata()
-  if (metadata == null)
-    return
-
-  let comp = metadata.getScoutTowerComponent()
-  if (comp != null)
-    comp.updateState()
-
-// ============================================================================
 init
   EventListener.onTargetCast(TlsAbilityIds.scoutTowerMarkTargets, (unit caster, unit target) -> onMarkTargetAbilCast(caster, target))
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_DEATH, function onUnitKilled)
   DamageEvent.addListener(DAMAGE_EVENT_PRIO_RELATIVE, () -> onDamageEventRelative())
   DamageEvent.addListener(DAMAGE_EVENT_PRIO_FINAL, () -> onDamageEventFinal())
-  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_UPGRADE_FINISH, function onUnitUpgraded)
-  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_UPGRADE_CANCEL, function onUnitUpgraded)

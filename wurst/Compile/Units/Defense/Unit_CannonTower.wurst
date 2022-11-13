@@ -92,7 +92,7 @@ public class CannonTowerDefinition extends TlsBuildingDefinition
     setDefenseBase(0)
 
     setGoldCost(2)
-    setMaterialCost(600)
+    setLumberCost(600)
     this.setCommonBuildingProperties()
 
     setHotkey("C")
@@ -143,7 +143,7 @@ public class CannonTowerDefinition extends TlsBuildingDefinition
     ..setHitPointsMaximumBase(2000)
     ..setUpgradesTo(commaList(TlsUnitIds.cannonTowers[1]))
     ..setGoldCost(2)
-    ..setMaterialCost(600)
+    ..setLumberCost(600)
     ..build("A tall tower fitted with a cannon that can fire a variable distance when operated by a survivor.",
       tooltipBuilder -> begin
         let workstationItem = new WorkstationOperatorBonusesTooltipItem()
@@ -215,11 +215,11 @@ public class CannonTowerDefinition extends TlsBuildingDefinition
     ..setTimeBase(30)
     ..setTimeIncrement(5)
     ..presetIcon(lvl -> Icons.bTNCannonTower)
-    ..setRequirements(1, commaList(TlsUnitIds.headquarters1))
-    ..setRequirements(2, commaList(TlsUnitIds.headquarters2))
-    ..setRequirements(3, commaList(TlsUnitIds.headquarters3))
-    ..setRequirements(4, commaList(TlsUnitIds.headquarters4))
-    ..setRequirements(5, commaList(TlsUnitIds.headquarters5))
+    ..setRequirements(1, commaList(TlsUnitIds.obelisk, TlsUnitIds.workshop))
+    ..setRequirements(2, commaList(TlsUnitIds.obelisk, TlsUnitIds.workshop))
+    ..setRequirements(3, commaList(TlsUnitIds.obelisk, TlsUnitIds.workshop))
+    ..setRequirements(4, commaList(TlsUnitIds.obelisk, TlsUnitIds.workshop))
+    ..setRequirements(5, commaList(TlsUnitIds.obelisk, TlsUnitIds.workshop))
     ..presetName(lvl -> "Cannon Tower Attack Damage")
     ..presetTooltip(lvl -> "Upgrade Cannon Tower Attack Damage")
     ..setTooltipExtended(1, "Increases the attack damage of Cannon Towers.")
@@ -250,83 +250,30 @@ function createWorkstationAbilities(int towerLevel)
   destroy inactiveWorkstationIconTooltipBuilder
 
 // ============================================================================
-public class CannonTowerComponent extends UnitComponent
-  private _handle m_workerEnteredCallback = INVALID_HANDLE
-  private _handle m_workerExitedCallback = INVALID_HANDLE
-  private _handle m_workerLeveledCallback = INVALID_HANDLE
+public class CannonTowerComponent extends WorkstationAbilityComponent
   private _handle m_attackBonusAffector = INVALID_HANDLE
   private bool m_activated = false
 
   // --------------------------------------------------------------------------
   construct (IUnitMetadata metadata)
     super(metadata)
-
-  // --------------------------------------------------------------------------
-  override function onEnabled()
-    super.onEnabled()
-    
-    let workstationComponent = getOwner().getOrAddWorkstationComponent()
-    m_workerEnteredCallback = workstationComponent.onWorkedEntered().registerDispatched(this, () -> onWorkerEntered())
-    m_workerExitedCallback = workstationComponent.onWorkedExited().registerDispatched(this, () -> onWorkedExited())
-    m_workerLeveledCallback = workstationComponent.onWorkedLeveled().registerDispatched(this, () -> onWorkerLeveled())
-
-    updateState()
-
-  // --------------------------------------------------------------------------
-  override function onDisabled()
-    super.onDisabled()
-
-    let workstationComponent = getOwner().getWorkstationComponent()
-    if (workstationComponent != null)
-      workstationComponent.onWorkedEntered().unregister(m_workerEnteredCallback)
-      workstationComponent.onWorkedExited().unregister(m_workerExitedCallback)
-      workstationComponent.onWorkedLeveled().unregister(m_workerLeveledCallback)
-
-    deactivate()
     
   // --------------------------------------------------------------------------
-  private function onWorkerEntered()
+  override protected function onWorkerEntered()
+    super.onWorkerEntered()
 
     let workstationComponent = getOwner().getOrAddWorkstationComponent()
     getOwnerUnit().setXpTarget(workstationComponent.getLoadedUnitAt(0))
 
-    if (getNumberOfWorkers() == 1)
-      activate()
-
   // --------------------------------------------------------------------------
-  private function onWorkedExited()
+  override protected function onWorkerExited()
+    super.onWorkerExited()
     
     getOwnerUnit().clearXpTarget()
 
-    if (getNumberOfWorkers() == 0)
-      deactivate()
-
   // --------------------------------------------------------------------------
-  private function onWorkerLeveled()
-    updateState()
-
-  // --------------------------------------------------------------------------
-  private function getNumberOfWorkers() returns int
-    let workstationComponent = getOwner().getWorkstationComponent()
-    return workstationComponent != null ? workstationComponent.getLoadedUnitCount() : 0
-
-  // --------------------------------------------------------------------------
-  private function activate()
-    setActive(true)
-
-  // --------------------------------------------------------------------------
-  private function deactivate()
-    setActive(false)
-
-  // --------------------------------------------------------------------------
-  private function setActive(bool active)
-    if (m_activated == active)
-      return
-    m_activated = active
-    updateState()
-
-  // --------------------------------------------------------------------------
-  protected function updateState()
+  override protected function updateState()
+    super.updateState()
 
     let ownerUnit = getOwnerUnit()
 
@@ -407,23 +354,9 @@ function onUnitKilled()
   FX.createGainedXPTag(killingUnit.getPos(), xp, killingUnit.getOwner())
 
 // ============================================================================
-function onUnitUpgraded()
-  let upgradedUnit = GetTriggerUnit()
-
-  let metadata = upgradedUnit.getMetadata()
-  if (metadata == null)
-    return
-
-  let comp = metadata.getCannonTowerComponent()
-  if (comp != null)
-    comp.updateState()
-
-// ============================================================================
 init
   createObjectDefinitions()
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_DEATH, function onUnitKilled)
-  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_UPGRADE_FINISH, function onUnitUpgraded)
-  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_UPGRADE_CANCEL, function onUnitUpgraded)
 
 // ============================================================================
 @test function asdf()

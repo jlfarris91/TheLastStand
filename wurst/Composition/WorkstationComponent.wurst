@@ -1,5 +1,4 @@
 package WorkstationComponent
-import UnitComponent
 import Events
 import Loaded
 import Orders
@@ -18,6 +17,7 @@ import ClosureEvents
 import BuffObjEditing
 import UnitPropertiesComponent
 import HashMap
+import RealtimeUnitComponent
 
 constant SoundDefinition g_loadingSoundDef = new SoundDefinition(Sounds.loading, false, true)
 
@@ -200,8 +200,10 @@ public class WorkstationComponent extends UnitComponent
 
     let unitPropsComp = u.getUnitPropertiesComponent()
     if (unitPropsComp != null)
-      let handler = unitPropsComp.getProperty(UnitProperty.OPERATOR_LEVEL)
-                      .onValueChanged().registerDispatched(this, () -> onWorkerLeveled(u))
+      let handler = unitPropsComp
+        .getProperty(UnitProperty.OPERATOR_LEVEL)
+        .onValueChanged()
+        .registerDispatched(this, () -> onWorkerLeveled(u))
       m_unitPropertyEventHandles.put(u, handler)
 
     if (m_workerEntered != null)
@@ -271,6 +273,102 @@ public function IUnitMetadata.getOrAddWorkstationComponent() returns Workstation
   if (component == null)
     component = this.addComponent(new WorkstationComponent(this)) castTo WorkstationComponent
   return component
+
+// ============================================================================
+public class WorkstationAbilityComponent extends RealtimeUnitComponent
+  
+  private _handle m_workedEnteredCallback = INVALID_HANDLE
+  private _handle m_workedExitedCallback = INVALID_HANDLE
+  private _handle m_workedLeveledCallback = INVALID_HANDLE
+  private bool m_activated = false
+
+  // --------------------------------------------------------------------------
+  construct (IUnitMetadata metadata)
+    super(metadata)
+
+  // --------------------------------------------------------------------------
+  function getNumberOfWorkers() returns int
+    let workstationComponent = getOwner().getWorkstationComponent()
+    return workstationComponent != null ? workstationComponent.getLoadedUnitCount() : 0
+
+  // --------------------------------------------------------------------------
+  function isWorkstationActive() returns bool
+    return m_activated
+
+  // --------------------------------------------------------------------------
+  function canActivate() returns bool
+    return true
+
+  // --------------------------------------------------------------------------
+  function getOperatorLevel() returns int
+    if (isWorkstationActive())
+      let workstationComponent = getOwner().getWorkstationComponent()
+      if (workstationComponent != null)
+        return workstationComponent.getMaxOperatorLevel()
+    return 1
+
+  // --------------------------------------------------------------------------
+  override function onEnabled()
+    super.onEnabled()
+
+    let workstationComponent = getOwner().getOrAddWorkstationComponent()
+    m_workedEnteredCallback = workstationComponent.onWorkedEntered().registerDispatched(this, () -> onWorkerEntered())
+    m_workedExitedCallback = workstationComponent.onWorkedExited().registerDispatched(this, () -> onWorkerExited())
+    m_workedLeveledCallback = workstationComponent.onWorkedLeveled().registerDispatched(this, () -> onWorkerLeveled())
+
+    updateState()
+
+  // --------------------------------------------------------------------------
+  override function onDisabled()
+    super.onDisabled()
+
+    let workstationComponent = getOwner().getWorkstationComponent()
+    if (workstationComponent != null)
+      workstationComponent.onWorkedEntered().unregister(m_workedEnteredCallback)
+      workstationComponent.onWorkedExited().unregister(m_workedExitedCallback)
+      workstationComponent.onWorkedLeveled().unregister(m_workedLeveledCallback)
+
+    deactivate()
+    
+  // --------------------------------------------------------------------------
+  protected function onWorkerEntered()
+
+    if (getNumberOfWorkers() == 1)
+      activate()
+
+  // --------------------------------------------------------------------------
+  protected function onWorkerExited()
+
+    if (getNumberOfWorkers() == 0)
+      deactivate()
+
+  // --------------------------------------------------------------------------
+  protected function onWorkerLeveled()
+    updateState()
+
+  // --------------------------------------------------------------------------
+  protected function activate()
+    setActive(true)
+
+  // --------------------------------------------------------------------------
+  protected function deactivate()
+    setActive(false)
+
+  // --------------------------------------------------------------------------
+  protected function setActive(bool active)
+    if (m_activated == active)
+      return
+
+    if (active and not canActivate())
+      return
+
+    m_activated = active
+
+    updateState()
+
+  // --------------------------------------------------------------------------
+  protected function updateState()
+    skip
 
 // ============================================================================
 /*

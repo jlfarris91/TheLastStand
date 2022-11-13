@@ -2,60 +2,214 @@ package Unit_LumberMill
 import TlsBuildingDefinition
 import GameConstants
 import TlsUpgradeIds
-import AbilityIds
 import BuildingUndeadTarget
+import RealtimeUnitComponent
+import SmartValue
+import PlayerProperties
+import WorkstationComponent
+import ChannelAbilityPreset
+import ClosureEvents
+import FX
+import Handle
+import TlsUnitDefinitionBuilder
+import ColorUtility
+import ClosureTimers
 
-LumberMillDefinition g_lumberMillDefinition
+public TlsBuildingDefinition g_lumberMillDefinition
+
+constant int ACTIVE_ICON_ABILITY_ID   = compiletime(ABIL_ID_GEN.next())
+constant int INACTIVE_ICON_ABILITY_ID = compiletime(ABIL_ID_GEN.next())
 
 // ============================================================================
-public class LumberMillDefinition extends TlsBuildingDefinition
-  construct(int newId)
-    super(newId, UnitIds.humanlumbermill)
-    this.makeBuildingUndeadTarget()
-    setName("Lumber Mill")
-    setTooltipBasic("Build Lumber Mill")
-    setTooltipExtended("A drop-off point for lumber and a place to research harvesting upgrades.")
-    setHotkey("M")
-    setButtonPositionX(0)
-    setButtonPositionY(0)
-    setDeathTimeseconds(2.34)
-    setGroundTexture("HSMA")
-    setTintingColorRed(150)
-    setTintingColorBlue(150)
-    setTintingColorGreen(150)
-    setArmorType(ArmorType.Fortified)
-    setPlacementRequires("unbuildable,unwalkable")
-    setPathingMap("PathTextures\\4x4Default.tga")
-    setScalingValue(0.6)
-    setSelectionScale(2.0)
-    setShadowTextureBuilding("")
-    setBuildTime(25)
-    setHideMinimapDisplay(true)
-    setRepairTime(25)
-    setSightRadiusDay(STRUCTURE_MEDIUM_SIGHT_RANGE_DAY)
-    setSightRadiusNight(STRUCTURE_MEDIUM_SIGHT_RANGE_NIGHT)
-    setUpgradesTo("")
-    setUpgradesUsed(commaList(TlsUpgradeIds.campDefense))
-    setNormalAbilities(commaList(
+public class LumberMill
+
+  // --------------------------------------------------------------------------
+  static function getLumberGatherCooldownMod(int operatorLevel) returns real
+    return (operatorLevel - 1) * 0.25
+
+// ============================================================================
+public class LumberMillComponent extends WorkstationAbilityComponent
+  private SmartValue m_lumberGatherAmount
+  private SmartValue m_lumberGatherCooldown
+  private _handle m_lumberGatherCooldownMod
+  private CallbackPeriodic m_gatherCallback
+
+  // --------------------------------------------------------------------------
+  construct (IUnitMetadata metadata)
+    super(metadata)
+
+  // --------------------------------------------------------------------------
+  ondestroy
+
+  // --------------------------------------------------------------------------
+  override function onEnabled()
+    super.onEnabled()
+    
+    m_lumberGatherCooldown = getOwnerUnit().getOwner().getProperty(PlayerProperty.LUMBERMILL_GATHER_COOLDOWN).attach(this)
+    m_lumberGatherAmount = getOwnerUnit().getOwner().getProperty(PlayerProperty.LUMBERMILL_GATHER_AMOUNT).attach(this)
+
+  // --------------------------------------------------------------------------
+  override function onDisabled()
+    super.onDisabled()
+    
+    if (m_lumberGatherCooldown != null)
+      destroy m_lumberGatherCooldown
+      m_lumberGatherCooldown = null
+    
+    if (m_lumberGatherAmount != null)
+      destroy m_lumberGatherAmount
+      m_lumberGatherAmount = null
+
+    if (m_gatherCallback != null)
+      destroy m_gatherCallback
+      m_gatherCallback = null
+
+  // --------------------------------------------------------------------------
+  function getLumberGatherCooldown() returns real
+    return m_lumberGatherCooldown != null ? m_lumberGatherCooldown.getValue() : 999.0
+
+  // --------------------------------------------------------------------------
+  function getLumberGatherAmount() returns int
+    return m_lumberGatherAmount != null ? m_lumberGatherAmount.getIntValue() : 0
+
+  // --------------------------------------------------------------------------
+  override protected function updateState()
+    super.updateState()
+
+    let ownerUnit = getOwnerUnit()
+    let operatorLevel = getOperatorLevel()
+
+    if (m_lumberGatherCooldown != null)
+      m_lumberGatherCooldown.remove(m_lumberGatherCooldownMod)
+      m_lumberGatherCooldownMod = m_lumberGatherCooldown.affectSub(LumberMill.getLumberGatherCooldownMod(operatorLevel))
+
+    if (isWorkstationActive())
+    //{
+      ownerUnit.removeAbility(INACTIVE_ICON_ABILITY_ID)
+      ownerUnit.addAbility(ACTIVE_ICON_ABILITY_ID)
+      ownerUnit.setAbilityLevel(ACTIVE_ICON_ABILITY_ID, operatorLevel)
+
+      if (m_gatherCallback == null)
+        m_gatherCallback = doPeriodically(getLumberGatherCooldown()) (CallbackPeriodic cb) ->
+          grantLumber()
+    //}
+    else
+    //{
+      ownerUnit.removeAbility(ACTIVE_ICON_ABILITY_ID)
+      ownerUnit.addAbility(INACTIVE_ICON_ABILITY_ID)
+
+      if (m_gatherCallback != null)
+        destroy m_gatherCallback
+        m_gatherCallback = null
+    //}
+
+  // --------------------------------------------------------------------------
+  private function grantLumber()
+    let amount = getLumberGatherAmount()
+    getOwnerPlayer().addLumber(amount)
+    FX.createGainedLumberTag(getOwnerUnit().getPos(), amount)
+
+// ============================================================================
+public function IUnitMetadata.getLumberMillComponent() returns LumberMillComponent
+  return this.getComponent(LumberMillComponent.typeId) castTo LumberMillComponent
+
+// ============================================================================
+public function IUnitMetadata.getOrAddLumberMillComponent() returns LumberMillComponent
+  var component = this.getLumberMillComponent()
+  if (component == null)
+    component = this.addComponent(new LumberMillComponent(this)) castTo LumberMillComponent
+  return component
+
+// ============================================================================
+function onUnitUpgraded()
+  let upgradedUnit = GetTriggerUnit()
+
+  let metadata = upgradedUnit.getMetadata()
+  if (metadata == null)
+    return
+
+  let comp = metadata.getLumberMillComponent()
+  if (comp != null)
+    comp.updateState()
+
+// ============================================================================
+@compiletime function createObjectDefinitions()
+
+  let description = "A structure used to harvest lumber and research improvements to lumber harvesting.|n|n{0}".format(
+    "Periodically gathers lumber when operated by a Survivor".green())
+
+  g_lumberMillDefinition = new TlsBuildingDefinition(TlsUnitIds.lumberMill, UnitIds.humanlumbermill)
+    ..makeBuildingUndeadTarget()
+    ..setName("Lumber Mill")
+    ..setTooltipBasic("Build Lumber Mill")
+    ..setHotkey("M")
+    ..setButtonPositionX(1)
+    ..setButtonPositionY(0)
+    ..setDeathTimeseconds(2.34)
+    ..setGroundTexture("HSMA")
+    ..setTintingColorRed(150)
+    ..setTintingColorBlue(150)
+    ..setTintingColorGreen(150)
+    ..setArmorType(ArmorType.Fortified)
+    ..setPlacementRequires("unbuildable,unwalkable")
+    ..setPathingMap("PathTextures\\4x4Default.tga")
+    ..setScalingValue(0.6)
+    ..setSelectionScale(2.0)
+    ..setShadowTextureBuilding("")
+    ..setBuildTime(25)
+    ..setHideMinimapDisplay(true)
+    ..setRepairTime(25)
+    ..setSightRadiusDay(STRUCTURE_MEDIUM_SIGHT_RANGE_DAY)
+    ..setSightRadiusNight(STRUCTURE_MEDIUM_SIGHT_RANGE_NIGHT)
+    ..setUpgradesTo("")
+    ..setUpgradesUsed(commaList(TlsUpgradeIds.campDefense))
+    ..setNormalAbilities(commaList(
       TlsAbilityIds.recycle,
       TlsAbilityIds.blightDispelSmall,
-      AbilityIds.returnGoldLumber))
-    setResearchesAvailable(commaList(TlsUpgradeIds.lumberHarvest))
-    setRequirements(commaList(TlsUnitIds.headquarters2))
-    
-    setHitPointsMaximumBase(500)
-    setArmorType(ArmorType.Fortified)
-    setDefenseBase(0)
+      AbilityIds.returnLumber,
+      TlsAbilityIds.workstationLoadUnit,
+      TlsAbilityIds.workstationUnloadUnit,
+      TlsAbilityIds.inventory2Slots))
+    ..setResearchesAvailable(commaList(TlsUpgradeIds.lumberHarvest))
+    ..setRequirements(commaList(TlsUnitIds.obelisk))
+    ..setHitPointsMaximumBase(500)
+    ..setArmorType(ArmorType.Fortified)
+    ..setDefenseBase(0)
+    ..setGoldCost(0)
+    ..setLumberCost(150)
+    ..setCommonBuildingProperties()
+    ..addUnitClass(TlsUnitClassification.BUILDING)
+    ..addUnitClass(TlsUnitClassification.WORKSTATION)
+    ..build(description,
+      /*caresAboutCombatStats*/ false,
+      tooltipBuilder -> begin
+        let workstationItem = new WorkstationOperatorBonusesTooltipItem()
+        ..addValue("Lumber gathering cooldown decreases with each operator level")
+        tooltipBuilder.addItem(workstationItem)
+      end)
 
-    setGoldCost(0)
-    setMaterialCost(150)
-    this.setCommonBuildingProperties()
+  let activeWorkstationIconTooltipBuilder = new WorkstationIconTooltipBuilder(true)..setDescription(description)
+  let inactiveWorkstationIconTooltipBuilder = new WorkstationIconTooltipBuilder(false)..setDescription(description)
 
-// ============================================================================
-@compiletime function createUnit()
-  g_lumberMillDefinition = new LumberMillDefinition(TlsUnitIds.lumberMill)
+  let properties = new WorkstationOperatorLevelBonusesTooltipItem()
+  ..addValue(lvl -> "Lumber gathering cooldown is decreased by {0}s".format((LumberMill.getLumberGatherCooldownMod(lvl)).toString()))
+  activeWorkstationIconTooltipBuilder.addItem(properties)
+
+  new AbilityActiveWorkstationIconDefinition(ACTIVE_ICON_ABILITY_ID)
+    ..setName("Lumber Mill")
+    ..presetTooltipNormalExtended(lvl -> activeWorkstationIconTooltipBuilder.getTooltipExtended(lvl))
+
+  new AbilityInactiveWorkstationIconDefinition(INACTIVE_ICON_ABILITY_ID)
+    ..setName("Lumber Mill")
+    ..presetTooltipNormalExtended(lvl -> inactiveWorkstationIconTooltipBuilder.getTooltipExtended(lvl))
+
+  destroy activeWorkstationIconTooltipBuilder
+  destroy inactiveWorkstationIconTooltipBuilder
 
 // ============================================================================
 init
   if (g_lumberMillDefinition == null)
-    createUnit()
+    createObjectDefinitions()
+
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_UPGRADE_FINISH, function onUnitUpgraded)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_UPGRADE_CANCEL, function onUnitUpgraded)
