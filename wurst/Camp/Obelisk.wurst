@@ -15,6 +15,7 @@ import GroupUtils
 import DisplayTextToPlayer
 import ItemType
 import AbilityObjEditing
+import ChannelAbilityPreset
 
 public TlsBuildingAndHeroDefinition g_obeliskDefinition
 public TlsItemDefinition g_obeliskItemDefinition
@@ -110,11 +111,37 @@ function destroyObeliskIfPlayerAlreadyHasOne(unit _unit) returns bool
 function spawnObelisk(int _unitTypeId, vec2 pos)
   ItemType.createItem(TlsItemIds.obelisk, pos)
 
+bool g_hasWisp = false
+
 // ============================================================================
 function onConstructCanceled()
   let structure = GetTriggerUnit()
-  if (structure.isObelisk())
+  if (not structure.isObelisk())
+    return
+
+  g_hasWisp = false
+
+  let owningPlayer = structure.getOwner()
+  let temp = getGroup()
+  temp.enumUnitsOfType(TlsUnitIds.wisp, null)
+  for u in temp
+    if (u.getOwner() == owningPlayer)
+      g_hasWisp = true
+  temp.release()
+
+  if (not g_hasWisp)
     spawnObelisk(structure.getTypeId(), structure.getPos())
+
+  // remove so it can't be revived since it's a hero
+  structure.remove()
+
+// ============================================================================
+function onSpellCast()
+  let castingUnit = GetSpellAbilityUnit()
+  if (castingUnit.getTypeId() != TlsUnitIds.wisp)
+    return
+  if (GetSpellAbilityId() == TlsAbilityIds.buildObelisk)
+    castingUnit.removeAbility(TlsAbilityIds.buildObelisk)
 
 // ============================================================================
 @compiletime function createDefinitions()
@@ -182,6 +209,10 @@ function onConstructCanceled()
     ..setDurationNormal(1, 30.0)
     ..setUnitCreatedperplayerrace(1, commaList(TlsUnitIds.obelisk))
     ..setIconNormal("ReplaceableTextures\\CommandButtons\\BTNPowerGenerator.blp")
+    ..setButtonPositionNormalX(0)
+    ..setButtonPositionNormalY(2)
+    ..setTooltipNormal(1, "Build Magical Obelisk")
+    ..setTooltipNormalExtended(1, g_obeliskDefinition.getTooltipExtended())
 
   new AbilityDefinitionFarseerChainLightning(TlsAbilityIds.obeliskLightning)
     ..presetManaCost(lvl -> 100)
@@ -197,3 +228,4 @@ init
   onUnitIndex(function onUnitIndexedDeindexed)
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_TRAIN_FINISH, function onUnitTrained)
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_CONSTRUCT_CANCEL, function onConstructCanceled)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_SPELL_CAST, function onSpellCast)
