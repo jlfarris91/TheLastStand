@@ -1,0 +1,94 @@
+package HeroAbility_RocketBarrage
+import ChannelAbilityPreset
+import Math
+import Icons
+import HeroAbilities
+import TlsAbilityIds
+
+// ============================================================================
+class RocketBarrage
+  static constant int ABILITY_ID = TlsAbilityIds.Hero.rocketBarrage
+  static constant int ABILITY_LEARN_ID = TlsAbilityIds.Hero.rocketBarrage_learn
+
+  // --------------------------------------------------------------------------
+  static function getTooltipNormal(int effectiveAbilityLevel, int learnedAbilityLevel) returns string
+    return "Rocket Barrage - [{0}]".format("Level {0}".format(
+      effectiveAbilityLevel.toString()).colorizeTooltipForHeroAbility(effectiveAbilityLevel, learnedAbilityLevel))
+
+  // --------------------------------------------------------------------------
+  static function getDamageAmount(int effectiveAbilityLevel) returns real
+    return lerp(80, 250, parameterize(1, 3, effectiveAbilityLevel))
+
+  // --------------------------------------------------------------------------
+  static function getMaxDamage(int effectiveAbilityLevel) returns real
+    return lerp(500, 1500, parameterize(1, 3, effectiveAbilityLevel))
+
+  // --------------------------------------------------------------------------
+  static function getTooltipNormalExtended(int effectiveAbilityLevel, int learnedAbilityLevel) returns string
+    return "Bombards an area with rockets, dealing up to {0} damage to nearby enemy land units and stunning them for 3 seconds.".format(
+      getDamageAmount(effectiveAbilityLevel).floor().toString().colorizeTooltipForHeroAbility(effectiveAbilityLevel, learnedAbilityLevel))
+
+// ============================================================================
+public class RocketBarrageComponent extends HeroAbilityComponent
+
+  // --------------------------------------------------------------------------
+  construct (IUnitMetadata owner)
+    super(owner, RocketBarrage.ABILITY_ID, RocketBarrage.ABILITY_LEARN_ID)
+
+  // --------------------------------------------------------------------------
+  protected override function getTooltipNormal(int effectiveAbilityLevel, int learnedAbilityLevel) returns string
+    return RocketBarrage.getTooltipNormal(effectiveAbilityLevel, learnedAbilityLevel)
+    
+  // --------------------------------------------------------------------------
+  protected override function getTooltipNormalExtended(int effectiveAbilityLevel, int learnedAbilityLevel) returns string
+    return RocketBarrage.getTooltipNormalExtended(effectiveAbilityLevel, learnedAbilityLevel)
+
+// ============================================================================
+public function IUnitMetadata.getRocketBarrageComponent() returns RocketBarrageComponent
+  return this.getComponent(RocketBarrageComponent.typeId) castTo RocketBarrageComponent
+
+// ============================================================================
+public function IUnitMetadata.getOrAddRocketBarrageComponent() returns RocketBarrageComponent
+  var component = this.getRocketBarrageComponent()
+  if (component == null)
+    component = this.addComponent(new RocketBarrageComponent(this)) castTo RocketBarrageComponent
+  return component
+
+// ============================================================================
+public function unit.getRocketBarrageComponent() returns RocketBarrageComponent
+  let metadata = this.getMetadata()
+  return metadata != null ? metadata.getRocketBarrageComponent() : null
+
+// ============================================================================
+public function unit.getOrAddRocketBarrageComponent() returns RocketBarrageComponent
+  let metadata = this.getMetadata()
+  return metadata != null ? metadata.getOrAddRocketBarrageComponent() : null
+
+// ============================================================================
+@compiletime function createObjects()
+
+  new AbilityDefinitionTinkererClusterRocketsLevel0(RocketBarrage.ABILITY_ID)
+    ..setLevels(10)
+    ..setupHeroAbilityGroup(HeroAbilityGroup.R)
+    ..setName("Rocket Barrage")
+    ..presetTooltipNormal(lvl -> RocketBarrage.getTooltipNormal(lvl, lvl))
+    ..presetTooltipNormalExtended(lvl -> RocketBarrage.getTooltipNormalExtended(lvl, lvl))
+    ..presetDamageAmount(lvl -> RocketBarrage.getDamageAmount(lvl))
+    ..presetMaxDamage(lvl -> RocketBarrage.getMaxDamage(lvl))
+    ..presetDurationHero(lvl -> 3.0)
+    ..presetDurationNormal(lvl -> 3.0)
+    ..setIconNormal(Icons.bTNClusterRockets)
+
+  new HeroLearnAbilityDefinition(RocketBarrage.ABILITY_LEARN_ID, 3)
+    ..setupHeroAbilityGroup(HeroAbilityGroup.R, 1)
+    ..setName("Rocket Barrage")
+    ..setTooltipLearn("Learn Rocket Barrage - [|cFFFFCC00 Level %d|r]")
+    ..setTooltipLearnExtended("Bombards an area with rockets, stunning enemy land units for 3 seconds and damaging nearby enemy units.|n|n|cFFFFCC00Level 1|r - {0} damage.|n|cFFFFCC00Level 2|r - {1} damage.|n|cFFFFCC00Level 3|r - {2} damage.".format(
+      RocketBarrage.getDamageAmount(1).toString(),
+      RocketBarrage.getDamageAmount(2).toString(),
+      RocketBarrage.getDamageAmount(3).toString()))
+    ..setIconResearch(Icons.bTNClusterRockets)
+
+// ============================================================================
+init
+  registerHeroAbilityComponent(RocketBarrageComponent.typeId)

@@ -1,0 +1,136 @@
+package HeroAbility_OperatorBoost
+import ChannelAbilityPreset
+import Math
+import Icons
+import HeroAbilities
+import TlsAbilityIds
+import RealExtensions
+import WorkstationComponent
+import DisplayTextToPlayer
+import FX
+import UnitPropertiesComponent
+import ClosureTimers
+
+constant int OPERATOR_LEVEL_PROP_AFFECTOR_ID = 'OPLA'
+
+// ============================================================================
+class OperatorBoost
+  static constant int ABILITY_ID = TlsAbilityIds.Hero.operatorBoost
+  static constant int ABILITY_LEARN_ID = TlsAbilityIds.Hero.operatorBoost_learn
+
+  // --------------------------------------------------------------------------
+  static function getTooltipNormal(int effectiveAbilityLevel, int learnedAbilityLevel) returns string
+    return "Operator Boost - [{0}]".format("Level {0}".format(
+      effectiveAbilityLevel.toString()).colorizeTooltipForHeroAbility(effectiveAbilityLevel, learnedAbilityLevel))
+
+  // --------------------------------------------------------------------------
+  static function getHitPointsRestored(int effectiveAbilityLevel) returns real
+    return lerp(400.0, 1200.0, parameterize(1, 3, effectiveAbilityLevel))
+
+  // --------------------------------------------------------------------------
+  static function getManaCost(int _effectiveAbilityLevel) returns int
+    return 60
+
+  // --------------------------------------------------------------------------
+  static function getTooltipNormalExtended(int effectiveAbilityLevel, int learnedAbilityLevel) returns string
+    return "A Operator Boost that can heal a friendly living unit for {0} or deal half damage to an enemy Undead unit.".format(
+      getHitPointsRestored(effectiveAbilityLevel).toPercentageString01().colorizeTooltipForHeroAbility(effectiveAbilityLevel, learnedAbilityLevel))
+
+// ============================================================================
+public class OperatorBoostComponent extends HeroAbilityComponent
+
+  // --------------------------------------------------------------------------
+  construct (IUnitMetadata owner)
+    super(owner, OperatorBoost.ABILITY_ID, OperatorBoost.ABILITY_LEARN_ID)
+
+  // --------------------------------------------------------------------------
+  protected override function getTooltipNormal(int effectiveAbilityLevel, int learnedAbilityLevel) returns string
+    return OperatorBoost.getTooltipNormal(effectiveAbilityLevel, learnedAbilityLevel)
+    
+  // --------------------------------------------------------------------------
+  protected override function getTooltipNormalExtended(int effectiveAbilityLevel, int learnedAbilityLevel) returns string
+    return OperatorBoost.getTooltipNormalExtended(effectiveAbilityLevel, learnedAbilityLevel)
+
+  // --------------------------------------------------------------------------
+  protected override function onCastTarget(int abilityId, unit target)
+
+    let ownerUnit = getOwnerUnit()
+    let ownerPlayer = ownerUnit.getOwner()
+
+    let targetMetadata = target.getMetadata()
+    let workstation = targetMetadata.getWorkstationComponent()
+    if (workstation == null)
+      displayMessageToPlayer(ownerPlayer, "Target is not a Workstation")
+      refund(abilityId)
+      return
+
+    let targetProps = target.getOrAddUnitPropertiesComponent()
+    let operatorLevelProp = targetProps.getProperty(UnitProperty.OPERATOR_LEVEL)
+
+    for affector in operatorLevelProp.getAffectors()
+      if (affector.getUserData() == OPERATOR_LEVEL_PROP_AFFECTOR_ID)
+        displayMessageToPlayer(ownerPlayer, "Target Workstation is already boosted")
+        refund(abilityId)
+        return
+
+    operatorLevelProp.affectAdd(30, OPERATOR_LEVEL_PROP_AFFECTOR_ID)
+
+    let fx = AddSpecialEffectTarget("Abilities\\Spells\\Human\\InnerFire\\InnerFireTarget.mdl", target, "overhead")
+    doAfter(30.0, () -> fx.destr())
+
+  // --------------------------------------------------------------------------
+  private function refund(int abilityId)
+    let ownerUnit = getOwnerUnit()
+    ownerUnit.endAbilityCooldown(abilityId)
+    let abil = ownerUnit.getAbility(abilityId)
+    let lvl = ownerUnit.getAbilityLevel(abilityId)
+    let mana = abil.getField(ABILITY_ILF_MANA_COST, lvl)
+    ownerUnit.addMana(mana.toReal())
+    FX.createGainedManaTag(ownerUnit.getPos(), mana, ownerUnit.getOwner())
+
+// ============================================================================
+public function IUnitMetadata.getOperatorBoostComponent() returns OperatorBoostComponent
+  return this.getComponent(OperatorBoostComponent.typeId) castTo OperatorBoostComponent
+
+// ============================================================================
+public function IUnitMetadata.getOrAddOperatorBoostComponent() returns OperatorBoostComponent
+  var component = this.getOperatorBoostComponent()
+  if (component == null)
+    component = this.addComponent(new OperatorBoostComponent(this)) castTo OperatorBoostComponent
+  return component
+
+// ============================================================================
+public function unit.getOperatorBoostComponent() returns OperatorBoostComponent
+  let metadata = this.getMetadata()
+  return metadata != null ? metadata.getOperatorBoostComponent() : null
+
+// ============================================================================
+public function unit.getOrAddOperatorBoostComponent() returns OperatorBoostComponent
+  let metadata = this.getMetadata()
+  return metadata != null ? metadata.getOrAddOperatorBoostComponent() : null
+
+// ============================================================================
+@compiletime function createObjects()
+
+  new ChannelAbilityPreset(OperatorBoost.ABILITY_ID, 10, true)
+    ..setLevels(10)
+    ..setupHeroAbilityGroup(HeroAbilityGroup.E)
+    ..setName("Operator Boost")
+    ..presetTooltipNormal(lvl -> OperatorBoost.getTooltipNormal(lvl, lvl))
+    ..presetTooltipNormalExtended(lvl -> OperatorBoost.getTooltipNormalExtended(lvl, lvl))
+    ..presetManaCost(lvl -> OperatorBoost.getManaCost(lvl))
+    ..setIconNormal(Icons.bTNHolyBolt)
+
+  new HeroLearnAbilityDefinition(OperatorBoost.ABILITY_LEARN_ID, 3)
+    ..setupHeroAbilityGroup(HeroAbilityGroup.E, 0)
+    ..setName("Operator Boost")
+    ..setTooltipLearn("Learn Operator Boost - [|cFFFFCC00 Level %d|r]")
+    ..setTooltipLearnExtended("Boosts the operator level of a target Workstation for 30 seconds.|n|n|cFFFFCC00Level 1|r - Increases operator level by {0}.|n|cFFFFCC00Level 2|r - Increases operator level by {1}.|n|cFFFFCC00Level 3|r - Increases operator level by {2}.".format(
+      OperatorBoost.getHitPointsRestored(1).toString(),
+      OperatorBoost.getHitPointsRestored(2).toString(),
+      OperatorBoost.getHitPointsRestored(3).toString()))
+    ..setIconResearch(Icons.bTNHolyBolt)
+
+// ============================================================================
+init
+  registerHeroAbilityComponent(OperatorBoostComponent.typeId)
