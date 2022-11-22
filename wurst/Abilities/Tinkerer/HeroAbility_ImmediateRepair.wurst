@@ -1,0 +1,122 @@
+package HeroAbility_ImmediateRepair
+import ChannelAbilityPreset
+import Math
+import Icons
+import HeroAbilities
+import TlsAbilityIds
+import DisplayTextToPlayer
+import FX
+import Abilities
+
+// ============================================================================
+class InstantRepair
+  static constant int ABILITY_ID = TlsAbilityIds.Hero.instantRepair
+  static constant int ABILITY_LEARN_ID = TlsAbilityIds.Hero.instantRepair_learn
+
+  // --------------------------------------------------------------------------
+  static function getTooltipNormal(int effectiveAbilityLevel, int learnedAbilityLevel) returns string
+    return "Instant Repair - [{0}]".format("Level {0}".format(
+      effectiveAbilityLevel.toString()).colorizeTooltipForHeroAbility(effectiveAbilityLevel, learnedAbilityLevel))
+
+  // --------------------------------------------------------------------------
+  static function getManaCost(int effectiveAbilityLevel) returns int
+    return 125 + effectiveAbilityLevel * 25
+    //return lerpInt(150, 250, parameterize(1, 3, effectiveAbilityLevel))
+
+  // --------------------------------------------------------------------------
+  static function getCooldown(int effectiveAbilityLevel) returns real
+    return lerp(90.0, 30.0, parameterize(1, 3, effectiveAbilityLevel))
+
+  // --------------------------------------------------------------------------
+  static function getTooltipNormalExtended(int _effectiveAbilityLevel, int _learnedAbilityLevel) returns string
+    return "Immediately repair a structure to full health or finish a construction in progress."
+
+// ============================================================================
+public class InstantRepairComponent extends HeroAbilityComponent
+
+  // --------------------------------------------------------------------------
+  construct (IUnitMetadata owner)
+    super(owner, InstantRepair.ABILITY_ID, InstantRepair.ABILITY_LEARN_ID)
+
+  // --------------------------------------------------------------------------
+  protected override function getTooltipNormal(int effectiveAbilityLevel, int learnedAbilityLevel) returns string
+    return InstantRepair.getTooltipNormal(effectiveAbilityLevel, learnedAbilityLevel)
+    
+  // --------------------------------------------------------------------------
+  protected override function getTooltipNormalExtended(int effectiveAbilityLevel, int learnedAbilityLevel) returns string
+    return InstantRepair.getTooltipNormalExtended(effectiveAbilityLevel, learnedAbilityLevel)
+
+  // --------------------------------------------------------------------------
+  override protected function onCastTarget(int abilityId, unit target)
+
+    let ownerUnit = getOwnerUnit()
+    let ownerPlayer = ownerUnit.getOwner()
+
+    if (target.getHP() == target.getMaxHP())
+      displayMessageToPlayer(ownerPlayer, "Target is already at full health")
+      ownerUnit.endAbilityCooldown(abilityId)
+      let abil = ownerUnit.getAbility(abilityId)
+      let lvl = ownerUnit.getAbilityLevel(abilityId)
+      let mana = abil.getField(ABILITY_ILF_MANA_COST, lvl)
+      ownerUnit.addMana(mana.toReal())
+      FX.createGainedManaTag(ownerUnit.getPos(), mana, ownerPlayer)
+      return
+  
+    target.setHP(target.getMaxHP())
+    UnitSetConstructionProgress(target, 99)
+
+// ============================================================================
+public function IUnitMetadata.getInstantRepairComponent() returns InstantRepairComponent
+  return this.getComponent(InstantRepairComponent.typeId) castTo InstantRepairComponent
+
+// ============================================================================
+public function IUnitMetadata.getOrAddInstantRepairComponent() returns InstantRepairComponent
+  var component = this.getInstantRepairComponent()
+  if (component == null)
+    component = this.addComponent(new InstantRepairComponent(this)) castTo InstantRepairComponent
+  return component
+
+// ============================================================================
+public function unit.getInstantRepairComponent() returns InstantRepairComponent
+  let metadata = this.getMetadata()
+  return metadata != null ? metadata.getInstantRepairComponent() : null
+
+// ============================================================================
+public function unit.getOrAddInstantRepairComponent() returns InstantRepairComponent
+  let metadata = this.getMetadata()
+  return metadata != null ? metadata.getOrAddInstantRepairComponent() : null
+
+// ============================================================================
+@compiletime function createObjects()
+
+  new ChannelAbilityPreset(InstantRepair.ABILITY_ID, 10, true)
+    ..setupHeroAbilityGroup(HeroAbilityGroup.R)
+    ..presetTargetTypes(Targettype.UNIT)
+    ..presetOption(Option.VISIBLE, true)
+    ..presetOption(Option.PHYSICALSPELL, true)
+    ..setName("Instant Repair")
+    ..presetTooltipNormal(lvl -> InstantRepair.getTooltipNormal(lvl, lvl))
+    ..presetTooltipNormalExtended(lvl -> InstantRepair.getTooltipNormalExtended(lvl, lvl))
+    ..presetCastRange(lvl -> 600)
+    ..presetTargetsAllowed(lvl -> "mechanical,friend,nonancient,ground,air,structure,bridge,alive,dead,invu,vuln")
+    ..setAnimationNames("spell,attack,throw")
+    ..setIconNormal(Icons.bTNHumanMissileUpTwo)
+    ..presetCooldown(lvl -> InstantRepair.getCooldown(lvl))
+    ..presetManaCost(lvl -> InstantRepair.getManaCost(lvl))
+    ..setArtTarget(Abilities.healTarget)
+
+  new HeroLearnAbilityDefinition(InstantRepair.ABILITY_LEARN_ID, 3)
+    ..setupHeroAbilityGroup(HeroAbilityGroup.R)
+    ..setName("Instant Repair")
+    ..setTooltipLearn("Learn Instant Repair - [|cFFFFCC00 Level %d|r]")
+    ..setTooltipLearnExtended("Immediately repair a structure to full health or finish a construction in progress.|n|n|cFFFFCC00Level 1|r - Cooldown {0}s|n|cFFFFCC00Level 2|r - Cooldown {1}s|n|cFFFFCC00Level 3|r - Cooldown {2}s".format(
+      InstantRepair.getCooldown(1).toString(),
+      InstantRepair.getCooldown(2).toString(),
+      InstantRepair.getCooldown(3).toString()))
+    ..setIconResearch(Icons.bTNThunderClap)
+    ..presetCooldown(lvl -> InstantRepair.getCooldown(lvl))
+    ..presetManaCost(lvl -> InstantRepair.getManaCost(lvl))
+
+// ============================================================================
+init
+  registerHeroAbilityComponent(InstantRepairComponent.typeId)

@@ -1,0 +1,89 @@
+package HeroAbility_Cleave
+import ChannelAbilityPreset
+import Math
+import Icons
+import HeroAbilities
+import TlsAbilityIds
+import RealExtensions
+
+// ============================================================================
+class Cleave
+  static constant int ABILITY_ID = TlsAbilityIds.Hero.cleave
+  static constant int ABILITY_LEARN_ID = TlsAbilityIds.Hero.cleave_learn
+
+  // --------------------------------------------------------------------------
+  static function getTooltipNormal(int effectiveAbilityLevel, int learnedAbilityLevel) returns string
+    return "Cleaving Attack - [{0}]".format("Level {0}".format(
+      effectiveAbilityLevel.toString()).colorizeTooltipForHeroAbility(effectiveAbilityLevel, learnedAbilityLevel))
+
+  // --------------------------------------------------------------------------
+  static function getDamageSplashPercent01(int effectiveAbilityLevel) returns real
+    return lerp(0.3, 0.8, parameterize(1, 3, effectiveAbilityLevel))
+
+  // --------------------------------------------------------------------------
+  static function getTooltipNormalExtended(int effectiveAbilityLevel, int learnedAbilityLevel) returns string
+    return "The Swordsman strikes with such force that {0} of his damage strikes through to enemies near the primary attacked unit.".format(
+      getDamageSplashPercent01(effectiveAbilityLevel).toPercentageString01().colorizeTooltipForHeroAbility(effectiveAbilityLevel, learnedAbilityLevel))
+
+// ============================================================================
+public class CleavingAttackComponent extends HeroAbilityComponent
+
+  // --------------------------------------------------------------------------
+  construct (IUnitMetadata owner)
+    super(owner, Cleave.ABILITY_ID, Cleave.ABILITY_LEARN_ID)
+
+  // --------------------------------------------------------------------------
+  protected override function getTooltipNormal(int effectiveAbilityLevel, int learnedAbilityLevel) returns string
+    return Cleave.getTooltipNormal(effectiveAbilityLevel, learnedAbilityLevel)
+    
+  // --------------------------------------------------------------------------
+  protected override function getTooltipNormalExtended(int effectiveAbilityLevel, int learnedAbilityLevel) returns string
+    return Cleave.getTooltipNormalExtended(effectiveAbilityLevel, learnedAbilityLevel)
+
+// ============================================================================
+public function IUnitMetadata.getCleaveComponent() returns CleavingAttackComponent
+  return this.getComponent(CleavingAttackComponent.typeId) castTo CleavingAttackComponent
+
+// ============================================================================
+public function IUnitMetadata.getOrAddCleaveComponent() returns CleavingAttackComponent
+  var component = this.getCleaveComponent()
+  if (component == null)
+    component = this.addComponent(new CleavingAttackComponent(this)) castTo CleavingAttackComponent
+  return component
+
+// ============================================================================
+public function unit.getCleaveComponent() returns CleavingAttackComponent
+  let metadata = this.getMetadata()
+  return metadata != null ? metadata.getCleaveComponent() : null
+
+// ============================================================================
+public function unit.getOrAddCleaveComponent() returns CleavingAttackComponent
+  let metadata = this.getMetadata()
+  return metadata != null ? metadata.getOrAddCleaveComponent() : null
+
+// ============================================================================
+@compiletime function createObjects()
+
+  new AbilityDefinitionPitLordCleavingAttack(Cleave.ABILITY_ID)
+    ..setLevels(10)
+    ..setupHeroAbilityGroup(HeroAbilityGroup.Q)
+    ..setName("Cleaving Attack")
+    ..presetTooltipNormal(lvl -> Cleave.getTooltipNormal(lvl, lvl))
+    ..presetTooltipNormalExtended(lvl -> Cleave.getTooltipNormalExtended(lvl, lvl))
+    ..presetTargetsAllowed(lvl -> "ground,enemy,neutral")
+    ..presetAreaofEffect(lvl -> 200.0)
+    ..setIconNormal(Icons.bTNCleavingAttack)
+
+  new HeroLearnAbilityDefinition(Cleave.ABILITY_LEARN_ID, 3)
+    ..setupHeroAbilityGroup(HeroAbilityGroup.Q)
+    ..setName("Cleaving Attack")
+    ..setTooltipLearn("Learn Cleaving Attack - [|cFFFFCC00 Level %d|r]")
+    ..setTooltipLearnExtended("The Swordsman attacks with such force that he damages multiple enemies with his attack.|n|n|cFFFFCC00Level 1|r - {0} damage is splash.|n|cFFFFCC00Level 2|r - {1} damage is splash.|n|cFFFFCC00Level 3|r - {2} damage is splash.".format(
+      Cleave.getDamageSplashPercent01(1).toPercentageString01(),
+      Cleave.getDamageSplashPercent01(2).toPercentageString01(),
+      Cleave.getDamageSplashPercent01(3).toPercentageString01()))
+    ..setIconResearch(Icons.bTNCleavingAttack)
+
+// ============================================================================
+init
+  registerHeroAbilityComponent(CleavingAttackComponent.typeId)

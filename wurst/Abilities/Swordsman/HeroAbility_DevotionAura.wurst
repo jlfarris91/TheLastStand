@@ -1,0 +1,88 @@
+package HeroAbility_DevotionAura
+import ChannelAbilityPreset
+import Math
+import Icons
+import HeroAbilities
+import TlsAbilityIds
+import RealExtensions
+
+// ============================================================================
+class DevotionAura
+  static constant int ABILITY_ID = TlsAbilityIds.Hero.devotionAura
+  static constant int ABILITY_LEARN_ID = TlsAbilityIds.Hero.devotionAura_learn
+
+  // --------------------------------------------------------------------------
+  static function getTooltipNormal(int effectiveAbilityLevel, int learnedAbilityLevel) returns string
+    return "Devotion Aura - [{0}]".format("Level {0}".format(
+      effectiveAbilityLevel.toString()).colorizeTooltipForHeroAbility(effectiveAbilityLevel, learnedAbilityLevel))
+
+  // --------------------------------------------------------------------------
+  static function getArmorBonus(int effectiveAbilityLevel) returns real
+    return lerp(10.0, 30.0, parameterize(1, 3, effectiveAbilityLevel))
+
+  // --------------------------------------------------------------------------
+  static function getTooltipNormalExtended(int effectiveAbilityLevel, int learnedAbilityLevel) returns string
+    return "Gives {0} additional armor to nearby friendly units.".format(
+      getArmorBonus(effectiveAbilityLevel).toPercentageString01().colorizeTooltipForHeroAbility(effectiveAbilityLevel, learnedAbilityLevel))
+
+// ============================================================================
+public class DevotionAuraComponent extends HeroAbilityComponent
+
+  // --------------------------------------------------------------------------
+  construct (IUnitMetadata owner)
+    super(owner, DevotionAura.ABILITY_ID, DevotionAura.ABILITY_LEARN_ID)
+
+  // --------------------------------------------------------------------------
+  protected override function getTooltipNormal(int effectiveAbilityLevel, int learnedAbilityLevel) returns string
+    return DevotionAura.getTooltipNormal(effectiveAbilityLevel, learnedAbilityLevel)
+    
+  // --------------------------------------------------------------------------
+  protected override function getTooltipNormalExtended(int effectiveAbilityLevel, int learnedAbilityLevel) returns string
+    return DevotionAura.getTooltipNormalExtended(effectiveAbilityLevel, learnedAbilityLevel)
+
+// ============================================================================
+public function IUnitMetadata.getDevotionAuraComponent() returns DevotionAuraComponent
+  return this.getComponent(DevotionAuraComponent.typeId) castTo DevotionAuraComponent
+
+// ============================================================================
+public function IUnitMetadata.getOrAddDevotionAuraComponent() returns DevotionAuraComponent
+  var component = this.getDevotionAuraComponent()
+  if (component == null)
+    component = this.addComponent(new DevotionAuraComponent(this)) castTo DevotionAuraComponent
+  return component
+
+// ============================================================================
+public function unit.getDevotionAuraComponent() returns DevotionAuraComponent
+  let metadata = this.getMetadata()
+  return metadata != null ? metadata.getDevotionAuraComponent() : null
+
+// ============================================================================
+public function unit.getOrAddDevotionAuraComponent() returns DevotionAuraComponent
+  let metadata = this.getMetadata()
+  return metadata != null ? metadata.getOrAddDevotionAuraComponent() : null
+
+// ============================================================================
+@compiletime function createObjects()
+
+  new AbilityDefinitionPaladinDevotionAura(DevotionAura.ABILITY_ID)
+    ..setLevels(10)
+    ..setupHeroAbilityGroup(HeroAbilityGroup.E)
+    ..setName("Devotion Aura")
+    ..presetTooltipNormal(lvl -> DevotionAura.getTooltipNormal(lvl, lvl))
+    ..presetTooltipNormalExtended(lvl -> DevotionAura.getTooltipNormalExtended(lvl, lvl))
+    ..presetArmorBonus(lvl -> DevotionAura.getArmorBonus(lvl))
+    ..setIconNormal(Icons.bTNDevotion)
+
+  new HeroLearnAbilityDefinition(DevotionAura.ABILITY_LEARN_ID, 3)
+    ..setupHeroAbilityGroup(HeroAbilityGroup.E)
+    ..setName("Devotion Aura")
+    ..setTooltipLearn("Learn Devotion Aura - [|cFFFFCC00 Level %d|r]")
+    ..setTooltipLearnExtended("Gives additional armor to nearby friendly units.|n|n|cFFFFCC00Level 1|r - Increases base armor by {0}.|n|cFFFFCC00Level 2|r - Increases base armor by {1}.|n|cFFFFCC00Level 3|r - Increases base armor by {2}.".format(
+      DevotionAura.getArmorBonus(1).toString(),
+      DevotionAura.getArmorBonus(2).toString(),
+      DevotionAura.getArmorBonus(3).toString()))
+    ..setIconResearch(Icons.bTNDevotion)
+
+// ============================================================================
+init
+  registerHeroAbilityComponent(DevotionAuraComponent.typeId)
