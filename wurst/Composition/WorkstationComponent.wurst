@@ -33,6 +33,7 @@ public class WorkstationComponent extends UnitComponent
   private Event m_workerExited = null
   private Event m_workerLeveled = null
   private HashMap<unit, _handle> m_unitPropertyEventHandles = new HashMap<unit, _handle>()
+  private _handle m_onOwnerOpLevelChanged
 
   // --------------------------------------------------------------------------
   construct (IUnitMetadata owner)
@@ -66,6 +67,36 @@ public class WorkstationComponent extends UnitComponent
 
     destroy m_unitPropertyEventHandles
     m_unitPropertyEventHandles = null
+
+  // --------------------------------------------------------------------------
+  override protected function onEnabled()
+    super.onEnabled()
+
+    let ownerUnit = getOwnerUnit()
+
+    let unitPropsComp = ownerUnit.getOrAddUnitPropertiesComponent()
+    if (m_onOwnerOpLevelChanged == INVALID_HANDLE)
+      m_onOwnerOpLevelChanged = unitPropsComp
+        .getProperty(UnitProperty.OPERATOR_LEVEL)
+        .onValueChanged()
+        .registerDispatched(this, () -> onWorkerLeveled(ownerUnit))
+
+  // --------------------------------------------------------------------------
+  override protected function onDisabled()
+    super.onDisabled()
+
+    let ownerUnit = getOwnerUnit()
+
+    if (m_onOwnerOpLevelChanged != INVALID_HANDLE)
+      let unitPropsComp = ownerUnit.getUnitPropertiesComponent()
+      if (unitPropsComp != null)
+        unitPropsComp
+          .getProperty(UnitProperty.OPERATOR_LEVEL)
+          .onValueChanged()
+          .unregister(m_onOwnerOpLevelChanged)
+      m_onOwnerOpLevelChanged = INVALID_HANDLE
+
+    unloadAllUnits()
 
   // --------------------------------------------------------------------------
   function onWorkedEntered() returns IEvent
@@ -120,7 +151,7 @@ public class WorkstationComponent extends UnitComponent
 
     for _unit in m_loadedUnits
     //{
-      var unitOperatorLevel = _unit.getLevel()
+      var unitOperatorLevel = 1
 
       let unitProps = _unit.getUnitPropertiesComponent()
       if (unitProps != null)
@@ -167,11 +198,6 @@ public class WorkstationComponent extends UnitComponent
     if (m_loadedUnits != null)
       while (m_loadedUnits.isEmpty() == false)
         unloadUnit(m_loadedUnits.getUnitAt(0))
-
-  // --------------------------------------------------------------------------
-  override protected function onDisabled()
-    super.onDisabled()
-    unloadAllUnits()
 
   // --------------------------------------------------------------------------
   protected function onWorkerLeveled(unit worker)

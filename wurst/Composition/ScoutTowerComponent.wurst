@@ -104,7 +104,6 @@ function isFilterUnitValidTargetForMarking() returns bool
 
 // ============================================================================
 public class ScoutTowerComponent extends WorkstationAbilityComponent
-  private bool m_activated = false
   private LinkedList<unit> m_markedTargets = new LinkedList<unit>()
   private SmartValue m_maxTargets
 
@@ -183,7 +182,7 @@ public class ScoutTowerComponent extends WorkstationAbilityComponent
     if (m_markedTargets.isEmpty())
       this.unregisterForRealtimeUpdate()
 
-    if (m_activated and tryFindNextTarget)
+    if (isWorkstationActive() and tryFindNextTarget)
       tryFindNextTargetLater()
 
   // --------------------------------------------------------------------------
@@ -195,7 +194,7 @@ public class ScoutTowerComponent extends WorkstationAbilityComponent
   // --------------------------------------------------------------------------
   private function tryFindNextTarget()
 
-    if (not m_activated or m_markedTargets.size() == getMaxTargets())
+    if (not isWorkstationActive() or m_markedTargets.size() == getMaxTargets())
       return
 
     let ownerUnit = getOwnerUnit()
@@ -275,16 +274,17 @@ public class ScoutTowerComponent extends WorkstationAbilityComponent
     super.updateState()
 
     let ownerUnit = getOwnerUnit()
+    let activated = isWorkstationActive()
 
     let operatorLevel = getOperatorLevel()
 
     for i = 1 to 10
-      if (m_activated and operatorLevel == i)
+      if (activated and operatorLevel == i)
         ownerUnit.addAbility(SCOUT_TOWER_ACTIVE_SIGHT_ABILITY_ID[i-1])
       else
         ownerUnit.removeAbility(SCOUT_TOWER_ACTIVE_SIGHT_ABILITY_ID[i-1])
 
-    if (m_activated)
+    if (activated)
       ownerUnit.removeAbility(SCOUT_TOWER_INACTIVE_ICON_ABILITY_ID)
       ownerUnit.addAbility(SCOUT_TOWER_ACTIVE_ICON_ABILITY_ID)
       ownerUnit.setAbilityLevel(SCOUT_TOWER_ACTIVE_ICON_ABILITY_ID, operatorLevel)
@@ -294,14 +294,14 @@ public class ScoutTowerComponent extends WorkstationAbilityComponent
       ownerUnit.removeAbility(SCOUT_TOWER_ACTIVE_ICON_ABILITY_ID)
       ownerUnit.addAbility(SCOUT_TOWER_INACTIVE_ICON_ABILITY_ID)
 
-    if (m_activated)
+    if (activated)
       tryFindNextTarget()
     else
       clearMarkedTargets()
 
     // Listen for trader reveal events
     let listenerName = getOwner().getWorkstationComponent().getLoadedUnitAt(0).getProperName()
-    setTraderHintListener(getOwnerPlayer(), m_activated, listenerName)
+    setTraderHintListener(getOwnerPlayer(), activated, listenerName)
 
 // ============================================================================
 public function IUnitMetadata.getScoutTowerComponent() returns ScoutTowerComponent
@@ -376,8 +376,15 @@ function canUnitDealExtraDamageToMarkedTargets(unit source) returns bool
   return not source.isBuildingUndeadTarget() and not source.isSpikes()
 
 // ============================================================================
+function onUpgradeFinished()
+  let upgradingUnit = GetTriggerUnit()
+  if (upgradingUnit.isScoutTower())
+    upgradingUnit.getMetadata().getOrAddScoutTowerComponent()
+
+// ============================================================================
 init
   EventListener.onTargetCast(TlsAbilityIds.scoutTowerMarkTargets, (unit caster, unit target) -> onMarkTargetAbilCast(caster, target))
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_DEATH, function onUnitKilled)
   DamageEvent.addListener(DAMAGE_EVENT_PRIO_RELATIVE, () -> onDamageEventRelative())
   DamageEvent.addListener(DAMAGE_EVENT_PRIO_FINAL, () -> onDamageEventFinal())
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_UPGRADE_FINISH, function onUpgradeFinished)
