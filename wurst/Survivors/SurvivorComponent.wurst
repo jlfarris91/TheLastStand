@@ -16,6 +16,7 @@ import Handle
 import ItemType
 import ColorUtility
 import PlayerExtensions
+import ClosureTimers
 
 group g_temp = CreateGroup()
 trigger g_onSurvivorJobPreChange = CreateTrigger()
@@ -149,12 +150,9 @@ public class SurvivorComponent extends UnitComponent
 
     owner.getOrAddPersistActiveAbilityComponent()
     owner.getOrAddRangedTargetXpRecieverComponent()
-
-    // Survivors will always be able to become jobless
-    activateJobDirectly(SurvivorJobType.None)
     
     let ownerUnit = getOwnerUnit()
-    if (ownerUnit != null)
+    if (ownerUnit != null and not m_changingJobs)
     //{
       let owningPlayer = ownerUnit.getOwner()
       
@@ -163,6 +161,7 @@ public class SurvivorComponent extends UnitComponent
 
       let job = SurvivorJobs.getJobTypeForUnitType(ownerUnit.getTypeId())
 
+      assignJobDirectly(job, ownerUnit.getTypeId())
       activateJobDirectly(job)
       
       // Pick a random survivor name
@@ -206,22 +205,13 @@ public class SurvivorComponent extends UnitComponent
 
     // Drop the job item for the currently assigned job
     if (m_assignedJob != SurvivorJobType.None)
-      let activeJobDefinition = SurvivorJobs.getJobDefinition(m_assignedJob)
-      ItemType.createItemForUnit(activeJobDefinition.getItemType(ownerUnit.getTypeId()), ownerUnit)
+      let assignedJobDef = m_assignedJobComponent.getJobDefinition()
+      let jobItemTypeId = assignedJobDef.getItemType(m_assignedJobComponent.getUnitTypeId())
+      if (jobItemTypeId == 0)
+        Log.error("Could not find job item type id for job " + assignedJobDef.getTitle(ownerUnit.getTypeId()) + " with unit type " + ownerUnit.getTypeId().toRawCode())
+      ItemType.createItemForUnit(jobItemTypeId, ownerUnit)
 
-    if (m_assignedJobComponent != null)
-      m_assignedJobComponent.setIsAssigned(false)
-      m_assignedJobComponent.setEnabled(false)
-
-    m_assignedJob = job
-    m_assignedJobComponent = getOwner().getOrAddSurvivorJobComponent(job)..setUnitTypeId(unitTypeId)
-    m_assignedAnyJob = m_assignedAnyJob or job != SurvivorJobType.None
-
-    // The player has learned about this job now that they have assigned the job
-    jobDefinition.setIsJobKnownToPlayer(ownerUnit.getOwner(), true)
-
-    if (job != SurvivorJobType.None)
-      m_assignedJobComponent.setIsAssigned(true)
+    assignJobDirectly(job, unitTypeId)
 
     return true
 
@@ -233,6 +223,8 @@ public class SurvivorComponent extends UnitComponent
 
   // --------------------------------------------------------------------------
   private function activateJob(SurvivorJobDefinition jobDefinition, int unitTypeId) returns bool
+
+    // Log.info("[activateJob] " + jobDefinition.getTitle(unitTypeId))
 
     let ownerUnit = getOwnerUnit()
     let job = jobDefinition.getType()
@@ -250,11 +242,39 @@ public class SurvivorComponent extends UnitComponent
 
   // --------------------------------------------------------------------------
   protected function activateJobDirectly(SurvivorJobType job)
+    
+    // let jobDefinition = SurvivorJobs.getJobDefinition(job)
+    // Log.info("[activateJobDirectly] " + jobDefinition.getId())
+
     if (m_activeJobComponent != null)
       m_activeJobComponent.setEnabled(false)
 
     m_activeJob = job
     m_activeJobComponent = getOwner().getOrAddSurvivorJobComponent(job)
+    
+    // Log.info("activated job " + jobDefinition.getId())
+
+  // --------------------------------------------------------------------------
+  protected function assignJobDirectly(SurvivorJobType job, int unitTypeId)
+
+    let jobDefinition = SurvivorJobs.getJobDefinition(job)
+    // Log.info("[assignJobDirectly] " + jobDefinition.getTitle(unitTypeId))
+
+    if (m_assignedJobComponent != null)
+      m_assignedJobComponent.setIsAssigned(false)
+      m_assignedJobComponent.setEnabled(false)
+
+    m_assignedJob = job
+    m_assignedJobComponent = getOwner().getOrAddSurvivorJobComponent(job)..setUnitTypeId(unitTypeId)
+    m_assignedAnyJob = m_assignedAnyJob or job != SurvivorJobType.None
+
+    if (job != SurvivorJobType.None)
+      m_assignedJobComponent.setIsAssigned(true)
+
+    // The player has learned about this job now that they have assigned the job
+    jobDefinition.setIsJobKnownToPlayer(getOwnerUnit().getOwner(), true)
+
+    // Log.info("set assigned job to " + jobDefinition.getTitle(unitTypeId))
 
   // --------------------------------------------------------------------------
   function equipJobItem(item jobItem) returns bool
@@ -314,26 +334,21 @@ public class SurvivorComponent extends UnitComponent
 
     if (newUnit == null)
       return
-    
-    // Log.info("SurvivorComponent", "onPostUnitChanged", newUnit.getName(), "newUnit 1 xp " + newUnit.getXp().toString())
 
     let newUnitId = newUnit.getTypeId()
     let job = SurvivorJobs.getJobTypeForUnitType(newUnitId)
     
     m_activeJob = job
     m_activeJobComponent = getJobComponent(job)
-    
-    // Log.info("SurvivorComponent", "onPostUnitChanged", newUnit.getName(), "newUnit 2 xp " + newUnit.getXp().toString())
 
     if (m_activeJobComponent != null)
       m_activeJobComponent.setEnabled(true)
-    
-    // Log.info("SurvivorComponent", "onPostUnitChanged", newUnit.getName(), "newUnit 3 xp " + newUnit.getXp().toString())
 
     updateUnitProperName()
     updateToggleJobAbility()
     
-    m_changingJobs = false
+    nullTimer() () ->
+      m_changingJobs = false
 
   // --------------------------------------------------------------------------
   override function onUnitChanged(unit oldUnit, unit newUnit)
@@ -359,10 +374,6 @@ public class SurvivorComponent extends UnitComponent
   // --------------------------------------------------------------------------
   private function updateToggleJobAbility()
     let ownerUnit = getOwnerUnit()
-    
-    //if (m_assignedJob == SurvivorJobType.None)
-    //  ownerUnit.addAbility(TlsAbilityIds.survivorNoJob)
-    //else
     ownerUnit.addAbility(TlsAbilityIds.survivorToggleJob)
 
 // ============================================================================

@@ -34,8 +34,12 @@ public class SurvivorUtility
 
   // --------------------------------------------------------------------------
   static function spawnSurvivorWithRandomJob(player forPlayer, vec2 pos, WeightedSet<SurvivorJobType> jobSet) returns unit
+    return spawnSurvivorWithJob(forPlayer, pos, jobSet.getRandom())
 
-    let jobDef = SurvivorJobs.getJobDefinition(jobSet.getRandom())
+  // --------------------------------------------------------------------------
+  static function spawnSurvivorWithJob(player forPlayer, vec2 pos, SurvivorJobType job) returns unit
+
+    let jobDef = SurvivorJobs.getJobDefinition(job)
 
     let survivor = createUnitTLS(forPlayer, jobDef.getInitialUnitType(), pos, GetRandomDirectionDeg().asAngleDegrees())
 
@@ -49,6 +53,11 @@ public class SurvivorUtility
 
   // --------------------------------------------------------------------------
   static function spawnSurvivorUnitForPlayer(player _player) returns unit
+    let job = g_weightedSurvivorJobSet.getRandom()
+    return spawnSurvivorUnitForPlayer(_player, job)
+
+  // --------------------------------------------------------------------------
+  static function spawnSurvivorUnitForPlayer(player _player, SurvivorJobType job) returns unit
 
     if (_player == null)
       argumentNullError("_player")
@@ -85,14 +94,14 @@ public class SurvivorUtility
     if (not spawnPointResult.succeeded or spawnPoint.distanceToSq(campCenter) > SURVIVOR_SPAWN_TELEPORT_THRESHOLD_SQ)
       spawnPoint = campCenter
 
-    let survivor = spawnSurvivorWithRandomJob(_player, spawnPoint, g_weightedSurvivorJobSet)
+    let survivor = spawnSurvivorWithJob(_player, spawnPoint, job)
 
     survivor.issuePointOrderById(OrderIds.move, playerHumanComp.getCampCenter())
-    
-    let job = SurvivorJobs.getJobDefinitionForUnitType(survivor.getTypeId())
+
+    let jobDef = SurvivorJobs.getJobDefinition(job)
 
     let message = "{0} {1} has joined your camp!".format(
-      job.getTitle(survivor.getTypeId()).colorize(Colors.gold),
+      jobDef.getTitle(survivor.getTypeId()).colorize(Colors.gold),
       survivor.getProperName())
 
     notifyPlayer(_player, message, survivor.getIconPath()) () ->
@@ -116,6 +125,16 @@ public class SurvivorUtility
     Log.debug("[trySpawnSurvivorForPlayer] Player {0} has room for {1} Survivor(s) and has {2} Survivor(s)".format(_player.getName(), availableSurvivors.toString(), currentSurvivors.toString()))
     if (availableSurvivors > currentSurvivors)
       spawnSurvivorUnitForPlayer(_player)
+
+  // --------------------------------------------------------------------------
+  static function trySpawnSurvivorForPlayer(player _player, SurvivorJobType job)
+    if (not _player.isPlayingHumanPlayer())
+      return
+    let availableSurvivors = _player.getCurrentSupply()
+    let currentSurvivors = countNumberOfSurvivorsOwnedByPlayer(_player)
+    Log.debug("[trySpawnSurvivorForPlayer] Player {0} has room for {1} Survivor(s) and has {2} Survivor(s)".format(_player.getName(), availableSurvivors.toString(), currentSurvivors.toString()))
+    if (availableSurvivors > currentSurvivors)
+      spawnSurvivorUnitForPlayer(_player, job)
 
   // --------------------------------------------------------------------------
   static function countNumberOfSurvivorsOwnedByPlayer(player _player) returns int

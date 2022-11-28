@@ -44,6 +44,7 @@ import GameProperties
 import PlayerProperties
 import GameConstants
 import LootItemLibrary
+import SurvivorJobs
 
 constant string COMMAND_GODLIKE = "godlike"
 constant string COMMAND_SPAWNONE = "spawnone"
@@ -1004,24 +1005,38 @@ function checkPath()
 function spawnSurvivor()
   let commandPlayer = getChatCommandPlayer()
   let targetPlayerId = getChatCommand().getArgument(0).getInt()
-  let count = getChatCommand().getArgument(1).getInt()
+  let countArg = getChatCommand().getArgument(1)
   let forceArg = getChatCommand().getArgument(2)
+  let jobArg = getChatCommand().getArgument(3)
 
   let targetPlayer = players[targetPlayerId]
   if (targetPlayer == null or not targetPlayer.isPlayingHumanPlayer())
     chatCommandPrintToPlayer(commandPlayer, "PLAYER must be the id of a playing human player")
     return
 
+  var count = 1
+  if (countArg != null)
+    count = countArg.getInt()
+
   var forceOp = false
   if (forceArg != null)
     forceOp = forceArg.getBool()
 
-  if (forceOp)
-    for i = 0 to count - 1
-      SurvivorUtility.spawnSurvivorUnitForPlayer(targetPlayer)
+  if (jobArg != null)
+    let job = jobArg.getString().toSurvivorJobType()
+    if (forceOp)
+      for i = 0 to count - 1
+        SurvivorUtility.spawnSurvivorUnitForPlayer(targetPlayer, job)
+    else
+      for i = 0 to count - 1
+        SurvivorUtility.trySpawnSurvivorForPlayer(targetPlayer, job)
   else
-    for i = 0 to count - 1
-      SurvivorUtility.trySpawnSurvivorForPlayer(targetPlayer)
+    if (forceOp)
+      for i = 0 to count - 1
+        SurvivorUtility.spawnSurvivorUnitForPlayer(targetPlayer)
+    else
+      for i = 0 to count - 1
+        SurvivorUtility.trySpawnSurvivorForPlayer(targetPlayer)
 
 // ============================================================================
 function selectAll()
@@ -1689,8 +1704,9 @@ function registerDebugCommands2()
   g_commandHandler.registerCommandDefinition(COMMAND_SPAWNSURVIVOR, function spawnSurvivor)
     ..setDescription("Tries to spawn one or more random survivors for a player")
     ..addIntegerArgument("PLAYER", false)
-    ..addIntegerArgument("COUNT", false)
+    ..addIntegerArgument("COUNT", true)
     ..addBoolArgument("FORCE", true)
+    ..addStringArgument("JOB", true)
 
   g_commandHandler.registerCommandDefinition(COMMAND_SELECTALL, function selectAll)
     ..setDescription("Selects all types of a unit")
