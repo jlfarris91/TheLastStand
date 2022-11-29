@@ -3,14 +3,8 @@ import RegisterEvents
 import TlsUnitIds
 import TlsAbilityIds
 import RealtimeUnitComponent
-import DisplayTextToPlayer
-import Ability_IgniteCampFire
-import ColorUtility
 import PersistActiveAbilityComponent
-import Orders
-import FX
 import Unit_CampFire
-import Ability_CampFireRestore
 import Crafting
 import Handle
 
@@ -57,13 +51,8 @@ public class CampFireComponent extends RealtimeUnitComponent
     let ownerUnit = getOwnerUnit()
     let ownerUnitId = ownerUnit.getTypeId()
 
-    switch (ownerUnitId)
-      case TlsUnitIds.campFire | TlsUnitIds.campFireBuild
-        updateCampFire()
-      case TlsUnitIds.campFire2
-        updateCampFire2()
-      case TlsUnitIds.campFireOff
-        updateCampFireOff()
+    if (ownerUnitId == TlsUnitIds.campFire2)
+      updateCampFire2()
 
   // --------------------------------------------------------------------------
   function onCraftItem(ItemRecipe recipe)
@@ -72,37 +61,12 @@ public class CampFireComponent extends RealtimeUnitComponent
     m_cookingRecipe = recipe
 
   // --------------------------------------------------------------------------
-  function updateCampFire()
-    let ownerUnit = getOwnerUnit()
-
-    automaticallyAddLumber()
-    
-    // lose mana per second
-    ownerUnit.subMana(CAMP_FIRE_MANA_COST_PER_SECOND.toReal())
-    
-    // when mana reaches 0 convert to camp fire off
-    if (ownerUnit.getMana() <= 0)
-      convertToCampFireOff()
-    
-  // --------------------------------------------------------------------------
-  function updateCampFireOff()
-    let ownerUnit = getOwnerUnit()
-
-    automaticallyAddLumber()
-    
-    // The off camp fire converts to a regular camp fire when any mana is restored
-    if (ownerUnit.getMana() > 0)
-      convertToCampFire()
-
-  // --------------------------------------------------------------------------
   function updateCampFire2()
     let ownerUnit = getOwnerUnit()
 
     // lose mana per second
-    ownerUnit.subMana(CAMP_FIRE_MANA_COST_PER_SECOND * CAMPFIRE2_MANA_COST_SCALE)
-    
-    // The camp fire 2 converts back to a camp fire 1 with full mana when mana reaches 0
-    // Unless there is still raw meat to consume to keep at at camp fire 2
+    ownerUnit.subMana(CAMP_FIRE_2_MANA_COST_PER_SECOND.toReal())
+
     if (ownerUnit.getMana() <= 0)
       ownerUnit.setMana(ownerUnit.getMaxMana())
       convertToCampFire()
@@ -124,19 +88,6 @@ public class CampFireComponent extends RealtimeUnitComponent
       craftingComponent.enable()
 
   // --------------------------------------------------------------------------
-  private function convertToCampFireOff()
-    let ownerUnit = getOwnerUnit()
-    let ownerUnitId = ownerUnit.getTypeId()
-    if (ownerUnitId == TlsUnitIds.campFireOff)
-      return
-    m_persistActiveAbilityComponent.setUpgradingUnit(true)
-    ownerUnit.issueImmediateOrderById(TlsUnitIds.campFireOff)
-
-    let craftingComponent = getOwner().getCraftingComponent()
-    if (craftingComponent != null)
-      craftingComponent.disable()
-
-  // --------------------------------------------------------------------------
   private function convertToCampFire2()
     let ownerUnit = getOwnerUnit()
     let ownerUnitId = ownerUnit.getTypeId()
@@ -149,22 +100,6 @@ public class CampFireComponent extends RealtimeUnitComponent
     let craftingComponent = getOwner().getCraftingComponent()
     if (craftingComponent != null)
       craftingComponent.disable()
-
-  // --------------------------------------------------------------------------
-  private function automaticallyAddLumber()
-    let ownerUnit = getOwnerUnit()
-
-    if (m_persistActiveAbilityComponent.getAbilityActiveState(TlsAbilityIds.campFireIgniteSelf) and
-        ownerUnit.getMana() < CAMP_FIRE_IGNITE_DURATION / 2)
-    //{
-      let owningPlayer = getOwnerUnit().getOwner()
-      if (owningPlayer.getLumber() < CAMP_FIRE_IGNITE_LUMBER_COST)
-        m_persistActiveAbilityComponent.issueAbilityDeactivationOrder(TlsAbilityIds.campFireIgniteSelf)
-      else
-        owningPlayer.subLumber(CAMP_FIRE_IGNITE_LUMBER_COST)
-        FX.createLostLumberTag(ownerUnit.getPos(), CAMP_FIRE_IGNITE_LUMBER_COST, owningPlayer)
-        addLumber()
-    //}
 
   // --------------------------------------------------------------------------
   function updateState()
@@ -186,10 +121,6 @@ public class CampFireComponent extends RealtimeUnitComponent
       ownerUnit.removeAbility(TlsAbilityIds.campFire2RestoreHealth)
       ownerUnit.removeAbility(TlsAbilityIds.campFire2RestoreMana)
       hideCampFire2Effects()
-
-  // --------------------------------------------------------------------------
-  protected function addLumber()
-    getOwnerUnit().addMana(CAMP_FIRE_IGNITE_DURATION.toReal())
 
   // --------------------------------------------------------------------------
   private function showCampFire2Effects()
@@ -229,45 +160,6 @@ function onUnitConstructFinished()
   constructedUnit.addAbility(TlsAbilityIds.campFireRestoreMana)
 
 // ============================================================================
-function onIgniteFire()
-  let castingUnit = GetSpellAbilityUnit()
-  let targetUnit = GetSpellTargetUnit()
-  let abilId = GetSpellAbilityId()
-
-  if (abilId != TlsAbilityIds.campFireIgniteTarget)
-    return
-
-  let castingPlayer = castingUnit.getOwner()
-
-  if (not targetUnit.isCampFire())
-    displayMessageToPlayer(castingPlayer, "You can only ignite Camp Fires.".colorize(Colors.red))
-    return
-
-  if (castingPlayer.getLumber() < CAMP_FIRE_IGNITE_LUMBER_COST)
-    displayMessageToPlayer(castingPlayer, "Not enough lumber.".colorize(Colors.red))
-    return
-
-  castingPlayer.subLumber(CAMP_FIRE_IGNITE_LUMBER_COST)
-  FX.createLostLumberTag(castingUnit.getPos(), CAMP_FIRE_IGNITE_LUMBER_COST, castingPlayer)
-
-  let comp = targetUnit.getMetadataRequired().getCampFireComponent()
-  comp.addLumber()
-
-// ============================================================================
-function onUnitIssuedOrder()
-  let orderedUnit = GetOrderedUnit()
-  let orderId = GetIssuedOrderId()
-
-  if (orderId != OrderIds.immolation or not orderedUnit.isCampFire())
-    return
-
-  let owningPlayer = orderedUnit.getOwner()
-  if (owningPlayer.getLumber() < CAMP_FIRE_IGNITE_LUMBER_COST)
-    displayMessageToPlayer(owningPlayer, "Not enough lumber".colorize(Colors.red))
-    orderedUnit.issueImmediateOrderById(OrderIds.unimmolation)
-    return
-
-// ============================================================================
 function onUnitConstructed()
   let constructedUnit = GetConstructedStructure()
   if (not constructedUnit.isCampFire())
@@ -296,7 +188,5 @@ function onUnitUpgraded()
 // ============================================================================
 init
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_CONSTRUCT_FINISH, function onUnitConstructFinished)
-  registerSpellEffectEvent(TlsAbilityIds.campFireIgniteTarget, function onIgniteFire)
-  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ISSUED_ORDER, function onUnitIssuedOrder)
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_CONSTRUCT_FINISH, function onUnitConstructed)
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_UPGRADE_FINISH, function onUnitUpgraded)
