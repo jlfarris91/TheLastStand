@@ -19,6 +19,7 @@ import Math
 import GameInstance
 import Spawning
 import Notifications
+import RegisterEvents
 
 constant real SURVIVOR_SPAWN_TELEPORT_THRESHOLD_SQ = 4000.0*4000.0
 
@@ -120,9 +121,9 @@ public class SurvivorUtility
   static function trySpawnSurvivorForPlayer(player _player)
     if (not _player.isPlayingHumanPlayer())
       return
-    let availableSurvivors = _player.getCurrentSupply()
     let currentSurvivors = countNumberOfSurvivorsOwnedByPlayer(_player)
-    Log.debug("[trySpawnSurvivorForPlayer] Player {0} has room for {1} Survivor(s) and has {2} Survivor(s)".format(_player.getName(), availableSurvivors.toString(), currentSurvivors.toString()))
+    let availableSurvivors = _player.getMaxSupply()
+    // Log.debug("[trySpawnSurvivorForPlayer] Player {0} has room for {1} Survivor(s) and has {2} Survivor(s)".format(_player.getName(), availableSurvivors.toString(), currentSurvivors.toString()))
     if (availableSurvivors > currentSurvivors)
       spawnSurvivorUnitForPlayer(_player)
 
@@ -130,21 +131,15 @@ public class SurvivorUtility
   static function trySpawnSurvivorForPlayer(player _player, SurvivorJobType job)
     if (not _player.isPlayingHumanPlayer())
       return
-    let availableSurvivors = _player.getCurrentSupply()
     let currentSurvivors = countNumberOfSurvivorsOwnedByPlayer(_player)
-    Log.debug("[trySpawnSurvivorForPlayer] Player {0} has room for {1} Survivor(s) and has {2} Survivor(s)".format(_player.getName(), availableSurvivors.toString(), currentSurvivors.toString()))
+    let availableSurvivors = _player.getMaxSupply()
+    // Log.debug("[trySpawnSurvivorForPlayer] Player {0} has room for {1} Survivor(s) and has {2} Survivor(s)".format(_player.getName(), availableSurvivors.toString(), currentSurvivors.toString()))
     if (availableSurvivors > currentSurvivors)
       spawnSurvivorUnitForPlayer(_player, job)
 
   // --------------------------------------------------------------------------
   static function countNumberOfSurvivorsOwnedByPlayer(player _player) returns int
-    g_tempGroup.clear()
-    g_tempGroup.enumUnitsOfPlayer(_player, null)
-    var count = 0
-    for _unit from g_tempGroup
-      if (_unit.isAlive() and _unit.isSurvivor())
-        count++
-    return count
+    return _player.getCurrentSupply()
 
   // --------------------------------------------------------------------------
   static function owningPlayerBanishSurvivor(unit targetUnit)
@@ -205,6 +200,12 @@ public function unit.isRescuableSurvivor() returns bool
   return this.isUnrescuedSurvivor()
 
 // ============================================================================
+function onUnitKilled()
+  let dyingUnit = GetDyingUnit()
+  if (dyingUnit.isSurvivor())
+    doAfter(SURVIVORS_RESPAWN_INTERVAL_RANGE.getRandom(), () -> SurvivorUtility.trySpawnSurvivorForPlayer(dyingUnit.getOwner()))
+
+// ============================================================================
 init
   g_weightedSurvivorJobSet = new WeightedSet<SurvivorJobType>()
     ..add(SurvivorJobType.None, 50)
@@ -215,3 +216,9 @@ init
     // ..add(SurvivorJobType.Marksman, 1)
     // ..add(SurvivorJobType.Acolyte, 1)
     // ..add(SurvivorJobType.Engineer, 1)
+
+  doPeriodically(10.0) (CallbackPeriodic cb) ->
+    for p in g_PlayingHumanPlayers
+      SurvivorUtility.trySpawnSurvivorForPlayer(p)
+
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_DEATH, function onUnitKilled)

@@ -5,6 +5,14 @@ import Handle
 import RegisterEvents
 import GameConstants
 import PlayerProperties
+import LinkedList
+import Unit_Shelter
+import UnitIndexer
+
+constant color SHELTER_ENABLED_COLOR = color(150,150,150)
+constant color SHELTER_DISABLED_COLOR = color(50,50,50)
+constant LinkedList<ShelterComponent> g_shelterComponents = new LinkedList<ShelterComponent>()
+int array g_playerShelterCount
 
 // ============================================================================
 public class ShelterComponent extends UnitComponent
@@ -17,33 +25,49 @@ public class ShelterComponent extends UnitComponent
   // --------------------------------------------------------------------------
   protected override function onEnabled()
     super.onEnabled()
-    updateAffector()    
+    g_shelterComponents.add(this)
+    g_playerShelterCount[getOwnerPlayer().getId()]++
     
   // --------------------------------------------------------------------------
   protected override function onDisabled()
     super.onDisabled()
     destroyAffector()
+    g_shelterComponents.remove(this)
+    g_playerShelterCount[getOwnerPlayer().getId()]--
 
   // --------------------------------------------------------------------------
-  protected function updateAffector()
+  protected function updateAffector(bool enabled)
     let ownerUnit = getOwnerUnit()
     let ownerPlayer = ownerUnit.getOwner()
 
-    var hpBonusValue = 0    
+    var hpBonusValue = 0
+    var infoAbilId = 0
+
     switch (ownerUnit.getTypeId())
       case TlsUnitIds.shelter1
         hpBonusValue = SURVIVOR_HP_BONUS_SHELTER_1
+        infoAbilId = SHELTER_1_ICON_ID
       case TlsUnitIds.shelter2
         hpBonusValue = SURVIVOR_HP_BONUS_SHELTER_2
+        infoAbilId = SHELTER_2_ICON_ID
       case TlsUnitIds.shelter3
         hpBonusValue = SURVIVOR_HP_BONUS_SHELTER_3
+        infoAbilId = SHELTER_3_ICON_ID
     
     let survivorHPBonusProp = ownerPlayer.getProperty(PlayerProperty.SURVIVOR_HP_BONUS)
 
     if (m_affector != INVALID_HANDLE)
       survivorHPBonusProp.remove(m_affector)
 
-    m_affector = survivorHPBonusProp.affectAdd(hpBonusValue.toReal())
+    if (enabled)
+      ownerUnit.removeAbility(SHELTER_NO_EFFECT_ICON_ID)
+      ownerUnit.addAbility(infoAbilId)
+      ownerUnit.setVertexColor(SHELTER_ENABLED_COLOR)
+      m_affector = survivorHPBonusProp.affectAdd(hpBonusValue.toReal())
+    else
+      ownerUnit.removeAbility(infoAbilId)
+      ownerUnit.addAbility(SHELTER_NO_EFFECT_ICON_ID)
+      ownerUnit.setVertexColor(SHELTER_DISABLED_COLOR)
 
   // --------------------------------------------------------------------------
   private function destroyAffector()
@@ -65,16 +89,35 @@ public function IUnitMetadata.getOrAddShelterComponent() returns ShelterComponen
 
 // ============================================================================
 function onUpgradeFinished()
-  let triggerUnit = GetTriggerUnit()
-  if (not triggerUnit.isShelter())
-    return
-  let metadata = triggerUnit.getMetadata()
-  if (metadata == null)
-    return
-  let comp = metadata.getShelterComponent()
-  if (comp != null)
-    comp.updateAffector()
+  let upgradingUnit = GetTriggerUnit()
+
+  if (upgradingUnit.isShelter())
+    upgradingUnit.getMetadata().getOrAddShelterComponent()
+
+  if (upgradingUnit.isObelisk() or upgradingUnit.isShelter())
+    updateShelterComponents(upgradingUnit.getOwner())
+
+// ============================================================================
+function playerHasLTESheltersThanSurvivors(player p) returns bool
+  return g_playerShelterCount[p.getId()] <= p.getMaxSupply()
+
+// ============================================================================
+function updateShelterComponents(player p)
+  let maxSupply = p.getMaxSupply()
+  var count = 0
+  for shelterComp in g_shelterComponents
+    if (shelterComp.getOwnerPlayer() == p)
+      shelterComp.updateAffector(count <= maxSupply)
+      count++
+
+// ============================================================================
+function onUnitIndexed()
+  let indexingUnit = getIndexingUnit()
+  if (indexingUnit.isSurvivor())
+    updateShelterComponents(indexingUnit.getOwner())
 
 // ============================================================================
 init
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_UPGRADE_FINISH, function onUpgradeFinished)
+  onUnitIndex(function onUnitIndexed)
+  onUnitDeindex(function onUnitIndexed)
