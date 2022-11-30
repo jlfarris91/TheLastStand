@@ -13,11 +13,15 @@ import Handle
 import TlsUnitDefinitionBuilder
 import ColorUtility
 import ClosureTimers
+import RegisterEvents
+import PlayerExtensions
 
 public TlsBuildingDefinition g_lumberMillDefinition
 
 constant int ACTIVE_ICON_ABILITY_ID   = compiletime(ABIL_ID_GEN.next())
 constant int INACTIVE_ICON_ABILITY_ID = compiletime(ABIL_ID_GEN.next())
+
+_handle array g_lumberHarvestAffectors
 
 // ============================================================================
 public class LumberMill
@@ -120,6 +124,25 @@ public function IUnitMetadata.getOrAddLumberMillComponent() returns LumberMillCo
   return component
 
 // ============================================================================
+function onResearchFinished()
+  let researchId = GetResearched()
+
+  if (researchId != TlsUpgradeIds.lumberHarvest)
+    return
+
+  let researchingUnit = GetResearchingUnit()
+  let researchingPlayer = researchingUnit.getOwner()
+  let researchLevel = researchingPlayer.getTechResearchLevel(researchId)
+
+  let gatherAmountProp = researchingPlayer.getProperty(PlayerProperty.LUMBERMILL_GATHER_AMOUNT)
+
+  let affector = g_lumberHarvestAffectors[researchingPlayer.getId()]
+  if (affector != INVALID_HANDLE)
+    gatherAmountProp.remove(affector)
+
+  g_lumberHarvestAffectors[researchingPlayer.getId()] = gatherAmountProp.affectAdd(researchLevel * 5.0)
+
+// ============================================================================
 @compiletime function createObjectDefinitions()
 
   let description = "A structure used to harvest lumber and research improvements to lumber harvesting.|n|n{0}".format(
@@ -197,3 +220,5 @@ public function IUnitMetadata.getOrAddLumberMillComponent() returns LumberMillCo
 init
   if (g_lumberMillDefinition == null)
     createObjectDefinitions()
+
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_RESEARCH_FINISH, function onResearchFinished)
