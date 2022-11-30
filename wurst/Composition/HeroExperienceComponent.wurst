@@ -1,0 +1,98 @@
+package HeroExperienceComponent
+import UnitComponent
+import RegisterEvents
+import GrantXpOnDeathComponent
+import SmartValue
+import PlayerProperties
+import Elites
+
+HeroExperienceComponent array g_heroExperienceComponents
+
+// ============================================================================
+public class HeroExperienceComponent extends UnitComponent
+
+  SmartValue xpPerKill
+  SmartValue xpPerKillElite
+  SmartValue xpPerKillBoss
+
+  // --------------------------------------------------------------------------
+  construct(IUnitMetadata owner)
+    super(owner)
+
+  // --------------------------------------------------------------------------
+  override protected function onEnabled()
+    super.onEnabled()
+
+    let ownerPlayer = getOwnerPlayer()
+
+    g_heroExperienceComponents[ownerPlayer.getId()] = this
+
+    xpPerKill = ownerPlayer.getProperty(PlayerProperty.HERO_XP_PER_KILL).attach(this)
+    xpPerKillElite = ownerPlayer.getProperty(PlayerProperty.HERO_XP_PER_KILL_ELITE).attach(this)
+    xpPerKillBoss = ownerPlayer.getProperty(PlayerProperty.HERO_XP_PER_KILL_BOSS).attach(this)
+
+  // --------------------------------------------------------------------------
+  override protected function onDisabled()
+    super.onDisabled()
+
+    if (xpPerKill != null)
+      destroy xpPerKill
+      xpPerKill = null
+
+    if (xpPerKillElite != null)
+      destroy xpPerKillElite
+      xpPerKillElite = null
+
+    if (xpPerKillBoss != null)
+      destroy xpPerKillBoss
+      xpPerKillBoss = null
+
+    g_heroExperienceComponents[getOwnerPlayer().getId()] = null
+
+  // --------------------------------------------------------------------------
+  function onUnitKilled(unit killedUnit)
+    getOwnerUnit().addXp(getXpValueForKilledUnit(killedUnit), true)
+
+  // --------------------------------------------------------------------------
+  function getXpValueForKilledUnit(unit killedUnit) returns int
+
+    let metadata = killedUnit.getMetadata()
+    if (metadata != null)
+      let comp = metadata.getGrantXpOnDeathComponent()
+      if (comp != null)
+        return comp.getExpValue()
+
+    if (killedUnit.isBoss())
+      return xpPerKillBoss.getIntValue()
+    if (killedUnit.isElite())
+      return xpPerKillElite.getIntValue()
+    else
+      return xpPerKill.getIntValue()
+
+// ============================================================================
+public function IUnitMetadata.getHeroExperienceComponent() returns HeroExperienceComponent
+  return this.getComponent(HeroExperienceComponent.typeId) castTo HeroExperienceComponent
+
+// ============================================================================
+public function IUnitMetadata.getOrAddHeroExperienceComponent() returns HeroExperienceComponent
+  var component = this.getHeroExperienceComponent()
+  if (component == null)
+    component = this.addComponent(new HeroExperienceComponent(this)) castTo HeroExperienceComponent
+  return component
+
+// ============================================================================
+function onUnitKilled()
+
+  let killingUnit = GetKillingUnit()
+  let dyingUnit = GetDyingUnit()
+
+  if (not dyingUnit.isEnemyOf(killingUnit))
+    return
+
+  let heroXpComp = g_heroExperienceComponents[killingUnit.getOwner().getId()]
+  if (heroXpComp != null)
+    heroXpComp.onUnitKilled(dyingUnit)
+
+// ============================================================================
+init
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_DEATH, function onUnitKilled)
