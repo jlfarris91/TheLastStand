@@ -1,0 +1,53 @@
+package FoodSupply
+import GameInstance
+import Time
+import HumanPlayers
+import RegisterEvents
+import TlsUnitIds
+import PlayerProperties
+import Handle
+import Survivors
+
+_handle array g_bossFoodCapAffectors
+
+// ============================================================================
+function onDayStarted()
+  for p in g_PlayingHumanPlayers
+    updatePlayerFoodCap(p)
+
+// ============================================================================
+function onUnitConstructed()
+  let constructedUnit = GetConstructedStructure()
+  if (constructedUnit.isObelisk())
+    updatePlayerFoodCap(constructedUnit.getOwner())
+
+// ============================================================================
+function updatePlayerFoodCap(player p)
+
+  let foodCapProp = p.getProperty(PlayerProperty.FOOD_CAP)
+
+  let bossAffector = g_bossFoodCapAffectors[p.getId()]
+  if (bossAffector != INVALID_HANDLE)
+    foodCapProp.remove(bossAffector)
+
+  let foodCapBonusPerBoss = p.getPropertyIntValue(PlayerProperty.FOOD_CAP_BOSS_BONUS)
+  let bossesSurvived = g_GameInstance.getBossesSurvived()
+
+  g_bossFoodCapAffectors[p.getId()] = foodCapProp.affectAdd((bossesSurvived * foodCapBonusPerBoss).toReal())
+
+// ============================================================================
+function onFoodCapPropertyChanged(player p)
+  SurvivorUtility.trySpawnSurvivorForPlayer(p)
+
+// ============================================================================
+function onFoodCapBossBonusPropertyChanged(player p)
+  updatePlayerFoodCap(p)
+
+// ============================================================================
+init
+  registerDayEvent(function onDayStarted)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_CONSTRUCT_FINISH, function onUnitConstructed)
+
+  for p in g_PlayingHumanPlayers
+    p.getProperty(PlayerProperty.FOOD_CAP).onValueChanged().register(() -> onFoodCapPropertyChanged(p))
+    p.getProperty(PlayerProperty.FOOD_CAP_BOSS_BONUS).onValueChanged().register(() -> onFoodCapBossBonusPropertyChanged(p))

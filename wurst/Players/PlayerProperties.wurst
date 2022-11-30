@@ -20,13 +20,16 @@ public enum PlayerProperty
   ITEM_FIND_QUALITY
   LUMBERMILL_GATHER_COOLDOWN
   LUMBERMILL_GATHER_AMOUNT
+  HERO_XP_PER_LOOT_TIER
   HERO_XP_PER_KILL
   HERO_XP_PER_KILL_ELITE
   HERO_XP_PER_KILL_BOSS
+  FOOD_CAP
+  FOOD_CAP_BOSS_BONUS
   __COUNT
 
 // Must match number of items in PlayerProperties enum
-public constant int PLAYER_PROPERTY_COUNT = 12
+public constant int PLAYER_PROPERTY_COUNT = 15
 
 // ============================================================================
 tuple propertyMetadata(real defaultValue, bool triggersUpdate, string friendlyName, string shortName, Func1<real, string> stringifier)
@@ -50,13 +53,16 @@ public class PlayerProperties
     /* SPIKE_STUN_DURATION              */  propertyMetadata(0.0,   false,  "Spike Stun Duration",                    "spike_stun_dur",                   g_toString.acquire()),
     /* SCOUT_TOWER_TARGETS              */  propertyMetadata(0.0,   false,  "Scout Tower Targets",                    "scout_tower_targets",              g_toIntString.acquire()),
     /* SCOUT_TOWER_TARGET_DAMAGE_SCALAR */  propertyMetadata(0.0,   false,  "Scout Tower Target Bonus Damage Scale",  "scout_tower_target_damage_scalar", g_toPercentageString01.acquire()),
-    /* SURVIVOR_HP_BONUS                */  propertyMetadata(0.0,   true,   "Survivor HP Bonus",                      "lifesteal",                        g_toIntString.acquire()),
+    /* SURVIVOR_HP_BONUS                */  propertyMetadata(0.0,   true,   "Survivor HP Bonus",                      "survivor_hp_bonus",                g_toIntString.acquire()),
     /* ITEM_FIND_QUALITY                */  propertyMetadata(1.0,   false,  "Item Find Quality",                      "item_find_quality",                g_toPercentageString01.acquire()),
     /* LUMBERMILL_GATHER_COOLDOWN       */  propertyMetadata(5.0,   false,  "Lumber Gather Cooldown",                 "lumber_gather_cooldown",           g_toSecondsString.acquire()),
     /* LUMBERMILL_GATHER_AMOUNT         */  propertyMetadata(5.0,   false,  "Lumber Gather Amount",                   "lumber_gather_amount",             g_toIntString.acquire()),
-    /* HERO_XP_PER_KILL                 */  propertyMetadata(4.0,   false,  "Hero XP Per Kill",                       "hero_xp_kill",                     g_toIntString.acquire()),
+    /* HERO_XP_PER_LOOT_TIER            */  propertyMetadata(5.0,   false,  "Hero XP Per Loot",                       "hero_xp_kill_loot",                g_toIntString.acquire()),
+    /* HERO_XP_PER_KILL                 */  propertyMetadata(2.0,   false,  "Hero XP Per Kill",                       "hero_xp_kill",                     g_toIntString.acquire()),
     /* HERO_XP_PER_KILL_ELITE           */  propertyMetadata(10.0,  false,  "Hero XP Per Kill Elite",                 "hero_xp_kill_elite",               g_toIntString.acquire()),
-    /* HERO_XP_PER_KILL_BOSS            */  propertyMetadata(25.0,  false,  "Hero XP Per Kill Boss",                  "hero_xp_kill_boss",                g_toIntString.acquire())
+    /* HERO_XP_PER_KILL_BOSS            */  propertyMetadata(50.0,  false,  "Hero XP Per Kill Boss",                  "hero_xp_kill_boss",                g_toIntString.acquire()),
+    /* FOOD_CAP                         */  propertyMetadata(5.0,   false,  "Food Cap",                               "food_cap",                         g_toIntString.acquire()),
+    /* FOOD_CAP_BOSS_BONUS              */  propertyMetadata(2.0,   true,   "Food Cap Bonus Per Boss",                "food_cap_boss_bonus",              g_toIntString.acquire())
   ]
 
   // --------------------------------------------------------------------------
@@ -104,8 +110,8 @@ public function player.getProperty(PlayerProperty property) returns SmartValue
   if (g_smartValues[propId] == null)
     g_smartValues[propId] = new SmartValue(PlayerProperties.getPropertyDefaultValue(property))
     if (PlayerProperties.PROPERTY_METADATA[propIndex].triggersUpdate)
-      g_smartValues[propId].onValueChanged().register(() -> update(this))
-      update(this)
+      g_smartValues[propId].onValueChanged().register(() -> update(this, property))
+      update(this, property)
   return g_smartValues[propId]
 
 // ============================================================================
@@ -121,14 +127,18 @@ public function player.getPropertyValueAsString(PlayerProperty property) returns
   return PlayerProperties.formatPropertyValue(property, this.getPropertyValue(property))
   
 // ============================================================================
-function update(player p)
+function update(player p, PlayerProperty property)
   
-  p.setTechResearchLevel(TlsUpgradeIds.survivorHpBonus, getSurvivorHPBonusResearchLevel(p))
+  if (property == PlayerProperty.SURVIVOR_HP_BONUS)
+    p.setTechResearchLevel(TlsUpgradeIds.survivorHpBonus, getSurvivorHPBonusResearchLevel(p))
+
+  if (property == PlayerProperty.FOOD_CAP)
+    p.setState(PLAYER_STATE_RESOURCE_FOOD_CAP, p.getPropertyIntValue(property))
 
 // ============================================================================
 function getSurvivorHPBonusResearchLevel(player p) returns int
   // This should match the increments defined in the TlsUpgradeIds.survivorHpBonus definition below
-  return (p.getPropertyValue(PlayerProperty.SURVIVOR_HP_BONUS) / 10).floor()
+  return (p.getPropertyIntValue(PlayerProperty.SURVIVOR_HP_BONUS) / 50).floor()
 
 // ============================================================================
 function onResearchFinished()
@@ -152,7 +162,7 @@ function onResearchFinished()
 @compiletime function createObjects()
 
   new TlsUpgradeDefinition(TlsUpgradeIds.survivorHpBonus, 100)
-    ..addEffectHitPointBonus(10, 10)
+    ..addEffectHitPointBonus(50, 50)
     ..setGoldCostBase(0)
     ..setGoldCostIncrement(0)
     ..setLumberCostBase(0)

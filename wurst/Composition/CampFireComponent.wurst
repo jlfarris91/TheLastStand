@@ -7,27 +7,33 @@ import PersistActiveAbilityComponent
 import Unit_CampFire
 import Crafting
 import Handle
+import FX
 
 constant string CAMPFIRE2_EFFECT_1 = "Environment\\LargeBuildingFire\\LargeBuildingFire1.mdl"
 constant string CAMPFIRE2_EFFECT_2 = "Abilities\\Spells\\Human\\Brilliance\\Brilliance.mdl"
 
+constant colorA CAMPFIRE1_RANGE_EFFECT_COLOR = colorA(255, 136, 0, 150)
+constant colorA CAMPFIRE2_RANGE_EFFECT_COLOR = colorA(0, 170, 255, 150)
+
 // ============================================================================
 public class CampFireComponent extends RealtimeUnitComponent
-  private PersistActiveAbilityComponent m_persistActiveAbilityComponent
   private effect m_campFire2Effect1
   private effect m_campFire2Effect2
   private _handle m_onCraftedItemHandler = INVALID_HANDLE
   private ItemRecipe m_cookingRecipe = null
+  
+  private effect m_rangeEffect = null
+  private real m_auraRadius = 0.0
+  private colorA m_rangeEffectColor = CAMPFIRE1_RANGE_EFFECT_COLOR
 
   // --------------------------------------------------------------------------
   construct(IUnitMetadata owner)
     super(owner)
-    m_persistActiveAbilityComponent = null
 
   // --------------------------------------------------------------------------
   override function onEnabled()
     super.onEnabled()
-    m_persistActiveAbilityComponent = getOwner().getOrAddPersistActiveAbilityComponent()
+
     this.registerForRealtimeUpdate(RealtimeUpdatePriority.Background)
     updateState()
 
@@ -45,6 +51,8 @@ public class CampFireComponent extends RealtimeUnitComponent
     m_onCraftedItemHandler = INVALID_HANDLE
 
     m_cookingRecipe = null
+
+    hideRangeEffect()
 
   // --------------------------------------------------------------------------
   override function realtimeUpdate(real dt)
@@ -75,12 +83,31 @@ public class CampFireComponent extends RealtimeUnitComponent
         getOwnerUnit().addItemById(m_cookingRecipe.getItemTypeId())
 
   // --------------------------------------------------------------------------
+  protected function showRangeEffect()
+    if (m_rangeEffect == null)
+      let ownerUnit = getOwnerUnit()
+      m_rangeEffect = FX.createRangeEffect(ownerUnit.getPos(), m_auraRadius, m_rangeEffectColor, ownerUnit.getOwner())
+
+  // --------------------------------------------------------------------------
+  protected function updateRangeEffect()
+    if (m_rangeEffect != null)
+      hideRangeEffect()
+      showRangeEffect()
+
+  // --------------------------------------------------------------------------
+  protected function hideRangeEffect()
+    
+    if (m_rangeEffect != null)
+      m_rangeEffect.destr()
+      m_rangeEffect = null
+
+  // --------------------------------------------------------------------------
   private function convertToCampFire()
     let ownerUnit = getOwnerUnit()
     let ownerUnitId = ownerUnit.getTypeId()
     if (ownerUnitId == TlsUnitIds.campFire)
       return
-    m_persistActiveAbilityComponent.setUpgradingUnit(true)
+
     ownerUnit.issueImmediateOrderById(TlsUnitIds.campFire)
 
     let craftingComponent = getOwner().getCraftingComponent()
@@ -93,7 +120,7 @@ public class CampFireComponent extends RealtimeUnitComponent
     let ownerUnitId = ownerUnit.getTypeId()
     if (ownerUnitId == TlsUnitIds.campFire2)
       return
-    m_persistActiveAbilityComponent.setUpgradingUnit(true)
+
     ownerUnit.issueImmediateOrderById(TlsUnitIds.campFire2)
     ownerUnit.setMana(ownerUnit.getMaxMana())
 
@@ -109,6 +136,8 @@ public class CampFireComponent extends RealtimeUnitComponent
     if (ownerUnitId == TlsUnitIds.campFire or ownerUnitId == TlsUnitIds.campFireBuild)
       ownerUnit.addAbility(TlsAbilityIds.campFireRestoreHealth)
       ownerUnit.addAbility(TlsAbilityIds.campFireRestoreMana)
+      m_auraRadius = CAMPFIRE1_AREA_OF_EFFECT
+      m_rangeEffectColor = CAMPFIRE1_RANGE_EFFECT_COLOR
     else
       ownerUnit.removeAbility(TlsAbilityIds.campFireRestoreHealth)
       ownerUnit.removeAbility(TlsAbilityIds.campFireRestoreMana)
@@ -116,11 +145,15 @@ public class CampFireComponent extends RealtimeUnitComponent
     if (ownerUnitId == TlsUnitIds.campFire2)
       ownerUnit.addAbility(TlsAbilityIds.campFire2RestoreHealth)
       ownerUnit.addAbility(TlsAbilityIds.campFire2RestoreMana)
+      m_auraRadius = CAMPFIRE2_AREA_OF_EFFECT
+      m_rangeEffectColor = CAMPFIRE2_RANGE_EFFECT_COLOR
       showCampFire2Effects()
     else
       ownerUnit.removeAbility(TlsAbilityIds.campFire2RestoreHealth)
       ownerUnit.removeAbility(TlsAbilityIds.campFire2RestoreMana)
       hideCampFire2Effects()
+
+    updateRangeEffect()
 
   // --------------------------------------------------------------------------
   private function showCampFire2Effects()
@@ -186,7 +219,27 @@ function onUnitUpgraded()
   ..setUpgradingUnit(false)
 
 // ============================================================================
+function onUnitSelected()
+  let selectedUnit = GetTriggerUnit()
+  if (not selectedUnit.isCampFire())
+    return
+  let comp = selectedUnit.getMetadata().getCampFireComponent()
+  if (comp != null)
+    comp.showRangeEffect()
+
+// ============================================================================
+function onUnitDeselected()
+  let selectedUnit = GetTriggerUnit()
+  if (not selectedUnit.isCampFire())
+    return
+  let comp = selectedUnit.getMetadata().getCampFireComponent()
+  if (comp != null)
+    comp.hideRangeEffect()
+
+// ============================================================================
 init
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_CONSTRUCT_FINISH, function onUnitConstructFinished)
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_CONSTRUCT_FINISH, function onUnitConstructed)
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_UPGRADE_FINISH, function onUnitUpgraded)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_SELECTED, function onUnitSelected)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_DESELECTED, function onUnitDeselected)
