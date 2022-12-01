@@ -15,7 +15,7 @@ var mappings = new Dictionary<string, string>()
 	{ "Engineer", "BTNBloodElfPeasant.blp" },
 	{ "Marksman1", "BTNRifleman.blp" },
 	{ "Priest1", "BTNPriest.blp" },
-	{ "Priest2", "BTNAcolyte.blp" },
+	{ "Acolyte1", "BTNAcolyte.blp" },
 };
 
 foreach (var pair in mappings)
