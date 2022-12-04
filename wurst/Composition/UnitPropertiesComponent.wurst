@@ -16,6 +16,7 @@ import UnitExtensions
 constant int ABILITY_ID_CRIT = compiletime(ABIL_ID_GEN.next())
 constant int ABILITY_ID_EVASION = compiletime(ABIL_ID_GEN.next())
 constant int ABILITY_ID_ATTACK_BONUS = compiletime(ABIL_ID_GEN.next())
+constant int ABILITY_ID_DEFENSE_BONUS = compiletime(ABIL_ID_GEN.next())
 
 // ============================================================================
 public enum UnitProperty
@@ -33,10 +34,11 @@ public enum UnitProperty
   LOOT_MANA_COST_SCALE
   LOOT_ITEM_FIND_QUALITY
   ATTACK_BONUS
+  DEFENSE_BONUS
   __COUNT
 
 // Must match number of items in UnitProperties enum
-public constant int UNIT_PROPERTY_COUNT = 14
+public constant int UNIT_PROPERTY_COUNT = 15
 
 // ============================================================================
 tuple unitPropertyMetadata(real defaultValue, string friendlyName, string shortName, Func1<real, string> stringifier, Action2<UnitPropertiesComponent, UnitProperty> onChangedCallback)
@@ -48,6 +50,7 @@ Func1<real, string> g_toPercentageString01 = (real v) -> v.toPercentageString01(
 constant UpdateCritProperties g_updateCritProperties = new UpdateCritProperties()
 constant UpdateEvadeChance g_updateEvadeChance = new UpdateEvadeChance()
 constant UpdateAttackBonus g_updateAttackBonus = new UpdateAttackBonus()
+constant UpdateDefenseBonus g_updateDefenseBonus = new UpdateDefenseBonus()
 
 // ============================================================================
 public class UnitProperties
@@ -68,7 +71,8 @@ public class UnitProperties
     /* LOOT_TWICE_CHANCE      */  unitPropertyMetadata(0.0, "Loot Twice Chance",      "loottwice",        g_toPercentageString01.acquire(), null),
     /* LOOT_MANA_COST_SCALE   */  unitPropertyMetadata(1.0, "Loot Mana Cost",         "lootcost",         g_toPercentageString01.acquire(), null),
     /* LOOT_ITEM_FIND_QUALITY */  unitPropertyMetadata(1.0, "Loot Item Find Quality", "lootitemquality",  g_toPercentageString01.acquire(), null),
-    /* ATTACK_BONUS           */  unitPropertyMetadata(0.0, "Attack Bonus",           "attackbonus",      g_toIntString.acquire(),          g_updateAttackBonus)
+    /* ATTACK_BONUS           */  unitPropertyMetadata(0.0, "Attack Bonus",           "attackbonus",      g_toIntString.acquire(),          g_updateAttackBonus),
+    /* DEFENSE_BONUS          */  unitPropertyMetadata(0.0, "Defense Bonus",          "defensebonus",     g_toIntString.acquire(),          g_updateDefenseBonus)
   ]
 
   // --------------------------------------------------------------------------
@@ -360,6 +364,10 @@ class UpdateCritProperties extends Action2<UnitPropertiesComponent, UnitProperty
   // --------------------------------------------------------------------------
   override function call(UnitPropertiesComponent comp, UnitProperty _prop)
     let ownerUnit = comp.getOwnerUnit()
+
+    if (not ownerUnit.hasAbility(ABILITY_ID_CRIT))
+      ownerUnit.addAbility(ABILITY_ID_CRIT)
+
     let abil = ownerUnit.getAbility(ABILITY_ID_CRIT)
     if (abil != null)
       let lvl = 0
@@ -379,6 +387,10 @@ class UpdateEvadeChance extends Action2<UnitPropertiesComponent, UnitProperty>
   // --------------------------------------------------------------------------
   override function call(UnitPropertiesComponent comp, UnitProperty _prop)
     let ownerUnit = comp.getOwnerUnit()
+
+    if (not ownerUnit.hasAbility(ABILITY_ID_EVASION))
+      ownerUnit.addAbility(ABILITY_ID_EVASION)
+
     let abil = ownerUnit.getAbility(ABILITY_ID_EVASION)
     if (abil != null)
       let lvl = 0
@@ -396,12 +408,37 @@ class UpdateAttackBonus extends Action2<UnitPropertiesComponent, UnitProperty>
   // --------------------------------------------------------------------------
   override function call(UnitPropertiesComponent comp, UnitProperty _prop)
     let ownerUnit = comp.getOwnerUnit()
+
+    if (not ownerUnit.hasAbility(ABILITY_ID_ATTACK_BONUS))
+      ownerUnit.addAbility(ABILITY_ID_ATTACK_BONUS)
+
     let abil = ownerUnit.getAbility(ABILITY_ID_ATTACK_BONUS)
     if (abil != null)
       let lvl = 0
       ownerUnit.incAbilityLevel(ABILITY_ID_ATTACK_BONUS)
       setAbilityField(abil, ABILITY_ILF_ATTACK_BONUS, lvl, comp.getPropertyIntValue(UnitProperty.ATTACK_BONUS))
       ownerUnit.decAbilityLevel(ABILITY_ID_ATTACK_BONUS)
+
+// ============================================================================
+class UpdateDefenseBonus extends Action2<UnitPropertiesComponent, UnitProperty>
+
+  // --------------------------------------------------------------------------
+  construct()
+    acquire()
+
+  // --------------------------------------------------------------------------
+  override function call(UnitPropertiesComponent comp, UnitProperty _prop)
+    let ownerUnit = comp.getOwnerUnit()
+
+    if (not ownerUnit.hasAbility(ABILITY_ID_DEFENSE_BONUS))
+      ownerUnit.addAbility(ABILITY_ID_DEFENSE_BONUS)
+
+    let abil = ownerUnit.getAbility(ABILITY_ID_DEFENSE_BONUS)
+    if (abil != null)
+      let lvl = 0
+      ownerUnit.incAbilityLevel(ABILITY_ID_DEFENSE_BONUS)
+      setAbilityField(abil, ABILITY_ILF_DEFENSE_BONUS_IDEF, lvl, comp.getPropertyIntValue(UnitProperty.DEFENSE_BONUS))
+      ownerUnit.decAbilityLevel(ABILITY_ID_DEFENSE_BONUS)
 
 // ============================================================================
 @compiletime function createCompiledObjects()
@@ -423,6 +460,12 @@ class UpdateAttackBonus extends Action2<UnitPropertiesComponent, UnitProperty>
   ..setLevels(2)
   ..setItemAbility(false)
   ..presetAttackBonus(lvl -> 0)
+
+  new AbilityDefinitionDefenseBonusPlus1(ABILITY_ID_DEFENSE_BONUS)
+  ..setName("STAT_DEFENSE_BONUS")
+  ..setLevels(2)
+  ..setItemAbility(false)
+  ..presetDefenseBonus(lvl -> 0)
 
 // ============================================================================
 init
