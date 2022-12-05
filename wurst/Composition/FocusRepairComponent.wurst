@@ -1,0 +1,188 @@
+package FocusRepairComponent
+import HashMap
+import UnitComponent
+import Orders
+import RepairTracking
+import RegisterEvents
+import GroupUtils
+import GroupExtensions
+import ErrorHandling
+
+HashMap<unit, trigger> g_targetToTrigger = new HashMap<unit, trigger>()
+HashMap<trigger, unit> g_triggerToTarget = new HashMap<trigger, unit>()
+HashMap<unit, group> g_targetToRepairingUnits = new HashMap<unit, group>()
+
+// ============================================================================
+public class FocusRepairComponent extends UnitComponent
+  private unit m_targetUnit
+
+  // --------------------------------------------------------------------------
+  construct (IUnitMetadata owner)
+    super(owner)
+
+  // --------------------------------------------------------------------------
+  override protected function onEnabled()
+    super.onEnabled()
+
+    Log.info("focus repair on")
+    
+    if (m_targetUnit != null)
+      registerRepairTargetUnit(m_targetUnit, getOwnerUnit())
+
+  // --------------------------------------------------------------------------
+  override protected function onDisabled()
+    super.onDisabled()
+
+    Log.info("focus repair off")
+
+    if (m_targetUnit != null)
+      unregisterRepairTargetUnit(m_targetUnit, getOwnerUnit())
+
+    m_targetUnit = null
+
+  // --------------------------------------------------------------------------
+  function getRepairTarget() returns unit
+    return m_targetUnit
+
+  // --------------------------------------------------------------------------
+  function setRepairTarget(unit target)
+    if (m_targetUnit == target)
+      return
+
+    Log.info("focus repair set target " + target.getName())
+    m_targetUnit = target
+
+    if (getEnabled())
+      registerRepairTargetUnit(target, getOwnerUnit())
+
+  // --------------------------------------------------------------------------
+  protected function onFocusRepairTargetHealthChange()
+    getOwnerUnit().issueTargetOrderById(OrderIds.repair, m_targetUnit)
+
+// ============================================================================
+public function IUnitMetadata.getFocusRepairComponent() returns FocusRepairComponent
+  return this.getComponent(FocusRepairComponent.typeId) castTo FocusRepairComponent
+
+// ============================================================================
+public function IUnitMetadata.getOrAddFocusRepairComponent() returns FocusRepairComponent
+  var component = this.getFocusRepairComponent()
+  if (component == null)
+    component = this.addComponent(new FocusRepairComponent(this), false) castTo FocusRepairComponent
+  return component
+
+// ============================================================================
+public function unit.getFocusRepairComponent() returns FocusRepairComponent
+  let metadata = this.getMetadata()
+  return metadata != null ? metadata.getFocusRepairComponent() : null
+
+// ============================================================================
+public function unit.getOrAddFocusRepairComponent() returns FocusRepairComponent
+  let metadata = this.getMetadata()
+  return metadata != null ? metadata.getOrAddFocusRepairComponent() : null
+
+// ============================================================================
+function registerRepairTargetUnit(unit targetUnit, unit repairingUnit)
+
+  Log.info("focus repair added " + repairingUnit.getName() + " -> " + targetUnit.getName())
+
+  var targetUnitHealthChangedTrigger = g_targetToTrigger.get(targetUnit)
+  if (targetUnitHealthChangedTrigger == null)
+    targetUnitHealthChangedTrigger = CreateTrigger()
+    targetUnitHealthChangedTrigger.registerUnitStateEvent(targetUnit, UNIT_STATE_LIFE, LESS_THAN, targetUnit.getMaxHP())
+    targetUnitHealthChangedTrigger.addCondition(Condition(function onFocusRepairTargetHealthChangeStatic))
+    g_triggerToTarget.put(targetUnitHealthChangedTrigger, targetUnit)
+    g_targetToTrigger.put(targetUnit, targetUnitHealthChangedTrigger)
+
+  var focusRepairGroup = g_targetToRepairingUnits.get(targetUnit)
+  if (focusRepairGroup == null)
+    focusRepairGroup = getGroup()
+    g_targetToRepairingUnits.put(targetUnit, focusRepairGroup)
+  
+  focusRepairGroup.addUnit(repairingUnit)
+
+// ============================================================================
+function unregisterRepairTargetUnit(unit targetUnit, unit repairingUnit)
+  
+  Log.info("focus repair removed " + repairingUnit.getName() + " -> " + targetUnit.getName())
+
+  let focusRepairGroup = g_targetToRepairingUnits.get(targetUnit)
+  if (focusRepairGroup == null)
+    return
+
+  focusRepairGroup.removeUnit(repairingUnit)
+  focusRepairGroup.refresh()
+
+  if (not focusRepairGroup.isEmpty())
+    return
+    
+  Log.info("focus repair deleting trigger " + targetUnit.getName())
+
+  let targetUnitHealthChangedTrigger = g_targetToTrigger.get(targetUnit)
+  if (targetUnitHealthChangedTrigger != null)
+    g_triggerToTarget.remove(targetUnitHealthChangedTrigger)
+    g_targetToTrigger.remove(targetUnit)
+    targetUnitHealthChangedTrigger.destr()
+
+  g_targetToRepairingUnits.remove(targetUnit)
+  focusRepairGroup.release()  
+
+// ============================================================================
+function onFocusRepairTargetHealthChangeStatic()
+
+  let targetUnit = g_triggerToTarget.get(GetTriggeringTrigger())
+  if (targetUnit == null)
+    return
+  
+  Log.info("focus repair target health changed " + targetUnit.getName())
+
+  let repairingUnitGroup = g_targetToRepairingUnits.get(targetUnit)
+  if (repairingUnitGroup == null)
+    return
+
+  for repairingUnit in repairingUnitGroup
+    let comp = repairingUnit.getFocusRepairComponent()
+    if (comp != null and comp.getRepairTarget() == targetUnit)
+      comp.onFocusRepairTargetHealthChange()
+
+// ============================================================================
+function onRepairAdd()
+
+  let repairingUnit = getRepairingUnit()
+  let targetUnit = getRepairTargetUnit()
+
+  let focusRepairComp = repairingUnit.getFocusRepairComponent()
+  if (focusRepairComp != null)
+    focusRepairComp.setRepairTarget(targetUnit)
+
+// ============================================================================
+function onUnitIssuedOrder()
+  let issuedOrder = GetIssuedOrderId()
+  if (issuedOrder != OrderIds.repairon and issuedOrder != OrderIds.repairoff)
+    return
+  
+  let orderedUnit = GetOrderedUnit()
+  let focusRepairComp = orderedUnit.getFocusRepairComponent()
+  if (focusRepairComp != null)
+    focusRepairComp.setEnabled(issuedOrder == OrderIds.repairoff)
+
+// ============================================================================
+function onUnitDeath()
+  let targetUnit = GetDyingUnit()
+
+  let repairingUnitGroup = g_targetToRepairingUnits.get(targetUnit)
+  if (repairingUnitGroup == null)
+    return
+
+  while not repairingUnitGroup.isEmpty()
+    let repairingUnit = repairingUnitGroup.getFirst()
+    unregisterRepairTargetUnit(targetUnit, repairingUnit)
+  
+  if (g_targetToRepairingUnits.has(targetUnit))
+    error("Failed to unregister repair units")
+
+// ============================================================================
+init
+
+  registerRepairAdd(function onRepairAdd)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ISSUED_ORDER, function onUnitIssuedOrder)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_DEATH, function onUnitDeath)
