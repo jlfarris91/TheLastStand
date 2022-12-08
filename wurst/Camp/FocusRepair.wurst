@@ -1,0 +1,52 @@
+package FocusRepair
+import Orders
+import RegisterEvents
+import GameConstants
+import UnitExtensions
+
+group g_tempGroup = CreateGroup()
+group g_activeRepairers = CreateGroup()
+boolexpr g_isFilterUnitRepairer = Condition(function isFilterUnitRepairer)
+
+// ============================================================================
+function isFilterUnitRepairer() returns bool
+  let filterUnit = GetFilterUnit()
+
+  if (not g_activeRepairers.contains(filterUnit))
+    return false
+
+  let currentOrderId = filterUnit.getCurrentOrder()
+
+  if (currentOrderId != OrderIds.repair and
+      currentOrderId != OrderIds.stop)
+    return false
+
+  return true
+
+// ============================================================================
+function onUnitDamaged()
+  let damagedUnit = GetTriggerUnit()
+  if (not damagedUnit.isStructure())
+    return
+
+  let damagedOwner = damagedUnit.getOwner()
+
+  g_tempGroup.enumUnitsInRange(damagedUnit.getPos(), SURVIVOR_ACQUISITION_RANGE, g_isFilterUnitRepairer)
+
+  for u in g_tempGroup
+    if (u.isAllyOf(damagedOwner))
+      u.issueTargetOrderById(OrderIds.repair, damagedUnit)
+
+// ============================================================================
+function onUnitIssuedOrder()
+  let issuedOrder = GetIssuedOrderId()
+  if (issuedOrder == OrderIds.repairon)
+    g_activeRepairers.addUnit(GetOrderedUnit())
+  else if (issuedOrder == OrderIds.repairoff)
+    g_activeRepairers.removeUnit(GetOrderedUnit())
+
+// ============================================================================
+init
+
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_DAMAGED, function onUnitDamaged)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ISSUED_ORDER, function onUnitIssuedOrder)
