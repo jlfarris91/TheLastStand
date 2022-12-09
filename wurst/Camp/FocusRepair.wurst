@@ -4,9 +4,18 @@ import RegisterEvents
 import GameConstants
 import UnitExtensions
 
-group g_tempGroup = CreateGroup()
+group g_tempGroup1 = CreateGroup()
+group g_tempGroup2 = CreateGroup()
 group g_activeRepairers = CreateGroup()
 boolexpr g_isFilterUnitRepairer = Condition(function isFilterUnitRepairer)
+boolexpr g_isFilterUnitDamagedStructure = Condition(function isFilterUnitDamagedStructure)
+
+// ============================================================================
+function isFilterUnitDamagedStructure() returns bool
+  let filterUnit = GetFilterUnit()
+  if (not filterUnit.isStructure())
+    return false
+  return filterUnit.getHP() < filterUnit.getMaxHP()
 
 // ============================================================================
 function isFilterUnitRepairer() returns bool
@@ -31,11 +40,35 @@ function onUnitDamaged()
 
   let damagedOwner = damagedUnit.getOwner()
 
-  g_tempGroup.enumUnitsInRange(damagedUnit.getPos(), SURVIVOR_ACQUISITION_RANGE, g_isFilterUnitRepairer)
+  g_tempGroup1.enumUnitsInRange(
+    damagedUnit.getPos(),
+    SURVIVOR_ACQUISITION_RANGE,
+    g_isFilterUnitRepairer)
 
-  for u in g_tempGroup
+  for u in g_tempGroup1
     if (u.isAllyOf(damagedOwner))
-      u.issueTargetOrderById(OrderIds.repair, damagedUnit)
+      repairNextTarget(u)
+
+// ============================================================================
+function repairNextTarget(unit repairingUnit)
+  let ownerPlayer = repairingUnit.getOwner()
+
+  g_tempGroup2.enumUnitsInRange(
+    repairingUnit.getPos(),
+    SURVIVOR_ACQUISITION_RANGE,
+    g_isFilterUnitDamagedStructure)
+
+  unit targetWithLeastHealth = null
+  real minHealth = REAL_MAX
+
+  for structure in g_tempGroup2
+    if (structure.isAllyOf(ownerPlayer))
+      let hp = structure.getHP()
+      if (hp < minHealth)
+        targetWithLeastHealth = structure
+        minHealth = hp
+
+  repairingUnit.issueTargetOrderById(OrderIds.repair, targetWithLeastHealth)
 
 // ============================================================================
 function onUnitIssuedOrder()
