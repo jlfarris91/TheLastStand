@@ -1,4 +1,4 @@
-package HeroAbility_Blundershot
+package HeroAbility_Lineshot
 import ChannelAbilityPreset
 import Math
 import RealExtensions
@@ -18,9 +18,9 @@ constant rangeReal ABIL_DAMAGE_DISTANCE_SCALE = rangeReal(1.0, 0.5)
 constant SoundDefinition g_attackSound = new SoundDefinition("units\\human\\rifleman\\riflemanattack1.flac", false, true)
 
 // ============================================================================
-class Blundershot
-  static constant int ABILITY_ID = TlsAbilityIds.Hero.blundershot
-  static constant int ABILITY_LEARN_ID = TlsAbilityIds.Hero.blundershot_learn
+class Lineshot
+  static constant int ABILITY_ID = TlsAbilityIds.Hero.lineshot
+  static constant int ABILITY_LEARN_ID = TlsAbilityIds.Hero.lineshot_learn
 
   // --------------------------------------------------------------------------
   static function getDamageScalar01(int effectiveAbilityLevel) returns real
@@ -28,7 +28,7 @@ class Blundershot
 
   // --------------------------------------------------------------------------
   static function getTooltipNormal(int effectiveAbilityLevel, int learnedAbilityLevel) returns string
-    return "Blundershot - [{0}]".format("Level {0}".format(
+    return "Lineshot - [{0}]".format("Level {0}".format(
       effectiveAbilityLevel.toString()).colorizeTooltipForHeroAbility(effectiveAbilityLevel, learnedAbilityLevel))
 
   // --------------------------------------------------------------------------
@@ -42,32 +42,32 @@ class Blundershot
 
   // --------------------------------------------------------------------------
   static function getTooltipNormalExtended(int effectiveAbilityLevel, int learnedAbilityLevel) returns string
-    return "Fires a spread of projectiles that deal {0} of your base damage to targets in their path. Targets receive less damage the further away they are. Hits air units.".format(
+    return "Fires a projectile that deals {0} of your base damage in a line. Each target hit reduces the damage by 50%. Hits air units.".format(
       getDamageScalar01(effectiveAbilityLevel).toPercentageString01().colorizeTooltipForHeroAbility(effectiveAbilityLevel, learnedAbilityLevel))
 
 // ============================================================================
-public class BlundershotComponent extends HeroAbilityComponent
+public class LineshotComponent extends HeroAbilityComponent
 
   SmartValue damageScale01 = new SmartValue(1.0)
 
   // --------------------------------------------------------------------------
   construct (IUnitMetadata owner)
-    super(owner, Blundershot.ABILITY_ID, Blundershot.ABILITY_LEARN_ID)
+    super(owner, Lineshot.ABILITY_ID, Lineshot.ABILITY_LEARN_ID)
 
   // --------------------------------------------------------------------------
   override protected function updateAbilityState()
     super.updateAbilityState()
   
     let abilityLevelAdjusted = abilityLevel.getIntValue()
-    damageScale01.setBase(Blundershot.getDamageScalar01(abilityLevelAdjusted))
+    damageScale01.setBase(Lineshot.getDamageScalar01(abilityLevelAdjusted))
 
   // --------------------------------------------------------------------------
   protected override function getTooltipNormal(int effectiveAbilityLevel, int learnedAbilityLevel) returns string
-    return Blundershot.getTooltipNormal(effectiveAbilityLevel, learnedAbilityLevel)
+    return Lineshot.getTooltipNormal(effectiveAbilityLevel, learnedAbilityLevel)
     
   // --------------------------------------------------------------------------
   protected override function getTooltipNormalExtended(int effectiveAbilityLevel, int learnedAbilityLevel) returns string
-    return Blundershot.getTooltipNormalExtended(effectiveAbilityLevel, learnedAbilityLevel)
+    return Lineshot.getTooltipNormalExtended(effectiveAbilityLevel, learnedAbilityLevel)
 
   // --------------------------------------------------------------------------
   override protected function onCastPoint(int _abilityId, vec2 target)
@@ -75,7 +75,7 @@ public class BlundershotComponent extends HeroAbilityComponent
     let ownerUnit = getOwnerUnit()
     let ownerPlayer = ownerUnit.getOwner()
 
-    let distance = ownerUnit.getAbility(Blundershot.ABILITY_ID).getField(ABILITY_RLF_CAST_RANGE, ownerUnit.getAbilityLevel(Blundershot.ABILITY_ID))
+    let distance = ownerUnit.getAbility(Lineshot.ABILITY_ID).getField(ABILITY_RLF_CAST_RANGE, ownerUnit.getAbilityLevel(Lineshot.ABILITY_ID))
 
     let startPos = ownerUnit.getPos()
     let endPos = startPos + (target - startPos).norm() * distance
@@ -85,72 +85,84 @@ public class BlundershotComponent extends HeroAbilityComponent
     Func2<ArcProjectile, unit, bool> unitFilter = (as, u) ->
       return u.isAlive() and u.isEnemyOf(ownerPlayer)
 
-    Action2<ArcProjectile, unit> callback = (as, u) ->
-      DamageEvent.setNextDamageFromCode()
-      DamageEvent.setNextDamageId(Blundershot.ABILITY_ID)
-      DamageEvent.setNextDamageElement(DAMAGE_ELEMENT_ATTACK)
-      let scale = ABIL_DAMAGE_DISTANCE_SCALE.lerp(parameterize(startPos, endPos, u.getPos()))
-      ownerUnit.damageTarget(u, finalDamage * scale, true, true, ATTACK_TYPE_CHAOS)
+    let callback = new ProjectileDamageCallback()
+    callback.ownerUnit = ownerUnit
+    callback.damage = finalDamage
+    callback.scalar = 0.25
 
-    let fx = addEffect("Abilities\\Spells\\NightElf\\FanOfKnives\\FanOfKnivesMissile.mdl", startPos)
+    let fx = addEffect("Abilities\\Weapons\\Banditmissile\\Banditmissile.mdl", startPos)
     ..setOrientation(startPos.angleTo(endPos).radians, 0.0, 0.0)
 
-    new ArcProjectile(ownerUnit, fx, startPos, endPos, 64.0, 96.0, 1000, 0.05, unitFilter, callback)
+    new ArcProjectile(ownerUnit, fx, startPos, endPos, 64.0, 64.0, 1000, 0.05, unitFilter, callback)
 
     g_attackSound.playOnPoint(startPos.toVec3())
 
 // ============================================================================
-public function IUnitMetadata.getBlundershotComponent() returns BlundershotComponent
-  return this.getComponent(BlundershotComponent.typeId) castTo BlundershotComponent
+public function IUnitMetadata.getLineshotComponent() returns LineshotComponent
+  return this.getComponent(LineshotComponent.typeId) castTo LineshotComponent
 
 // ============================================================================
-public function IUnitMetadata.getOrAddBlundershotComponent() returns BlundershotComponent
-  var component = this.getBlundershotComponent()
+public function IUnitMetadata.getOrAddLineshotComponent() returns LineshotComponent
+  var component = this.getLineshotComponent()
   if (component == null)
-    component = this.addComponent(new BlundershotComponent(this)) castTo BlundershotComponent
+    component = this.addComponent(new LineshotComponent(this)) castTo LineshotComponent
   return component
 
 // ============================================================================
-public function unit.getBlundershotComponent() returns BlundershotComponent
+public function unit.getLineshotComponent() returns LineshotComponent
   let metadata = this.getMetadata()
-  return metadata != null ? metadata.getBlundershotComponent() : null
+  return metadata != null ? metadata.getLineshotComponent() : null
 
 // ============================================================================
-public function unit.getOrAddBlundershotComponent() returns BlundershotComponent
+public function unit.getOrAddLineshotComponent() returns LineshotComponent
   let metadata = this.getMetadata()
-  return metadata != null ? metadata.getOrAddBlundershotComponent() : null
+  return metadata != null ? metadata.getOrAddLineshotComponent() : null
+
+// ============================================================================
+class ProjectileDamageCallback extends Action2<ArcProjectile, unit>
+  unit ownerUnit
+  real damage
+  real scalar
+
+  // --------------------------------------------------------------------------
+  override function call(ArcProjectile arg1, unit target)
+    DamageEvent.setNextDamageFromCode()
+    DamageEvent.setNextDamageId(Lineshot.ABILITY_ID)
+    DamageEvent.setNextDamageElement(DAMAGE_ELEMENT_ATTACK)
+    ownerUnit.damageTarget(target, damage, true, true, ATTACK_TYPE_CHAOS)
+    damage = damage * scalar
 
 // ============================================================================
 @compiletime function createObjects()
 
-  new ChannelAbilityPreset(Blundershot.ABILITY_ID, 10, true)
+  new ChannelAbilityPreset(Lineshot.ABILITY_ID, 10, true)
     ..setupHeroAbilityGroup(HeroAbilityGroup.R)
     ..presetTargetTypes(Targettype.POINT)
     ..presetOption(Option.VISIBLE, true)
     ..presetOption(Option.PHYSICALSPELL, true)
-    ..setName("Blundershot")
-    ..presetTooltipNormal(lvl -> Blundershot.getTooltipNormal(lvl, lvl))
-    ..presetTooltipNormalExtended(lvl -> Blundershot.getTooltipNormalExtended(lvl, lvl))
+    ..setName("Lineshot")
+    ..presetTooltipNormal(lvl -> Lineshot.getTooltipNormal(lvl, lvl))
+    ..presetTooltipNormalExtended(lvl -> Lineshot.getTooltipNormalExtended(lvl, lvl))
     ..presetCastingTime(lvl -> (5. / 30.) * 1.267)
-    ..presetCastRange(lvl -> 600)
+    ..presetCastRange(lvl -> 800)
     ..presetTargetsAllowed(lvl -> "ground,air,enemy,vulnerable")
     ..setAnimationNames("spell,attack,throw")
     ..setIconNormal(Icons.bTNHumanMissileUpTwo)
-    ..presetCooldown(lvl -> Blundershot.getCooldown(lvl))
-    ..presetManaCost(lvl -> Blundershot.getManaCost(lvl))
+    ..presetCooldown(lvl -> Lineshot.getCooldown(lvl))
+    ..presetManaCost(lvl -> Lineshot.getManaCost(lvl))
 
-  new HeroLearnAbilityDefinition(Blundershot.ABILITY_LEARN_ID, 3)
+  new HeroLearnAbilityDefinition(Lineshot.ABILITY_LEARN_ID, 3)
     ..setupHeroAbilityGroup(HeroAbilityGroup.R, 0)
-    ..setName("Blundershot")
-    ..setTooltipLearn("Learn Blundershot - [|cFFFFCC00 Level %d|r]")
-    ..setTooltipLearnExtended("Fires a spread of projectiles that deal damage to targets in their path. Targets receive less damage the further away they are.|n|n|cFFFFCC00Level 1|r - Deals {0} of the unit's base damage|n|cFFFFCC00Level 2|r - Deals {1} of the unit's base damage|n|cFFFFCC00Level 3|r - Deals {2} of the unit's base damage".format(
-      Blundershot.getDamageScalar01(1).toPercentageString01(),
-      Blundershot.getDamageScalar01(2).toPercentageString01(),
-      Blundershot.getDamageScalar01(3).toPercentageString01()))
+    ..setName("Lineshot")
+    ..setTooltipLearn("Learn Lineshot - [|cFFFFCC00 Level %d|r]")
+    ..setTooltipLearnExtended("Fires a projectile that deals damage to targets in a line. Each target hit reduces further damage dealt by 25%. Hits air units.|n|n|cFFFFCC00Level 1|r - Deals {0} of the unit's base damage|n|cFFFFCC00Level 2|r - Deals {1} of the unit's base damage|n|cFFFFCC00Level 3|r - Deals {2} of the unit's base damage".format(
+      Lineshot.getDamageScalar01(1).toPercentageString01(),
+      Lineshot.getDamageScalar01(2).toPercentageString01(),
+      Lineshot.getDamageScalar01(3).toPercentageString01()))
     ..setIconResearch(Icons.bTNHumanMissileUpTwo)
-    ..presetCooldown(lvl -> Blundershot.getCooldown(lvl))
-    ..presetManaCost(lvl -> Blundershot.getManaCost(lvl))
+    ..presetCooldown(lvl -> Lineshot.getCooldown(lvl))
+    ..presetManaCost(lvl -> Lineshot.getManaCost(lvl))
 
 // ============================================================================
 init
-  registerHeroAbilityComponent(BlundershotComponent.typeId)
+  registerHeroAbilityComponent(LineshotComponent.typeId)

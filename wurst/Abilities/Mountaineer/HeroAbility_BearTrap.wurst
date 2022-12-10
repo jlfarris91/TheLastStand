@@ -1,0 +1,310 @@
+package HeroAbility_BearTrap
+import RealExtensions
+import ChannelAbilityPreset
+import UnitIds
+import UnitIndexer
+import DummyCaster
+import Math
+import Orders
+import BuffObjEditing
+import HeroAbilities
+import TlsAbilityIds
+import ClosureTimers
+import Execute
+import DisplayTextToPlayer
+import TlsSounds
+import ColorUtility
+
+constant int DUMMY_ID = compiletime(UNIT_ID_GEN.next())
+constant int CLOUD_ABIL_ID = compiletime(ABIL_ID_GEN.next())
+constant int CLOUD_BUFF_ID = compiletime(BUFF_ID_GEN.next())
+constant int DUMMY_PROJECTILE_ABIL_ID = compiletime(ABIL_ID_GEN.next())
+constant real CLOUD_AOE = 300.0
+constant real CLOUD_DURATION = 15.0
+
+group g_castingBearTraps = CreateGroup()
+
+// ============================================================================
+class BearTrap
+
+  // --------------------------------------------------------------------------
+  static function getChanceToMissPercentage01(int effectiveAbilityLevel) returns real
+    return clamp01(lerp(0.3, 1.0, parameterize(1, 3, effectiveAbilityLevel)))
+
+  // --------------------------------------------------------------------------
+  static function getAttackSpeedModifier(int effectiveAbilityLevel) returns real
+    return lerp(-0.1, -0.3, parameterize(1, 3, effectiveAbilityLevel))
+
+  // --------------------------------------------------------------------------
+  static function getMovementSpeedModifier(int effectiveAbilityLevel) returns real
+    return lerp(-0.1, -0.3, parameterize(1, 3, effectiveAbilityLevel))
+
+  // --------------------------------------------------------------------------
+  static function getManaCost(int effectiveAbilityLevel) returns int
+    return lerpInt(150, 350, parameterize(1, 3, effectiveAbilityLevel))
+
+  // --------------------------------------------------------------------------
+  static function getCooldown(int effectiveAbilityLevel) returns real
+    return lerp(40.0, 25.0, parameterize(1, 3, effectiveAbilityLevel))
+
+  // --------------------------------------------------------------------------
+  static function getTooltipNormal(int effectiveAbilityLevel, int learnedAbilityLevel) returns string
+    return "Smoke Grenade - [{0}]".format("Level {0}".format(
+      effectiveAbilityLevel.toString()).colorizeTooltipForHeroAbility(effectiveAbilityLevel, learnedAbilityLevel))
+
+  // --------------------------------------------------------------------------
+  static function getTooltipNormalExtended(int effectiveAbilityLevel, int learnedAbilityLevel) returns string
+    return "Throws a smoke grenade at a target area causing all enemies within to have a {0} chance to miss attacks and have {1} reduced attack speed for {2} seconds.|n|n{3}".format(
+      getChanceToMissPercentage01(effectiveAbilityLevel).toPercentageString01().colorizeTooltipForHeroAbility(effectiveAbilityLevel, learnedAbilityLevel),
+      (-getAttackSpeedModifier(effectiveAbilityLevel)).toPercentageString01().colorizeTooltipForHeroAbility(effectiveAbilityLevel, learnedAbilityLevel),
+      CLOUD_DURATION.toInt().toString(),
+      "Affects friendly units!".colorize(Colors.red))
+
+// ============================================================================
+public class BearTrapComponent extends HeroAbilityComponent
+  protected vec2 m_lastTargetPoint
+  
+  // --------------------------------------------------------------------------
+  construct(IUnitMetadata owner)
+    super(owner, TlsAbilityIds.Hero.bearTrap, TlsAbilityIds.Hero.bearTrap_learn)
+
+  // --------------------------------------------------------------------------
+  override protected function onDisabled()
+    super.onDisabled()
+    g_castingBearTraps.removeUnit(getOwnerUnit())
+
+  // --------------------------------------------------------------------------
+  override protected function onCastPoint(int _abilityId, vec2 target)
+    let ownerUnit = getOwnerUnit()
+
+    m_lastTargetPoint = target
+    g_castingBearTraps.addUnit(ownerUnit)
+
+    // Log.info("onCastPoint")
+
+    let dummy = new DummyCaster()
+      ..origin(ownerUnit.getPos())
+      ..owner(ownerUnit.getOwner())
+      ..delay(10.0)
+  
+    if (dummy.castPoint(DUMMY_PROJECTILE_ABIL_ID, 1, OrderIds.summonfactory, target) == null)
+    //{
+      // Refund since the ability failed to cast
+      ownerUnit.resetAbilityCooldown(TlsAbilityIds.Hero.bearTrap)
+      ownerUnit.addMana(BearTrap.getManaCost(getEffectiveAbilityLevel()).toReal())
+
+      displayMessageToPlayer(ownerUnit.getOwner(), "Unable to target there.".colorize(Colors.gold))
+      TlsSounds.errorSoundDef.playForPlayer(ownerUnit.getOwner())
+    //}
+
+  // --------------------------------------------------------------------------
+  protected function onMissileLanded()
+    let ownerUnit = getOwnerUnit()
+
+    // Log.info("onMissileLanded 1")
+
+    try() () -> 
+    //{
+      let caster = new DummyCaster()
+        ..owner(ownerUnit.getOwner())
+        ..origin(m_lastTargetPoint)
+        ..delay(CLOUD_DURATION)
+
+      let effectiveAbilityLevel = getEffectiveAbilityLevel()
+    
+      if (caster.castPoint(CLOUD_ABIL_ID, effectiveAbilityLevel, OrderIds.cloudoffog, m_lastTargetPoint) == null)
+      //{
+        Log.error("Failed to cast lvl {0} cloud ability!".format(effectiveAbilityLevel.toString()))
+        // Refund since the ability failed to cast
+        ownerUnit.resetAbilityCooldown(TlsAbilityIds.Hero.bearTrap)
+        ownerUnit.addMana(BearTrap.getManaCost(effectiveAbilityLevel).toReal())
+      //}
+      else
+      //{
+        let circlefx = addEffect("circle.mdl", m_lastTargetPoint)
+          ..setPos(m_lastTargetPoint)
+          ..setScale(CLOUD_AOE / 64.0)
+          ..setColor(colorA(150, 150, 150, 50))
+        doAfter(CLOUD_DURATION, () -> circlefx.destr())
+      //}
+    //}
+
+    // Log.info("onMissileLanded 2")
+
+    m_lastTargetPoint = ZERO2
+    g_castingBearTraps.removeUnit(ownerUnit)
+
+    // Log.info("onMissileLanded 3")
+
+  // --------------------------------------------------------------------------
+  protected override function getTooltipNormal(int effectiveAbilityLevel, int learnedAbilityLevel) returns string
+    return BearTrap.getTooltipNormal(effectiveAbilityLevel, learnedAbilityLevel)
+    
+  // --------------------------------------------------------------------------
+  protected override function getTooltipNormalExtended(int effectiveAbilityLevel, int learnedAbilityLevel) returns string
+    return BearTrap.getTooltipNormalExtended(effectiveAbilityLevel, learnedAbilityLevel)
+
+// ============================================================================
+public function IUnitMetadata.getBearTrapComponent() returns BearTrapComponent
+  return this.getComponent(BearTrapComponent.typeId) castTo BearTrapComponent
+
+// ============================================================================
+public function IUnitMetadata.getOrAddBearTrapComponent() returns BearTrapComponent
+  var component = this.getBearTrapComponent()
+  if (component == null)
+    component = this.addComponent(new BearTrapComponent(this)) castTo BearTrapComponent
+  return component
+
+// ============================================================================
+public function unit.getBearTrapComponent() returns BearTrapComponent
+  let metadata = this.getMetadata()
+  return metadata != null ? metadata.getBearTrapComponent() : null
+
+// ============================================================================
+public function unit.getOrAddBearTrapComponent() returns BearTrapComponent
+  let metadata = this.getMetadata()
+  return metadata != null ? metadata.getOrAddBearTrapComponent() : null
+
+// ============================================================================
+function onUnitIndexed()
+  let indexingUnit = getIndexingUnit()
+  if (indexingUnit.getTypeId() != DUMMY_ID)
+    return
+
+  // Log.info("onUnitIndexed 1 smoke grenade dummy")
+
+  let dummyUnitPos = indexingUnit.getPos()
+
+  real closestDistance = REAL_MAX
+  BearTrapComponent closestCaster = null
+    
+  for castingUnit in g_castingBearTraps
+    let comp = castingUnit.getBearTrapComponent()
+    if (comp != null and comp.getEnabled())
+      let dd = dummyUnitPos.distanceToSq(comp.m_lastTargetPoint)
+      if (dd < closestDistance)
+        closestDistance = dd
+        closestCaster = comp
+  
+  if (closestCaster == null)
+    Log.error("Not sure who smoke grenade dummy unit belongs to")
+    return
+
+  // Log.info("onUnitIndexed 2 found caster target")
+
+  closestCaster.onMissileLanded()
+
+  indexingUnit.remove()
+
+  // Log.info("onUnitIndexed 3")
+
+// ============================================================================
+@compiletime function createObjects()
+
+  new UnitDefinition(DUMMY_ID, UnitIds.wisp)
+    ..setNameEditorSuffix("(Smoke Grenade DUMMY_ID)")
+    ..setScalingValue(0.01)
+    ..setNormalAbilities(commaList(AbilityIds.invulnerable, AbilityIds.locust))
+    ..setSightRadiusDay(1)
+    ..setSightRadiusNight(1)
+    ..setArtSpecial("")
+    ..setModelFile("dummy.mdl")
+    ..setCollisionSize(0.0)
+    ..setFoodCost(0)
+    ..setFoodProduced(0)
+    ..setAttacksEnabled(0)
+
+  new BuffDefinition(CLOUD_BUFF_ID, 'bclf')
+    ..setName("Smoke Grenade")
+    ..setEditorSuffix(1, "(Smoke Grenade CLOUD_BUFF_ID)")
+    ..setTooltipNormal(1, "Smoke Grenade")
+    ..setTooltipNormalExtended(1, "This unit is inside of a thick cloud of smoke causing it to miss attacks.")
+  
+  new AbilityDefinitionCloudofFog(CLOUD_ABIL_ID)
+    ..setEditorSuffix("(Smoke Grenade CLOUD_ABIL_ID)")
+    ..setLevels(10)
+    ..setItemAbility(false)
+    ..presetAreaofEffect(lvl -> CLOUD_AOE)
+    ..presetAttackSpeedModifier(lvl -> BearTrap.getAttackSpeedModifier(lvl))
+    ..presetAttacksPrevented(lvl -> 0)
+    ..presetChanceToMiss(lvl -> BearTrap.getChanceToMissPercentage01(lvl))
+    ..presetMovementSpeedModifier(lvl -> BearTrap.getMovementSpeedModifier(lvl))
+    ..presetBuffs(lvl -> CLOUD_BUFF_ID.toRawCode())
+    ..presetEffects(lvl -> commaList('Xclf'))
+    ..presetTargetsAllowed(lvl -> "ground,vulnerable,invulnerable")
+    ..presetDurationHero(lvl -> CLOUD_DURATION)
+    ..presetDurationNormal(lvl -> CLOUD_DURATION)
+    ..presetManaCost(lvl -> 0)
+    ..presetCooldown(lvl -> 0)
+    ..presetCastRange(lvl -> 9999)
+    ..setRequirements("")
+  
+  new AbilityDefinitionCloudofFog(TlsAbilityIds.Hero.bearTrap)
+    ..setEditorSuffix("(Smoke Grenade TlsAbilityIds.Hero.bearTrap)")
+    ..setupHeroAbilityGroup(HeroAbilityGroup.E)
+    ..setLevels(10)
+    ..setItemAbility(false)
+    ..setAnimationNames("spell,attack,throw")
+    ..presetTooltipNormal(lvl -> BearTrap.getTooltipNormal(lvl, lvl))
+    ..presetTooltipNormalExtended(lvl -> BearTrap.getTooltipNormalExtended(lvl, lvl))
+    ..presetCastingTime(lvl -> (5. / 30.) * 1.267)
+    ..presetAreaofEffect(lvl -> CLOUD_AOE)
+    ..presetAttackSpeedModifier(lvl -> 0.0)
+    ..presetAttacksPrevented(lvl -> 0)
+    ..presetChanceToMiss(lvl -> 0.0)
+    ..presetMovementSpeedModifier(lvl -> 0.0)
+    ..presetBuffs(lvl -> "")
+    ..presetTargetsAllowed(lvl -> "")
+    ..presetDurationHero(lvl -> 0.1)
+    ..presetDurationNormal(lvl -> 0.1)
+    ..presetManaCost(lvl -> BearTrap.getManaCost(lvl))
+    // ..presetManaCost(lvl -> 0)
+    ..presetCooldown(lvl -> BearTrap.getCooldown(lvl))
+    // ..presetCooldown(lvl -> 1.0)
+    ..presetCastRange(lvl -> 900)
+    ..setRequirements("")
+
+  new AbilityDefinitionTinkererSummonFactoryLevel0(DUMMY_PROJECTILE_ABIL_ID)
+    ..setEditorSuffix("(Smoke Grenade DUMMY_PROJECTILE_ABIL_ID)")
+    ..setLevels(1)
+    ..setHeroAbility(false)
+    ..setName("Smoke Grenade")
+    ..presetCastRange(lvl -> 900)
+    ..presetAreaofEffect(lvl -> CLOUD_AOE)
+    ..presetTargetsAllowed(lvl -> "")
+    ..setAnimationNames("spell,attack,throw")
+    ..setIconNormal("replaceabletextures\\commandbuttons\\btnbeartrap.blp")
+    ..setMissileArt("Abilities\\Spells\\Other\\AcidBomb\\BottleMissile.mdl")
+    ..setMissileSpeed(400)
+    ..setMissileArc(0.5)
+    ..presetFactoryUnitID(lvl -> DUMMY_ID.toRawCode())
+    ..presetLeashRange(lvl -> 0.0)
+    ..presetSpawnInterval(lvl -> 300.0)
+    ..presetSpawnUnitDuration(lvl -> 0.0)
+    ..presetSpawnUnitOffset(lvl -> 99999.0)
+    ..presetBuffs(lvl -> "_")
+    ..presetCastRange(lvl -> 900)
+    ..presetManaCost(lvl -> 0)
+    ..presetDurationHero(lvl -> 0)
+    ..presetDurationNormal(lvl -> 0)
+    ..presetCooldown(lvl -> 0.0)
+
+  new HeroLearnAbilityDefinition(TlsAbilityIds.Hero.bearTrap_learn, 3)
+    ..setEditorSuffix("(Smoke Grenade TlsAbilityIds.Hero.bearTrap_learn)")
+    ..setupHeroAbilityGroup(HeroAbilityGroup.E, 0)
+    ..setName("Smoke Grenade")
+    ..setTooltipLearn("Learn Smoke Grenade - [|cFFFFCC00 Level %d|r]")
+    ..setTooltipLearnExtended("Throws a smoke grenade at a target area causing all enemies within to miss attacks for {6} seconds.|n|n|cFFFFCC00Level 1|r - {0} chance to miss and attack speed is reduced by {1}|n|cFFFFCC00Level 2|r - {2} chance to miss and attack speed is reduced by {3}|n|cFFFFCC00Level 3|r - {4} chance to miss and attack speed is reduced by {5}|n|n{6}".format(
+      BearTrap.getChanceToMissPercentage01(1).toPercentageString01(), (-BearTrap.getAttackSpeedModifier(1)).toPercentageString01(),
+      BearTrap.getChanceToMissPercentage01(2).toPercentageString01(), (-BearTrap.getAttackSpeedModifier(2)).toPercentageString01(),
+      BearTrap.getChanceToMissPercentage01(3).toPercentageString01(), (-BearTrap.getAttackSpeedModifier(3)).toPercentageString01(),
+      CLOUD_DURATION.toInt().toString(),
+      "Affects friendly units!".colorize(Colors.red)))
+    ..setIconResearch("replaceabletextures\\commandbuttons\\btnbeartrap.blp")
+    ..presetManaCost(lvl -> BearTrap.getManaCost(lvl))
+    ..presetCooldown(lvl -> BearTrap.getCooldown(lvl))
+
+// ============================================================================
+init
+  onUnitIndex(() -> onUnitIndexed())
+  registerHeroAbilityComponent(BearTrapComponent.typeId)
