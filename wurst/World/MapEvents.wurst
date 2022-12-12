@@ -10,8 +10,13 @@ import GroupUtils
 import LinkedList
 import initlater MapEventsInit
 import TlsUnitIds
+import LootableTypes
 
 LinkedList<MapEventTemplate> g_mapEventTemplates = new LinkedList<MapEventTemplate>()
+location g_tempLoc = Location(0, 0)
+destructable array g_enumDestructables
+int g_enumDestructablesCount
+boolexpr g_filterUnitIsLootable = Condition(function filterUnitIsLootable)
 
 // ============================================================================
 public class MapEventTemplate
@@ -20,7 +25,7 @@ public class MapEventTemplate
   private IterableMap<int, Vector<MapEventUnitSpawner>> m_unitSpawnersByTypeId = new IterableMap<int, Vector<MapEventUnitSpawner>>()
   private Vector<MapEventUnitSpawner> m_unitSpawners
   private Vector<MapEventDestructableSpawner> m_destructableSpawners
-  private Vector<MapEventDestructableRemover> m_destructableRemovers
+  private Vector<MapEventAreaCleaner> m_areaCleaners
   private Vector<MapEventTileSpawner> m_tileSpawners
 
   // --------------------------------------------------------------------------
@@ -28,7 +33,7 @@ public class MapEventTemplate
     m_id = id
     m_unitSpawners = new Vector<MapEventUnitSpawner>(unitSpawnerCapacity)
     m_destructableSpawners = new Vector<MapEventDestructableSpawner>(destructableSpawnerCapacity)
-    m_destructableRemovers = new Vector<MapEventDestructableRemover>()
+    m_areaCleaners = new Vector<MapEventAreaCleaner>()
     m_tileSpawners = new Vector<MapEventTileSpawner>(tileSpawnerCapacity)
 
     g_mapEventTemplates.add(this)
@@ -78,11 +83,11 @@ public class MapEventTemplate
   function registerUnitSpawner(int unitTypeId, transform localTransform)
 
     if (unitTypeId == TlsUnitIds.mapEventDestRemover128)
-      registerDestRemover(128.0, localTransform)
+      registerAreaCleaner(128.0, localTransform)
       return
 
     if (unitTypeId == TlsUnitIds.mapEventDestRemover256)
-      registerDestRemover(256.0, localTransform)
+      registerAreaCleaner(256.0, localTransform)
       return
 
     var spawnOnCreate = true
@@ -118,13 +123,13 @@ public class MapEventTemplate
     Preload.registerDestructableTypeId(destructableTypeId, variation)
 
   // --------------------------------------------------------------------------
-  function registerDestRemover(real radius, vec2 localPos)
+  function registerAreaCleaner(real radius, vec2 localPos)
     let localTransform = transform(localPos.toVec3(), ZERO3, IDENTITYQ, 1.0)
-    registerDestRemover(radius, localTransform)
+    registerAreaCleaner(radius, localTransform)
 
   // --------------------------------------------------------------------------
-  function registerDestRemover(real radius, transform localTransform)
-    m_destructableRemovers.add(new MapEventDestructableRemover(radius, localTransform))
+  function registerAreaCleaner(real radius, transform localTransform)
+    m_areaCleaners.add(new MapEventAreaCleaner(radius, localTransform))
 
   // --------------------------------------------------------------------------
   function registerTileSpawner(int tilesetId, int variation, int localTileCornerX, int localTileCornerY)
@@ -164,11 +169,11 @@ public class MapEventTemplate
 
   // --------------------------------------------------------------------------
   function getDestRemoverCount() returns int
-    return m_destructableRemovers.size()
+    return m_areaCleaners.size()
 
   // --------------------------------------------------------------------------
-  function getDestRemover(int index) returns MapEventDestructableRemover
-    return m_destructableRemovers.get(index)
+  function getDestRemover(int index) returns MapEventAreaCleaner
+    return m_areaCleaners.get(index)
 
   // --------------------------------------------------------------------------
   function getTileSpawnerCount() returns int
@@ -193,7 +198,7 @@ public class MapEventInstance
   private MapEventTemplate m_template
   private group m_spawnedUnits
   private Vector<destructable> m_spawnedDestructables
-  private Vector<MapEventDestructableRemoverInstance> m_spawnedRemovers
+  private Vector<MapEventAreaCleanerInstance> m_spawnedRemovers
   private Vector<MapEventTileInstance> m_spawnedTiles
 
   // --------------------------------------------------------------------------
@@ -219,7 +224,7 @@ public class MapEventInstance
     cleanup()
 
     let destRemoverCount = m_template.getDestRemoverCount()
-    m_spawnedRemovers = new Vector<MapEventDestructableRemoverInstance>(destRemoverCount)
+    m_spawnedRemovers = new Vector<MapEventAreaCleanerInstance>(destRemoverCount)
     for i = 0 to destRemoverCount - 1
       let destRemover = m_template.getDestRemover(i)
       let instance = destRemover.spawn(m_worldTransform)
@@ -332,19 +337,20 @@ class MapEventDestructableSpawner
       worldTransform.scale,
       m_variation)
 
-location g_temp = Location(0, 0)
-destructable array g_destructables
-int g_destructablesCount
-
 // ============================================================================
 function enumDestructablesInCircle()
   let enumDest = GetEnumDestructable()
   if (enumDest.isAliveTrick())
-    g_destructables[g_destructablesCount] = enumDest
-    g_destructablesCount++
+    g_enumDestructables[g_enumDestructablesCount] = enumDest
+    g_enumDestructablesCount++
 
 // ============================================================================
-class MapEventDestructableRemover
+function filterUnitIsLootable() returns bool
+  let filterUnit = GetFilterUnit()
+  return filterUnit.isLootable()
+
+// ============================================================================
+class MapEventAreaCleaner
   private real m_radius
   private transform m_localTransform
 
@@ -354,17 +360,18 @@ class MapEventDestructableRemover
     m_localTransform = localTransform
 
   // --------------------------------------------------------------------------
-  function spawn(transform parentTransform) returns MapEventDestructableRemoverInstance
+  function spawn(transform parentTransform) returns MapEventAreaCleanerInstance
     let worldTransform = parentTransform.concat(m_localTransform)
-    let instance =  new MapEventDestructableRemoverInstance(m_radius, worldTransform)
+    let instance =  new MapEventAreaCleanerInstance(m_radius, worldTransform)
     instance.redo()
     return instance
 
 // ============================================================================
-class MapEventDestructableRemoverInstance
+class MapEventAreaCleanerInstance
   private real m_radius
   private transform m_worldTransform
   private LinkedList<destructable> m_destructables
+  private group m_units
 
   // --------------------------------------------------------------------------
   construct(real radius, transform worldTransform)
@@ -379,19 +386,24 @@ class MapEventDestructableRemoverInstance
   function redo()
 
     // Enum destructables in radius
-    MoveLocation(g_temp, m_worldTransform.pos.x, m_worldTransform.pos.y)
-    g_destructablesCount = 0
-    EnumDestructablesInCircleBJ(m_radius, g_temp, function enumDestructablesInCircle)
+    MoveLocation(g_tempLoc, m_worldTransform.pos.x, m_worldTransform.pos.y)
+    g_enumDestructablesCount = 0
+    EnumDestructablesInCircleBJ(m_radius, g_tempLoc, function enumDestructablesInCircle)
 
-    if (g_destructablesCount == 0)
-      return
+    if (g_enumDestructablesCount > 0)
+    //{
+      m_destructables = new LinkedList<destructable>()
 
-    m_destructables = new LinkedList<destructable>()
+      for i = 0 to g_enumDestructablesCount - 1
+        let dest = g_enumDestructables[i]
+        dest.show(false)
+        m_destructables.add(dest)
+    //}
 
-    for i = 0 to g_destructablesCount - 1
-      let dest = g_destructables[i]
-      dest.show(false)
-      m_destructables.add(dest)
+    m_units = getGroup()
+    m_units.enumUnitsInRange(m_worldTransform.pos.toVec2(), m_radius, g_filterUnitIsLootable)
+    for u in m_units
+      u.hide()
 
   // --------------------------------------------------------------------------
   function undo()
@@ -400,6 +412,12 @@ class MapEventDestructableRemoverInstance
         dest.show(true)
       destroy m_destructables
       m_destructables = null
+
+    if (m_units != null)
+      for u in m_units
+        u.show()
+      m_units.release()
+      m_units = null
 
 // ============================================================================
 class MapEventTileSpawner
