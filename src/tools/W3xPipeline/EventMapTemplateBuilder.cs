@@ -21,7 +21,7 @@ namespace W3xPipeline
         private static Tag IGNORE_TILESET_ID_TAG = Tag.FromString("Ztil");
         private static Tag UNIT_NAME_FIELD_ID = Tag.FromString("unam");
         private static Tag DEST_NAME_FIELD_ID = Tag.FromString("bnam");
-        private static Tag PLAYER_START_LOCATION_ID = 2;
+        private static Tag PLAYER_START_LOCATION_ID = Tag.FromString("sloc");
 
         private readonly LayeredFileSystem m_fileSystem;
         private readonly ILogger m_logger;
@@ -94,7 +94,7 @@ namespace W3xPipeline
                 m_logger.Log($"Done building {Path.GetDirectoryName(mapEventTemplateMapDir)}");
             }
 
-            var outputFilePath = $"D:\\Projects\\WarcraftIII\\TheLastStand\\wurst\\World\\__Generated\\MapEventTemplates.wurst";
+            var outputFilePath = $"D:\\Projects\\WarcraftIII\\TheLastStand\\wurst\\World\\MapEventsInit.wurst";
 
             File.WriteAllText(outputFilePath, GenerateWurst(mapEventTemplates));
 
@@ -110,11 +110,12 @@ namespace W3xPipeline
 
             sb.AppendLine("// This file is generated. Any changes will be lost.");
             sb.AppendLine($"// Last generated {DateTime.Now}");
-            sb.AppendLine($"package MapEventTemplates");
+            sb.AppendLine($"package MapEventsInit");
             sb.AppendLine($"import MapEvents");
             sb.AppendLine();
-            sb.AppendLine("@compiletime function createMapEventTemplates()");
-            sb.AppendLine($"{indentStr}Log.debug(\"Creating {mapEventTemplates.Count} map event templates...\")");
+            sb.AppendLine("// ============================================================================");
+            sb.AppendLine("public function registerMapEventTemplates()");
+            sb.AppendLine($"{indentStr}Log.debug(\"Registering {mapEventTemplates.Count} map event templates...\")");
 
             int i = 1;
             foreach (MapEventTemplate mapEventTemplate in mapEventTemplates)
@@ -138,19 +139,18 @@ namespace W3xPipeline
                 var destSpawnerCount = mapEventTemplate.DoodadPlacementFile.Placements.Destructables.Count;
                 var tileSpawnerCount = tilePoints.Count;
 
+                sb.AppendLine($"{indentStr}");
                 sb.AppendLine($"{indentStr}// --------------------------------------------------------------------------");
                 sb.AppendLine($"{indentStr}// Generated from {mapEventTemplate.MapFilePath} ");
                 sb.AppendLine($"{indentStr}// Unit Spawners: {unitSpawnerCount}");
                 sb.AppendLine($"{indentStr}// Dest Spawners: {destSpawnerCount}");
                 sb.AppendLine($"{indentStr}// Tile Spawners: {tileSpawnerCount}");
                 sb.AppendLine($"{indentStr}// --------------------------------------------------------------------------");
-
-                sb.AppendLine($"{indentStr}");
-                sb.AppendLine($"{indentStr}new MapEventTemplate({unitSpawnerCount}, {destSpawnerCount}, {tileSpawnerCount})");
+                sb.AppendLine($"{indentStr}new MapEventTemplate(\"{Path.GetFileNameWithoutExtension(mapEventTemplate.MapFilePath)}\", {unitSpawnerCount}, {destSpawnerCount}, {tileSpawnerCount})");
 
                 foreach (var unitPlacement in mapEventTemplate.UnitPlacementFile.Placements)
                 {
-                    if (unitPlacement.Id == Tag.Invalid)
+                    if (unitPlacement.Id == Tag.Invalid || unitPlacement.Id == PLAYER_START_LOCATION_ID)
                         continue;
 
                     var localPos = unitPlacement.Position;
@@ -163,7 +163,7 @@ namespace W3xPipeline
                         suffix = $" // {entityName}";
                     }
 
-                    sb.AppendLine($"{indentStr2}..registerUnitSpawner('{(Tag)unitPlacement.Id}', vec2({localPos.X:F1}, {localPos.Y:F1}), angle({localYaw}:F1)) {suffix}");
+                    sb.AppendLine($"{indentStr2}..registerUnitSpawner('{unitPlacement.Id}', vec3({localPos.X}, {localPos.Y}, {localPos.Z}), angle({localYaw})) {suffix}");
                 }
 
                 foreach (var destPlacement in mapEventTemplate.DoodadPlacementFile.Placements.Destructables)
@@ -178,20 +178,23 @@ namespace W3xPipeline
                         suffix = $" // {entityName}";
                     }
 
-                    sb.AppendLine($"{indentStr2}..registerDestSpawner('{(Tag)destPlacement.Id}', {destPlacement.Variation}, vec2({localPos.X:F1}, {localPos.Y:F1}), angle({localYaw}:F1)){suffix}");
+                    sb.AppendLine($"{indentStr2}..registerDestSpawner('{destPlacement.Id}', {destPlacement.Variation}, vec3({localPos.X}, {localPos.Y}, {localPos.Z}), angle({localYaw})){suffix}");
                 }
 
-                int centerTileX = mapEventTemplate.TerrainFile.Terrain.Width / 2;
-                int centerTileY = mapEventTemplate.TerrainFile.Terrain.Height / 2;
+                int centerTileX = (int)Math.Floor(mapEventTemplate.TerrainFile.Terrain.Width / 2.0f);
+                int centerTileY = (int)Math.Floor(mapEventTemplate.TerrainFile.Terrain.Height / 2.0f);
 
                 foreach (var tilePoint in tilePoints)
                 {
-                    var localPos = new Vector2(tilePoint.X - centerTileX, tilePoint.Y - centerTileY);
-                    sb.AppendLine($"{indentStr2}..registerTileSpawner('{(Tag)tilePoint.GroundTextureId}', {tilePoint.GroundVariation}, vec2({localPos.X:F1}, {localPos.Y:F1}))");
+                    var localTileCornerX = tilePoint.X - centerTileX;
+                    var localTileCornerY = tilePoint.Y - centerTileY;
+                    var tilesetId = mapEventTemplate.TerrainFile.Terrain.GroundTilesetIds[tilePoint.GroundTextureId];
+                    sb.AppendLine($"{indentStr2}..registerTileSpawner('{tilesetId}', {tilePoint.GroundVariation}, {localTileCornerX}, {localTileCornerY})");
                 }
             }
 
-            sb.AppendLine($"{indentStr}Log.debug(\"Done creating spawn region.\")");
+            sb.AppendLine();
+            sb.AppendLine($"{indentStr}Log.debug(\"Done creating map event templates.\")");
 
             return sb.ToString();
         }

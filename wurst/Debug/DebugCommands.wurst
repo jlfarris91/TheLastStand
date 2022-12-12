@@ -45,6 +45,9 @@ import PlayerProperties
 import GameConstants
 import LootItemLibrary
 import SurvivorJobs
+import MapEvents
+import Quaternion
+import Transform
 
 constant string COMMAND_GODLIKE = "godlike"
 constant string COMMAND_SPAWNONE = "spawnone"
@@ -105,6 +108,8 @@ constant string COMMAND_NOTIFYALL = "notifyAll"
 // constant string COMMAND_STARTKICKVOTE = "startKickVote"
 // constant string COMMAND_CASTKICKVOTE = "castKickVote"
 constant string COMMAND_SHARE_UNDEAD_UNITS = "shareUndeadUnits"
+constant string COMMAND_SPAWN_MAP_EVENT = "spawnMapEvent"
+constant string COMMAND_DESTROY_MAP_EVENT = "destroyLastMapEvent"
 
 constant string COMMAND_UTC = "utc"
 constant string COMMAND_UTS = "uts"
@@ -115,6 +120,8 @@ constant string COMMAND_SPAWNING = "spawning"
 DevChatCommandHandler g_commandHandler
 fogmodifier array g_seeVisionModifiers
 group g_workingGroup = CreateGroup()
+
+MapEventInstance g_lastMapEventInstance
 
 // ============================================================================
 function getFirstWorkingGroupUnit(player p) returns unit
@@ -1477,6 +1484,45 @@ function shareUndeadUnits()
     SetPlayerAllianceStateBJ( PLAYER_UNDEAD, commandPlayer, bj_ALLIANCE_UNALLIED )
 
 // ============================================================================
+function spawnMapEvent()
+  let command = getChatCommand()
+  let commandPlayer = getChatCommandPlayer()
+  let mapTemplateId = command.getArgument(0).getString()
+  let playerId = command.getArgument(1).getInt()
+  let angleArg = command.getArgument(2)
+
+  var angle = angle(0)
+  if (angleArg != null)
+    angle = angleArg.getReal().fromDeg()
+
+  let template = MapEventTemplate.getTemplate(mapTemplateId)
+  if (template == null)
+    chatCommandPrintToPlayer(commandPlayer, "No map template with id " + mapTemplateId)
+    return
+
+  let cameraPos = vec2(GetCameraTargetPositionX(), GetCameraTargetPositionY())
+
+  cameraPos.sync(commandPlayer) cameraPosSyncd ->
+  //{
+    let worldTransform = transform(cameraPosSyncd.toVec3(), ZERO3, eulerToQuat(angle.radians(), 0, 0), 1.0)
+    
+    g_lastMapEventInstance = template.create(players[playerId], worldTransform)
+
+    chatCommandPrintToPlayer(commandPlayer, "Created instance of " + mapTemplateId)
+  //}
+
+// ============================================================================
+function destroyLastMapEvent()
+  let commandPlayer = getChatCommandPlayer()
+
+  if (g_lastMapEventInstance != null)
+    chatCommandPrintToPlayer(commandPlayer, "Destroying instance of " + g_lastMapEventInstance.getTemplate().getId())
+    destroy g_lastMapEventInstance
+    g_lastMapEventInstance = null
+  else
+    chatCommandPrintToPlayer(commandPlayer, "Spawn a map event first")
+
+// ============================================================================
 function utc()
   let command = getChatCommand()
   let commandPlayer = getChatCommandPlayer()
@@ -1790,6 +1836,13 @@ function registerDebugCommands2()
   g_commandHandler.registerCommandDefinition(COMMAND_SHARE_UNDEAD_UNITS, function shareUndeadUnits)
     ..addBoolArgument("VALUE", false)
 
+  g_commandHandler.registerCommandDefinition(COMMAND_SPAWN_MAP_EVENT, function spawnMapEvent)
+    ..addStringArgument("ID", false)
+    ..addIntegerArgument("PLAYER_ID", false)
+    ..addRealArgument("ANGLE", true)
+
+  g_commandHandler.registerCommandDefinition(COMMAND_DESTROY_MAP_EVENT, function destroyLastMapEvent)
+
   g_commandHandler.registerCommandDefinition(COMMAND_UTC, function utc)
     ..addStringArgument("OP", false)
 
@@ -1816,3 +1869,4 @@ init
     execute(() -> registerDebugCommands1())
     execute(() -> registerDebugCommands2())
   //}
+  

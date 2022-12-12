@@ -141,12 +141,12 @@
                     filesToAdd.Length))
                 {
                     // Add each file from the source map dir into the archive
-                    //foreach (FileInfo fileInfo in filesToAdd)
-                    //{
-                    //    string archiveFilePath = PipelineUtility.MakeRelativeToDirectory(args.SourceMapDirectory.FullName, fileInfo.FullName);
-                    //    newMapArchive.AddFileFromDisk(fileInfo.FullName, archiveFilePath);
-                    //    sLogger.Log($"Added file {fileInfo.FullName} -> {archiveFilePath}");
-                    //}
+                    foreach (FileInfo fileInfo in filesToAdd)
+                    {
+                        string archiveFilePath = PipelineUtility.MakeRelativeToDirectory(args.SourceMapDirectory.FullName, fileInfo.FullName);
+                        newMapArchive.AddFileFromDisk(fileInfo.FullName, archiveFilePath);
+                        sLogger.Log($"Added file {fileInfo.FullName} -> {archiveFilePath}");
+                    }
 
                     // Map archive is now done being loaded
                     sLogger.Log($"Mounting archive '{intermediateMpqPath}' at priority {MAP_PRI}");
@@ -159,14 +159,14 @@
 
                     var objects = new List<IPipelineObject>
                     {
-                        //new PathMapBuildabilityModifier(pathMapFileBinaryDeserializer, pathMapFileBinarySerializer),
-                        //new RegionMapper(sLogger,
-                        //    fileSystem,
-                        //    objectLibrary,
-                        //    imageProvider,
-                        //    assetManager,
-                        //    pathMapFileBinaryDeserializer,
-                        //    args.OutputSpawnRegionScriptFile.FullName) { WriteRegionsToArchive = args.WriteRegionsToArchive },
+                        new PathMapBuildabilityModifier(pathMapFileBinaryDeserializer, pathMapFileBinarySerializer),
+                        new RegionMapper(sLogger,
+                            fileSystem,
+                            objectLibrary,
+                            imageProvider,
+                            assetManager,
+                            pathMapFileBinaryDeserializer,
+                            args.OutputSpawnRegionScriptFile.FullName) { WriteRegionsToArchive = args.WriteRegionsToArchive },
                         new EventMapTemplateBuilder(
                             fileSystem,
                             sLogger,
