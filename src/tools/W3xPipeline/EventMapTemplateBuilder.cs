@@ -170,6 +170,7 @@ namespace W3xPipeline
                 {
                     var localPos = destPlacement.Position;
                     var localYaw = destPlacement.RotationInRadians;
+                    var localScale = destPlacement.Scale;
 
                     var suffix = "";
                     string entityNameObj = m_entityLibrary.GetValue(destPlacement.Id, DEST_NAME_FIELD_ID, 0) as string;
@@ -178,7 +179,7 @@ namespace W3xPipeline
                         suffix = $" // {entityName}";
                     }
 
-                    sb.AppendLine($"{indentStr2}..registerDestSpawner('{destPlacement.Id}', {destPlacement.Variation}, vec3({localPos.X}, {localPos.Y}, {localPos.Z}), angle({localYaw})){suffix}");
+                    sb.AppendLine($"{indentStr2}..registerDestSpawner('{destPlacement.Id}', {destPlacement.Variation}, vec3({localPos.X}, {localPos.Y}, {localPos.Z}), angle({localYaw}), {localScale.X}){suffix}");
                 }
 
                 int centerTileX = (int)Math.Floor(mapEventTemplate.TerrainFile.Terrain.Width / 2.0f);

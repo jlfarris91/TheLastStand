@@ -9,6 +9,7 @@ import GroupExtensions
 import GroupUtils
 import LinkedList
 import initlater MapEventsInit
+import TlsUnitIds
 
 LinkedList<MapEventTemplate> g_mapEventTemplates = new LinkedList<MapEventTemplate>()
 
@@ -19,6 +20,7 @@ public class MapEventTemplate
   private IterableMap<int, Vector<MapEventUnitSpawner>> m_unitSpawnersByTypeId = new IterableMap<int, Vector<MapEventUnitSpawner>>()
   private Vector<MapEventUnitSpawner> m_unitSpawners
   private Vector<MapEventDestructableSpawner> m_destructableSpawners
+  private Vector<MapEventDestructableRemover> m_destructableRemovers
   private Vector<MapEventTileSpawner> m_tileSpawners
 
   // --------------------------------------------------------------------------
@@ -26,6 +28,7 @@ public class MapEventTemplate
     m_id = id
     m_unitSpawners = new Vector<MapEventUnitSpawner>(unitSpawnerCapacity)
     m_destructableSpawners = new Vector<MapEventDestructableSpawner>(destructableSpawnerCapacity)
+    m_destructableRemovers = new Vector<MapEventDestructableRemover>()
     m_tileSpawners = new Vector<MapEventTileSpawner>(tileSpawnerCapacity)
 
     g_mapEventTemplates.add(this)
@@ -73,7 +76,22 @@ public class MapEventTemplate
 
   // --------------------------------------------------------------------------
   function registerUnitSpawner(int unitTypeId, transform localTransform)
-    let unitSpawner = new MapEventUnitSpawner(unitTypeId, localTransform)
+
+    if (unitTypeId == TlsUnitIds.mapEventDestRemover128)
+      registerDestRemover(128.0, localTransform)
+      return
+
+    if (unitTypeId == TlsUnitIds.mapEventDestRemover256)
+      registerDestRemover(256.0, localTransform)
+      return
+
+    var spawnOnCreate = true
+
+    if (unitTypeId == TlsUnitIds.mapEventUnitSpawner1 or
+        unitTypeId == TlsUnitIds.mapEventUnitSpawner2)
+      spawnOnCreate = false
+
+    let unitSpawner = new MapEventUnitSpawner(unitTypeId, spawnOnCreate, localTransform)
 
     var unitSpawners = m_unitSpawnersByTypeId.get(unitTypeId)
     if (unitSpawners == null)
@@ -88,16 +106,25 @@ public class MapEventTemplate
     Preload.registerUnitTypeId(unitTypeId)
 
   // --------------------------------------------------------------------------
-  function registerDestSpawner(int destructableTypeId, int variation, vec3 localPos, angle localYaw)
-    let localTransform = transform(localPos, ZERO3, eulerToQuat(localYaw.radians(), 0.0, 0.0), 1.0)
+  function registerDestSpawner(int destructableTypeId, int variation, vec3 localPos, angle localYaw, real localScale)
+    let localTransform = transform(localPos, ZERO3, eulerToQuat(localYaw.radians(), 0.0, 0.0), localScale)
     registerDestSpawner(destructableTypeId, variation, localTransform)
 
   // --------------------------------------------------------------------------
   function registerDestSpawner(int destructableTypeId, int variation, transform localTransform)
-    m_destructableSpawners.add(new MapEventDestructableSpawner(destructableTypeId, variation, localTransform))
+    m_destructableSpawners.add(new MapEventDestructableSpawner(destructableTypeId, variation, true, localTransform))
     
     // Add to preloader so we don't get a hitch when spawning the map event
     Preload.registerDestructableTypeId(destructableTypeId, variation)
+
+  // --------------------------------------------------------------------------
+  function registerDestRemover(real radius, vec2 localPos)
+    let localTransform = transform(localPos.toVec3(), ZERO3, IDENTITYQ, 1.0)
+    registerDestRemover(radius, localTransform)
+
+  // --------------------------------------------------------------------------
+  function registerDestRemover(real radius, transform localTransform)
+    m_destructableRemovers.add(new MapEventDestructableRemover(radius, localTransform))
 
   // --------------------------------------------------------------------------
   function registerTileSpawner(int tilesetId, int variation, int localTileCornerX, int localTileCornerY)
@@ -136,6 +163,14 @@ public class MapEventTemplate
     return m_destructableSpawners.get(index)
 
   // --------------------------------------------------------------------------
+  function getDestRemoverCount() returns int
+    return m_destructableRemovers.size()
+
+  // --------------------------------------------------------------------------
+  function getDestRemover(int index) returns MapEventDestructableRemover
+    return m_destructableRemovers.get(index)
+
+  // --------------------------------------------------------------------------
   function getTileSpawnerCount() returns int
     return m_tileSpawners.size()
 
@@ -145,7 +180,10 @@ public class MapEventTemplate
 
   // --------------------------------------------------------------------------
   function create(player owner, transform worldTransform) returns MapEventInstance
-    let instance = new MapEventInstance(this, worldTransform)
+    var gridAlignedWorldTransform = worldTransform
+    gridAlignedWorldTransform.pos.x = (gridAlignedWorldTransform.pos.x / 128.0).floor() * 128.0
+    gridAlignedWorldTransform.pos.y = (gridAlignedWorldTransform.pos.y / 128.0).floor() * 128.0
+    let instance = new MapEventInstance(this, gridAlignedWorldTransform)
     instance.spawn(owner)
     return instance
 
@@ -155,6 +193,7 @@ public class MapEventInstance
   private MapEventTemplate m_template
   private group m_spawnedUnits
   private Vector<destructable> m_spawnedDestructables
+  private Vector<MapEventDestructableRemoverInstance> m_spawnedRemovers
   private Vector<MapEventTileInstance> m_spawnedTiles
 
   // --------------------------------------------------------------------------
@@ -179,6 +218,14 @@ public class MapEventInstance
 
     cleanup()
 
+    let destRemoverCount = m_template.getDestRemoverCount()
+    m_spawnedRemovers = new Vector<MapEventDestructableRemoverInstance>(destRemoverCount)
+    for i = 0 to destRemoverCount - 1
+      let destRemover = m_template.getDestRemover(i)
+      let instance = destRemover.spawn(m_worldTransform)
+      if (instance != null)
+        m_spawnedRemovers.add(instance)
+
     let destSpawnerCount = m_template.getDestSpawnerCount()
     m_spawnedDestructables = new Vector<destructable>(destSpawnerCount)
     for i = 0 to destSpawnerCount - 1
@@ -197,17 +244,17 @@ public class MapEventInstance
     m_spawnedUnits = getGroup()
     for i = 0 to unitSpawnerCount - 1
       let unitSpawner = m_template.getUnitSpawner(i)
-      let spawnedUnit = unitSpawner.spawn(owner, m_worldTransform)
-      if (spawnedUnit != null)
-        m_spawnedUnits.addUnit(spawnedUnit)
+      if (unitSpawner.getSpawnOnCreate())
+        let spawnedUnit = unitSpawner.spawn(owner, m_worldTransform)
+        if (spawnedUnit != null)
+          m_spawnedUnits.addUnit(spawnedUnit)
 
   // --------------------------------------------------------------------------
   function cleanup()
 
     if (m_spawnedDestructables != null)
       for dest in m_spawnedDestructables
-        if (dest.isAliveTrick())
-          dest.remove()
+        dest.remove()
       destroy m_spawnedDestructables
       m_spawnedDestructables = null
 
@@ -224,15 +271,27 @@ public class MapEventInstance
       m_spawnedUnits.release()
       m_spawnedUnits = null
 
+    if (m_spawnedRemovers != null)
+      for remover in m_spawnedRemovers
+        destroy remover
+      destroy m_spawnedRemovers
+      m_spawnedRemovers = null
+
 // ============================================================================
 public class MapEventUnitSpawner
   private int m_unitTypeId
   private transform m_localTransform
+  private bool m_spawnOnCreate
 
   // --------------------------------------------------------------------------
-  construct(int unitTypeId, transform localTransform)
+  construct(int unitTypeId, bool spawnOnCreate, transform localTransform)
     m_unitTypeId = unitTypeId
+    m_spawnOnCreate = spawnOnCreate
     m_localTransform = localTransform
+  
+  // --------------------------------------------------------------------------
+  function getSpawnOnCreate() returns bool
+    return m_spawnOnCreate
 
   // --------------------------------------------------------------------------
   function spawn(player owner, transform parentTransform) returns unit
@@ -249,12 +308,18 @@ class MapEventDestructableSpawner
   private int m_destructableTypeId
   private int m_variation
   private transform m_localTransform
+  private bool m_spawnOnCreate
 
   // --------------------------------------------------------------------------
-  construct(int destructableTypeId, int variation, transform localTransform)
+  construct(int destructableTypeId, int variation, bool spawnOnCreate, transform localTransform)
     m_destructableTypeId = destructableTypeId
     m_variation = variation
+    m_spawnOnCreate = spawnOnCreate
     m_localTransform = localTransform
+  
+  // --------------------------------------------------------------------------
+  function getSpawnOnCreate() returns bool
+    return m_spawnOnCreate
 
   // --------------------------------------------------------------------------
   function spawn(transform parentTransform) returns destructable
@@ -266,6 +331,75 @@ class MapEventDestructableSpawner
       worldRotEuler.z.asAngleRadians(),
       worldTransform.scale,
       m_variation)
+
+location g_temp = Location(0, 0)
+destructable array g_destructables
+int g_destructablesCount
+
+// ============================================================================
+function enumDestructablesInCircle()
+  let enumDest = GetEnumDestructable()
+  if (enumDest.isAliveTrick())
+    g_destructables[g_destructablesCount] = enumDest
+    g_destructablesCount++
+
+// ============================================================================
+class MapEventDestructableRemover
+  private real m_radius
+  private transform m_localTransform
+
+  // --------------------------------------------------------------------------
+  construct(real radius, transform localTransform)
+    m_radius = radius
+    m_localTransform = localTransform
+
+  // --------------------------------------------------------------------------
+  function spawn(transform parentTransform) returns MapEventDestructableRemoverInstance
+    let worldTransform = parentTransform.concat(m_localTransform)
+    let instance =  new MapEventDestructableRemoverInstance(m_radius, worldTransform)
+    instance.redo()
+    return instance
+
+// ============================================================================
+class MapEventDestructableRemoverInstance
+  private real m_radius
+  private transform m_worldTransform
+  private LinkedList<destructable> m_destructables
+
+  // --------------------------------------------------------------------------
+  construct(real radius, transform worldTransform)
+    m_radius = radius
+    m_worldTransform = worldTransform
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    undo()
+
+  // --------------------------------------------------------------------------
+  function redo()
+
+    // Enum destructables in radius
+    MoveLocation(g_temp, m_worldTransform.pos.x, m_worldTransform.pos.y)
+    g_destructablesCount = 0
+    EnumDestructablesInCircleBJ(m_radius, g_temp, function enumDestructablesInCircle)
+
+    if (g_destructablesCount == 0)
+      return
+
+    m_destructables = new LinkedList<destructable>()
+
+    for i = 0 to g_destructablesCount - 1
+      let dest = g_destructables[i]
+      dest.show(false)
+      m_destructables.add(dest)
+
+  // --------------------------------------------------------------------------
+  function undo()
+    if (m_destructables != null)
+      for dest in m_destructables
+        dest.show(true)
+      destroy m_destructables
+      m_destructables = null
 
 // ============================================================================
 class MapEventTileSpawner
@@ -309,7 +443,7 @@ public class MapEventTileInstance
   function redo()
     m_prevTilesetId = m_tile.getType()
     m_prevVariation = m_tile.getVariance()
-    m_tile.setType(m_prevTilesetId, m_prevVariation)
+    m_tile.setType(m_tilesetId, m_variation)
 
   // --------------------------------------------------------------------------
   function undo()
