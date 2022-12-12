@@ -42,9 +42,9 @@ function CreateUnitsForPlayer0 takes nothing returns nothing
     local trigger t
     local real life
 
-    set u = BlzCreateUnitWithSkin( p, 'h00Q', -254.8, -2.4, -56.294, 'h00Q' )
+    set u = BlzCreateUnitWithSkin( p, 'h00Q', -255.9, -124.4, 294.772, 'h00Q' )
     set u = BlzCreateUnitWithSkin( p, 'h00P', 1.5, 128.5, 90.000, 'h00P' )
-    set u = BlzCreateUnitWithSkin( p, 'h00Q', 259.2, -2.4, 235.520, 'h00Q' )
+    set u = BlzCreateUnitWithSkin( p, 'h00Q', 257.0, -125.8, 249.303, 'h00Q' )
 endfunction
 
 //===========================================================================

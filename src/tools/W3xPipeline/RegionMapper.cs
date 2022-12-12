@@ -23,12 +23,7 @@
 
     public class RegionMapper : IPipelineObject
     {
-        private const string ARCHIVE_TERRAIN_FILE_PATH = "war3map.wpm";
-        private const string ARCHIVE_REGION_PLACEMENT_FILE_PATH = "war3map.w3r";
-        private const string ARCHIVE_DOCUMENT_PLACEMENT_FILE_PATH = "war3map.doo";
         private const string SPAWN_REGION_NAME_PREFIX = "SPAWN_REGION_";
-        private const string ARCHIVE_DOCUMENT_DOODAD_DATA_FILE_PATH = @"Units\DestructableData.slk";
-        private const string ARCHIVE_DOCUMENT_DOODAD_METADATA_FILE_PATH = @"Units\DestructableMetaData.slk";
 
         private readonly ILogger m_logger;
         private readonly IReadOnlyFileSystem m_fileSystem;
@@ -374,16 +369,16 @@
             try
             {
                 MapRegions mapRegions;
-                DoodadFile doodads;
+                DoodadPlacementFile doodads;
                 PathMap pathMap;
 
-                using (MpqFileStream file = archive.OpenFile(ARCHIVE_TERRAIN_FILE_PATH))
+                using (MpqFileStream file = archive.OpenFile(MapFiles.PATHING_FILE_PATH))
                 using (var reader = new BinaryReader(file))
                 {
                     pathMap = m_pathMapFileDeserializer.Deserialize(reader).Map;
                 }
 
-                using (MpqFileStream file = archive.OpenFile(ARCHIVE_REGION_PLACEMENT_FILE_PATH))
+                using (MpqFileStream file = archive.OpenFile(MapFiles.REGION_PLACEMENT_FILE_PATH))
                 using (var reader = new BinaryReader(file))
                 {
                     mapRegions = new MapRegionsBinaryDeserializer().Deserialize(reader);
@@ -395,10 +390,10 @@
                     mapRegions.Regions.Remove(oldSpawnRegion);
                 }
 
-                using (MpqFileStream file = archive.OpenFile(ARCHIVE_DOCUMENT_PLACEMENT_FILE_PATH))
+                using (MpqFileStream file = archive.OpenFile(MapFiles.DOODAD_PLACEMENTS_FILE_PATH))
                 using (var reader = new BinaryReader(file))
                 {
-                    doodads = new DoodadFileBinaryDeserializer().Deserialize(reader);
+                    doodads = new DoodadPlacementFileBinaryDeserializer().Deserialize(reader);
                 }
 
                 UpdatePathingMap(doodads, pathMap);
@@ -442,8 +437,8 @@
 
                     m_logger.Log("Done serializing regions");
 
-                    m_logger.Log($"Replacing file {ARCHIVE_REGION_PLACEMENT_FILE_PATH} in mpq");
-                    archive.ReplaceFile(tempFileName, ARCHIVE_REGION_PLACEMENT_FILE_PATH);
+                    m_logger.Log($"Replacing file {MapFiles.REGION_PLACEMENT_FILE_PATH} in mpq");
+                    archive.ReplaceFile(tempFileName, MapFiles.REGION_PLACEMENT_FILE_PATH);
                 }
 
                 string generatedScriptFileContents = GenerateSpawnRegionsWurstScript(mapRegions);
@@ -460,9 +455,9 @@
             }
         }
 
-        private void UpdatePathingMap(DoodadFile doodads, PathMap pathMap)
+        private void UpdatePathingMap(DoodadPlacementFile doodads, PathMap pathMap)
         {
-            foreach (DoodadPlacement doodadPlacement in doodads.Placements.Placements)
+            foreach (DestructablePlacement doodadPlacement in doodads.Placements.Destructables)
             {
                 UpdatePathingMap(doodadPlacement, pathMap);
             }
@@ -535,7 +530,7 @@
                 }
                 else
                 {
-                    rotDeg = placement.Rotation * Mathf.Rad2Deg;
+                    rotDeg = placement.RotationInRadians * Mathf.Rad2Deg;
                 }
 
                 rotDeg = Mathf.WrapAngleDegrees((int)(rotDeg / 90.0f) * 90.0f + 90.0f);

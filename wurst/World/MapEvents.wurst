@@ -1,0 +1,301 @@
+package MapEvents
+import Transform
+import HashMap
+import Quaternion
+import TerrainUtils
+import Vector
+import Preload
+import GroupExtensions
+import GroupUtils
+import LinkedList
+
+LinkedList<MapEventTemplate> g_mapEventTemplates = new LinkedList<MapEventTemplate>()
+
+// ============================================================================
+public class MapEventTemplate
+
+  private IterableMap<int, Vector<MapEventUnitSpawner>> m_unitSpawnersByTypeId = new IterableMap<int, Vector<MapEventUnitSpawner>>()
+  private Vector<MapEventUnitSpawner> m_unitSpawners
+  private Vector<MapEventDestructableSpawner> m_destructableSpawners
+  private Vector<MapEventTileSpawner> m_tileSpawners
+
+  // --------------------------------------------------------------------------
+  construct(int unitSpawnerCapacity, int destructableSpawnerCapacity, int tileSpawnerCapacity)
+    m_unitSpawners = new Vector<MapEventUnitSpawner>(unitSpawnerCapacity)
+    m_destructableSpawners = new Vector<MapEventDestructableSpawner>(destructableSpawnerCapacity)
+    m_tileSpawners = new Vector<MapEventTileSpawner>(tileSpawnerCapacity)
+
+    g_mapEventTemplates.add(this)
+
+  // --------------------------------------------------------------------------
+  ondestroy
+
+    g_mapEventTemplates.remove(this)
+    
+    for spawner in m_unitSpawners
+      destroy spawner
+    destroy m_unitSpawners
+    m_unitSpawners = null
+    
+    for spawner in m_destructableSpawners
+      destroy spawner
+    destroy m_destructableSpawners
+    m_destructableSpawners = null
+    
+    for spawner in m_tileSpawners
+      destroy spawner
+    destroy m_tileSpawners
+    m_tileSpawners = null
+
+    for key in m_unitSpawnersByTypeId
+      destroy m_unitSpawnersByTypeId.get(key)
+    destroy m_unitSpawnersByTypeId
+    m_unitSpawnersByTypeId = null
+
+  // --------------------------------------------------------------------------
+  function registerUnitSpawner(int unitTypeId, vec3 localPos, angle localYaw)
+    let localTransform = transform(localPos, ZERO3, eulerToQuat(localYaw.radians(), 0.0, 0.0), 1.0)
+    registerUnitSpawner(unitTypeId, localTransform)
+
+  // --------------------------------------------------------------------------
+  function registerUnitSpawner(int unitTypeId, transform localTransform)
+    let unitSpawner = new MapEventUnitSpawner(unitTypeId, localTransform)
+
+    var unitSpawners = m_unitSpawnersByTypeId.get(unitTypeId)
+    if (unitSpawners == null)
+      unitSpawners = new Vector<MapEventUnitSpawner>()
+      m_unitSpawnersByTypeId.put(unitTypeId, unitSpawners)
+
+    unitSpawners.add(unitSpawner)
+
+    m_unitSpawners.add(unitSpawner)
+
+    // Add to preloader so we don't get a hitch when spawning the map event
+    Preload.registerUnitTypeId(unitTypeId)
+
+  // --------------------------------------------------------------------------
+  function registerDestSpawner(int destructableTypeId, int variation, vec3 localPos, angle localYaw)
+    let localTransform = transform(localPos, ZERO3, eulerToQuat(localYaw.radians(), 0.0, 0.0), 1.0)
+    registerDestSpawner(destructableTypeId, variation, localTransform)
+
+  // --------------------------------------------------------------------------
+  function registerDestSpawner(int destructableTypeId, int variation, transform localTransform)
+    m_destructableSpawners.add(new MapEventDestructableSpawner(destructableTypeId, variation, localTransform))
+    
+    // Add to preloader so we don't get a hitch when spawning the map event
+    Preload.registerDestructableTypeId(destructableTypeId, variation)
+
+  // --------------------------------------------------------------------------
+  function registerTileSpawner(int tilesetId, int variation, vec3 localPos)
+    let localTransform = transform(localPos, ZERO3, IDENTITYQ, 1.0)
+    registerTileSpawner(tilesetId, variation, localTransform)
+
+  // --------------------------------------------------------------------------
+  function registerTileSpawner(int tilesetId, int variation, transform localTransform)
+    m_tileSpawners.add(new MapEventTileSpawner(tilesetId, variation, localTransform))
+
+  // --------------------------------------------------------------------------
+  function getUnitSpawnerCount() returns int
+    return m_unitSpawners.size()
+
+  // --------------------------------------------------------------------------
+  function getUnitSpawner(int index) returns MapEventUnitSpawner
+    return m_unitSpawners.get(index)
+
+  // --------------------------------------------------------------------------
+  function getUnitSpawnerByTypeIdCount(int unitTypeId) returns int
+    let unitSpawners = m_unitSpawnersByTypeId.get(unitTypeId)
+    return unitSpawners != null ? unitSpawners.size() : 0
+
+  // --------------------------------------------------------------------------
+  function getUnitSpawnerByTypeId(int unitTypeId, int index) returns MapEventUnitSpawner
+    let unitSpawners = m_unitSpawnersByTypeId.get(unitTypeId)
+    return unitSpawners != null ? unitSpawners.get(index) : null
+
+  // --------------------------------------------------------------------------
+  function getDestSpawnerCount() returns int
+    return m_destructableSpawners.size()
+
+  // --------------------------------------------------------------------------
+  function getDestSpawner(int index) returns MapEventDestructableSpawner
+    return m_destructableSpawners.get(index)
+
+  // --------------------------------------------------------------------------
+  function getTileSpawnerCount() returns int
+    return m_tileSpawners.size()
+
+  // --------------------------------------------------------------------------
+  function getTileSpawner(int index) returns MapEventTileSpawner
+    return m_tileSpawners.get(index)
+
+  // --------------------------------------------------------------------------
+  function create(player owner, transform worldTransform) returns MapEventInstance
+    let instance = new MapEventInstance(this, worldTransform)
+    instance.spawn(owner)
+    return instance
+
+// ============================================================================
+public class MapEventInstance
+  private transform m_worldTransform
+  private MapEventTemplate m_template
+  private group m_spawnedUnits
+  private Vector<destructable> m_spawnedDestructables
+  private Vector<MapEventTileInstance> m_spawnedTiles
+
+  // --------------------------------------------------------------------------
+  construct(MapEventTemplate template, transform worldTransform)
+    m_template = template
+    m_worldTransform = worldTransform
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    cleanup()
+
+  // --------------------------------------------------------------------------
+  function getTemplate() returns MapEventTemplate
+    return m_template
+
+  // --------------------------------------------------------------------------
+  function getWorldTransform() returns transform
+    return m_worldTransform
+
+  // --------------------------------------------------------------------------
+  function spawn(player owner)
+
+    cleanup()
+
+    let destSpawnerCount = m_template.getDestSpawnerCount()
+    m_spawnedDestructables = new Vector<destructable>(destSpawnerCount)
+    for i = 0 to destSpawnerCount - 1
+      let destSpawner = m_template.getDestSpawner(i)
+      let spawnedDest = destSpawner.spawn(m_worldTransform)
+      if (spawnedDest != null)
+        m_spawnedDestructables.add(spawnedDest)
+
+    let tileSpawnerCount = m_template.getTileSpawnerCount()
+    m_spawnedTiles = new Vector<MapEventTileInstance>(tileSpawnerCount)
+    for i = 0 to tileSpawnerCount - 1
+      let tileSpawner = m_template.getTileSpawner(i)
+      m_spawnedTiles.add(tileSpawner.spawn(m_worldTransform))
+
+    let unitSpawnerCount = m_template.getUnitSpawnerCount()
+    m_spawnedUnits = getGroup()
+    for i = 0 to unitSpawnerCount - 1
+      let unitSpawner = m_template.getUnitSpawner(i)
+      let spawnedUnit = unitSpawner.spawn(owner, m_worldTransform)
+      if (spawnedUnit != null)
+        m_spawnedUnits.addUnit(spawnedUnit)
+
+  // --------------------------------------------------------------------------
+  function cleanup()
+
+    if (m_spawnedDestructables != null)
+      for dest in m_spawnedDestructables
+        if (dest.isAliveTrick())
+          dest.remove()
+      destroy m_spawnedDestructables
+      m_spawnedDestructables = null
+
+    if (m_spawnedTiles != null)
+      for tile in m_spawnedTiles
+        destroy tile
+      destroy m_spawnedTiles
+      m_spawnedTiles = null
+
+    if (m_spawnedUnits != null)
+      m_spawnedUnits.refresh()
+      for u in m_spawnedUnits
+        u.remove()
+      m_spawnedUnits.release()
+      m_spawnedUnits = null
+
+// ============================================================================
+public class MapEventUnitSpawner
+  private int m_unitTypeId
+  private transform m_localTransform
+
+  // --------------------------------------------------------------------------
+  construct(int unitTypeId, transform localTransform)
+    m_unitTypeId = unitTypeId
+    m_localTransform = localTransform
+
+  // --------------------------------------------------------------------------
+  function spawn(player owner, transform parentTransform) returns unit
+    let worldTransform = parentTransform.concat(m_localTransform)
+    let worldRotEuler = worldTransform.rot.toEuler()
+    return createUnit(
+      owner,
+      m_unitTypeId,
+      worldTransform.pos,
+      worldRotEuler.z.asAngleRadians())
+
+// ============================================================================
+class MapEventDestructableSpawner
+  private int m_destructableTypeId
+  private int m_variation
+  private transform m_localTransform
+
+  // --------------------------------------------------------------------------
+  construct(int destructableTypeId, int variation, transform localTransform)
+    m_destructableTypeId = destructableTypeId
+    m_variation = variation
+    m_localTransform = localTransform
+
+  // --------------------------------------------------------------------------
+  function spawn(transform parentTransform) returns destructable
+    let worldTransform = parentTransform.concat(m_localTransform)
+    let worldRotEuler = worldTransform.rot.toEuler()
+    return createDestructable(
+      m_destructableTypeId,
+      worldTransform.pos,
+      worldRotEuler.z.asAngleRadians(),
+      worldTransform.scale,
+      m_variation)
+
+// ============================================================================
+class MapEventTileSpawner
+  private int m_tilesetId
+  private int m_variation
+  private transform m_localTransform
+
+  // --------------------------------------------------------------------------
+  construct(int tilesetId, int variation, transform localTransform)
+    m_tilesetId = tilesetId
+    m_variation = variation
+    m_localTransform = localTransform
+
+  // --------------------------------------------------------------------------
+  function spawn(transform parentTransform) returns MapEventTileInstance
+    let worldTransform = parentTransform.concat(m_localTransform)
+    let tile = worldTransform.pos.toVec2().getTile()
+    let tileInstance = new MapEventTileInstance(tile, m_tilesetId, m_variation)
+    tileInstance.redo()
+    return tileInstance
+
+// ============================================================================
+public class MapEventTileInstance
+  private tile m_tile
+  private int m_tilesetId
+  private int m_variation
+  private int m_prevTilesetId
+  private int m_prevVariation
+
+  // --------------------------------------------------------------------------
+  construct(tile tile, int tilesetId, int variation)
+    m_tile = tile
+    m_tilesetId = tilesetId
+    m_variation = variation
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    undo()
+
+  // --------------------------------------------------------------------------
+  function redo()
+    m_prevTilesetId = m_tile.getType()
+    m_prevVariation = m_tile.getVariance()
+    m_tile.setType(m_prevTilesetId, m_prevVariation)
+
+  // --------------------------------------------------------------------------
+  function undo()
+    m_tile.setType(m_prevTilesetId, m_prevVariation)
