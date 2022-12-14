@@ -1,0 +1,105 @@
+package ME_RaiderCamp
+import MapEvents
+import Transform
+import TlsMapEventIds
+import GameConstants
+import Unit_WoodFence
+import Quaternion
+import TlsUnitDefinition
+import LootableTypes
+import WeightedSet
+
+// ============================================================================
+public class RaiderCampMapEvent extends MapEvent
+  private MapEventTemplate m_mapEventTemplate = null
+  private MapEventInstance m_mapEventInstance = null
+
+  // --------------------------------------------------------------------------
+  construct()
+    super("RaiderCamp")
+    m_mapEventTemplate = MapEventTemplate.getTemplate("RaiderCamp")
+
+  // --------------------------------------------------------------------------
+  override function setWorldTransform(transform worldTransform)
+
+    var alignedWorldTransform = worldTransform
+
+    // Force to 45 degree angle increments
+    var eulers = alignedWorldTransform.rot.toEuler()
+    eulers.z = (eulers.z * DEGTORAD / 45.0).floor() * 45.0 * RADTODEG
+
+    // Align to grid
+    alignedWorldTransform.pos.x = (alignedWorldTransform.pos.x / 128.0).floor() * 128.0
+    alignedWorldTransform.pos.y = (alignedWorldTransform.pos.y / 128.0).floor() * 128.0
+
+    alignedWorldTransform.rot = eulerToQuat(eulers.z, eulers.y, eulers.x)
+
+    super.setWorldTransform(alignedWorldTransform)
+
+  // --------------------------------------------------------------------------
+  override protected function onStarted()
+    super.onStarted()
+
+    m_mapEventInstance = m_mapEventTemplate.createInstance()
+    m_mapEventInstance.setWorldTransform(getWorldTransform())
+    
+    m_mapEventInstance.spawnCleaners()
+    m_mapEventInstance.spawnTiles()
+
+    // Spawn towers
+    m_mapEventInstance.spawnUnits(PLAYER_RAIDERS, TlsMapEventIds.building2x2_1, TlsUnitIds.guardTowers[0])
+
+    // Spawn walls
+    m_mapEventInstance.spawnUnits(PLAYER_RAIDERS, TlsMapEventIds.building3x1, WoodFenceIds.ns)
+    m_mapEventInstance.spawnUnits(PLAYER_RAIDERS, TlsMapEventIds.building1x3, WoodFenceIds.ew)
+    m_mapEventInstance.spawnUnits(PLAYER_RAIDERS, TlsMapEventIds.building3x1Diag1, WoodFenceIds.nesw)
+    m_mapEventInstance.spawnUnits(PLAYER_RAIDERS, TlsMapEventIds.building3x1Diag2, WoodFenceIds.nwse)
+
+    // Spawn spikes
+    m_mapEventInstance.spawnUnits(PLAYER_RAIDERS, TlsMapEventIds.building2x2_2, TlsUnitIds.spikes[0])
+    
+    // Spawn tents
+    m_mapEventInstance.spawnUnits(PLAYER_RAIDERS, 'hhou', TlsUnitIds.shelter1)
+    
+    // Spawn camp fire
+    m_mapEventInstance.spawnUnits(PLAYER_RAIDERS, TlsMapEventIds.loc2, TlsUnitIds.campFire)
+    
+    // Spawn cages
+    m_mapEventInstance.spawnUnits(PLAYER_RAIDERS, TlsMapEventIds.loc3, UNIT_ID_LOOTABLE_CAGE)
+
+    // Spawn bandits
+    var banditSpawnerCount = m_mapEventTemplate.getUnitSpawnerByTypeIdCount(TlsMapEventIds.loc1)
+
+    // Always spawn at least one bandit lord
+    if (banditSpawnerCount > 0)
+      let spawner = m_mapEventTemplate.getUnitSpawnerByTypeId(TlsMapEventIds.loc1, 0)
+      m_mapEventInstance.spawnUnit(spawner, PLAYER_RAIDERS, TlsUnitIds.Undead.fallenBanditLord[0])
+      banditSpawnerCount--
+
+    // Then spawn remaining bandits
+    if (banditSpawnerCount > 0)
+
+      let banditWeightedSet = new WeightedSet<int>()
+      ..add(TlsUnitIds.Undead.fallenBandit[0], 3)
+      ..add(TlsUnitIds.Undead.fallenMarksman[0], 2)
+      ..add(TlsUnitIds.Undead.fallenWizard[0], 1)
+
+      for i = 0 to banditSpawnerCount - 1
+        let spawner = m_mapEventTemplate.getUnitSpawnerByTypeId(TlsMapEventIds.loc1, 0)
+        let unitTypeId = banditWeightedSet.getRandom()
+        m_mapEventInstance.spawnUnit(spawner, PLAYER_RAIDERS, unitTypeId)
+
+      destroy banditWeightedSet
+    
+    m_mapEventInstance.spawnDestructables()
+
+  // --------------------------------------------------------------------------
+  override protected function onCompleted()
+    super.onCompleted()
+
+    destroy m_mapEventInstance
+    m_mapEventInstance = null
+
+// ============================================================================
+init
+  MapEvent.registerMapEventFactory("RaiderCamp", () -> new RaiderCampMapEvent())

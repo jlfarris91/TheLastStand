@@ -146,7 +146,7 @@ namespace W3xPipeline
                 sb.AppendLine($"{indentStr}// Dest Spawners: {destSpawnerCount}");
                 sb.AppendLine($"{indentStr}// Tile Spawners: {tileSpawnerCount}");
                 sb.AppendLine($"{indentStr}// --------------------------------------------------------------------------");
-                sb.AppendLine($"{indentStr}new MapEventTemplate(\"{Path.GetFileNameWithoutExtension(mapEventTemplate.MapFilePath)}\", {unitSpawnerCount}, {destSpawnerCount}, {tileSpawnerCount})");
+                sb.AppendLine($"{indentStr}MapEventTemplate.createMapEventTemplate(\"{Path.GetFileNameWithoutExtension(mapEventTemplate.MapFilePath)}\")");
 
                 foreach (var unitPlacement in mapEventTemplate.UnitPlacementFile.Placements)
                 {

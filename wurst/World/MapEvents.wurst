@@ -8,11 +8,21 @@ import Preload
 import GroupExtensions
 import GroupUtils
 import LinkedList
-import initlater MapEventsInit
-import TlsUnitIds
 import LootableTypes
+import ClosureTimers
+import Predicate
+import TlsMapEventIds
+import Runnable
+import Func
 
+import initlater MapEventsInit
+
+HashMap<string, Func<MapEventTemplate>> g_mapEventTemplateFactories = new HashMap<string, Func<MapEventTemplate>>()
+HashMap<string, Func<MapEvent>> g_mapEventFactories = new HashMap<string, Func<MapEvent>>()
 LinkedList<MapEventTemplate> g_mapEventTemplates = new LinkedList<MapEventTemplate>()
+LinkedList<MapEventInstance> g_mapEventInstances = new LinkedList<MapEventInstance>()
+LinkedList<MapEvent> g_mapEvents = new LinkedList<MapEvent>()
+LinkedList<MapEvent> g_runningMapEvents = new LinkedList<MapEvent>()
 location g_tempLoc = Location(0, 0)
 destructable array g_enumDestructables
 int g_enumDestructablesCount
@@ -25,16 +35,16 @@ public class MapEventTemplate
   private IterableMap<int, Vector<MapEventUnitSpawner>> m_unitSpawnersByTypeId = new IterableMap<int, Vector<MapEventUnitSpawner>>()
   private Vector<MapEventUnitSpawner> m_unitSpawners
   private Vector<MapEventDestructableSpawner> m_destructableSpawners
-  private Vector<MapEventAreaCleaner> m_areaCleaners
+  private Vector<MapEventAreaCleanerSpawner> m_areaCleaners
   private Vector<MapEventTileSpawner> m_tileSpawners
 
   // --------------------------------------------------------------------------
-  construct(string id, int unitSpawnerCapacity, int destructableSpawnerCapacity, int tileSpawnerCapacity)
+  construct(string id)
     m_id = id
-    m_unitSpawners = new Vector<MapEventUnitSpawner>(unitSpawnerCapacity)
-    m_destructableSpawners = new Vector<MapEventDestructableSpawner>(destructableSpawnerCapacity)
-    m_areaCleaners = new Vector<MapEventAreaCleaner>()
-    m_tileSpawners = new Vector<MapEventTileSpawner>(tileSpawnerCapacity)
+    m_unitSpawners = new Vector<MapEventUnitSpawner>()
+    m_destructableSpawners = new Vector<MapEventDestructableSpawner>()
+    m_areaCleaners = new Vector<MapEventAreaCleanerSpawner>()
+    m_tileSpawners = new Vector<MapEventTileSpawner>()
 
     g_mapEventTemplates.add(this)
 
@@ -71,6 +81,15 @@ public class MapEventTemplate
     return null
 
   // --------------------------------------------------------------------------
+  static function createMapEventTemplate(string id) returns MapEventTemplate
+    let factory = g_mapEventTemplateFactories.get(id)
+    return factory != null ? factory.call() : new MapEventTemplate(id)
+
+  // --------------------------------------------------------------------------
+  static function registerMapEventTemplateFactory(string id, Func<MapEventTemplate> factory)
+    g_mapEventTemplateFactories.put(id, factory.acquire())
+
+  // --------------------------------------------------------------------------
   function getId() returns string
     return m_id
 
@@ -82,21 +101,15 @@ public class MapEventTemplate
   // --------------------------------------------------------------------------
   function registerUnitSpawner(int unitTypeId, transform localTransform)
 
-    if (unitTypeId == TlsUnitIds.mapEventDestRemover128)
+    if (unitTypeId == TlsMapEventIds.areaCleaner128)
       registerAreaCleaner(128.0, localTransform)
       return
 
-    if (unitTypeId == TlsUnitIds.mapEventDestRemover256)
+    if (unitTypeId == TlsMapEventIds.areaCleaner256)
       registerAreaCleaner(256.0, localTransform)
       return
 
-    var spawnOnCreate = true
-
-    if (unitTypeId == TlsUnitIds.mapEventUnitSpawner1 or
-        unitTypeId == TlsUnitIds.mapEventUnitSpawner2)
-      spawnOnCreate = false
-
-    let unitSpawner = new MapEventUnitSpawner(unitTypeId, spawnOnCreate, localTransform)
+    let unitSpawner = new MapEventUnitSpawner(unitTypeId, localTransform)
 
     var unitSpawners = m_unitSpawnersByTypeId.get(unitTypeId)
     if (unitSpawners == null)
@@ -117,7 +130,7 @@ public class MapEventTemplate
 
   // --------------------------------------------------------------------------
   function registerDestSpawner(int destructableTypeId, int variation, transform localTransform)
-    m_destructableSpawners.add(new MapEventDestructableSpawner(destructableTypeId, variation, true, localTransform))
+    m_destructableSpawners.add(new MapEventDestructableSpawner(destructableTypeId, variation, localTransform))
     
     // Add to preloader so we don't get a hitch when spawning the map event
     Preload.registerDestructableTypeId(destructableTypeId, variation)
@@ -129,7 +142,7 @@ public class MapEventTemplate
 
   // --------------------------------------------------------------------------
   function registerAreaCleaner(real radius, transform localTransform)
-    m_areaCleaners.add(new MapEventAreaCleaner(radius, localTransform))
+    m_areaCleaners.add(new MapEventAreaCleanerSpawner(radius, localTransform))
 
   // --------------------------------------------------------------------------
   function registerTileSpawner(int tilesetId, int variation, int localTileCornerX, int localTileCornerY)
@@ -168,11 +181,11 @@ public class MapEventTemplate
     return m_destructableSpawners.get(index)
 
   // --------------------------------------------------------------------------
-  function getDestRemoverCount() returns int
+  function getAreaCleanerCount() returns int
     return m_areaCleaners.size()
 
   // --------------------------------------------------------------------------
-  function getDestRemover(int index) returns MapEventAreaCleaner
+  function getAreaCleaner(int index) returns MapEventAreaCleanerSpawner
     return m_areaCleaners.get(index)
 
   // --------------------------------------------------------------------------
@@ -184,31 +197,41 @@ public class MapEventTemplate
     return m_tileSpawners.get(index)
 
   // --------------------------------------------------------------------------
-  function create(player owner, transform worldTransform) returns MapEventInstance
-    var gridAlignedWorldTransform = worldTransform
-    gridAlignedWorldTransform.pos.x = (gridAlignedWorldTransform.pos.x / 128.0).floor() * 128.0
-    gridAlignedWorldTransform.pos.y = (gridAlignedWorldTransform.pos.y / 128.0).floor() * 128.0
-    let instance = new MapEventInstance(this, gridAlignedWorldTransform)
-    instance.spawn(owner)
-    return instance
+  function createInstance() returns MapEventInstance
+    return new MapEventInstance(this)
 
 // ============================================================================
 public class MapEventInstance
-  private transform m_worldTransform
-  private MapEventTemplate m_template
-  private group m_spawnedUnits
-  private Vector<destructable> m_spawnedDestructables
-  private Vector<MapEventAreaCleanerInstance> m_spawnedRemovers
-  private Vector<MapEventTileInstance> m_spawnedTiles
+  private player m_owner = null
+  private transform m_worldTransform = IDENTITYT
+  private MapEventTemplate m_template = null
+  private group m_spawnedUnits = null
+  private Vector<destructable> m_spawnedDestructables = null
+  private Vector<MapEventAreaCleanerInstance> m_cleaners = null
+  private Vector<MapEventTileInstance> m_spawnedTiles = null
+  private Predicate<MapEventUnitSpawner> m_unitFilter = null
+  private Predicate<MapEventDestructableSpawner> m_destructableFilter = null
 
   // --------------------------------------------------------------------------
-  construct(MapEventTemplate template, transform worldTransform)
+  construct(MapEventTemplate template)
     m_template = template
-    m_worldTransform = worldTransform
+
+    g_mapEventInstances.add(this)
 
   // --------------------------------------------------------------------------
   ondestroy
+
+    g_mapEventInstances.remove(this)
+
     cleanup()
+
+    if (m_destructableFilter != null)
+      m_destructableFilter.release()
+      m_destructableFilter = null
+
+    if (m_unitFilter != null)
+      m_unitFilter.release()
+      m_unitFilter = null
 
   // --------------------------------------------------------------------------
   function getTemplate() returns MapEventTemplate
@@ -219,56 +242,83 @@ public class MapEventInstance
     return m_worldTransform
 
   // --------------------------------------------------------------------------
-  function spawn(player owner)
-
-    cleanup()
-
-    let destRemoverCount = m_template.getDestRemoverCount()
-    m_spawnedRemovers = new Vector<MapEventAreaCleanerInstance>(destRemoverCount)
-    for i = 0 to destRemoverCount - 1
-      let destRemover = m_template.getDestRemover(i)
-      let instance = destRemover.spawn(m_worldTransform)
-      if (instance != null)
-        m_spawnedRemovers.add(instance)
-
-    let destSpawnerCount = m_template.getDestSpawnerCount()
-    m_spawnedDestructables = new Vector<destructable>(destSpawnerCount)
-    for i = 0 to destSpawnerCount - 1
-      let destSpawner = m_template.getDestSpawner(i)
-      let spawnedDest = destSpawner.spawn(m_worldTransform)
-      if (spawnedDest != null)
-        m_spawnedDestructables.add(spawnedDest)
-
-    let tileSpawnerCount = m_template.getTileSpawnerCount()
-    m_spawnedTiles = new Vector<MapEventTileInstance>(tileSpawnerCount)
-    for i = 0 to tileSpawnerCount - 1
-      let tileSpawner = m_template.getTileSpawner(i)
-      m_spawnedTiles.add(tileSpawner.spawn(m_worldTransform))
-
-    let unitSpawnerCount = m_template.getUnitSpawnerCount()
-    m_spawnedUnits = getGroup()
-    for i = 0 to unitSpawnerCount - 1
-      let unitSpawner = m_template.getUnitSpawner(i)
-      if (unitSpawner.getSpawnOnCreate())
-        let spawnedUnit = unitSpawner.spawn(owner, m_worldTransform)
-        if (spawnedUnit != null)
-          m_spawnedUnits.addUnit(spawnedUnit)
+  function setWorldTransform(transform value)
+    m_worldTransform = value
 
   // --------------------------------------------------------------------------
-  function cleanup()
+  function setUnitFilter(Predicate<MapEventUnitSpawner> filter)
+    if (m_unitFilter != null)
+      m_unitFilter.release()
+    m_unitFilter = filter.acquire()
 
-    if (m_spawnedDestructables != null)
-      for dest in m_spawnedDestructables
-        dest.remove()
-      destroy m_spawnedDestructables
-      m_spawnedDestructables = null
+  // --------------------------------------------------------------------------
+  function setDestructableFilter(Predicate<MapEventDestructableSpawner> filter)
+    if (m_destructableFilter != null)
+      m_destructableFilter.release()
+    m_destructableFilter = filter.acquire()
 
-    if (m_spawnedTiles != null)
-      for tile in m_spawnedTiles
-        destroy tile
-      destroy m_spawnedTiles
-      m_spawnedTiles = null
+  // --------------------------------------------------------------------------
+  function setOwner(player owner)
+    m_owner = owner
 
+  // --------------------------------------------------------------------------
+  function getOwner() returns player
+    return m_owner
+
+  // --------------------------------------------------------------------------
+  function spawn()
+    spawnCleaners()
+    spawnTiles()
+    if (m_owner != null)
+      spawnUnits(m_owner)
+    spawnDestructables()
+
+  // --------------------------------------------------------------------------
+  function spawnUnit(MapEventUnitSpawner spawner, player owner) returns unit
+    if (m_spawnedUnits == null)
+      m_spawnedUnits = getGroup()
+
+    let spawnedUnit = spawner.spawn(owner, m_worldTransform)
+    if (spawnedUnit != null)
+      m_spawnedUnits.addUnit(spawnedUnit)
+
+    return spawnedUnit
+
+  // --------------------------------------------------------------------------
+  function spawnUnit(MapEventUnitSpawner spawner, player owner, int unitTypeIdOverride) returns unit
+    if (m_spawnedUnits == null)
+      m_spawnedUnits = getGroup()
+
+    let spawnedUnit = spawner.spawn(owner, unitTypeIdOverride, m_worldTransform)
+    if (spawnedUnit != null)
+      m_spawnedUnits.addUnit(spawnedUnit)
+
+    return spawnedUnit
+
+  // --------------------------------------------------------------------------
+  function spawnUnits(player owner)
+    if (m_spawnedUnits == null)
+      m_spawnedUnits = getGroup()
+  
+    let unitSpawnerCount = m_template.getUnitSpawnerCount()  
+    for i = 0 to unitSpawnerCount - 1
+      let spawner = m_template.getUnitSpawner(i)
+      if (m_unitFilter == null or m_unitFilter.call(spawner))
+        spawnUnit(spawner, owner)
+
+  // --------------------------------------------------------------------------
+  function spawnUnits(player owner, int spawnerUnitTypeId, int actualUnitTypeId)
+    if (m_spawnedUnits == null)
+      m_spawnedUnits = getGroup()
+  
+    let unitSpawnerCount = m_template.getUnitSpawnerByTypeIdCount(spawnerUnitTypeId)  
+    for i = 0 to unitSpawnerCount - 1
+      let spawner = m_template.getUnitSpawnerByTypeId(spawnerUnitTypeId, i)
+      if (m_unitFilter == null or m_unitFilter.call(spawner))
+        spawnUnit(spawner, owner, actualUnitTypeId)
+        
+  // --------------------------------------------------------------------------
+  function destroyUnits()
     if (m_spawnedUnits != null)
       m_spawnedUnits.refresh()
       for u in m_spawnedUnits
@@ -276,66 +326,162 @@ public class MapEventInstance
       m_spawnedUnits.release()
       m_spawnedUnits = null
 
-    if (m_spawnedRemovers != null)
-      for remover in m_spawnedRemovers
+  // --------------------------------------------------------------------------
+  function spawnDestructable(MapEventDestructableSpawner spawner) returns destructable
+    if (m_spawnedDestructables == null)
+      m_spawnedDestructables = new Vector<destructable>()
+
+    let spawnedDest = spawner.spawn(m_worldTransform)
+    if (spawnedDest != null)
+      m_spawnedDestructables.add(spawnedDest)
+
+    return spawnedDest
+  
+  // --------------------------------------------------------------------------
+  function spawnDestructables()
+    let destSpawnerCount = m_template.getDestSpawnerCount()
+    
+    if (m_spawnedDestructables == null)
+      m_spawnedDestructables = new Vector<destructable>(destSpawnerCount)
+
+    for i = 0 to destSpawnerCount - 1
+      let spawner = m_template.getDestSpawner(i)
+      if (m_destructableFilter == null or m_destructableFilter.call(spawner))
+        spawnDestructable(spawner)
+
+  // --------------------------------------------------------------------------
+  function destroyDestructables()
+    if (m_spawnedDestructables != null)
+      for dest in m_spawnedDestructables
+        dest.remove()
+      destroy m_spawnedDestructables
+      m_spawnedDestructables = null
+  
+  // --------------------------------------------------------------------------
+  function spawnTile(MapEventTileSpawner spawner) returns MapEventTileInstance
+    if (m_spawnedTiles == null)
+      m_spawnedTiles = new Vector<MapEventTileInstance>()
+    
+    let spawnedTile = spawner.spawn(m_worldTransform)
+    if (spawnedTile != null)
+      m_spawnedTiles.add(spawnedTile)
+    
+    return spawnedTile
+
+  // --------------------------------------------------------------------------
+  function spawnTiles()
+    let tileSpawnerCount = m_template.getTileSpawnerCount()
+
+    if (m_spawnedTiles == null)
+      m_spawnedTiles = new Vector<MapEventTileInstance>(tileSpawnerCount)
+
+    for i = 0 to tileSpawnerCount - 1
+      let spawner = m_template.getTileSpawner(i)
+      spawnTile(spawner)
+
+  // --------------------------------------------------------------------------
+  function destroyTiles()
+
+    if (m_spawnedTiles != null)
+      for tile in m_spawnedTiles
+        destroy tile
+      destroy m_spawnedTiles
+      m_spawnedTiles = null
+
+  // --------------------------------------------------------------------------
+  function spawnCleaner(MapEventAreaCleanerSpawner spawner) returns MapEventAreaCleanerInstance
+    if (m_cleaners == null)
+      m_cleaners = new Vector<MapEventAreaCleanerInstance>()
+
+    let instance = spawner.spawn(m_worldTransform)
+    if (instance != null)
+      m_cleaners.add(instance)
+
+    return instance
+
+  // --------------------------------------------------------------------------
+  function spawnCleaners()
+    let cleanerCount = m_template.getAreaCleanerCount()
+    
+    if (m_cleaners == null)
+      m_cleaners = new Vector<MapEventAreaCleanerInstance>(cleanerCount)
+
+    for i = 0 to cleanerCount - 1
+      let cleaner = m_template.getAreaCleaner(i)
+      spawnCleaner(cleaner)
+
+  // --------------------------------------------------------------------------
+  function destroyCleaners()
+
+    if (m_cleaners != null)
+      for remover in m_cleaners
         destroy remover
-      destroy m_spawnedRemovers
-      m_spawnedRemovers = null
+      destroy m_cleaners
+      m_cleaners = null
+
+  // --------------------------------------------------------------------------
+  function cleanup()
+    destroyDestructables()
+    destroyUnits()
+    destroyTiles()
+    destroyCleaners()
 
 // ============================================================================
 public class MapEventUnitSpawner
   private int m_unitTypeId
   private transform m_localTransform
-  private bool m_spawnOnCreate
 
   // --------------------------------------------------------------------------
-  construct(int unitTypeId, bool spawnOnCreate, transform localTransform)
+  construct(int unitTypeId, transform localTransform)
     m_unitTypeId = unitTypeId
-    m_spawnOnCreate = spawnOnCreate
     m_localTransform = localTransform
-  
+
   // --------------------------------------------------------------------------
-  function getSpawnOnCreate() returns bool
-    return m_spawnOnCreate
+  function getUnitTypeId() returns int
+    return m_unitTypeId
+
+  // --------------------------------------------------------------------------
+  function getLocalTransform() returns transform
+    return m_localTransform
 
   // --------------------------------------------------------------------------
   function spawn(player owner, transform parentTransform) returns unit
     let worldTransform = parentTransform.concat(m_localTransform)
-    let worldRotEuler = worldTransform.rot.toEuler()
-    return createUnit(
-      owner,
-      m_unitTypeId,
-      worldTransform.pos,
-      worldRotEuler.z.asAngleRadians())
+    return createUnit(owner, m_unitTypeId, worldTransform)
+
+  // --------------------------------------------------------------------------
+  function spawn(player owner, int unitTypeIdOverride, transform parentTransform) returns unit
+    let worldTransform = parentTransform.concat(m_localTransform)
+    return createUnit(owner, unitTypeIdOverride, worldTransform)
 
 // ============================================================================
 class MapEventDestructableSpawner
   private int m_destructableTypeId
   private int m_variation
   private transform m_localTransform
-  private bool m_spawnOnCreate
 
   // --------------------------------------------------------------------------
-  construct(int destructableTypeId, int variation, bool spawnOnCreate, transform localTransform)
+  construct(int destructableTypeId, int variation, transform localTransform)
     m_destructableTypeId = destructableTypeId
     m_variation = variation
-    m_spawnOnCreate = spawnOnCreate
     m_localTransform = localTransform
-  
+
   // --------------------------------------------------------------------------
-  function getSpawnOnCreate() returns bool
-    return m_spawnOnCreate
+  function getDestructableTypeId() returns int
+    return m_destructableTypeId
+
+  // --------------------------------------------------------------------------
+  function getVariation() returns int
+    return m_variation
+
+  // --------------------------------------------------------------------------
+  function getLocalTransform() returns transform
+    return m_localTransform
 
   // --------------------------------------------------------------------------
   function spawn(transform parentTransform) returns destructable
     let worldTransform = parentTransform.concat(m_localTransform)
-    let worldRotEuler = worldTransform.rot.toEuler()
-    return createDestructable(
-      m_destructableTypeId,
-      worldTransform.pos,
-      worldRotEuler.z.asAngleRadians(),
-      worldTransform.scale,
-      m_variation)
+    return createDestructable(m_destructableTypeId, m_variation, worldTransform)
 
 // ============================================================================
 function enumDestructablesInCircle()
@@ -350,7 +496,7 @@ function filterUnitIsLootable() returns bool
   return filterUnit.isLootable()
 
 // ============================================================================
-class MapEventAreaCleaner
+class MapEventAreaCleanerSpawner
   private real m_radius
   private transform m_localTransform
 
@@ -358,6 +504,14 @@ class MapEventAreaCleaner
   construct(real radius, transform localTransform)
     m_radius = radius
     m_localTransform = localTransform
+
+  // --------------------------------------------------------------------------
+  function getRadius() returns real
+    return m_radius
+
+  // --------------------------------------------------------------------------
+  function getLocalTransform() returns transform
+    return m_localTransform
 
   // --------------------------------------------------------------------------
   function spawn(transform parentTransform) returns MapEventAreaCleanerInstance
@@ -432,6 +586,18 @@ class MapEventTileSpawner
     m_localTransform = localTransform
 
   // --------------------------------------------------------------------------
+  function getTilesetId() returns int
+    return m_tilesetId
+
+  // --------------------------------------------------------------------------
+  function getVariation() returns int
+    return m_variation
+
+  // --------------------------------------------------------------------------
+  function getLocalTransform() returns transform
+    return m_localTransform
+
+  // --------------------------------------------------------------------------
   function spawn(transform parentTransform) returns MapEventTileInstance
     let worldTransform = parentTransform.concat(m_localTransform)
     let tile = worldTransform.pos.toVec2().getTile()
@@ -468,7 +634,58 @@ public class MapEventTileInstance
     m_tile.setType(m_prevTilesetId, m_prevVariation)
 
 // ============================================================================
+public class MapEvent extends Runnable
+  private string m_id
+  private transform m_worldTransform
+
+  // --------------------------------------------------------------------------
+  construct(string id)
+    m_id = id
+    g_mapEvents.add(this)
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    g_mapEvents.remove(this)
+
+  // --------------------------------------------------------------------------
+  static function registerMapEventFactory(string id, Func<MapEvent> factory)
+    g_mapEventFactories.put(id, factory.acquire())
+
+  // --------------------------------------------------------------------------
+  static function createMapEvent(string id) returns MapEvent
+    let factory = g_mapEventFactories.get(id)
+    return factory != null ? factory.call() : null
+
+  // --------------------------------------------------------------------------
+  function getId() returns string
+    return m_id
+
+  // --------------------------------------------------------------------------
+  function getWorldTransform() returns transform
+    return m_worldTransform
+
+  // --------------------------------------------------------------------------
+  function setWorldTransform(transform worldTransform)
+    m_worldTransform = worldTransform
+
+  // --------------------------------------------------------------------------
+  override protected function onStarted()
+    g_runningMapEvents.add(this)
+  
+  // --------------------------------------------------------------------------
+  override protected function onPaused()
+    g_runningMapEvents.remove(this)
+  
+  // --------------------------------------------------------------------------
+  override protected function onResumed()
+    g_runningMapEvents.add(this)
+
+  // --------------------------------------------------------------------------
+  override protected function onCompleted()
+    g_runningMapEvents.remove(this)
+
+// ============================================================================
 init
 
   // This comes from the generated MapEventsInit.wurst file
-  registerMapEventTemplates()
+  nullTimer(() -> registerMapEventTemplates())
