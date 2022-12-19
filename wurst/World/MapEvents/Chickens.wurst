@@ -1,4 +1,4 @@
-package Frogs
+package Chickens
 import MapEvents
 import GroupUtils
 import HumanPlayers
@@ -15,38 +15,41 @@ import ItemType
 import TlsItemIds
 import TlsUnitDefinition
 
-MapEvent g_frogsMapEvent
+MapEvent g_chickensMapEvent
 
-constant string FROG_MAP_EVENT_ID = "world_frogs"
+constant string CHICKENS_MAP_EVENT_ID = "world_chickens"
 
 // ============================================================================
-public class FrogsMapEvent extends MapEvent
-  private group m_spawnedFrogs = getGroup()
+public class ChickensMapEvent extends MapEvent
+  private group m_spawnedUnits = getGroup()
   private MapEventTemplate m_mapEventTemplate
   private MapEventInstance m_mapEventInstance
   private CancellationToken m_ct
 
   // --------------------------------------------------------------------------
   construct()
-    super(FROG_MAP_EVENT_ID)
-    m_mapEventTemplate = MapEventTemplate.getTemplate(FROG_MAP_EVENT_ID)
+    super(CHICKENS_MAP_EVENT_ID)
+    m_mapEventTemplate = MapEventTemplate.getTemplate(CHICKENS_MAP_EVENT_ID)
     m_ct = new CancellationToken()..acquire()
 
   // --------------------------------------------------------------------------
   ondestroy
-    m_spawnedFrogs.release()
-    m_spawnedFrogs = null
+    m_spawnedUnits.release()
+    m_spawnedUnits = null
 
-    m_ct.cancelAndRelease()
-    m_ct = null
+    if (m_ct != null)
+      m_ct.cancelAndRelease()
+      m_ct = null
 
   // --------------------------------------------------------------------------
   override protected function onStarted()
 
+    m_ct = new CancellationToken()..acquire()
+
     m_mapEventInstance = m_mapEventTemplate.createInstance()
 
     let playerCountT = parameterize01(1, MAX_PLAYER_COUNT, g_PlayingHumanPlayerCount)
-    let frogSpawnCount = FROG_SPAWN_COUNT_RANGE.lerp(playerCountT).floor()
+    let chickenSpawnCount = CHICKEN_SPAWN_COUNT_RANGE.lerp(playerCountT).floor()
 
     let unitSpawners = new HashList<MapEventUnitSpawner>()
 
@@ -54,7 +57,7 @@ public class FrogsMapEvent extends MapEvent
       let unitSpawner = m_mapEventTemplate.getUnitSpawner(i)
       unitSpawners.add(unitSpawner)
       
-    let spawnJob = m_mapEventInstance.getUnitSpawnThread().repeat(m_ct, frogSpawnCount) (integer i) ->
+    let spawnJob = m_mapEventInstance.getUnitSpawnThread().repeat(m_ct, chickenSpawnCount) (integer i) ->
     //{
       let randomIndex = GetRandomInt(0, unitSpawners.size() - 1)
       let spawner = unitSpawners.get(randomIndex)
@@ -69,56 +72,62 @@ public class FrogsMapEvent extends MapEvent
   // --------------------------------------------------------------------------
   override protected function onCompleted()
     super.onCompleted()
-    destroy m_mapEventInstance
-    m_mapEventInstance = null
+
+    if (m_ct != null)
+      m_ct.cancelAndRelease()
+      m_ct = null
+
+    if (m_mapEventInstance != null)
+      destroy m_mapEventInstance
+      m_mapEventInstance = null
 
 // ============================================================================
-function createFrogsMapEventTemplate()
+function createMapEventTemplate()
 
-  let mapEventTemplate = MapEventTemplate.createMapEventTemplate(FROG_MAP_EVENT_ID)
+  let mapEventTemplate = MapEventTemplate.createMapEventTemplate(CHICKENS_MAP_EVENT_ID)
 
-  let frogSpawnerUnits = getGroup()
-  frogSpawnerUnits.enumUnitsOfType(TlsUnitIds.frogSpawner, null)
+  let chickenSpawnerUnits = getGroup()
+  chickenSpawnerUnits.enumUnitsOfType(TlsUnitIds.chickenSpawner, null)
 
-  for frogSpawnerUnit in frogSpawnerUnits
-    mapEventTemplate.registerUnitSpawner(TlsUnitIds.frog, frogSpawnerUnit.getPos().toVec3(), frogSpawnerUnit.getFacingAngle())
+  for chickenSpawnerUnit in chickenSpawnerUnits
+    mapEventTemplate.registerUnitSpawner(TlsUnitIds.chicken, chickenSpawnerUnit.getPos().toVec3(), chickenSpawnerUnit.getFacingAngle())
       ..setUseRecycler(true)
       ..setFadeInDuration(UNIT_FADE_DURATION)
       ..setFadeOutToRandomPos(UNIT_FADE_DURATION)
-    frogSpawnerUnit.remove()
+    chickenSpawnerUnit.remove()
 
-  frogSpawnerUnits.release()
+  chickenSpawnerUnits.release()
 
 // ============================================================================
 function onDayStart()
 
-  if (g_frogsMapEvent != null)
-    g_frogsMapEvent.start()
+  if (g_chickensMapEvent != null)
+    g_chickensMapEvent.start()
 
 // ============================================================================
 function onNightStart()
   
-  if (g_frogsMapEvent != null)
-    g_frogsMapEvent.complete()
+  if (g_chickensMapEvent != null)
+    g_chickensMapEvent.complete()
 
 // ============================================================================
 function onUnitKilled()
   let dyingUnit = GetDyingUnit()
-  if (dyingUnit.getTypeId() == TlsUnitIds.frog)
-    ItemType.createItem(TlsItemIds.frog, dyingUnit.getPos())
+  if (dyingUnit.getTypeId() == TlsUnitIds.chicken)
+    ItemType.createItem(TlsItemIds.chicken, dyingUnit.getPos())
 
 // ============================================================================
 @compiletime function createObjectDefinitions()
-  new TlsUnitDefinition(TlsUnitIds.frog, UnitIds.frog)
+  new TlsUnitDefinition(TlsUnitIds.chicken, UnitIds.chicken)
 
 // ============================================================================
 init
   createObjectDefinitions()
 
-  createFrogsMapEventTemplate()
+  createMapEventTemplate()
 
-  MapEvent.registerMapEventFactory(FROG_MAP_EVENT_ID, () -> new FrogsMapEvent())
-  g_frogsMapEvent = MapEvent.createMapEvent(FROG_MAP_EVENT_ID)
+  MapEvent.registerMapEventFactory(CHICKENS_MAP_EVENT_ID, () -> new ChickensMapEvent())
+  g_chickensMapEvent = MapEvent.createMapEvent(CHICKENS_MAP_EVENT_ID)
 
   registerDayEvent(function onDayStart)
   registerNightEvent(function onNightStart)

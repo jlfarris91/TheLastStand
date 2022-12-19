@@ -1,19 +1,21 @@
 package ForgottenOneComponent
 import UnitComponent
 import Trace
-import Spawning
 import UndeadTargetingComponent
 import UndeadTargetService
 import TlsAbilityIds
 import HashMap
 import Orders
+import World
+import CancellationToken
+import Jobs
 
 constant int SUMMON_ORDER_ID = OrderIds.ward
 HashMap<unit, unit> g_summonedToSummonerMap = new HashMap<unit, unit>()
 
 // ============================================================================
 public class ForgottenOneComponent extends UnitComponent
-  private TentacleSpawnRequest m_spawnRequest
+  private CancellationToken m_ct
 
   // --------------------------------------------------------------------------
   construct (IUnitMetadata owner)
@@ -22,20 +24,21 @@ public class ForgottenOneComponent extends UnitComponent
   // --------------------------------------------------------------------------
   override function onEnabled()
     super.onEnabled()
-    m_spawnRequest = new TentacleSpawnRequest(getOwnerUnit())
-    SpawnController.enqueue(m_spawnRequest)
+
+    m_ct = new CancellationToken()
+
+    let tentacleSpawnJob = new TentacleSpawnRequest(getOwnerUnit())
+    World.unitSpawnThread.enqueue(m_ct, tentacleSpawnJob)
 
   // --------------------------------------------------------------------------
   override function onDisabled()
     super.onDisabled()
 
-    if (m_spawnRequest != null)
-      SpawnController.remove(m_spawnRequest)
-      destroy m_spawnRequest
-      m_spawnRequest = null
+    m_ct.cancelAndRelease()
+    m_ct = null
 
 // ============================================================================
-class TentacleSpawnRequest extends SpawnRequestBase
+class TentacleSpawnRequest extends Job
   private unit m_owner
   private timer m_timer
 
@@ -91,10 +94,6 @@ class TentacleSpawnRequest extends SpawnRequestBase
   // --------------------------------------------------------------------------
   override function getDebuggerStateString() returns string
     return "Tentacles " + m_timer.getRemaining().toString() + "s"
-
-  // --------------------------------------------------------------------------
-  override function close()
-    // don't destroy automatically
 
 // ============================================================================
 public function IUnitMetadata.getForgottenOneComponent() returns ForgottenOneComponent

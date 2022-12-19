@@ -13,43 +13,6 @@ import SoundUtils
 import Math
 import Difficulties
 
-public tuple tierChances(real tier1, real tier2, real tier3)
-
-public tuple spawnWaveUnitType(int id, int tier)
-
-// ============================================================================
-public class SpawnWaveUnitTypeCollection
-  private spawnWaveUnitType array[12] m_unitTypes
-  private int m_size = 0
-
-  // --------------------------------------------------------------------------
-  function clear()
-    m_size = 0
-
-  // --------------------------------------------------------------------------
-  function add(spawnWaveUnitType unitType)
-    m_unitTypes[m_size] = unitType
-    m_size++
-
-  // --------------------------------------------------------------------------
-  function add(int unitTypeId, int tier)
-    m_unitTypes[m_size].id = unitTypeId
-    m_unitTypes[m_size].tier = tier
-    m_size++
-
-  // --------------------------------------------------------------------------
-  function get(int index) returns spawnWaveUnitType
-    return m_unitTypes[index]
-
-  // --------------------------------------------------------------------------
-  function size() returns int
-    return m_size
-    
-
-// ============================================================================
-public interface ISpawnWaveUnitTypeProvider
-  function getUnitTypes(SpawnWaveContext context, int count, SpawnWaveUnitTypeCollection output)
-
 // ============================================================================
 public interface ISpawnWaveActivator extends IRunnable
   function getActivatedEvent() returns Event
@@ -63,7 +26,7 @@ public class SpawnWaveDefinition
   private Func1<SpawnWaveContext, Runnable> m_progressFactory
   private ISpawnWaveActivator m_activator
   private SpawnRange m_spawnRange
-  private ISpawnWaveUnitTypeProvider m_unitTypeProvider
+  private ITieredUnitTypeProvider m_unitTypeProvider
   private Func1<SpawnWaveContext, int> m_maxSpawnCount
   private Func1<SpawnWaveContext, int> m_maxAliveCount
   private Func1<SpawnWaveContext, real> m_spawnGroupingFactor
@@ -167,11 +130,11 @@ public class SpawnWaveDefinition
     return m_spawnRange
 
   // --------------------------------------------------------------------------
-  function setUnitTypeProvider(ISpawnWaveUnitTypeProvider unitTypeProvider)
+  function setUnitTypeProvider(ITieredUnitTypeProvider unitTypeProvider)
     m_unitTypeProvider = unitTypeProvider
 
   // --------------------------------------------------------------------------
-  function getUnitTypeProvider() returns ISpawnWaveUnitTypeProvider
+  function getUnitTypeProvider() returns ITieredUnitTypeProvider
     return m_unitTypeProvider
 
   // --------------------------------------------------------------------------
@@ -378,20 +341,29 @@ public class SpawnWaveDefinition
     m_techIdToAdvance = value
 
 // ============================================================================
-public class SpawnWaveContext
+public class SpawnWaveContext extends SpawnContext
   SpawnWaveDefinition definition = null
   int waveNumber = 0
   real waveProgress = 0.0
   real playerDifficulty = 1.0
-  real array[MAX_ELITE_TIER] tierChances = [ 1.0, 0.0, 0.0]
-  int unitTier = 0
-  int waveTier = 0
-  int groupId = 0
   int goldDrops = 0
   int goldAvailable = 0
 
   private Event m_onUnitKilled
   private int m_killCount = 0
+
+  // --------------------------------------------------------------------------
+  construct()
+  
+  // --------------------------------------------------------------------------
+  construct(SpawnWaveContext other)
+    definition = other.definition
+    waveNumber = other.waveNumber
+    waveProgress = other.waveProgress
+    playerDifficulty = other.playerDifficulty
+    goldDrops = other.goldDrops
+    goldAvailable = other.goldAvailable
+    m_killCount = other.m_killCount
 
   // --------------------------------------------------------------------------
   ondestroy
@@ -400,28 +372,32 @@ public class SpawnWaveContext
       m_onUnitKilled = null
 
   // --------------------------------------------------------------------------
-  function getGameProgress01() returns real
+  override function clone() returns SpawnContext
+    return new SpawnWaveContext(this)
+
+  // --------------------------------------------------------------------------
+  override function getGameProgress01() returns real
     return ((waveNumber - 1).toReal() + waveProgress) / TOTAL_NIGHTS
 
   // --------------------------------------------------------------------------
-  function getGameDifficulty01() returns real
+  override function getGameDifficulty01() returns real
     return g_GameInstance.getGameDifficulty01()
 
   // --------------------------------------------------------------------------
-  function getUnitModifierGameProgress01() returns real
+  override function getUnitModifierGameProgress01() returns real
     return parameterize(1, TOTAL_NIGHTS, waveNumber)
 
   // --------------------------------------------------------------------------
-  function getUnitModifierDifficultyScalar01() returns real
-    return DifficultyScaling.getEliteGeneralScalar01(playerDifficulty, unitTier.toReal())
+  override function getUnitModifierDifficultyScalar01() returns real
+    return DifficultyScaling.getEliteGeneralScalar01(playerDifficulty, getTier().toReal())
   
   // --------------------------------------------------------------------------
-  function getUnitDamageScalar01() returns real
-    return DifficultyScaling.getEliteDamageScalar01(playerDifficulty, unitTier.toReal())
+  override function getUnitDamageScalar01() returns real
+    return DifficultyScaling.getEliteDamageScalar01(playerDifficulty, getTier().toReal())
   
   // --------------------------------------------------------------------------
-  function getUnitHealthScalar01() returns real
-    return DifficultyScaling.getEliteHealthScalar01(playerDifficulty, unitTier.toReal())
+  override function getUnitHealthScalar01() returns real
+    return DifficultyScaling.getEliteHealthScalar01(playerDifficulty, getTier().toReal())
 
   // --------------------------------------------------------------------------
   function onUnitKilled() returns IEvent
@@ -438,36 +414,3 @@ public class SpawnWaveContext
     m_killCount++
     if (m_onUnitKilled != null)
       m_onUnitKilled.call()
-
-  // --------------------------------------------------------------------------
-  function clone() returns SpawnWaveContext
-    let clone = new SpawnWaveContext()
-    clone.definition = definition
-    clone.waveNumber = waveNumber
-    clone.waveProgress = waveProgress
-    clone.playerDifficulty = playerDifficulty
-    clone.waveTier = waveTier
-    clone.unitTier = unitTier
-    clone.groupId = groupId
-    for i = 0 to MAX_ELITE_TIER-1
-      clone.tierChances[i] = tierChances[i]
-    return clone
-
-  // --------------------------------------------------------------------------
-  function getRandomTier() returns int
-    var roll01 = GetRandomReal(0, 1)
-    var tier = 0
-    for i = 0 to MAX_ELITE_TIER - 1
-      let tierChance = tierChances[i]
-      if (roll01 < tierChance)
-        tier = i
-        break
-      roll01 -= tierChance
-    return tier
-
-// ============================================================================
-public class UnitSpawnContext
-  UnitSpawnContext prev = null
-  UnitSpawnContext next = null
-  int unitTypeId = -1
-  int tier = -1

@@ -1,0 +1,445 @@
+package SpawnUndeadUnitJob
+import Jobs
+import UndeadTargetService
+import Spawning
+import UnitRecycler
+import GroupUtils
+import Range
+import Events
+import ErrorHandling
+import UnitMetadata
+import Suspend
+import RegisterEvents
+import HashMap
+import GroupExtensions
+import Math
+import Func
+import PlayerMetadata
+import RealTime
+import ColorUtility
+
+HashMap<unit, SpawnUndeadUnitJob> g_unitToJobMap
+
+// ============================================================================
+public enum SpawnRestriction
+  None  // Go ahead and spawn
+  Wait  // Waiting for full group
+  Done  // Done spawning units for this wave
+
+// ============================================================================
+public class SpawnUndeadUnitJob extends Job
+
+  private string m_id
+  private player m_targetPlayer
+  private player m_owningPlayer
+
+  private ITieredUnitTypeProvider m_unitTypeProvider = null
+  private UndeadTargetProvider m_targetProvider = null
+  private ISpawnPointProvider m_spawnPointProvider = null
+  private SpawnContext m_context = null
+
+  // Configuration
+  private int m_maxSpawnCount = INT_MAX
+  private int m_maxAliveCount = INT_MAX
+  private real m_groupingFactor = 1.0
+  private bool m_waitForFullSpawnGroup = false
+  private rangeReal m_spawnRange
+  private rangeReal m_facingAngleRange = rangeReal(0, 360)
+  private bool m_useRecycler
+  private Func2<Job, unit, bool> m_prepareUnitFunc
+
+  private group m_currentGroup = null
+  private group m_spawnedUnits = null
+
+  private int m_nextCounter = 0
+  private int m_totalSpawned = 0
+  private int m_groupSize = 1
+  private int m_groupId = -1
+
+  private TieredUnitTypeCollection m_unitTypes = null
+  private int m_unitTypeIndex = -1
+
+  private Event2<SpawnUndeadUnitJob, unit> m_onUnitSpawned
+  private Event2<SpawnUndeadUnitJob, group> m_onGroupSpawned
+
+  // --------------------------------------------------------------------------
+  construct(string id, player owningPlayer, player targetPlayer)
+    super(REAL_MAX)
+
+    m_id = id
+    m_owningPlayer = owningPlayer
+    m_targetPlayer = targetPlayer
+    m_currentGroup = getGroup()
+    m_spawnedUnits = getGroup()
+    m_groupSize = 0
+    m_groupId = -1
+
+    m_context = new SpawnContext()..acquire()
+
+    m_unitTypes = new TieredUnitTypeCollection()
+    m_unitTypeIndex = 0
+
+  // --------------------------------------------------------------------------
+  ondestroy
+
+    if (m_context != null)
+      m_context.release()
+      m_context = null
+
+    if (m_targetProvider != null)
+      m_targetProvider.release()
+      m_targetProvider = null
+
+    if (m_currentGroup != null)
+    // {
+      // Remove/stock any units that weren't fully spawned in with the current group
+      for u in m_currentGroup
+        let recycler = u.getRecycler()
+        if (recycler != null)
+          recycler.stock(u)
+        else
+          u.remove()
+
+      m_currentGroup.release()
+      m_currentGroup = null
+    //}
+
+    if (m_spawnedUnits != null)
+      m_spawnedUnits.release()
+      m_spawnedUnits = null
+
+    if (m_unitTypes != null)
+      destroy m_unitTypes
+      m_unitTypes = null
+
+    if (m_onUnitSpawned != null)
+      destroy m_onUnitSpawned
+      m_onUnitSpawned = null
+
+    if (m_onGroupSpawned != null)
+      destroy m_onGroupSpawned
+      m_onGroupSpawned = null
+
+    if (m_prepareUnitFunc != null)
+      m_prepareUnitFunc.release()
+      m_prepareUnitFunc = null
+
+  // --------------------------------------------------------------------------
+  function getId() returns string
+    return m_id
+
+  // --------------------------------------------------------------------------
+  function getContext() returns SpawnContext
+    return m_context
+  
+  // --------------------------------------------------------------------------
+  function setContext(SpawnContext value)
+    m_context = value
+
+  // --------------------------------------------------------------------------
+  function getUnitTypeProvider() returns ITieredUnitTypeProvider
+    return m_unitTypeProvider
+  
+  // --------------------------------------------------------------------------
+  function setUnitTypeProvider(ITieredUnitTypeProvider value)
+    m_unitTypeProvider = value
+
+  // --------------------------------------------------------------------------
+  function getSpawnRange() returns rangeReal
+    return m_spawnRange
+  
+  // --------------------------------------------------------------------------
+  function setSpawnRange(rangeReal value)
+    m_spawnRange = value
+
+  // --------------------------------------------------------------------------
+  function getSpawnPointProvider() returns ISpawnPointProvider
+    return m_spawnPointProvider
+  
+  // --------------------------------------------------------------------------
+  function setSpawnPointProvider(ISpawnPointProvider value)
+    m_spawnPointProvider = value
+
+  // --------------------------------------------------------------------------
+  function getTargetProvider() returns UndeadTargetProvider
+    return m_targetProvider
+  
+  // --------------------------------------------------------------------------
+  function setTargetProvider(UndeadTargetProvider value)
+    if (m_targetProvider != null)
+      m_targetProvider.release()
+    m_targetProvider = value.acquire()
+
+  // --------------------------------------------------------------------------
+  function getWaitForFullGroup() returns bool
+    return m_waitForFullSpawnGroup
+  
+  // --------------------------------------------------------------------------
+  function setWaitForFullGroup(bool value)
+    m_waitForFullSpawnGroup = value
+
+  // --------------------------------------------------------------------------
+  function getMaxAliveCount() returns int
+    return m_maxAliveCount
+  
+  // --------------------------------------------------------------------------
+  function setMaxAliveCount(int value)
+    m_maxAliveCount = value
+    updateGroupSize()
+
+  // --------------------------------------------------------------------------
+  function getGroupingFactor() returns real
+    return m_groupingFactor
+  
+  // --------------------------------------------------------------------------
+  function setGroupingFactor(real value)
+    m_groupingFactor = value
+    updateGroupSize()
+
+  // --------------------------------------------------------------------------
+  function getAliveUnitCount() returns int
+    m_currentGroup.refresh()
+    return m_currentGroup.size()
+
+  // --------------------------------------------------------------------------
+  function getPrepareUnitFunc() returns Func2<Job, unit, bool>
+    return m_prepareUnitFunc
+  
+  // --------------------------------------------------------------------------
+  function setPrepareUnitFunc(Func2<Job, unit, bool> value)
+    if (m_prepareUnitFunc != null)
+      m_prepareUnitFunc.release()
+    m_prepareUnitFunc = value.acquire() 
+
+  // --------------------------------------------------------------------------
+  function getUseRecycler() returns bool
+    return m_useRecycler
+  
+  // --------------------------------------------------------------------------
+  function setUseRecycler(bool value)
+    m_useRecycler = value
+
+  // --------------------------------------------------------------------------
+  function onUnitSpawned() returns IEvent2<SpawnUndeadUnitJob, unit>
+    if (m_onUnitSpawned == null)
+      m_onUnitSpawned = new Event2<SpawnUndeadUnitJob, unit>()
+    return m_onUnitSpawned
+
+  // --------------------------------------------------------------------------
+  function onGroupSpawned() returns IEvent2<SpawnUndeadUnitJob, group>
+    if (m_onGroupSpawned == null)
+      m_onGroupSpawned = new Event2<SpawnUndeadUnitJob, group>()
+    return m_onGroupSpawned
+
+  // --------------------------------------------------------------------------
+  private function updateGroupSize()
+    m_groupSize = max(R2I(I2R(m_maxAliveCount) * m_groupingFactor), 1)
+
+  // --------------------------------------------------------------------------
+  override function next() returns int
+
+    let restriction = canSpawnNextUnit()
+
+    if (restriction == SpawnRestriction.Done)
+      // Wave is done spawning units
+      return 0
+
+    if (restriction == SpawnRestriction.Wait)
+      // Too many alive currently
+      return 0
+
+    if (m_nextCounter == 0)
+      nextGroup()
+
+    m_nextCounter++
+
+    let unitType = getNextUnitType()
+
+    if (unitType.tier == -1)
+      error("Unit tier is -1")
+
+    m_context.setGroupId(m_groupId)
+    m_context.setTier(unitType.tier)
+
+    let spawnedUnit = createUnit(unitType.id)
+    if (spawnedUnit == null)
+      Log.error("SpawnUndeadUnitJob", "next", "", "Unable to spawn unit " + UnitId2String(unitType.id))
+      spawnedUnit.removeOrStock()
+      return 0
+
+    if (not prepareUnit(spawnedUnit))
+      Log.error("SpawnUndeadUnitJob", "next", "", "Unable to prepare unit " + UnitId2String(unitType.id))
+      spawnedUnit.removeOrStock()
+      return 0
+
+    m_currentGroup.addUnit(spawnedUnit)
+    registerSpawnedUnit(spawnedUnit)
+
+    if (m_onUnitSpawned != null)
+      m_onUnitSpawned.call(this, spawnedUnit)
+
+    m_context.setGroupId(-1)
+    m_context.setTier(0)
+
+    if (m_currentGroup.size() == m_groupSize)
+      nextGroup()
+
+    return 1
+
+  // --------------------------------------------------------------------------
+  override function hasNext() returns bool
+    return true
+
+  // --------------------------------------------------------------------------
+  override function complete()
+    super.complete()
+    completeGroup()
+
+  // --------------------------------------------------------------------------
+  private function nextGroup()
+
+    completeGroup()
+
+    if (m_totalSpawned == m_maxSpawnCount)
+      return
+
+    m_unitTypeIndex = 0
+    m_groupId++
+
+    m_context.setGroupId(m_groupId)
+    m_context.setTier(0)
+
+    // Get new unit types for next subgroup
+    m_unitTypes.clear()
+    m_unitTypeProvider.getUnitTypes(m_context, m_groupSize, m_unitTypes)
+
+  // --------------------------------------------------------------------------
+  private function completeGroup()
+
+    if (m_currentGroup.isEmpty())
+      return
+
+    let groupTargetUnit = m_targetProvider.getRandomTargetUnit(false) // TODO: prefer organic targets?
+    m_context.setTargetUnit(groupTargetUnit)
+
+    let result = m_spawnPointProvider.getRandomSpawnPointInRange(groupTargetUnit.getPos(), m_spawnRange)
+    if (not result.succeeded)
+      Log.warn("[SpawnWave.onActivated] Found no spawn points!")
+      cancel()
+      return
+
+    for spawnedUnit in m_currentGroup
+      spawnedUnit.setPos(result.spawnPoint)
+      spawnedUnit.unsuspend()
+      spawnedUnit.show()
+
+    if (m_onGroupSpawned != null)
+      m_onGroupSpawned.call(this, m_currentGroup)
+    
+    m_currentGroup.clear()
+
+    m_context.setTargetUnit(null)
+
+  // --------------------------------------------------------------------------
+  private function getNextUnitType() returns tieredUnitType
+    let unitType = m_unitTypes.get(m_unitTypeIndex)
+    m_unitTypeIndex = wrap(m_unitTypeIndex + 1, 0, m_unitTypes.size() - 1)
+    return unitType
+  
+  // --------------------------------------------------------------------------
+  private function createUnit(int unitTypeId) returns unit
+
+    unit spawnedUnit
+
+    let facingAngle = m_facingAngleRange.getRandom().asAngleDegrees()
+
+    if (m_useRecycler)
+      spawnedUnit = createUnitRecycled(m_owningPlayer, unitTypeId, ZERO2, facingAngle)
+    else
+      spawnedUnit = createUnitTLS(m_owningPlayer, unitTypeId, ZERO2, facingAngle)
+    
+    spawnedUnit.suspend()
+    spawnedUnit.hide()
+
+    return spawnedUnit
+
+  // --------------------------------------------------------------------------
+  private function prepareUnit(unit u) returns bool
+    return m_prepareUnitFunc != null ? m_prepareUnitFunc.call(this, u) : true
+
+  // --------------------------------------------------------------------------
+  private function canSpawnNextUnit() returns SpawnRestriction
+  
+    if (m_totalSpawned == m_maxSpawnCount)
+      return SpawnRestriction.Done
+
+    if (getAliveUnitCount() == m_maxAliveCount)
+      return SpawnRestriction.Wait
+
+    if (m_targetPlayer == null)
+      return SpawnRestriction.Done
+
+    if (not m_targetPlayer.isIngame())
+      return SpawnRestriction.Done
+
+    let playerMetadata = m_targetPlayer.getMetadata()
+    if (playerMetadata == null or playerMetadata.getHasLostGame())
+      return SpawnRestriction.Done
+
+    return SpawnRestriction.None
+
+  // --------------------------------------------------------------------------
+  override function getDebuggerStateString() returns string
+
+    string state
+
+    switch (canSpawnNextUnit())
+      case SpawnRestriction.None
+        state = "Spwn"
+      case SpawnRestriction.Wait
+        state = "Wait"
+      case SpawnRestriction.Done
+        state = "Done"
+
+    return "{0} {1} ({2}/{3}) G{4} {5}s".format(
+      m_id,
+      state,
+      m_currentGroup.size().toString(),
+      m_groupSize.toString(),
+      m_groupId.toString(),
+      (getRealTimeSeconds() - m_startTime).toString())
+      .colorize(m_targetPlayer.getColor().toColor())
+
+  // --------------------------------------------------------------------------
+  private function registerSpawnedUnit(unit spawnedUnit)
+
+    if (g_unitToJobMap.has(spawnedUnit))
+      return
+
+    g_unitToJobMap.put(spawnedUnit, this)
+    m_spawnedUnits.addUnit(spawnedUnit)
+    m_totalSpawned++
+
+  // --------------------------------------------------------------------------
+  private function unregisterSpawnedUnit(unit spawnedUnit)
+    g_unitToJobMap.remove(spawnedUnit)
+    m_currentGroup.removeUnit(spawnedUnit)
+    m_spawnedUnits.removeUnit(spawnedUnit)
+
+  // --------------------------------------------------------------------------
+  protected function onUnitKilled(unit dyingUnit)
+    unregisterSpawnedUnit(dyingUnit)
+
+// ============================================================================
+function onUnitDeath()
+  let dyingUnit = GetDyingUnit()
+  if (not g_unitToJobMap.has(dyingUnit))
+    return
+  let spawnJob = g_unitToJobMap.get(dyingUnit)
+  spawnJob.onUnitKilled(dyingUnit)
+
+// ============================================================================
+init
+
+  g_unitToJobMap = new HashMap<unit, SpawnUndeadUnitJob>()
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_DEATH, function onUnitDeath)

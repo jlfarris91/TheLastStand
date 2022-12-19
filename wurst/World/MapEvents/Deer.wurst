@@ -1,0 +1,169 @@
+package Deer
+import MapEvents
+import GroupUtils
+import HumanPlayers
+import GameConstants
+import Jobs
+import Range
+import UnitExtensions
+import Time
+import RegisterEvents
+import ItemType
+import TlsItemIds
+import TlsUnitDefinition
+import Bounds
+import ClosureTimers
+import UnitRecycler
+import HumanPlayerComponent
+import ISpawnPointProvider
+import UndeadTargetService
+import PlayerSpawnPointProviders
+import ColorUtility
+import Orders
+
+MapEvent g_deerMapEvent
+
+constant string DEER_MAP_EVENT_ID = "world_deer"
+
+// ============================================================================
+public class DeerMapEvent extends MapEvent
+
+  // --------------------------------------------------------------------------
+  construct()
+    super(DEER_MAP_EVENT_ID)
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    banishAllDeer()
+
+  // --------------------------------------------------------------------------
+  override protected function onStarted()
+    super.onStarted()
+    spawnDeerAroundTheMap()
+
+  // --------------------------------------------------------------------------
+  override protected function onCompleted()
+    super.onCompleted()    
+    banishAllDeer()
+
+// ============================================================================
+class DeerSpawnJob extends Job
+  private player m_targetPlayer
+  private HumanPlayerComponent m_targetPlayerComp
+  private ISpawnPointProvider m_spawnPointProvider
+  private UndeadTargetProvider m_targetUnitProvider
+  private bool m_hasNext = true
+  private int m_spawned = 0
+
+  // --------------------------------------------------------------------------
+  construct (player targetPlayer)
+    super(10.0)
+    m_targetPlayer = targetPlayer
+    m_targetPlayerComp = m_targetPlayer.getHumanPlayerComponent()
+    m_targetUnitProvider = getUndeadTargetProviderForPlayer(m_targetPlayer)
+    m_spawnPointProvider = getHostileSpawnPointProviderForPlayer(m_targetPlayer)
+
+  // --------------------------------------------------------------------------
+  override function next() returns int
+
+    let playerMetadata = m_targetPlayer.getMetadata()
+    if (playerMetadata == null or playerMetadata.getHasLostGame() or not m_targetPlayer.isIngame())
+      m_hasNext = false
+      return 0
+
+    let targetUnit = m_targetUnitProvider.getRandomTargetUnit(false)
+    if (targetUnit == null)
+      return 0
+
+    let result = m_spawnPointProvider.getRandomSpawnPointInRange(targetUnit.getPos(), SpawnRange.FAR.toRangeReal())
+    if (not result.succeeded)
+      return 0
+
+    spawnDeer(result.spawnPoint)
+
+    m_spawned++
+    m_hasNext = m_spawned < NUMBER_DEER_PER_PLAYER
+
+    return 1
+  
+  // --------------------------------------------------------------------------
+  override function hasNext() returns bool
+    return m_hasNext
+
+  // --------------------------------------------------------------------------
+  override function getDebuggerStateString() returns string
+    return "Deer {0}/{1}".format(m_spawned.toString(), NUMBER_DEER_PER_PLAYER.toString()).colorize(m_targetPlayer.getColor().toColor())
+
+// ============================================================================
+function spawnDeerAroundTheMap()
+  for _player in g_PlayingHumanPlayers
+    spawnDeerNearPlayer(_player)
+
+// ============================================================================
+function spawnDeerNearPlayer(player _player)
+  let playerMetadata = _player.getMetadata()
+  if (playerMetadata == null or playerMetadata.getHasLostGame() or not _player.isIngame())
+    return
+  MapEventInstance.unitThread.enqueue(new DeerSpawnJob(_player))
+
+// ============================================================================
+function spawnDeer(vec2 pos)
+  let deer = createUnitRecycled(PLAYER_ENVIRONMENT, TlsUnitIds.deer, pos, GetRandomDirectionDeg().asAngleDegrees())
+  deer.setInvulnerable(true)
+  deer.fadeIn()
+
+  let moveToPos = pos.polarOffset(GetRandomDirectionDeg().asAngleDegrees(), GetRandomReal(200, 400))
+  deer.issuePointOrderById(Orders.move, moveToPos)
+
+  doAfter(UNIT_FADE_DURATION, () -> deer.setInvulnerable(false))
+
+// ============================================================================
+function banishAllDeer()
+  
+  let temp = getGroup()
+  temp.enumUnitsOfType(TlsUnitIds.deer, null)
+  for deer in temp
+    if (deer.isAlive())
+      deer.setInvulnerable(true)
+      deer.issuePointOrder("move", playableBounds.getRandomPoint())
+      deer.fadeOut()
+  temp.release()
+
+  doAfter(UNIT_FADE_DURATION, () -> stockAllDeer())
+
+// ============================================================================
+function stockAllDeer()
+  
+  let temp = getGroup()
+  temp.enumUnitsOfType(TlsUnitIds.deer, null)
+  for deer in temp
+    if (not deer.isStocked())
+      deer.stock()
+  temp.release()
+
+// ============================================================================
+function onDayStart()
+
+  if (g_deerMapEvent != null)
+    g_deerMapEvent.start()
+
+// ============================================================================
+function onNightStart()
+  
+  if (g_deerMapEvent != null)
+    g_deerMapEvent.complete()
+
+// ============================================================================
+function onUnitKilled()
+  let dyingUnit = GetDyingUnit()
+  if (dyingUnit.getTypeId() == TlsUnitIds.deer)
+    ItemType.createItem(TlsItemIds.rawMeat, dyingUnit.getPos())
+
+// ============================================================================
+init
+  MapEvent.registerMapEventFactory(DEER_MAP_EVENT_ID, () -> new DeerMapEvent())
+  g_deerMapEvent = MapEvent.createMapEvent(DEER_MAP_EVENT_ID)
+
+  registerDayEvent(function onDayStart)
+  registerNightEvent(function onNightStart)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_DEATH, function onUnitKilled)

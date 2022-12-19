@@ -1,0 +1,385 @@
+package SpawnDirectors
+import WeightedSet
+import ClosureTimers
+import Vector
+import Range
+import World
+import Jobs
+import UndeadTargetService
+import ISpawnPointProvider
+
+constant real TOO_CHEAP_COEFF = 6
+
+// ============================================================================
+public abstract class SpawnJobConfig
+
+// ============================================================================
+public abstract class EntityDefinition
+  private string m_id
+  private int m_baseCost
+
+  // --------------------------------------------------------------------------
+  construct(string id)
+    m_id = id
+
+  // --------------------------------------------------------------------------
+  function getId() returns string
+    return m_id
+
+  // --------------------------------------------------------------------------
+  function getCost() returns int
+    return m_baseCost
+  
+  // --------------------------------------------------------------------------
+  function setBaseCost(int value)
+    m_baseCost = value
+
+  // --------------------------------------------------------------------------
+  abstract function createSpawnJob(SpawnJobConfig config) returns Job
+
+// ============================================================================
+public class MonsterDefinition extends EntityDefinition
+  private int array[3] m_unitTypeIds
+  private int m_tierCount
+
+  // --------------------------------------------------------------------------
+  construct(string id)
+    super(id)
+
+  // --------------------------------------------------------------------------
+  function getUnitTypeId(int tier) returns int
+    return m_unitTypeIds[tier]
+  
+  // --------------------------------------------------------------------------
+  function setUnitTypeId(int tier, int value)
+    m_unitTypeIds[tier] = value
+
+  // --------------------------------------------------------------------------
+  function getTierCount() returns int
+    return m_tierCount
+  
+  // --------------------------------------------------------------------------
+  function setTierCount(int value)
+    m_tierCount = value
+
+  // --------------------------------------------------------------------------
+  override function createSpawnJob(SpawnJobConfig _config) returns Job
+    return Job.succeeded
+
+// ============================================================================
+public class SpawnCard
+  private EntityDefinition m_entityDef
+  protected SpawnCardCategory m_category
+  private real m_weight
+
+  // --------------------------------------------------------------------------
+  construct(EntityDefinition entityDef, real weight)
+    m_entityDef = entityDef
+    m_weight = weight
+
+  // --------------------------------------------------------------------------
+  function getEntityDef() returns EntityDefinition
+    return m_entityDef
+
+  // --------------------------------------------------------------------------
+  function getCost() returns int
+    return m_entityDef.getCost()
+
+  // --------------------------------------------------------------------------
+  function getWeight() returns real
+    return m_weight
+
+  // --------------------------------------------------------------------------
+  function getCategory() returns SpawnCardCategory
+    return m_category
+
+  // --------------------------------------------------------------------------
+  function canSpawn() returns bool
+    return true
+
+// ============================================================================
+public class SpawnCardCategory
+  private SpawnCardDeck m_deck
+  private string m_id
+  private WeightedSet<SpawnCard> m_cards = new WeightedSet<SpawnCard>()
+  private SpawnCard m_mostExpensiveCard
+
+  // --------------------------------------------------------------------------
+  construct(SpawnCardDeck deck, string id)
+    m_deck = deck
+    m_id = id
+
+  // --------------------------------------------------------------------------
+  function getId() returns string
+    return m_id
+
+  // --------------------------------------------------------------------------
+  function addCard(SpawnCard card)
+
+    if (card.m_category != null)
+      card.m_category.removeCard(card)
+
+    m_cards.add(card, card.getWeight())
+    card.m_category = this
+
+    if (m_mostExpensiveCard == null or card.getCost() > m_mostExpensiveCard.getCost())
+      m_mostExpensiveCard = card
+      m_deck.updateMostExpensiveCard()
+
+  // --------------------------------------------------------------------------
+  function removeCard(SpawnCard card)
+    m_cards.remove(card)
+    card.m_category = null
+
+    if (m_mostExpensiveCard == card)
+      updateMostExpensiveCard()
+
+  // --------------------------------------------------------------------------
+  function drawCard() returns SpawnCard
+    return m_cards.getRandom()
+
+  // --------------------------------------------------------------------------
+  function getMostExpensiveCard() returns SpawnCard
+    return m_mostExpensiveCard
+
+  // --------------------------------------------------------------------------
+  private function updateMostExpensiveCard()
+    m_mostExpensiveCard = null
+    for otherCard in m_cards
+      if (m_mostExpensiveCard == null or otherCard.getCost() > m_mostExpensiveCard.getCost())
+        m_mostExpensiveCard = otherCard
+    m_deck.updateMostExpensiveCard()
+
+// ============================================================================
+public class SpawnCardDeck
+  private WeightedSet<SpawnCardCategory> m_categories = new WeightedSet<SpawnCardCategory>()
+  private SpawnCard m_mostExpensiveCard
+
+  // --------------------------------------------------------------------------
+  function addCategory(string id, real weight) returns SpawnCardCategory
+    let category = new SpawnCardCategory(this, id)
+    m_categories.add(category, weight)
+    return category
+
+  // --------------------------------------------------------------------------
+  function getCategory(string id) returns SpawnCardCategory
+    for cat in m_categories
+      if cat.getId() == id
+        return cat
+    return null
+
+  // --------------------------------------------------------------------------
+  function getMostExpensiveCard() returns SpawnCard
+    return m_mostExpensiveCard
+
+  // --------------------------------------------------------------------------
+  function drawCard() returns SpawnCard
+    let category = m_categories.getRandom()
+    return category.drawCard()
+
+  // --------------------------------------------------------------------------
+  protected function updateMostExpensiveCard()
+    m_mostExpensiveCard = null
+    for category in m_categories
+      let categoryCard = category.getMostExpensiveCard()
+      if (m_mostExpensiveCard == null or categoryCard.getCost() > m_mostExpensiveCard.getCost())
+        m_mostExpensiveCard = categoryCard
+
+// ============================================================================
+public abstract class Director
+  private string m_id
+  private int m_credits
+  private bool m_enabled
+  private SpawnCardDeck m_deck
+  private int m_creditsOnActivation
+  private int m_creditMultiplier
+  private int m_maxSpawns
+  protected DirectorGroup m_group
+
+  private CallbackPeriodic m_creditGeneratorTimer
+
+  // --------------------------------------------------------------------------
+  construct(string id)
+    m_id = id
+    m_deck = new SpawnCardDeck()
+
+  // --------------------------------------------------------------------------
+  ondestroy
+
+    if (m_deck != null)
+      destroy m_deck
+      m_deck = null
+
+  // --------------------------------------------------------------------------
+  function getId() returns string
+    return m_id
+
+  // --------------------------------------------------------------------------
+  function getCredits() returns int
+    return m_credits
+  
+  // --------------------------------------------------------------------------
+  function setCredits(int value)
+    m_credits = value
+
+  // --------------------------------------------------------------------------
+  function getDeck() returns SpawnCardDeck
+    return m_deck
+  
+  // --------------------------------------------------------------------------
+  function getEnabled() returns bool
+    return m_enabled
+  
+  // --------------------------------------------------------------------------
+  function setEnabled(bool value)
+    if (m_enabled != value)
+      m_enabled = value
+      if (value)
+        onEnabled()
+      else
+        onDisabled()
+
+  // --------------------------------------------------------------------------
+  function enable()
+    setEnabled(true)
+
+  // --------------------------------------------------------------------------
+  function disable()
+    setEnabled(false)
+
+  // --------------------------------------------------------------------------
+  protected function onEnabled()
+
+    m_creditGeneratorTimer = doPeriodically(1.0, cb -> generateCredits())
+
+  // --------------------------------------------------------------------------
+  protected function onDisabled()
+
+    if (m_creditGeneratorTimer != null)
+      destroy m_creditGeneratorTimer
+      m_creditGeneratorTimer = null
+
+  // --------------------------------------------------------------------------
+  protected abstract function getCreditsPerSecond() returns int
+
+  // --------------------------------------------------------------------------
+  protected function generateCredits()
+    m_credits += getCreditsPerSecond()
+
+// ============================================================================
+public abstract class ContinuousDirector extends Director
+  private rangeReal m_spawnIntervalDuringWave
+  private rangeReal m_spawnIntervalBetweenWaves
+  private int m_maxSpawns
+  private int m_maxSpawnsPerWave
+
+  private int m_spawnedUnitsCount
+  private int m_waveSpawnCount
+
+  private bool m_prevSpawnSucceeded
+  private SpawnCard m_selectedCard
+  private int m_selectedTier
+  private int m_selectedCost
+
+  private CallbackManual m_spawnTimer
+
+  // --------------------------------------------------------------------------
+  construct(string id)
+    super(id)
+
+  // --------------------------------------------------------------------------
+  override protected function onEnabled()
+    super.onEnabled()
+
+    prepareNextWave()
+
+    if (m_spawnTimer == null)
+      m_spawnTimer = doManual(0.0, true, () -> spawnOne())
+
+  // --------------------------------------------------------------------------
+  override protected function onDisabled()
+    super.onDisabled()
+
+    if (m_spawnTimer != null)
+      destroy m_spawnTimer
+      m_spawnTimer = null
+
+  // --------------------------------------------------------------------------
+  function spawnOne()
+
+    if (m_spawnedUnitsCount >= m_maxSpawns or
+        m_waveSpawnCount >= m_maxSpawnsPerWave)
+      m_prevSpawnSucceeded = false
+
+    if (m_prevSpawnSucceeded == false)
+      prepareNextWave()
+      m_spawnTimer.restart(m_spawnIntervalBetweenWaves.getRandom())
+      return
+
+    let credits = getCredits()
+
+    if (credits > m_selectedCost * TOO_CHEAP_COEFF)
+      let deck = getDeck()
+      if (m_selectedCard != deck.getMostExpensiveCard())
+        m_prevSpawnSucceeded = false
+        return
+
+    setCredits(credits - m_selectedCost)
+
+    World.unitSpawnThread.enqueue(m_selectedCard.getEntityDef().createSpawnJob(null))
+
+    m_spawnTimer.restart(m_spawnIntervalDuringWave.getRandom())
+    m_prevSpawnSucceeded = true
+
+  // --------------------------------------------------------------------------
+  private function prepareNextWave()
+    
+    m_selectedCost = 0
+    m_selectedTier = 0
+    m_selectedCard = getDeck().drawCard()
+
+    let credits = getCredits()
+    let baseCost = m_selectedCard.getCost()
+
+    for tier = 2 to 0 step -1
+      let tierCost = m_maxSpawnsPerWave * tier * baseCost
+      if (credits > tierCost)
+        m_selectedTier = tier
+        m_selectedCost = tierCost
+        break
+
+// ============================================================================
+// public class NightCombatDirector extends ContinuousDirector
+
+//   // --------------------------------------------------------------------------
+//   construct(player targetPlayer)
+//     super("Night:"+targetPlayer.getId().toString())
+
+// ============================================================================
+public class DirectorGroup
+  private Vector<Director> m_directors = new Vector<Director>()
+
+  // --------------------------------------------------------------------------
+  function registerDirector(Director director)
+
+    if (director.m_group != null)
+      director.m_group.unregisterDirector(director)
+
+    director.m_group = this
+    m_directors.add(director)
+
+  // --------------------------------------------------------------------------
+  function unregisterDirector(Director director)
+    m_directors.remove(director)
+    director.m_group = null
+
+  // --------------------------------------------------------------------------
+  function getDirectorCount() returns int
+    return m_directors.size()
+
+  // --------------------------------------------------------------------------
+  function getDirector(int index) returns Director
+    return m_directors.get(index)
+
+// ============================================================================
+init
