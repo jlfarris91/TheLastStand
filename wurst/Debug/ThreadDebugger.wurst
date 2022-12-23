@@ -1,0 +1,81 @@
+package ThreadDebugger
+import Frame
+import ProjectConstants
+import DebuggerDialog
+import TabPanel
+import Jobs
+
+// ============================================================================
+class ThreadDebugger extends DebuggerRealtimeUpdateFrame
+  private int m_lastThreadIdGen
+  private TabPanel m_tabPanel
+
+  // --------------------------------------------------------------------------
+  construct()
+    super(createFrame("FRAME", "ThreadDebugger", GAME_UI, "", 0))
+
+    m_tabPanel = new TabPanel()
+    addChild(m_tabPanel)
+
+  // --------------------------------------------------------------------------
+  override function realtimeUpdate(real _)
+
+    if (Thread.getStaticThreadIdGen() != m_lastThreadIdGen)
+      rebuildTabPanel()
+      return
+
+    let selectedContentId = m_tabPanel.getSelectedContentId()
+    if (selectedContentId == "")
+      return
+
+    let contentFrame = m_tabPanel.getContent(selectedContentId) castTo ThreadInfoFrame
+    if (contentFrame == null)
+      return
+
+    contentFrame.update()
+
+  // --------------------------------------------------------------------------
+  private function rebuildTabPanel()
+
+    m_lastThreadIdGen = Thread.getStaticThreadIdGen()
+
+    let prevSelectedContentId = m_tabPanel.getSelectedContentId()
+    m_tabPanel.removeAllContent()
+
+    for thread in Thread.getAllThreads()
+      m_tabPanel.addContent(thread.getName(), new ThreadInfoFrame(thread))
+
+    if (m_tabPanel.getContent(prevSelectedContentId) != null)
+      m_tabPanel.setSelectedContentId(prevSelectedContentId)
+
+// ============================================================================
+class ThreadInfoFrame extends Frame
+  private Thread m_thread
+
+  // --------------------------------------------------------------------------
+  construct(Thread thread)
+    super(createFrame("TEXTAREA", "TIF", GAME_UI, "", 0))
+    m_thread = thread
+
+  // --------------------------------------------------------------------------
+  function update()
+
+    let contentFrame = getFrameHandle()
+
+    BlzFrameSetText(contentFrame, "Status: q:{0} sw:{1} w:{2} p:{3} c:{4} t:{5}".format(
+      m_thread.getRemainingWorkCount().toString(),
+      m_thread.getTotalSubWorkCompletedCount().toString(),
+      m_thread.getCompletedJobsCount().toString(),
+      m_thread.getProcessedCount().toString(),
+      m_thread.getCanceledWorkCount().toString(),
+      m_thread.getTimedOutWorkCount().toString()))
+
+    let queue = m_thread.getQueue()
+    for job in queue
+      let requeuedCount = job.getRequeueCount()
+      BlzFrameAddText(contentFrame, " > " + job.getDebuggerStateString() + (requeuedCount > 0 ? " [reqd:{0}]".format(requeuedCount.toString()) : ""))
+
+// ============================================================================
+init
+  if (DEV_ENVIRONMENT)
+    DebuggerDialog.registerFrame("THRD", () -> new ThreadDebugger())
