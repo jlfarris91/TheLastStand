@@ -16,8 +16,6 @@
 
 globals
     // Generated
-    rect                    gg_rct_BaseUnits           = null
-    rect                    gg_rct_debugSurvivorSpawn  = null
     sound                   gg_snd_GyrocopterImpactHit2 = null
     string                  gg_snd_Undead1
     string                  gg_snd_Undead2
@@ -28,6 +26,39 @@ globals
     sound                   gg_snd_QuestCompleted      = null
     sound                   gg_snd_RiflemanDeath       = null
     sound                   gg_snd_ZombieDeath1        = null
+    rect                    gg_rct_Base_001            = null
+    rect                    gg_rct_Base_003            = null
+    rect                    gg_rct_Base_004            = null
+    rect                    gg_rct_Base_005            = null
+    rect                    gg_rct_Base_006            = null
+    rect                    gg_rct_Base_007            = null
+    rect                    gg_rct_Base_008            = null
+    rect                    gg_rct_Base_009            = null
+    rect                    gg_rct_Base_010            = null
+    rect                    gg_rct_Base_011            = null
+    rect                    gg_rct_Base_012            = null
+    rect                    gg_rct_Base_013            = null
+    rect                    gg_rct_Base_014            = null
+    rect                    gg_rct_Base_015            = null
+    rect                    gg_rct_Base_016            = null
+    rect                    gg_rct_Base_017            = null
+    rect                    gg_rct_Base_018            = null
+    rect                    gg_rct_Base_019            = null
+    rect                    gg_rct_Base_020            = null
+    rect                    gg_rct_Base_021            = null
+    rect                    gg_rct_Base_022            = null
+    rect                    gg_rct_Base_023            = null
+    rect                    gg_rct_Base_024            = null
+    rect                    gg_rct_Base_025            = null
+    rect                    gg_rct_Base_026            = null
+    rect                    gg_rct_Base_027            = null
+    rect                    gg_rct_Base_028            = null
+    rect                    gg_rct_Base_029            = null
+    rect                    gg_rct_Base_030            = null
+    rect                    gg_rct_Base_031            = null
+    rect                    gg_rct_Base_032            = null
+    rect                    gg_rct_Base_033            = null
+    rect                    gg_rct_Base_034            = null
 endglobals
 
 function InitGlobals takes nothing returns nothing
@@ -91,6 +122,246 @@ endfunction
 //*  Unit Creation
 //*
 //***************************************************************************
+
+//===========================================================================
+function CreateBuildingsForPlayer10 takes nothing returns nothing
+    local player p = Player(10)
+    local unit u
+    local integer unitID
+    local trigger t
+    local real life
+
+    set u = BlzCreateUnitWithSkin( p, 'h00W', -2528.0, -2208.0, 270.000, 'h00W' )
+    set u = BlzCreateUnitWithSkin( p, 'h00W', -2336.0, -2208.0, 270.000, 'h00W' )
+    set u = BlzCreateUnitWithSkin( p, 'h010', -2176.0, -2368.0, 270.000, 'h010' )
+    set u = BlzCreateUnitWithSkin( p, 'h010', -2688.0, -2368.0, 270.000, 'h010' )
+    set u = BlzCreateUnitWithSkin( p, 'h00W', -5984.0, -1440.0, 270.000, 'h00W' )
+    set u = BlzCreateUnitWithSkin( p, 'h00W', -5792.0, -1440.0, 270.000, 'h00W' )
+    set u = BlzCreateUnitWithSkin( p, 'h010', -6144.0, -1216.0, 270.000, 'h010' )
+    set u = BlzCreateUnitWithSkin( p, 'h010', -5632.0, -1216.0, 270.000, 'h010' )
+    set u = BlzCreateUnitWithSkin( p, 'h010', -7168.0, -4608.0, 270.000, 'h010' )
+    set u = BlzCreateUnitWithSkin( p, 'h010', -7616.0, -5184.0, 270.000, 'h010' )
+    set u = BlzCreateUnitWithSkin( p, 'h00Z', -7328.0, -5088.0, 270.000, 'h00Z' )
+    set u = BlzCreateUnitWithSkin( p, 'h00X', -6944.0, -4768.0, 270.000, 'h00X' )
+    set u = BlzCreateUnitWithSkin( p, 'h00Y', -7904.0, -7456.0, 270.000, 'h00Y' )
+    set u = BlzCreateUnitWithSkin( p, 'h010', -8192.0, -7360.0, 270.000, 'h010' )
+    set u = BlzCreateUnitWithSkin( p, 'h010', -7744.0, -7744.0, 270.000, 'h010' )
+    set u = BlzCreateUnitWithSkin( p, 'h00Z', -7456.0, -9824.0, 270.000, 'h00Z' )
+    set u = BlzCreateUnitWithSkin( p, 'h00Z', -7264.0, -9632.0, 270.000, 'h00Z' )
+    set u = BlzCreateUnitWithSkin( p, 'h010', -6976.0, -9664.0, 270.000, 'h010' )
+    set u = BlzCreateUnitWithSkin( p, 'h010', -7424.0, -10112.0, 270.000, 'h010' )
+    set u = BlzCreateUnitWithSkin( p, 'h011', -6592.0, -10048.0, 270.000, 'h011' )
+    set u = BlzCreateUnitWithSkin( p, 'h011', -7168.0, -10688.0, 270.000, 'h011' )
+    set u = BlzCreateUnitWithSkin( p, 'h011', -7744.0, -8256.0, 270.000, 'h011' )
+    set u = BlzCreateUnitWithSkin( p, 'h011', -8384.0, -8128.0, 270.000, 'h011' )
+    set u = BlzCreateUnitWithSkin( p, 'h011', -7424.0, -4224.0, 270.000, 'h011' )
+    set u = BlzCreateUnitWithSkin( p, 'h011', -8128.0, -4928.0, 270.000, 'h011' )
+    set u = BlzCreateUnitWithSkin( p, 'h011', -5440.0, -832.0, 270.000, 'h011' )
+    set u = BlzCreateUnitWithSkin( p, 'h011', -6336.0, -832.0, 270.000, 'h011' )
+    set u = BlzCreateUnitWithSkin( p, 'h011', -1920.0, -2880.0, 270.000, 'h011' )
+    set u = BlzCreateUnitWithSkin( p, 'h011', -2752.0, -2880.0, 270.000, 'h011' )
+    set u = BlzCreateUnitWithSkin( p, 'h00Z', -5024.0, -9248.0, 270.000, 'h00Z' )
+    set u = BlzCreateUnitWithSkin( p, 'h00Z', -4832.0, -9056.0, 270.000, 'h00Z' )
+    set u = BlzCreateUnitWithSkin( p, 'h010', -4800.0, -8768.0, 270.000, 'h010' )
+    set u = BlzCreateUnitWithSkin( p, 'h010', -5312.0, -9280.0, 270.000, 'h010' )
+    set u = BlzCreateUnitWithSkin( p, 'h011', -5440.0, -8384.0, 270.000, 'h011' )
+    set u = BlzCreateUnitWithSkin( p, 'h011', -5824.0, -8768.0, 270.000, 'h011' )
+    set u = BlzCreateUnitWithSkin( p, 'h00W', -2208.0, -10208.0, 270.000, 'h00W' )
+    set u = BlzCreateUnitWithSkin( p, 'h00W', -2016.0, -10208.0, 270.000, 'h00W' )
+    set u = BlzCreateUnitWithSkin( p, 'h00W', -1952.0, -9184.0, 270.000, 'h00W' )
+    set u = BlzCreateUnitWithSkin( p, 'h00W', -1760.0, -9184.0, 270.000, 'h00W' )
+    set u = BlzCreateUnitWithSkin( p, 'h00X', -1504.0, -9312.0, 270.000, 'h00X' )
+    set u = BlzCreateUnitWithSkin( p, 'h00Y', -1376.0, -9504.0, 270.000, 'h00Y' )
+    set u = BlzCreateUnitWithSkin( p, 'h011', -3008.0, -9536.0, 270.000, 'h011' )
+    set u = BlzCreateUnitWithSkin( p, 'h010', -2368.0, -10048.0, 270.000, 'h010' )
+    set u = BlzCreateUnitWithSkin( p, 'h010', -1856.0, -10048.0, 270.000, 'h010' )
+    set u = BlzCreateUnitWithSkin( p, 'h010', -2112.0, -9408.0, 270.000, 'h010' )
+    set u = BlzCreateUnitWithSkin( p, 'h010', -1600.0, -9280.0, 270.000, 'h010' )
+    set u = BlzCreateUnitWithSkin( p, 'h011', -2496.0, -9280.0, 270.000, 'h011' )
+    set u = BlzCreateUnitWithSkin( p, 'h00X', -9568.0, -11488.0, 270.000, 'h00X' )
+    set u = BlzCreateUnitWithSkin( p, 'h00W', -8608.0, -10784.0, 270.000, 'h00W' )
+    set u = BlzCreateUnitWithSkin( p, 'h00W', -8416.0, -10784.0, 270.000, 'h00W' )
+    set u = BlzCreateUnitWithSkin( p, 'h010', -8128.0, -10880.0, 270.000, 'h010' )
+    set u = BlzCreateUnitWithSkin( p, 'h010', -8896.0, -10880.0, 270.000, 'h010' )
+    set u = BlzCreateUnitWithSkin( p, 'h011', -8512.0, -11584.0, 270.000, 'h011' )
+    set u = BlzCreateUnitWithSkin( p, 'h011', -9408.0, -11328.0, 270.000, 'h011' )
+    set u = BlzCreateUnitWithSkin( p, 'h00X', -10144.0, -6880.0, 270.000, 'h00X' )
+    set u = BlzCreateUnitWithSkin( p, 'h00X', -10144.0, -7072.0, 270.000, 'h00X' )
+    set u = BlzCreateUnitWithSkin( p, 'h010', -10432.0, -6464.0, 270.000, 'h010' )
+    set u = BlzCreateUnitWithSkin( p, 'h010', -10496.0, -7104.0, 270.000, 'h010' )
+    set u = BlzCreateUnitWithSkin( p, 'h011', -10816.0, -5824.0, 270.000, 'h011' )
+    set u = BlzCreateUnitWithSkin( p, 'h011', -11264.0, -6272.0, 270.000, 'h011' )
+    set u = BlzCreateUnitWithSkin( p, 'h00Y', -9952.0, -4192.0, 270.000, 'h00Y' )
+    set u = BlzCreateUnitWithSkin( p, 'h00Y', -10144.0, -4000.0, 270.000, 'h00Y' )
+    set u = BlzCreateUnitWithSkin( p, 'h010', -10432.0, -3968.0, 270.000, 'h010' )
+    set u = BlzCreateUnitWithSkin( p, 'h010', -10048.0, -4480.0, 270.000, 'h010' )
+    set u = BlzCreateUnitWithSkin( p, 'h011', -10944.0, -3968.0, 270.000, 'h011' )
+    set u = BlzCreateUnitWithSkin( p, 'h011', -10880.0, -4672.0, 270.000, 'h011' )
+    set u = BlzCreateUnitWithSkin( p, 'h00W', -10080.0, -3744.0, 270.000, 'h00W' )
+    set u = BlzCreateUnitWithSkin( p, 'h00W', -9888.0, -3744.0, 270.000, 'h00W' )
+    set u = BlzCreateUnitWithSkin( p, 'h00Y', -9184.0, -2208.0, 270.000, 'h00Y' )
+    set u = BlzCreateUnitWithSkin( p, 'h00Y', -9376.0, -2016.0, 270.000, 'h00Y' )
+    set u = BlzCreateUnitWithSkin( p, 'h010', -9728.0, -2048.0, 270.000, 'h010' )
+    set u = BlzCreateUnitWithSkin( p, 'h010', -9280.0, -2560.0, 270.000, 'h010' )
+    set u = BlzCreateUnitWithSkin( p, 'h011', -9664.0, -3520.0, 270.000, 'h011' )
+    set u = BlzCreateUnitWithSkin( p, 'h011', -10304.0, -3520.0, 270.000, 'h011' )
+    set u = BlzCreateUnitWithSkin( p, 'h00W', -10208.0, -864.0, 270.000, 'h00W' )
+    set u = BlzCreateUnitWithSkin( p, 'h00W', -10016.0, -864.0, 270.000, 'h00W' )
+    set u = BlzCreateUnitWithSkin( p, 'h00W', -9504.0, 352.0, 270.000, 'h00W' )
+    set u = BlzCreateUnitWithSkin( p, 'h00W', -9312.0, 352.0, 270.000, 'h00W' )
+    set u = BlzCreateUnitWithSkin( p, 'h010', -9792.0, -704.0, 270.000, 'h010' )
+    set u = BlzCreateUnitWithSkin( p, 'h010', -10432.0, -704.0, 270.000, 'h010' )
+    set u = BlzCreateUnitWithSkin( p, 'h011', -9536.0, 64.0, 270.000, 'h011' )
+    set u = BlzCreateUnitWithSkin( p, 'h011', -9280.0, 64.0, 270.000, 'h011' )
+    set u = BlzCreateUnitWithSkin( p, 'h00X', -10272.0, 1312.0, 270.000, 'h00X' )
+    set u = BlzCreateUnitWithSkin( p, 'h00X', -10272.0, 1120.0, 270.000, 'h00X' )
+    set u = BlzCreateUnitWithSkin( p, 'h00X', -10272.0, 2272.0, 270.000, 'h00X' )
+    set u = BlzCreateUnitWithSkin( p, 'h010', -10368.0, 1472.0, 270.000, 'h010' )
+    set u = BlzCreateUnitWithSkin( p, 'h010', -10368.0, 960.0, 270.000, 'h010' )
+    set u = BlzCreateUnitWithSkin( p, 'h011', -10432.0, 1984.0, 270.000, 'h011' )
+    set u = BlzCreateUnitWithSkin( p, 'h011', -10560.0, 2432.0, 270.000, 'h011' )
+    set u = BlzCreateUnitWithSkin( p, 'h00X', -8096.0, 3552.0, 270.000, 'h00X' )
+    set u = BlzCreateUnitWithSkin( p, 'h00X', -8096.0, 3360.0, 270.000, 'h00X' )
+    set u = BlzCreateUnitWithSkin( p, 'h010', -7872.0, 3776.0, 270.000, 'h010' )
+    set u = BlzCreateUnitWithSkin( p, 'h010', -7872.0, 3136.0, 270.000, 'h010' )
+    set u = BlzCreateUnitWithSkin( p, 'h00X', -2336.0, -7072.0, 270.000, 'h00X' )
+    set u = BlzCreateUnitWithSkin( p, 'h00X', -2336.0, -7264.0, 270.000, 'h00X' )
+    set u = BlzCreateUnitWithSkin( p, 'h00X', -1120.0, -7264.0, 270.000, 'h00X' )
+    set u = BlzCreateUnitWithSkin( p, 'h010', -1216.0, -7424.0, 270.000, 'h010' )
+    set u = BlzCreateUnitWithSkin( p, 'h010', -2240.0, -7424.0, 270.000, 'h010' )
+    set u = BlzCreateUnitWithSkin( p, 'h011', -2240.0, -6912.0, 270.000, 'h011' )
+    set u = BlzCreateUnitWithSkin( p, 'h011', -1216.0, -6912.0, 270.000, 'h011' )
+    set u = BlzCreateUnitWithSkin( p, 'h00X', -1120.0, -7072.0, 270.000, 'h00X' )
+    set u = BlzCreateUnitWithSkin( p, 'h00Z', 4512.0, -8096.0, 270.000, 'h00Z' )
+    set u = BlzCreateUnitWithSkin( p, 'h00Z', 4704.0, -7904.0, 270.000, 'h00Z' )
+    set u = BlzCreateUnitWithSkin( p, 'h010', 4800.0, -7616.0, 270.000, 'h010' )
+    set u = BlzCreateUnitWithSkin( p, 'h010', 4224.0, -8000.0, 270.000, 'h010' )
+    set u = BlzCreateUnitWithSkin( p, 'h011', 4544.0, -6848.0, 270.000, 'h011' )
+    set u = BlzCreateUnitWithSkin( p, 'h011', 5248.0, -7104.0, 270.000, 'h011' )
+    set u = BlzCreateUnitWithSkin( p, 'h00X', 2656.0, -6240.0, 270.000, 'h00X' )
+    set u = BlzCreateUnitWithSkin( p, 'h00X', 2656.0, -6432.0, 270.000, 'h00X' )
+    set u = BlzCreateUnitWithSkin( p, 'h010', 2752.0, -6016.0, 270.000, 'h010' )
+    set u = BlzCreateUnitWithSkin( p, 'h010', 3008.0, -6592.0, 270.000, 'h010' )
+    set u = BlzCreateUnitWithSkin( p, 'h011', 3456.0, -5760.0, 270.000, 'h011' )
+    set u = BlzCreateUnitWithSkin( p, 'h011', 3520.0, -6208.0, 270.000, 'h011' )
+    set u = BlzCreateUnitWithSkin( p, 'h00W', 8224.0, -6176.0, 270.000, 'h00W' )
+    set u = BlzCreateUnitWithSkin( p, 'h00W', 8032.0, -6176.0, 270.000, 'h00W' )
+    set u = BlzCreateUnitWithSkin( p, 'h010', 7744.0, -6080.0, 270.000, 'h010' )
+    set u = BlzCreateUnitWithSkin( p, 'h010', 8384.0, -5952.0, 270.000, 'h010' )
+    set u = BlzCreateUnitWithSkin( p, 'h011', 7360.0, -5824.0, 270.000, 'h011' )
+    set u = BlzCreateUnitWithSkin( p, 'h011', 7680.0, -5376.0, 270.000, 'h011' )
+    set u = BlzCreateUnitWithSkin( p, 'h00W', 9184.0, -10528.0, 270.000, 'h00W' )
+    set u = BlzCreateUnitWithSkin( p, 'h00W', 9376.0, -10528.0, 270.000, 'h00W' )
+    set u = BlzCreateUnitWithSkin( p, 'h00W', 10144.0, -10208.0, 270.000, 'h00W' )
+    set u = BlzCreateUnitWithSkin( p, 'h00W', 9952.0, -10208.0, 270.000, 'h00W' )
+    set u = BlzCreateUnitWithSkin( p, 'h010', 10304.0, -10432.0, 270.000, 'h010' )
+    set u = BlzCreateUnitWithSkin( p, 'h010', 9536.0, -10944.0, 270.000, 'h010' )
+    set u = BlzCreateUnitWithSkin( p, 'h011', 9152.0, -11072.0, 270.000, 'h011' )
+    set u = BlzCreateUnitWithSkin( p, 'h011', 9920.0, -10560.0, 270.000, 'h011' )
+    set u = BlzCreateUnitWithSkin( p, 'h00Z', 7712.0, -10784.0, 270.000, 'h00Z' )
+    set u = BlzCreateUnitWithSkin( p, 'h00X', 7584.0, -11040.0, 270.000, 'h00X' )
+    set u = BlzCreateUnitWithSkin( p, 'h010', 8000.0, -10624.0, 270.000, 'h010' )
+    set u = BlzCreateUnitWithSkin( p, 'h010', 7680.0, -11328.0, 270.000, 'h010' )
+    set u = BlzCreateUnitWithSkin( p, 'h011', 8512.0, -10688.0, 270.000, 'h011' )
+    set u = BlzCreateUnitWithSkin( p, 'h011', 7872.0, -11648.0, 270.000, 'h011' )
+    set u = BlzCreateUnitWithSkin( p, 'h00W', 7008.0, -544.0, 270.000, 'h00W' )
+    set u = BlzCreateUnitWithSkin( p, 'h00W', 7200.0, -544.0, 270.000, 'h00W' )
+    set u = BlzCreateUnitWithSkin( p, 'h010', 7360.0, -320.0, 270.000, 'h010' )
+    set u = BlzCreateUnitWithSkin( p, 'h010', 6848.0, -320.0, 270.000, 'h010' )
+    set u = BlzCreateUnitWithSkin( p, 'h011', 6848.0, 192.0, 270.000, 'h011' )
+    set u = BlzCreateUnitWithSkin( p, 'h011', 7488.0, 192.0, 270.000, 'h011' )
+    set u = BlzCreateUnitWithSkin( p, 'h00X', 10656.0, 1696.0, 270.000, 'h00X' )
+    set u = BlzCreateUnitWithSkin( p, 'h00X', 10656.0, 1888.0, 270.000, 'h00X' )
+    set u = BlzCreateUnitWithSkin( p, 'h010', 10688.0, 1472.0, 270.000, 'h010' )
+    set u = BlzCreateUnitWithSkin( p, 'h010', 10816.0, 1984.0, 270.000, 'h010' )
+    set u = BlzCreateUnitWithSkin( p, 'h011', 10176.0, 1088.0, 270.000, 'h011' )
+    set u = BlzCreateUnitWithSkin( p, 'h011', 10432.0, 576.0, 270.000, 'h011' )
+    set u = BlzCreateUnitWithSkin( p, 'h00W', 9376.0, 7584.0, 270.000, 'h00W' )
+    set u = BlzCreateUnitWithSkin( p, 'h00W', 9184.0, 7584.0, 270.000, 'h00W' )
+    set u = BlzCreateUnitWithSkin( p, 'h010', 9664.0, 7744.0, 270.000, 'h010' )
+    set u = BlzCreateUnitWithSkin( p, 'h010', 8896.0, 7744.0, 270.000, 'h010' )
+    set u = BlzCreateUnitWithSkin( p, 'h011', 9024.0, 8256.0, 270.000, 'h011' )
+    set u = BlzCreateUnitWithSkin( p, 'h011', 9536.0, 8128.0, 270.000, 'h011' )
+    set u = BlzCreateUnitWithSkin( p, 'h00X', 10656.0, 8224.0, 270.000, 'h00X' )
+    set u = BlzCreateUnitWithSkin( p, 'h00X', 10656.0, 8032.0, 270.000, 'h00X' )
+    set u = BlzCreateUnitWithSkin( p, 'h010', 10816.0, 8512.0, 270.000, 'h010' )
+    set u = BlzCreateUnitWithSkin( p, 'h010', 10816.0, 7808.0, 270.000, 'h010' )
+    set u = BlzCreateUnitWithSkin( p, 'h011', 10880.0, 7232.0, 270.000, 'h011' )
+    set u = BlzCreateUnitWithSkin( p, 'h00Y', 4064.0, 9696.0, 270.000, 'h00Y' )
+    set u = BlzCreateUnitWithSkin( p, 'h00Y', 4256.0, 9504.0, 270.000, 'h00Y' )
+    set u = BlzCreateUnitWithSkin( p, 'h010', 4544.0, 9536.0, 270.000, 'h010' )
+    set u = BlzCreateUnitWithSkin( p, 'h010', 4032.0, 10048.0, 270.000, 'h010' )
+    set u = BlzCreateUnitWithSkin( p, 'h011', 4544.0, 10304.0, 270.000, 'h011' )
+    set u = BlzCreateUnitWithSkin( p, 'h011', 4928.0, 9920.0, 270.000, 'h011' )
+    set u = BlzCreateUnitWithSkin( p, 'h00Y', 3168.0, 4000.0, 270.000, 'h00Y' )
+    set u = BlzCreateUnitWithSkin( p, 'h00Y', 3360.0, 3808.0, 270.000, 'h00Y' )
+    set u = BlzCreateUnitWithSkin( p, 'h010', 2880.0, 4032.0, 270.000, 'h010' )
+    set u = BlzCreateUnitWithSkin( p, 'h010', 3264.0, 3456.0, 270.000, 'h010' )
+    set u = BlzCreateUnitWithSkin( p, 'h011', 2368.0, 3648.0, 270.000, 'h011' )
+    set u = BlzCreateUnitWithSkin( p, 'h011', 2752.0, 3264.0, 270.000, 'h011' )
+    set u = BlzCreateUnitWithSkin( p, 'h00W', 352.0, 2400.0, 270.000, 'h00W' )
+    set u = BlzCreateUnitWithSkin( p, 'h00W', 544.0, 2400.0, 270.000, 'h00W' )
+    set u = BlzCreateUnitWithSkin( p, 'h010', 192.0, 2368.0, 270.000, 'h010' )
+    set u = BlzCreateUnitWithSkin( p, 'h010', 64.0, 1728.0, 270.000, 'h010' )
+    set u = BlzCreateUnitWithSkin( p, 'h011', -832.0, 2368.0, 270.000, 'h011' )
+    set u = BlzCreateUnitWithSkin( p, 'h011', -448.0, 1600.0, 270.000, 'h011' )
+    set u = BlzCreateUnitWithSkin( p, 'h00W', -2464.0, 5600.0, 270.000, 'h00W' )
+    set u = BlzCreateUnitWithSkin( p, 'h00W', -2272.0, 5600.0, 270.000, 'h00W' )
+    set u = BlzCreateUnitWithSkin( p, 'h010', -2624.0, 5696.0, 270.000, 'h010' )
+    set u = BlzCreateUnitWithSkin( p, 'h010', -1984.0, 5824.0, 270.000, 'h010' )
+    set u = BlzCreateUnitWithSkin( p, 'h011', -2496.0, 6336.0, 270.000, 'h011' )
+    set u = BlzCreateUnitWithSkin( p, 'h011', -1856.0, 6720.0, 270.000, 'h011' )
+    set u = BlzCreateUnitWithSkin( p, 'h00W', -5152.0, 6496.0, 270.000, 'h00W' )
+    set u = BlzCreateUnitWithSkin( p, 'h00W', -4960.0, 6496.0, 270.000, 'h00W' )
+    set u = BlzCreateUnitWithSkin( p, 'h010', -5312.0, 6592.0, 270.000, 'h010' )
+    set u = BlzCreateUnitWithSkin( p, 'h010', -4800.0, 6592.0, 270.000, 'h010' )
+    set u = BlzCreateUnitWithSkin( p, 'h011', -4544.0, 7104.0, 270.000, 'h011' )
+    set u = BlzCreateUnitWithSkin( p, 'h011', -5248.0, 7232.0, 270.000, 'h011' )
+    set u = BlzCreateUnitWithSkin( p, 'h00X', -9952.0, 8608.0, 270.000, 'h00X' )
+    set u = BlzCreateUnitWithSkin( p, 'h00X', -9952.0, 8416.0, 270.000, 'h00X' )
+    set u = BlzCreateUnitWithSkin( p, 'h010', -10048.0, 8768.0, 270.000, 'h010' )
+    set u = BlzCreateUnitWithSkin( p, 'h010', -10048.0, 8256.0, 270.000, 'h010' )
+    set u = BlzCreateUnitWithSkin( p, 'h00X', -800.0, 7520.0, 270.000, 'h00X' )
+    set u = BlzCreateUnitWithSkin( p, 'h011', -10816.0, 8768.0, 270.000, 'h011' )
+    set u = BlzCreateUnitWithSkin( p, 'h011', -10752.0, 8128.0, 270.000, 'h011' )
+    set u = BlzCreateUnitWithSkin( p, 'h00X', -800.0, 7328.0, 270.000, 'h00X' )
+    set u = BlzCreateUnitWithSkin( p, 'h010', -640.0, 7680.0, 270.000, 'h010' )
+    set u = BlzCreateUnitWithSkin( p, 'h010', -576.0, 7232.0, 270.000, 'h010' )
+    set u = BlzCreateUnitWithSkin( p, 'h011', 64.0, 7616.0, 270.000, 'h011' )
+    set u = BlzCreateUnitWithSkin( p, 'h011', 192.0, 7040.0, 270.000, 'h011' )
+    set u = BlzCreateUnitWithSkin( p, 'h00W', 5728.0, 7072.0, 270.000, 'h00W' )
+    set u = BlzCreateUnitWithSkin( p, 'h00W', 5920.0, 7072.0, 270.000, 'h00W' )
+    set u = BlzCreateUnitWithSkin( p, 'h00W', 6240.0, 5088.0, 270.000, 'h00W' )
+    set u = BlzCreateUnitWithSkin( p, 'h00W', 6432.0, 5088.0, 270.000, 'h00W' )
+    set u = BlzCreateUnitWithSkin( p, 'h010', 6592.0, 5184.0, 270.000, 'h010' )
+    set u = BlzCreateUnitWithSkin( p, 'h010', 5568.0, 6976.0, 270.000, 'h010' )
+    set u = BlzCreateUnitWithSkin( p, 'h011', 6080.0, 6976.0, 270.000, 'h011' )
+    set u = BlzCreateUnitWithSkin( p, 'h011', 6080.0, 5184.0, 270.000, 'h011' )
+    set u = BlzCreateUnitWithSkin( p, 'h00X', -9824.0, -6368.0, 270.000, 'h00X' )
+    set u = BlzCreateUnitWithSkin( p, 'h00X', -9824.0, -6560.0, 270.000, 'h00X' )
+    set u = BlzCreateUnitWithSkin( p, 'h010', -9984.0, -6592.0, 270.000, 'h010' )
+    set u = BlzCreateUnitWithSkin( p, 'h00W', -9568.0, -4768.0, 270.000, 'h00W' )
+    set u = BlzCreateUnitWithSkin( p, 'h00W', -9376.0, -4768.0, 270.000, 'h00W' )
+    set u = BlzCreateUnitWithSkin( p, 'h010', -9728.0, -4864.0, 270.000, 'h010' )
+    set u = BlzCreateUnitWithSkin( p, 'h011', -9280.0, -5056.0, 270.000, 'h011' )
+    set u = BlzCreateUnitWithSkin( p, 'h011', -9408.0, -6144.0, 270.000, 'h011' )
+endfunction
+
+//===========================================================================
+function CreateUnitsForPlayer10 takes nothing returns nothing
+    local player p = Player(10)
+    local unit u
+    local integer unitID
+    local trigger t
+    local real life
+
+    set u = BlzCreateUnitWithSkin( p, 'h00H', -5381.9, -8784.1, -42.497, 'h00H' )
+    call SetUnitColor( u, ConvertPlayerColor(6) )
+    set u = BlzCreateUnitWithSkin( p, 'h00K', 866.8, -8860.9, 89.231, 'h00K' )
+    call SetUnitColor( u, ConvertPlayerColor(0) )
+    set u = BlzCreateUnitWithSkin( p, 'h00J', -4406.4, -9287.2, -44.887, 'h00J' )
+    call SetUnitColor( u, ConvertPlayerColor(4) )
+endfunction
 
 //===========================================================================
 function CreateBuildingsForPlayer20 takes nothing returns nothing
@@ -431,23 +702,19 @@ function CreateNeutralPassive takes nothing returns nothing
     local real life
 
     set u = BlzCreateUnitWithSkin( p, 'h00M', -1941.3, 6156.2, 221.720, 'h00M' )
-    set u = BlzCreateUnitWithSkin( p, 'h00H', 4353.7, -7605.3, 305.979, 'h00H' )
+    set u = BlzCreateUnitWithSkin( p, 'h00H', 4859.6, -7070.9, 246.496, 'h00H' )
     call SetUnitColor( u, ConvertPlayerColor(6) )
     set u = BlzCreateUnitWithSkin( p, 'h00J', -1723.7, -6883.5, 270.000, 'h00J' )
     call SetUnitColor( u, ConvertPlayerColor(4) )
-    set u = BlzCreateUnitWithSkin( p, 'h00H', -7038.8, -10204.3, 126.018, 'h00H' )
+    set u = BlzCreateUnitWithSkin( p, 'h00H', -6989.8, -10203.3, 135.428, 'h00H' )
     call SetUnitColor( u, ConvertPlayerColor(6) )
     set u = BlzCreateUnitWithSkin( p, 'h00J', -9085.3, -11108.9, 316.939, 'h00J' )
     call SetUnitColor( u, ConvertPlayerColor(4) )
     set u = BlzCreateUnitWithSkin( p, 'h00K', -9933.8, -8931.0, 280.207, 'h00K' )
     call SetUnitColor( u, ConvertPlayerColor(0) )
-    set u = BlzCreateUnitWithSkin( p, 'h00J', -5489.5, -8612.2, 312.273, 'h00J' )
-    call SetUnitColor( u, ConvertPlayerColor(4) )
     set u = BlzCreateUnitWithSkin( p, 'h00K', -3453.0, -10951.5, 270.714, 'h00K' )
     call SetUnitColor( u, ConvertPlayerColor(0) )
     set u = BlzCreateUnitWithSkin( p, 'h00J', -2493.7, -9659.0, 320.414, 'h00J' )
-    call SetUnitColor( u, ConvertPlayerColor(4) )
-    set u = BlzCreateUnitWithSkin( p, 'h00J', 604.6, -8650.6, 314.402, 'h00J' )
     call SetUnitColor( u, ConvertPlayerColor(4) )
     set u = BlzCreateUnitWithSkin( p, 'h00K', 2938.4, -10207.6, 270.000, 'h00K' )
     call SetUnitColor( u, ConvertPlayerColor(0) )
@@ -467,21 +734,21 @@ function CreateNeutralPassive takes nothing returns nothing
     call SetUnitColor( u, ConvertPlayerColor(0) )
     set u = BlzCreateUnitWithSkin( p, 'h00K', 1530.4, -1859.3, 272.028, 'h00K' )
     call SetUnitColor( u, ConvertPlayerColor(0) )
-    set u = BlzCreateUnitWithSkin( p, 'h00H', -7984.3, -7846.2, 87.810, 'h00H' )
+    set u = BlzCreateUnitWithSkin( p, 'h00H', -8059.8, -7977.8, 85.159, 'h00H' )
     call SetUnitColor( u, ConvertPlayerColor(6) )
-    set u = BlzCreateUnitWithSkin( p, 'h00J', -10271.3, -2674.0, 318.318, 'h00J' )
+    set u = BlzCreateUnitWithSkin( p, 'h00J', -10170.9, -3013.1, 42.970, 'h00J' )
     call SetUnitColor( u, ConvertPlayerColor(4) )
     set u = BlzCreateUnitWithSkin( p, 'h00H', -7573.4, -4828.6, 313.148, 'h00H' )
     call SetUnitColor( u, ConvertPlayerColor(6) )
     set u = BlzCreateUnitWithSkin( p, 'h00K', -5772.4, -2985.9, 275.943, 'h00K' )
     call SetUnitColor( u, ConvertPlayerColor(0) )
-    set u = BlzCreateUnitWithSkin( p, 'h00H', -5887.6, -947.4, 270.000, 'h00H' )
+    set u = BlzCreateUnitWithSkin( p, 'h00H', -5889.0, -898.1, 270.000, 'h00H' )
     call SetUnitColor( u, ConvertPlayerColor(6) )
-    set u = BlzCreateUnitWithSkin( p, 'h00J', -10203.9, -303.2, 286.447, 'h00J' )
+    set u = BlzCreateUnitWithSkin( p, 'h00J', -9691.9, -292.7, 234.216, 'h00J' )
     call SetUnitColor( u, ConvertPlayerColor(4) )
-    set u = BlzCreateUnitWithSkin( p, 'h00J', -10578.4, 1245.1, 357.653, 'h00J' )
+    set u = BlzCreateUnitWithSkin( p, 'h00J', -10705.9, 1641.3, -54.194, 'h00J' )
     call SetUnitColor( u, ConvertPlayerColor(4) )
-    set u = BlzCreateUnitWithSkin( p, 'h00H', -7094.2, 3115.5, 134.053, 'h00H' )
+    set u = BlzCreateUnitWithSkin( p, 'h00H', -7067.8, 3551.4, 185.586, 'h00H' )
     call SetUnitColor( u, ConvertPlayerColor(6) )
     set u = BlzCreateUnitWithSkin( p, 'h00H', -363.8, 1997.9, 18.645, 'h00H' )
     call SetUnitColor( u, ConvertPlayerColor(6) )
@@ -489,7 +756,7 @@ function CreateNeutralPassive takes nothing returns nothing
     call SetUnitColor( u, ConvertPlayerColor(0) )
     set u = BlzCreateUnitWithSkin( p, 'h00J', -10617.2, 9942.0, 41.937, 'h00J' )
     call SetUnitColor( u, ConvertPlayerColor(4) )
-    set u = BlzCreateUnitWithSkin( p, 'h00H', -10372.6, 8569.0, 357.381, 'h00H' )
+    set u = BlzCreateUnitWithSkin( p, 'h00H', -10496.1, 8516.9, 357.381, 'h00H' )
     call SetUnitColor( u, ConvertPlayerColor(6) )
     set u = BlzCreateUnitWithSkin( p, 'h00K', -7539.6, 9416.1, 270.000, 'h00K' )
     call SetUnitColor( u, ConvertPlayerColor(0) )
@@ -505,7 +772,7 @@ function CreateNeutralPassive takes nothing returns nothing
     call SetUnitColor( u, ConvertPlayerColor(0) )
     set u = BlzCreateUnitWithSkin( p, 'h00K', 4181.6, 6048.3, 271.701, 'h00K' )
     call SetUnitColor( u, ConvertPlayerColor(0) )
-    set u = BlzCreateUnitWithSkin( p, 'h00H', 2742.7, 3753.1, 270.000, 'h00H' )
+    set u = BlzCreateUnitWithSkin( p, 'h00H', 2872.6, 3582.7, 38.492, 'h00H' )
     call SetUnitColor( u, ConvertPlayerColor(6) )
     set u = BlzCreateUnitWithSkin( p, 'h00H', -2128.0, 6734.6, 266.871, 'h00H' )
     call SetUnitColor( u, ConvertPlayerColor(6) )
@@ -515,31 +782,31 @@ function CreateNeutralPassive takes nothing returns nothing
     call SetUnitColor( u, ConvertPlayerColor(0) )
     set u = BlzCreateUnitWithSkin( p, 'h00K', 5753.5, -946.6, 273.100, 'h00K' )
     call SetUnitColor( u, ConvertPlayerColor(0) )
-    set u = BlzCreateUnitWithSkin( p, 'h00H', 3191.4, -6050.0, 207.822, 'h00H' )
+    set u = BlzCreateUnitWithSkin( p, 'h00H', 3170.1, -6104.5, 207.822, 'h00H' )
     call SetUnitColor( u, ConvertPlayerColor(6) )
     set u = BlzCreateUnitWithSkin( p, 'h00H', -2380.2, -2724.1, 90.144, 'h00H' )
     call SetUnitColor( u, ConvertPlayerColor(6) )
     set u = BlzCreateUnitWithSkin( p, 'h00K', -2732.2, 4664.8, 270.000, 'h00K' )
     call SetUnitColor( u, ConvertPlayerColor(0) )
-    set u = BlzCreateUnitWithSkin( p, 'h00H', -136.9, 7387.5, 175.874, 'h00H' )
+    set u = BlzCreateUnitWithSkin( p, 'h00H', -125.9, 7258.9, 151.970, 'h00H' )
     call SetUnitColor( u, ConvertPlayerColor(6) )
-    set u = BlzCreateUnitWithSkin( p, 'h00H', 4380.4, 9911.5, 234.174, 'h00H' )
+    set u = BlzCreateUnitWithSkin( p, 'h00H', 4513.3, 9939.5, 225.059, 'h00H' )
     call SetUnitColor( u, ConvertPlayerColor(6) )
     set u = BlzCreateUnitWithSkin( p, 'h00J', 5919.7, 10279.2, 317.602, 'h00J' )
     call SetUnitColor( u, ConvertPlayerColor(4) )
-    set u = BlzCreateUnitWithSkin( p, 'h00H', 10965.3, 8078.1, 181.329, 'h00H' )
+    set u = BlzCreateUnitWithSkin( p, 'h00H', 11034.9, 8075.4, 181.329, 'h00H' )
     call SetUnitColor( u, ConvertPlayerColor(6) )
-    set u = BlzCreateUnitWithSkin( p, 'h00H', 10865.1, 1139.3, 135.839, 'h00H' )
+    set u = BlzCreateUnitWithSkin( p, 'h00H', 10859.4, 990.2, 85.700, 'h00H' )
     call SetUnitColor( u, ConvertPlayerColor(6) )
     set u = BlzCreateUnitWithSkin( p, 'h00J', -6248.1, 406.2, 270.000, 'h00J' )
     call SetUnitColor( u, ConvertPlayerColor(4) )
     set u = BlzCreateUnitWithSkin( p, 'h00L', 8338.2, 1988.1, 106.806, 'h00L' )
-    set u = BlzCreateUnitWithSkin( p, 'h00H', 8762.1, 8114.3, 319.251, 'h00H' )
+    set u = BlzCreateUnitWithSkin( p, 'h00H', 8713.1, 8089.3, 319.251, 'h00H' )
     call SetUnitColor( u, ConvertPlayerColor(6) )
     set u = BlzCreateUnitWithSkin( p, 'h00L', 5635.5, 2665.8, 275.872, 'h00L' )
     set u = BlzCreateUnitWithSkin( p, 'h00H', 7916.4, -5774.6, 270.000, 'h00H' )
     call SetUnitColor( u, ConvertPlayerColor(6) )
-    set u = BlzCreateUnitWithSkin( p, 'h00H', 7174.3, -123.2, 270.000, 'h00H' )
+    set u = BlzCreateUnitWithSkin( p, 'h00H', 7120.6, -23.1, 270.000, 'h00H' )
     call SetUnitColor( u, ConvertPlayerColor(6) )
     set u = BlzCreateUnitWithSkin( p, 'h00H', -4976.8, 6948.2, 270.000, 'h00H' )
     call SetUnitColor( u, ConvertPlayerColor(6) )
@@ -547,7 +814,7 @@ function CreateNeutralPassive takes nothing returns nothing
     call SetUnitColor( u, ConvertPlayerColor(4) )
     set u = BlzCreateUnitWithSkin( p, 'h00J', -9658.4, -5576.0, 270.000, 'h00J' )
     call SetUnitColor( u, ConvertPlayerColor(4) )
-    set u = BlzCreateUnitWithSkin( p, 'h00H', -10752.7, -6457.0, 315.830, 'h00H' )
+    set u = BlzCreateUnitWithSkin( p, 'h00H', -10959.8, -6195.3, 315.830, 'h00H' )
     call SetUnitColor( u, ConvertPlayerColor(6) )
     set u = BlzCreateUnitWithSkin( p, 'h00H', -10595.7, -4281.3, 21.476, 'h00H' )
     call SetUnitColor( u, ConvertPlayerColor(6) )
@@ -625,11 +892,13 @@ endfunction
 
 //===========================================================================
 function CreatePlayerBuildings takes nothing returns nothing
+    call CreateBuildingsForPlayer10(  )
     call CreateBuildingsForPlayer20(  )
 endfunction
 
 //===========================================================================
 function CreatePlayerUnits takes nothing returns nothing
+    call CreateUnitsForPlayer10(  )
     call CreateUnitsForPlayer20(  )
 endfunction
 
@@ -649,8 +918,39 @@ endfunction
 function CreateRegions takes nothing returns nothing
     local weathereffect we
 
-    set gg_rct_BaseUnits = Rect( 10944.0, -11584.0, 11328.0, -10816.0 )
-    set gg_rct_debugSurvivorSpawn = Rect( -320.0, -7648.0, -128.0, -7456.0 )
+    set gg_rct_Base_001 = Rect( -8192.0, 3040.0, -6944.0, 3904.0 )
+    set gg_rct_Base_003 = Rect( -11008.0, 832.0, -10176.0, 2560.0 )
+    set gg_rct_Base_004 = Rect( -10528.0, -928.0, -9152.0, 384.0 )
+    set gg_rct_Base_005 = Rect( -10688.0, -3808.0, -9056.0, -1792.0 )
+    set gg_rct_Base_006 = Rect( -11104.0, -4768.0, -9728.0, -3840.0 )
+    set gg_rct_Base_007 = Rect( -11488.0, -7328.0, -10080.0, -5664.0 )
+    set gg_rct_Base_008 = Rect( -8352.0, -5408.0, -6880.0, -4032.0 )
+    set gg_rct_Base_009 = Rect( -6432.0, -1504.0, -5344.0, -576.0 )
+    set gg_rct_Base_010 = Rect( -2912.0, -3040.0, -1824.0, -2112.0 )
+    set gg_rct_Base_011 = Rect( -3232.0, -10272.0, -1184.0, -8832.0 )
+    set gg_rct_Base_012 = Rect( -5888.0, -9376.0, -4736.0, -8352.0 )
+    set gg_rct_Base_013 = Rect( -7552.0, -10720.0, -6528.0, -9504.0 )
+    set gg_rct_Base_014 = Rect( -8480.0, -8384.0, -7392.0, -7200.0 )
+    set gg_rct_Base_015 = Rect( -9664.0, -11744.0, -8000.0, -10624.0 )
+    set gg_rct_Base_016 = Rect( -2432.0, -7872.0, -1024.0, -6656.0 )
+    set gg_rct_Base_017 = Rect( 4128.0, -8192.0, 5312.0, -6752.0 )
+    set gg_rct_Base_018 = Rect( 2528.0, -6752.0, 3584.0, -5504.0 )
+    set gg_rct_Base_019 = Rect( 7296.0, -6240.0, 8512.0, -5280.0 )
+    set gg_rct_Base_020 = Rect( 9056.0, -11488.0, 10400.0, -10112.0 )
+    set gg_rct_Base_021 = Rect( 7488.0, -11744.0, 8608.0, -10400.0 )
+    set gg_rct_Base_022 = Rect( 6656.0, -672.0, 7616.0, 320.0 )
+    set gg_rct_Base_023 = Rect( 9984.0, 480.0, 11200.0, 2272.0 )
+    set gg_rct_Base_024 = Rect( 8544.0, 7488.0, 9824.0, 8416.0 )
+    set gg_rct_Base_025 = Rect( 10464.0, 6912.0, 11424.0, 8896.0 )
+    set gg_rct_Base_026 = Rect( 3904.0, 9216.0, 5024.0, 10432.0 )
+    set gg_rct_Base_027 = Rect( 2304.0, 3136.0, 3520.0, 4256.0 )
+    set gg_rct_Base_028 = Rect( -928.0, 1536.0, 608.0, 2592.0 )
+    set gg_rct_Base_029 = Rect( -2816.0, 5504.0, -1792.0, 6976.0 )
+    set gg_rct_Base_030 = Rect( -5408.0, 6400.0, -4512.0, 7360.0 )
+    set gg_rct_Base_031 = Rect( -10944.0, 8000.0, -9856.0, 8960.0 )
+    set gg_rct_Base_032 = Rect( -896.0, 6912.0, 256.0, 7872.0 )
+    set gg_rct_Base_033 = Rect( 5472.0, 5024.0, 6656.0, 7104.0 )
+    set gg_rct_Base_034 = Rect( -10048.0, -6656.0, -9184.0, -4704.0 )
 endfunction
 
 //***************************************************************************
