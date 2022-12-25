@@ -2,12 +2,16 @@ package Bases
 import TlsUnitIds
 import ClosureTimers
 import TimerUtils
-import GroupUtils
 import UnitIndexer
 import Optional
 import Vector
 import SpawnPointCollection
 import Transform
+import Quaternion
+import MapEvents
+import Preload
+
+import initlater BasesInit
 
 constant color BASE_EASY_COLOR = color(0, 255, 0)
 constant color BASE_MEDIUM_COLOR = color(255, 255, 0)
@@ -36,6 +40,8 @@ int g_hardBaseCount
 int g_showBaseDebug = 0
 CallbackManual array g_playerShowBasesTimers
 
+rect g_tempRect = Rect(0,0,0,0)
+
 // ============================================================================
 public enum BaseDifficulty
   EASY
@@ -45,11 +51,80 @@ public enum BaseDifficulty
 
 // ============================================================================
 public class Base
-  transform transform = IDENTITYT
-  BaseDifficulty difficulty
-  real dd = REAL_MAX
-  minimapicon icon = null
-  string name = ""
+  protected transform m_transform = IDENTITYT
+  protected BaseDifficulty m_difficulty
+  protected real m_dd = REAL_MAX
+  protected minimapicon m_icon = null
+  private string m_id = ""
+  private string m_name = ""
+  private Vector<UnitSpawner> m_unitSpawners
+  private region m_region
+
+  // ----------------------------------------------------------------------------
+  construct(string id)
+    m_id = id
+    m_unitSpawners = new Vector<UnitSpawner>()
+    m_region = CreateRegion()
+
+  // ----------------------------------------------------------------------------
+  ondestroy
+
+    for spawner in m_unitSpawners
+      destroy spawner
+
+    destroy m_unitSpawners
+    m_unitSpawners = null
+
+    m_region.destr()
+    m_region = null
+
+  // ----------------------------------------------------------------------------
+  function getId() returns string
+    return m_id
+
+  // ----------------------------------------------------------------------------
+  function getName() returns string
+    return m_name
+
+  // ----------------------------------------------------------------------------
+  function setName(string value)
+    m_name = value
+
+  // ----------------------------------------------------------------------------
+  function getDifficulty() returns BaseDifficulty
+    return m_difficulty
+
+  // ----------------------------------------------------------------------------
+  function getWorldTransform() returns transform
+    return m_transform
+
+  // ----------------------------------------------------------------------------
+  function getMinimapIcon() returns minimapicon
+    return m_icon
+
+  // --------------------------------------------------------------------------
+  function registerUnitSpawner(int unitTypeId, vec3 localPos, angle localYaw) returns UnitSpawner
+    let localTransform = transform(localPos, ZERO3, eulerToQuat(localYaw.radians(), 0.0, 0.0), 1.0)
+    return registerUnitSpawner(unitTypeId, localTransform)
+
+  // --------------------------------------------------------------------------
+  function registerUnitSpawner(int unitTypeId, transform localTransform) returns UnitSpawner
+    let unitSpawner = new UnitSpawner(unitTypeId, localTransform)
+    m_unitSpawners.add(unitSpawner)
+
+    // Add to preloader so we don't get a hitch when spawning the map event
+    Preload.registerUnitTypeId(unitTypeId)
+
+    return unitSpawner
+
+  // ----------------------------------------------------------------------------
+  function addRect(rect value)
+    m_region.addRect(value)
+
+  // ----------------------------------------------------------------------------
+  function addRect(real left, real bottom, real right, real top)
+    g_tempRect.resize(vec2(left, bottom), vec2(right, top))
+    addRect(g_tempRect)
 
 // ============================================================================
 public abstract class Bases
@@ -79,12 +154,39 @@ public abstract class Bases
     return g_hardBasePos[index]
 
   // --------------------------------------------------------------------------
-  static function getBasePosition(int index) returns vec2
-    return g_bases.get(index).transform.pos.toVec2()
+  static function getBase(int index) returns Base
+    return g_bases.get(index)
+
+  // ----------------------------------------------------------------------------
+  static function registerBase(string id, BaseDifficulty diff, vec3 pos, angle yaw, string displayName) returns Base
+    let _base = new Base(id)
+    ..setName(displayName)
+
+    _base.m_difficulty = diff
+    _base.m_transform = transform(pos, ZERO3, eulerToQuat(yaw.radians(), 0, 0), 1.0)
   
-  // --------------------------------------------------------------------------
-  static function getBaseDifficulty(int index) returns BaseDifficulty
-    return g_bases.get(index).difficulty
+    if (diff == BaseDifficulty.EASY)
+      _base.m_icon = CreateMinimapIcon(pos.x, pos.y, BASE_EASY_COLOR.red, BASE_EASY_COLOR.green, BASE_EASY_COLOR.blue, BASE_MODEL_PATH, BASE_FOG_STATE)
+      g_easyBaseIcons[g_easyBaseCount] = _base.m_icon
+      g_easyBaseCount++
+    
+    if (diff == BaseDifficulty.MEDIUM)
+      _base.m_icon = CreateMinimapIcon(pos.x, pos.y, BASE_MEDIUM_COLOR.red, BASE_MEDIUM_COLOR.green, BASE_MEDIUM_COLOR.blue, BASE_MODEL_PATH, BASE_FOG_STATE)
+      g_mediumBaseIcons[g_mediumBaseCount] = _base.m_icon
+      g_mediumBaseCount++
+    
+    if (diff == BaseDifficulty.HARD)
+      _base.m_icon = CreateMinimapIcon(pos.x, pos.y, BASE_HARD_COLOR.red, BASE_HARD_COLOR.green, BASE_HARD_COLOR.blue, BASE_MODEL_PATH, BASE_FOG_STATE)
+      g_hardBaseIcons[g_hardBaseCount] = _base.m_icon
+      g_hardBaseCount++
+
+    SetMinimapIconVisible(_base.m_icon, false)
+
+    g_bases.add(_base)
+    g_basesClosest.add(_base)
+    g_basesFurthest.add(_base)
+
+    return _base
 
   // --------------------------------------------------------------------------
   /** Gets the base closest to any invalidating units */
@@ -92,10 +194,10 @@ public abstract class Bases
     var result = optionalVec2(false, ZERO2, "")
     real closestDD = REAL_MAX
     for b in g_bases
-      if (b.dd < closestDD)
-        closestDD = b.dd
+      if (b.m_dd < closestDD)
+        closestDD = b.m_dd
         result.hasValue = true
-        result.value = b.transform.pos.toVec2()
+        result.value = b.getWorldTransform().pos.toVec2()
     return result
 
   // --------------------------------------------------------------------------
@@ -103,7 +205,7 @@ public abstract class Bases
   static function getClosestSpawnPoints(int count, SpawnPointCollection outSpawnPoints) returns int
     var n = 0
     while (n < count and n < g_basesClosest.size())
-      outSpawnPoints.pushPoint(g_basesClosest.get(n).transform.pos.toVec2())
+      outSpawnPoints.pushPoint(g_basesClosest.get(n).getWorldTransform().pos.toVec2())
       n++
     return n
 
@@ -113,10 +215,10 @@ public abstract class Bases
     var result = optionalVec2(false, ZERO2, "")
     real furthestDD = REAL_MIN
     for b in g_bases
-      if (b.dd > furthestDD)
-        furthestDD = b.dd
+      if (b.m_dd > furthestDD)
+        furthestDD = b.m_dd
         result.hasValue = true
-        result.value = b.transform.pos.toVec2()
+        result.value = b.getWorldTransform().pos.toVec2()
     return result
 
   // --------------------------------------------------------------------------
@@ -124,7 +226,7 @@ public abstract class Bases
   static function getFurthestSpawnPoints(int count, SpawnPointCollection outSpawnPoints) returns int
     var n = 0
     while (n < count and n < g_basesFurthest.size())
-      outSpawnPoints.pushPoint(g_basesFurthest.get(n).transform.pos.toVec2())
+      outSpawnPoints.pushPoint(g_basesFurthest.get(n).getWorldTransform().pos.toVec2())
       n++
     return n
 
@@ -182,64 +284,20 @@ function unit.isBaseUnit() returns bool
          this.getTypeId() == TlsUnitIds.baseHard
 
 // ============================================================================
-function indexBaseUnit(unit baseUnit)
-
-  let baseUnitId = baseUnit.getTypeId()
-  let unitPos = baseUnit.getPos()
-
-  var b = new Base()
-  b.transform = baseUnit.getTransform()
-  
-  if (baseUnitId == TlsUnitIds.baseEasy)
-    b.difficulty = BaseDifficulty.EASY
-    b.icon = CreateMinimapIcon(unitPos.x, unitPos.y, BASE_EASY_COLOR.red, BASE_EASY_COLOR.green, BASE_EASY_COLOR.blue, BASE_MODEL_PATH, BASE_FOG_STATE)
-    g_easyBaseIcons[g_easyBaseCount] = b.icon
-    g_easyBaseCount++
-  
-  if (baseUnitId == TlsUnitIds.baseMedium)
-    b.difficulty = BaseDifficulty.MEDIUM
-    b.icon = CreateMinimapIcon(unitPos.x, unitPos.y, BASE_MEDIUM_COLOR.red, BASE_MEDIUM_COLOR.green, BASE_MEDIUM_COLOR.blue, BASE_MODEL_PATH, BASE_FOG_STATE)
-    g_mediumBaseIcons[g_mediumBaseCount] = b.icon
-    g_mediumBaseCount++
-  
-  if (baseUnitId == TlsUnitIds.baseHard)
-    b.difficulty = BaseDifficulty.HARD
-    b.icon = CreateMinimapIcon(unitPos.x, unitPos.y, BASE_HARD_COLOR.red, BASE_HARD_COLOR.green, BASE_HARD_COLOR.blue, BASE_MODEL_PATH, BASE_FOG_STATE)
-    g_hardBaseIcons[g_hardBaseCount] = b.icon
-    g_hardBaseCount++
-
-  g_bases.add(b)
-  g_basesClosest.add(b)
-  g_basesFurthest.add(b)
-
-  if (b.icon != null)
-    baseUnit.remove()
-    SetMinimapIconVisible(b.icon, false)
-
-// ============================================================================
-function indexAllBaseUnits()
-  let temp = getGroup()
-  temp.enumUnitsAll(null)
-  for _unit in temp
-    if (_unit.isBaseUnit())
-      indexBaseUnit(_unit)
-  temp.release()
-
-// ============================================================================
 function update(Base b)
-  let basePos = b.transform.pos.toVec2()
+  let basePos = b.getWorldTransform().pos.toVec2()
   var closestDD = REAL_MAX
   for invalidatingUnit in g_invalidatingUnits
     let dd = invalidatingUnit.getPos().distanceToSq(basePos)
     if (dd < closestDD)
       closestDD = dd
-  b.dd = closestDD
+  b.m_dd = closestDD
 
 // ============================================================================
 function updateAll()
   if (g_invalidatingUnits.isEmpty())
     for b in g_bases
-      b.dd = REAL_MAX
+      b.m_dd = REAL_MAX
   else
     for b in g_bases
       update(b)
@@ -249,17 +307,17 @@ function updateAll()
 function updateNearby(vec2 pos)
   var updated = 0
   for b in g_bases
-    let dd = pos.distanceToSq(b.transform.pos.toVec2())
-    if (b.dd == REAL_MAX or dd < b.dd)
-      b.dd = dd
+    let dd = pos.distanceToSq(b.getWorldTransform().pos.toVec2())
+    if (b.m_dd == REAL_MAX or dd < b.m_dd)
+      b.m_dd = dd
       updated++
   if (updated > 0)
     sort()
 
 // ============================================================================
 function sort()
-  g_basesClosest.sort((a, b) -> a.dd < b.dd)
-  g_basesFurthest.sort((a, b) -> a.dd > b.dd)
+  g_basesClosest.sort((a, b) -> a.m_dd < b.m_dd)
+  g_basesFurthest.sort((a, b) -> a.m_dd > b.m_dd)
 
 // ============================================================================
 function registerInvalidatingUnit(unit invalidatingUnit)
@@ -273,11 +331,8 @@ function unregisterInvalidatingUnit(unit invalidatingUnit)
 
 // ============================================================================
 function initialize()
-  indexAllBaseUnits()
+  registerBases()
   sort()
-
-// ============================================================================
-function updateBaseDebug()
 
 // ============================================================================
 init

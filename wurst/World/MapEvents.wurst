@@ -38,8 +38,8 @@ boolexpr g_filterUnitIsLootable = Condition(function filterUnitIsLootable)
 public class MapEventTemplate
 
   private string m_id
-  private IterableMap<int, Vector<MapEventUnitSpawner>> m_unitSpawnersByTypeId = new IterableMap<int, Vector<MapEventUnitSpawner>>()
-  private Vector<MapEventUnitSpawner> m_unitSpawners
+  private IterableMap<int, Vector<UnitSpawner>> m_unitSpawnersByTypeId = new IterableMap<int, Vector<UnitSpawner>>()
+  private Vector<UnitSpawner> m_unitSpawners
   private Vector<MapEventDestructableSpawner> m_destructableSpawners
   private Vector<MapEventAreaCleanerSpawner> m_areaCleaners
   private Vector<MapEventTileSpawner> m_tileSpawners
@@ -48,7 +48,7 @@ public class MapEventTemplate
   // --------------------------------------------------------------------------
   construct(string id)
     m_id = id
-    m_unitSpawners = new Vector<MapEventUnitSpawner>()
+    m_unitSpawners = new Vector<UnitSpawner>()
     m_destructableSpawners = new Vector<MapEventDestructableSpawner>()
     m_areaCleaners = new Vector<MapEventAreaCleanerSpawner>()
     m_tileSpawners = new Vector<MapEventTileSpawner>()
@@ -101,12 +101,12 @@ public class MapEventTemplate
     return m_id
 
   // --------------------------------------------------------------------------
-  function registerUnitSpawner(int unitTypeId, vec3 localPos, angle localYaw) returns MapEventUnitSpawner
+  function registerUnitSpawner(int unitTypeId, vec3 localPos, angle localYaw) returns UnitSpawner
     let localTransform = transform(localPos, ZERO3, eulerToQuat(localYaw.radians(), 0.0, 0.0), 1.0)
     return registerUnitSpawner(unitTypeId, localTransform)
 
   // --------------------------------------------------------------------------
-  function registerUnitSpawner(int unitTypeId, transform localTransform) returns MapEventUnitSpawner
+  function registerUnitSpawner(int unitTypeId, transform localTransform) returns UnitSpawner
 
     if (unitTypeId == TlsMapEventIds.areaCleaner128)
       registerAreaCleaner(128.0, localTransform)
@@ -116,11 +116,11 @@ public class MapEventTemplate
       registerAreaCleaner(256.0, localTransform)
       return null
 
-    let unitSpawner = new MapEventUnitSpawner(unitTypeId, localTransform)
+    let unitSpawner = new UnitSpawner(unitTypeId, localTransform)
 
     var unitSpawners = m_unitSpawnersByTypeId.get(unitTypeId)
     if (unitSpawners == null)
-      unitSpawners = new Vector<MapEventUnitSpawner>()
+      unitSpawners = new Vector<UnitSpawner>()
       m_unitSpawnersByTypeId.put(unitTypeId, unitSpawners)
 
     unitSpawners.add(unitSpawner)
@@ -168,7 +168,7 @@ public class MapEventTemplate
     return m_unitSpawners.size()
 
   // --------------------------------------------------------------------------
-  function getUnitSpawner(int index) returns MapEventUnitSpawner
+  function getUnitSpawner(int index) returns UnitSpawner
     return m_unitSpawners.get(index)
 
   // --------------------------------------------------------------------------
@@ -177,7 +177,7 @@ public class MapEventTemplate
     return unitSpawners != null ? unitSpawners.size() : 0
 
   // --------------------------------------------------------------------------
-  function getUnitSpawnerByTypeId(int unitTypeId, int index) returns MapEventUnitSpawner
+  function getUnitSpawnerByTypeId(int unitTypeId, int index) returns UnitSpawner
     let unitSpawners = m_unitSpawnersByTypeId.get(unitTypeId)
     return unitSpawners != null ? unitSpawners.get(index) : null
 
@@ -236,12 +236,12 @@ public class MapEventInstance
   private transform m_worldTransform = IDENTITYT
   private MapEventTemplate m_template = null
   private group m_spawnedUnits = null
-  private IterableMap<MapEventUnitSpawner, group> m_spawnerToSpawnedUnits = null
-  private HashMap<unit, MapEventUnitSpawner> m_spawnedUnitToSpawner = null
+  private IterableMap<UnitSpawner, group> m_spawnerToSpawnedUnits = null
+  private HashMap<unit, UnitSpawner> m_spawnedUnitToSpawner = null
   private Vector<destructable> m_spawnedDestructables = null
   private Vector<MapEventAreaCleanerInstance> m_cleaners = null
   private Vector<MapEventTileInstance> m_spawnedTiles = null
-  private Predicate<MapEventUnitSpawner> m_unitFilter = null
+  private Predicate<UnitSpawner> m_unitFilter = null
   private Predicate<MapEventDestructableSpawner> m_destructableFilter = null
   private CancellationToken m_ct
 
@@ -293,7 +293,7 @@ public class MapEventInstance
     m_worldTransform = value
 
   // --------------------------------------------------------------------------
-  function setUnitFilter(Predicate<MapEventUnitSpawner> filter)
+  function setUnitFilter(Predicate<UnitSpawner> filter)
     if (m_unitFilter != null)
       m_unitFilter.release()
     m_unitFilter = filter.acquire()
@@ -357,7 +357,7 @@ public class MapEventInstance
     spawnDestructables()
 
   // --------------------------------------------------------------------------
-  function spawnUnitNow(MapEventUnitSpawner spawner, player owner) returns unit
+  function spawnUnitNow(UnitSpawner spawner, player owner) returns unit
     if (m_spawnedUnits == null)
       m_spawnedUnits = getGroup()
 
@@ -367,7 +367,7 @@ public class MapEventInstance
       m_spawnedUnits.addUnit(spawnedUnit)
 
       if (m_spawnerToSpawnedUnits == null)
-        m_spawnerToSpawnedUnits = new IterableMap<MapEventUnitSpawner, group>()
+        m_spawnerToSpawnedUnits = new IterableMap<UnitSpawner, group>()
 
       var spawnedUnitsBySpawner = m_spawnerToSpawnedUnits.get(spawner)
       if (spawnedUnitsBySpawner == null)
@@ -377,7 +377,7 @@ public class MapEventInstance
       spawnedUnitsBySpawner.addUnit(spawnedUnit)
 
       if (m_spawnedUnitToSpawner == null)
-        m_spawnedUnitToSpawner = new HashMap<unit, MapEventUnitSpawner>()
+        m_spawnedUnitToSpawner = new HashMap<unit, UnitSpawner>()
 
       m_spawnedUnitToSpawner.put(spawnedUnit, spawner)
     //}
@@ -385,7 +385,7 @@ public class MapEventInstance
     return spawnedUnit
 
   // --------------------------------------------------------------------------
-  function spawnUnitNow(MapEventUnitSpawner spawner, player owner, int unitTypeIdOverride) returns unit
+  function spawnUnitNow(UnitSpawner spawner, player owner, int unitTypeIdOverride) returns unit
     if (m_spawnedUnits == null)
       m_spawnedUnits = getGroup()
 
@@ -396,12 +396,12 @@ public class MapEventInstance
     return spawnedUnit
 
   // --------------------------------------------------------------------------
-  function spawnUnit(MapEventUnitSpawner spawner, player owner) returns FuncJob<unit>
+  function spawnUnit(UnitSpawner spawner, player owner) returns FuncJob<unit>
     let jobId = createJobId("spawnUnit+"+spawner.getUnitTypeId().toRawCode())
     return m_unitThread.invokeFunc(jobId, m_ct, () -> spawnUnitNow(spawner, owner))
 
   // --------------------------------------------------------------------------
-  function spawnUnit(MapEventUnitSpawner spawner, player owner, int unitTypeIdOverride) returns FuncJob<unit>
+  function spawnUnit(UnitSpawner spawner, player owner, int unitTypeIdOverride) returns FuncJob<unit>
     let jobId = createJobId("spawnUnit+"+unitTypeIdOverride.toRawCode())
     return m_unitThread.invokeFunc(jobId, m_ct, () -> spawnUnitNow(spawner, owner, unitTypeIdOverride))
 
@@ -486,9 +486,9 @@ public class MapEventInstance
   // --------------------------------------------------------------------------
   private static function unspawnUnitNow(
     group spawnedUnits,
-    IterableMap<MapEventUnitSpawner, group> spawnerToSpawnedUnits,
-    HashMap<unit, MapEventUnitSpawner> spawnedUnitToSpawner,
-    MapEventUnitSpawner spawner,
+    IterableMap<UnitSpawner, group> spawnerToSpawnedUnits,
+    HashMap<unit, UnitSpawner> spawnedUnitToSpawner,
+    UnitSpawner spawner,
     group spawnedUnitsBySpawner,
     unit spawnedUnit)
     
@@ -658,7 +658,7 @@ public class MapEventInstance
     return "{0}:{1}:{2}".format(m_template.getId(), m_instanceId.toString(), id)
 
 // ============================================================================
-public class MapEventUnitSpawner
+public class UnitSpawner
   private int m_unitTypeId
   private transform m_localTransform
   private real m_fadeInDuration

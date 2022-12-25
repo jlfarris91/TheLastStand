@@ -368,7 +368,7 @@
 
             try
             {
-                MapRegions mapRegions;
+                RegionsFile mapRegions;
                 DoodadPlacementFile doodads;
                 PathMap pathMap;
 
@@ -381,7 +381,7 @@
                 using (MpqFileStream file = archive.OpenFile(MapFiles.REGION_PLACEMENT_FILE_PATH))
                 using (var reader = new BinaryReader(file))
                 {
-                    mapRegions = new MapRegionsBinaryDeserializer().Deserialize(reader);
+                    mapRegions = new RegionsFileBinaryDeserializer().Deserialize(reader);
                 }
 
                 Region[] oldSpawnRegions = mapRegions.Regions.Where(_ => _.Name.StartsWith(SPAWN_REGION_NAME_PREFIX)).ToArray();
@@ -400,7 +400,7 @@
 
                 m_logger.Log($"Removed {oldSpawnRegions.Length} existing spawn regions in map");
 
-                int maxId = mapRegions.Regions.Max(_ => _.Id) + 1;
+                int maxId = mapRegions.Regions.Any() ? mapRegions.Regions.Max(_ => _.Id) + 1 : 0;
 
                 m_logger.Log($"Generating new spawn regions...");
 
@@ -432,7 +432,7 @@
                     using (Stream file = File.Create(tempFileName))
                     using (var writer = new BinaryWriter(file))
                     {
-                        new MapRegionsBinarySerializer().Serialize(writer, mapRegions);
+                        new RegionsFileBinarySerializer().Serialize(writer, mapRegions);
                     }
 
                     m_logger.Log("Done serializing regions");
@@ -611,7 +611,7 @@
             };
         }
 
-        private static string GenerateSpawnRegionsWurstScript(MapRegions regions)
+        private static string GenerateSpawnRegionsWurstScript(RegionsFile regions)
         {
             var sb = new StringBuilder();
 

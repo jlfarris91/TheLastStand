@@ -10,6 +10,7 @@
     using War3.Net.Imaging;
     using War3.Net.Maps.Doodads;
     using War3.Net.Maps.Pathing;
+    using War3.Net.Maps.Regions;
     using War3.Net.Maps.Terrain;
     using War3.Net.Maps.Units;
     using War3.Net.Mpq;
@@ -65,9 +66,13 @@
             var pathMapFileBinarySerializer = new PathMapFileBinarySerializer(v => new PathMapBinarySerializer());
             var unitPlacementBinaryDeserializer = new UnitPlacementBinaryDeserializer();
             var unitPlacementFileBinaryDeserializer = new UnitPlacementFileBinaryDeserializer((v, sv) => unitPlacementBinaryDeserializer);
+            var unitPlacementBinarySerializer = new UnitPlacementBinarySerializer();
+            var unitPlacementFileBinarySerializer = new UnitPlacementFileBinarySerializer((v, sv) => unitPlacementBinarySerializer);
             var doodadPlacementFileBinaryDeserializer = new DoodadPlacementFileBinaryDeserializer();
             var terrainBinaryDeserializer = new TerrainBinaryDeserializer();
             var terrainFileBinaryDeserializer = new TerrainFileBinaryDeserializer(v => terrainBinaryDeserializer);
+            var regionsBinaryDeserializer = new RegionsFileBinaryDeserializer();
+            var regionsBinarySerializer = new RegionsFileBinarySerializer();
 
             var referencedFilePaths = new List<string>();
 
@@ -150,7 +155,8 @@
 
                     // Map archive is now done being loaded
                     sLogger.Log($"Mounting archive '{intermediateMpqPath}' at priority {MAP_PRI}");
-                    fileSystem.AddSystem(new MpqArchiveFileSystem(newMapArchive), MAP_PRI);
+                    var mapArchiveFileSystem = new MpqArchiveFileSystem(newMapArchive);
+                    fileSystem.AddSystem(mapArchiveFileSystem, MAP_PRI);
 
                     sLogger.Log($"Loading base object data...");
                     var libraries = PipelineUtility.LoadCustomObjectLibraries(fileSystem, sLogger);
@@ -159,6 +165,14 @@
 
                     var objects = new List<IPipelineObject>
                     {
+                        new BaseBuilder(
+                            mapArchiveFileSystem,
+                            sLogger,
+                            objectLibrary,
+                            unitPlacementFileBinaryDeserializer,
+                            unitPlacementFileBinarySerializer,
+                            regionsBinaryDeserializer,
+                            regionsBinarySerializer),
                         new PathMapBuildabilityModifier(pathMapFileBinaryDeserializer, pathMapFileBinarySerializer),
                         new RegionMapper(sLogger,
                             fileSystem,
@@ -168,10 +182,8 @@
                             pathMapFileBinaryDeserializer,
                             args.OutputSpawnRegionScriptFile.FullName) { WriteRegionsToArchive = args.WriteRegionsToArchive },
                         new EventMapTemplateBuilder(
-                            fileSystem,
                             sLogger,
                             objectLibrary,
-                            assetManager,
                             unitPlacementFileBinaryDeserializer,
                             doodadPlacementFileBinaryDeserializer,
                             terrainFileBinaryDeserializer),

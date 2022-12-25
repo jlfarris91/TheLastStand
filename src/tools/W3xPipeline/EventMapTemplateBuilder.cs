@@ -3,7 +3,6 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Numerics;
 using System.Text;
 using War3.Net;
 using War3.Net.Assets;
@@ -23,27 +22,21 @@ namespace W3xPipeline
         private static Tag DEST_NAME_FIELD_ID = Tag.FromString("bnam");
         private static Tag PLAYER_START_LOCATION_ID = Tag.FromString("sloc");
 
-        private readonly LayeredFileSystem m_fileSystem;
         private readonly ILogger m_logger;
         private readonly IReadOnlyEntityLibrary m_entityLibrary;
-        private readonly IAssetManager m_assetManager;
         private readonly UnitPlacementFileBinaryDeserializer m_unitPlacementFileBinaryDeserializer;
         private readonly DoodadPlacementFileBinaryDeserializer m_doodadPlacementFileBinaryDeserializer;
         private readonly TerrainFileBinaryDeserializer m_terrainFileBinaryDeserializer;
 
         public EventMapTemplateBuilder(
-            LayeredFileSystem fileSystem,
             ILogger logger,
             IReadOnlyEntityLibrary entityLibrary,
-            IAssetManager assetManager,
             UnitPlacementFileBinaryDeserializer unitPlacementFileBinaryDeserializer,
             DoodadPlacementFileBinaryDeserializer doodadPlacementFileBinaryDeserializer,
             TerrainFileBinaryDeserializer terrainFileBinaryDeserializer)
         {
-            m_fileSystem = fileSystem;
             m_logger = logger;
             m_entityLibrary = entityLibrary;
-            m_assetManager = assetManager;
             m_unitPlacementFileBinaryDeserializer = unitPlacementFileBinaryDeserializer;
             m_doodadPlacementFileBinaryDeserializer = doodadPlacementFileBinaryDeserializer;
             m_terrainFileBinaryDeserializer = terrainFileBinaryDeserializer;
