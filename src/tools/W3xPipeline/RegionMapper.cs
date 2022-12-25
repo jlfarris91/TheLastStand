@@ -468,7 +468,7 @@
             IReadOnlyEntityObject entity = m_objectLibrary.GetEntity(placement.Id);
             if (!(entity is IAffectsPathing affectsPathing))
             {
-                return;
+                throw new Exception($"Failed to find entity of type {placement.Id}");
             }
 
             string pt = affectsPathing.PathingTexture;
