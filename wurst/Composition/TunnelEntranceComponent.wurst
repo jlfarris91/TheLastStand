@@ -19,6 +19,8 @@ import GroupExtensions
 import TlsUnitIds
 import TlsAbilityIds
 import Unit_Tunnel
+import FX
+import ColorUtility
 
 LinkedList<TunnelOperation> g_activeTravelOperations = new LinkedList<TunnelOperation>()
 CallbackPeriodic g_updateTunnelOperations
@@ -30,6 +32,7 @@ constant real TRAVEL_DURATION = 3.0
 constant real TUNNEL_OPERATION_FX_DURATION_OFFSET = 1.0
 constant real TUNNEL_MIN_DISTANCE = 256.0
 constant real TUNNEL_TRAVEL_TIMER = 0.1
+constant real TUNNEL_DIG_DIST_MAX = 2048 // match dig abil range in Unit_Tunnel.wurst
 
 constant int EFFECT_COUNT = 16
 constant real EFFECT_SCALE = 0.3
@@ -175,9 +178,9 @@ public class TunnelEntranceComponent extends UnitComponent
   protected unit m_connectedTunnelEntrance = null
   private unit m_diggingTunnelTarget = null
   private unit m_diggingUnit = null
-  
   private group m_awaitingTravelGroup = null
   private CallbackPeriodic m_loadTimer = null
+  private effect m_rangeEffect = null
 
   // --------------------------------------------------------------------------
   construct(IUnitMetadata owner)
@@ -275,6 +278,8 @@ public class TunnelEntranceComponent extends UnitComponent
     
     g_tunnelEntrances.removeUnit(getOwnerUnit())
 
+    hideRangeEffect()
+
   // --------------------------------------------------------------------------
   protected function onUnitEnterTunnel(unit enteringUnit)
     // Log.info("onUnitEnterTunnel")
@@ -324,6 +329,8 @@ public class TunnelEntranceComponent extends UnitComponent
 
     setupLoadForTravel()
 
+    updateRangeEffect()
+
   // --------------------------------------------------------------------------
   protected function onTunnelDigCancel()
     // Log.info("onTunnelDigCancel")
@@ -333,6 +340,8 @@ public class TunnelEntranceComponent extends UnitComponent
     m_diggingUnit = null
 
     setupLoadForBuilder()
+
+    updateRangeEffect()
 
   // --------------------------------------------------------------------------
   private function unloadUnits()
@@ -397,6 +406,29 @@ public class TunnelEntranceComponent extends UnitComponent
     //  Log.info("TEC", "tryCastLoad", "", "issued load order")
     //else
     //  Log.info("TEC", "tryCastLoad", "", "failed to issue load order")
+
+  // --------------------------------------------------------------------------
+  protected function showRangeEffect()
+
+    if (hasConnectedTunnelEntrance())
+      return
+
+    if (m_rangeEffect == null)
+      let ownerUnit = getOwnerUnit()
+      m_rangeEffect = FX.createRangeEffect(ownerUnit.getPos(), TUNNEL_DIG_DIST_MAX, Colors.white, ownerUnit.getOwner())
+
+  // --------------------------------------------------------------------------
+  protected function updateRangeEffect()
+    if (m_rangeEffect != null)
+      hideRangeEffect()
+      showRangeEffect()
+
+  // --------------------------------------------------------------------------
+  protected function hideRangeEffect()
+    
+    if (m_rangeEffect != null)
+      m_rangeEffect.destr()
+      m_rangeEffect = null
 
 // ============================================================================
 public function unit.getTunnelEntranceComponent() returns TunnelEntranceComponent
@@ -642,6 +674,24 @@ function unregisterTunnelOperation(TunnelOperation op)
     g_updateTunnelOperations = null
 
 // ============================================================================
+function onUnitSelected()
+  let selectedUnit = GetTriggerUnit()
+  if (not selectedUnit.isCampFire())
+    return
+  let comp = selectedUnit.getMetadata().getTunnelEntranceComponent()
+  if (comp != null)
+    comp.showRangeEffect()
+
+// ============================================================================
+function onUnitDeselected()
+  let selectedUnit = GetTriggerUnit()
+  if (not selectedUnit.isCampFire())
+    return
+  let comp = selectedUnit.getMetadata().getTunnelEntranceComponent()
+  if (comp != null)
+    comp.hideRangeEffect()
+
+// ============================================================================
 init
 
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_LOADED, function onUnitLoaded)
@@ -654,3 +704,6 @@ init
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ISSUED_ORDER, function onUnitIssuedOrder)
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ISSUED_POINT_ORDER, function onUnitIssuedOrder)
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ISSUED_TARGET_ORDER, function onUnitIssuedTargetOrder)
+
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_SELECTED, function onUnitSelected)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_DESELECTED, function onUnitDeselected)
