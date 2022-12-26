@@ -163,42 +163,127 @@ namespace W3xPipeline
 
             File.WriteAllText(outputFilePath, GenerateWurst(bases));
 
+            ModifyUnitPlacementsFile(archive, unitPlacementFile);
+
+            ModifyRegionsFile(archive, regionsFile);
+
+            ModifyScriptFile(archive);
+
+            m_logger.Log($"Done building {bases.Count} bases.");
+        }
+
+        private void ModifyUnitPlacementsFile(MpqArchive archive, UnitPlacementFile unitPlacementFile)
+        {
             string tempFileName = Path.GetTempFileName();
 
+            m_logger.Log("Serializing unit placements file...");
+            using (var file = File.Create(tempFileName))
+            using (var writer = new BinaryWriter(file))
             {
-                m_logger.Log("Serializing unit placements file...");
-                using (var file = File.Create(tempFileName))
-                using (var writer = new BinaryWriter(file))
-                {
-                    m_unitPlacementFileBinarySerializer.Serialize(writer, unitPlacementFile);
-                }
-
-                m_logger.Log("Done serializing unit placements.");
-
-                m_logger.Log($"Replacing file {MapFiles.UNIT_PLACEMENTS_FILE_PATH} in mpq");
-                archive.ReplaceFile(tempFileName, MapFiles.UNIT_PLACEMENTS_FILE_PATH);
+                m_unitPlacementFileBinarySerializer.Serialize(writer, unitPlacementFile);
             }
 
-            {
-                m_logger.Log("Serializing regions file...");
-                using (var file = File.Create(tempFileName))
-                using (var writer = new BinaryWriter(file))
-                {
-                    m_regionsBinarySerializer.Serialize(writer, regionsFile);
-                }
+            m_logger.Log("Done serializing unit placements.");
 
-                m_logger.Log("Done serializing regions.");
-
-                m_logger.Log($"Replacing file {MapFiles.REGION_PLACEMENT_FILE_PATH} in mpq");
-                archive.ReplaceFile(tempFileName, MapFiles.REGION_PLACEMENT_FILE_PATH);
-            }
+            m_logger.Log($"Replacing file {MapFiles.UNIT_PLACEMENTS_FILE_PATH} in mpq");
+            archive.ReplaceFile(tempFileName, MapFiles.UNIT_PLACEMENTS_FILE_PATH);
 
             if (File.Exists(tempFileName))
             {
                 File.Delete(tempFileName);
             }
+        }
 
-            m_logger.Log($"Done building {bases.Count} bases.");
+        private void ModifyRegionsFile(MpqArchive archive, RegionsFile regionsFile)
+        {
+            string tempFileName = Path.GetTempFileName();
+
+            m_logger.Log("Serializing regions file...");
+            using (var file = File.Create(tempFileName))
+            using (var writer = new BinaryWriter(file))
+            {
+                m_regionsBinarySerializer.Serialize(writer, regionsFile);
+            }
+
+            m_logger.Log("Done serializing regions.");
+
+            m_logger.Log($"Replacing file {MapFiles.REGION_PLACEMENT_FILE_PATH} in mpq");
+            archive.ReplaceFile(tempFileName, MapFiles.REGION_PLACEMENT_FILE_PATH);
+
+            if (File.Exists(tempFileName))
+            {
+                File.Delete(tempFileName);
+            }
+        }
+
+        private void ModifyScriptFile(MpqArchive archive)
+        {
+            string tempFileName = Path.GetTempFileName();
+
+            m_logger.Log("Modifying script file...");
+
+            var regionVariableDeclarationRegex = new Regex(@"rect\s+gg_rct_Base.*");
+            var regionVariableAssignmentRegex = new Regex(@"set gg_rct_Base.*");
+
+            var functionCreateBuildingsForPlayerName = $"function CreateBuildingsForPlayer{BASE_UNIT_PLAYER_ID}";
+            var functionCreateUnitsForPlayerName = $"function CreateUnitsForPlayer{BASE_UNIT_PLAYER_ID}";
+
+            var callCreateBuildingsForPlayerName = $"call CreateBuildingsForPlayer{BASE_UNIT_PLAYER_ID}";
+            var callCreateUnitsForPlayerName = $"call CreateUnitsForPlayer{BASE_UNIT_PLAYER_ID}";
+
+            var sb = new StringBuilder();
+            using (var regionsFileStream = m_fileSystem.OpenRead(MapFiles.SCRIPT_FILE_PATH))
+            using (var regionsFileReader = new StreamReader(regionsFileStream))
+            {
+                int ignore = 0;
+                while (!regionsFileReader.EndOfStream)
+                {
+                    var line = regionsFileReader.ReadLine();
+                    var trimmedLine = line.Trim(' ');
+
+                    if (trimmedLine.StartsWith(functionCreateBuildingsForPlayerName) ||
+                        trimmedLine.StartsWith(functionCreateUnitsForPlayerName))
+                    {
+                        ignore++;
+                        continue;
+                    }
+
+                    if (ignore > 0 && trimmedLine.StartsWith("endfunction"))
+                    {
+                        ignore--;
+                        continue;
+                    }
+
+                    if (trimmedLine.StartsWith(callCreateBuildingsForPlayerName) ||
+                        trimmedLine.StartsWith(callCreateUnitsForPlayerName))
+                    {
+                        continue;
+                    }
+
+                    if (regionVariableDeclarationRegex.Match(trimmedLine).Success ||
+                        regionVariableAssignmentRegex.Match(trimmedLine).Success)
+                    {
+                        continue;
+                    }
+
+                    if (ignore == 0)
+                    {
+                        sb.AppendLine(line);
+                    }
+                }
+            }
+
+            File.WriteAllText(tempFileName, sb.ToString());
+
+            m_logger.Log("Done modifying script file.");
+
+            m_logger.Log($"Replacing file {MapFiles.SCRIPT_FILE_PATH} in mpq");
+            archive.ReplaceFile(tempFileName, MapFiles.SCRIPT_FILE_PATH);
+
+            if (File.Exists(tempFileName))
+            {
+                File.Delete(tempFileName);
+            }
         }
 
         private string GenerateWurst(ICollection<BaseDefinition> bases)
