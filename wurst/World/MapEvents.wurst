@@ -23,6 +23,7 @@ import ObjectIds
 import DestructableUtility
 
 import initlater MapEventsInit
+import Events
 
 HashMap<string, Func<MapEventTemplate>> g_mapEventTemplateFactories = new HashMap<string, Func<MapEventTemplate>>()
 HashMap<string, Func<MapEvent>> g_mapEventFactories = new HashMap<string, Func<MapEvent>>()
@@ -38,7 +39,7 @@ public class MapEventTemplate
   private string m_id
   private IterableMap<int, Vector<UnitSpawner>> m_unitSpawnersByTypeId = new IterableMap<int, Vector<UnitSpawner>>()
   private Vector<UnitSpawner> m_unitSpawners
-  private Vector<MapEventDestructableSpawner> m_destructableSpawners
+  private Vector<DestructableSpawner> m_destructableSpawners
   private Vector<MapEventAreaCleanerSpawner> m_areaCleaners
   private Vector<MapEventTileSpawner> m_tileSpawners
   private int m_instanceCounter
@@ -47,7 +48,7 @@ public class MapEventTemplate
   construct(string id)
     m_id = id
     m_unitSpawners = new Vector<UnitSpawner>()
-    m_destructableSpawners = new Vector<MapEventDestructableSpawner>()
+    m_destructableSpawners = new Vector<DestructableSpawner>()
     m_areaCleaners = new Vector<MapEventAreaCleanerSpawner>()
     m_tileSpawners = new Vector<MapEventTileSpawner>()
 
@@ -145,7 +146,7 @@ public class MapEventTemplate
 
   // --------------------------------------------------------------------------
   function registerDestSpawner(int destructableTypeId, int variation, transform localTransform)
-    m_destructableSpawners.add(new MapEventDestructableSpawner(destructableTypeId, variation, localTransform))
+    m_destructableSpawners.add(new DestructableSpawner(destructableTypeId, variation, localTransform))
     
     // Add to preloader so we don't get a hitch when spawning the map event
     Preload.registerDestructableTypeId(destructableTypeId, variation)
@@ -192,7 +193,7 @@ public class MapEventTemplate
     return m_destructableSpawners.size()
 
   // --------------------------------------------------------------------------
-  function getDestSpawner(int index) returns MapEventDestructableSpawner
+  function getDestSpawner(int index) returns DestructableSpawner
     return m_destructableSpawners.get(index)
 
   // --------------------------------------------------------------------------
@@ -249,13 +250,16 @@ public class MapEventInstance
   private Vector<MapEventAreaCleanerInstance> m_cleaners = null
   private Vector<MapEventTileInstance> m_spawnedTiles = null
   private Predicate<UnitSpawner> m_unitFilter = null
-  private Predicate<MapEventDestructableSpawner> m_destructableFilter = null
+  private Predicate<DestructableSpawner> m_destructableFilter = null
   private CancellationToken m_ct
 
   private Thread m_cleanerThread = cleanerThread
   private Thread m_unitThread = unitThread
   private Thread m_destThread = destThread
   private Thread m_tileThread = tileThread
+
+  private Event2<UnitSpawner, unit> m_onUnitSpawned
+  private Event2<UnitSpawner, unit> m_onUnitUnspawned
 
   // --------------------------------------------------------------------------
   construct(MapEventTemplate template, int instanceId)
@@ -283,6 +287,14 @@ public class MapEventInstance
       m_unitFilter.release()
       m_unitFilter = null
 
+    if (m_onUnitSpawned != null)
+      destroy m_onUnitSpawned
+      m_onUnitSpawned = null
+
+    if (m_onUnitUnspawned != null)
+      destroy m_onUnitUnspawned
+      m_onUnitUnspawned = null
+
   // --------------------------------------------------------------------------
   function getInstanceId() returns int
     return m_instanceId
@@ -306,7 +318,7 @@ public class MapEventInstance
     m_unitFilter = filter.acquire()
 
   // --------------------------------------------------------------------------
-  function setDestructableFilter(Predicate<MapEventDestructableSpawner> filter)
+  function setDestructableFilter(Predicate<DestructableSpawner> filter)
     if (m_destructableFilter != null)
       m_destructableFilter.release()
     m_destructableFilter = filter.acquire()
@@ -387,6 +399,9 @@ public class MapEventInstance
         m_spawnedUnitToSpawner = new HashMap<unit, UnitSpawner>()
 
       m_spawnedUnitToSpawner.put(spawnedUnit, spawner)
+
+      if (m_onUnitSpawned != null)
+        m_onUnitSpawned.call(spawner, spawnedUnit)
     //}
 
     return spawnedUnit
@@ -445,7 +460,10 @@ public class MapEventInstance
     if (spawnedUnits == null)
       error("No spawned unit group for unit spawner")
 
-    unspawnUnitNow(
+    if (m_onUnitUnspawned != null)
+      m_onUnitUnspawned.call(spawner, spawnedUnit)
+
+    unspawnUnitNowStatic(
       m_spawnedUnits,
       m_spawnerToSpawnedUnits,
       m_spawnedUnitToSpawner,
@@ -481,7 +499,12 @@ public class MapEventInstance
       for spawnedUnit in spawnedUnitsBySpawner
       //{
         let jobId = createJobId("unspawnUnit+"+spawnedUnit.getTypeId().toRawCode())
-        let unspawnUnitJob = m_unitThread.invoke(jobId, () -> unspawnUnitNow(allSpawnedUnits, spawnerToSpawnedUnits, spawnedUnitToSpawner, spawner, spawnedUnitsBySpawner, spawnedUnit))
+        let unspawnUnitJob = m_unitThread.invoke(jobId) () ->
+        //{
+          if (m_onUnitUnspawned != null)
+            m_onUnitUnspawned.call(spawner, spawnedUnit)
+          unspawnUnitNowStatic(allSpawnedUnits, spawnerToSpawnedUnits, spawnedUnitToSpawner, spawner, spawnedUnitsBySpawner, spawnedUnit)
+        //}
         whenAllJob.addJob(unspawnUnitJob)
       //}
     //}
@@ -491,7 +514,19 @@ public class MapEventInstance
     return whenAllJob
 
   // --------------------------------------------------------------------------
-  private static function unspawnUnitNow(
+  function onUnitSpawned() returns IEvent2<UnitSpawner, unit>
+    if (m_onUnitSpawned == null)
+      m_onUnitSpawned = new Event2<UnitSpawner, unit>()
+    return m_onUnitSpawned
+
+  // --------------------------------------------------------------------------
+  function onUnitUnspawned() returns IEvent2<UnitSpawner, unit>
+    if (m_onUnitUnspawned == null)
+      m_onUnitUnspawned = new Event2<UnitSpawner, unit>()
+    return m_onUnitUnspawned
+
+  // --------------------------------------------------------------------------
+  private static function unspawnUnitNowStatic(
     group spawnedUnits,
     IterableMap<UnitSpawner, group> spawnerToSpawnedUnits,
     HashMap<unit, UnitSpawner> spawnedUnitToSpawner,
@@ -511,7 +546,7 @@ public class MapEventInstance
     spawnedUnitToSpawner.remove(spawnedUnit)
 
   // --------------------------------------------------------------------------
-  function spawnDestructableNow(MapEventDestructableSpawner spawner) returns destructable
+  function spawnDestructableNow(DestructableSpawner spawner) returns destructable
     if (m_spawnedDestructables == null)
       m_spawnedDestructables = new Vector<destructable>()
 
@@ -522,7 +557,7 @@ public class MapEventInstance
     return spawnedDest
 
   // --------------------------------------------------------------------------
-  function spawnDestructable(MapEventDestructableSpawner spawner) returns FuncJob<destructable>
+  function spawnDestructable(DestructableSpawner spawner) returns FuncJob<destructable>
     let jobId = createJobId("spawnDest+"+spawner.getDestructableTypeId().toRawCode())
     return m_destThread.invokeFunc(jobId, m_ct, () -> spawnDestructableNow(spawner))
   
@@ -673,11 +708,20 @@ public class UnitSpawner
   private int m_fadeOutMove
   private vec2 m_fadeOutMoveToPos
   private bool m_useRecycler
+  private int m_userData
 
   // --------------------------------------------------------------------------
   construct(int unitTypeId, transform localTransform)
     m_unitTypeId = unitTypeId
     m_localTransform = localTransform
+
+  // --------------------------------------------------------------------------
+  function getUserData() returns int
+    return m_userData
+  
+  // --------------------------------------------------------------------------
+  function setUserData(int value)
+    m_userData = value
 
   // --------------------------------------------------------------------------
   function getFadeInDuration() returns real
@@ -783,7 +827,7 @@ public class UnitSpawner
       spawnedUnit.remove()
 
 // ============================================================================
-class MapEventDestructableSpawner
+class DestructableSpawner
   private int m_destructableTypeId
   private int m_variation
   private transform m_localTransform
