@@ -156,7 +156,7 @@ namespace W3xPipeline
                         suffix = $" // {entityName}";
                     }
 
-                    sb.AppendLine($"{indentStr2}..registerUnitSpawner('{unitPlacement.Id}', vec3({localPos.X}, {localPos.Y}, {localPos.Z}), angle({localYaw})) {suffix}");
+                    sb.AppendLine($"{indentStr2}..registerUnitSpawner('{unitPlacement.Id}', vec2({localPos.X}, {localPos.Y}), angle({localYaw})) {suffix}");
                 }
 
                 foreach (var destPlacement in mapEventTemplate.DoodadPlacementFile.Placements.Destructables)

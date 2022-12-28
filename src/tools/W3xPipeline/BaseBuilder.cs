@@ -323,13 +323,10 @@ namespace W3xPipeline
                 }
 
                 sb.AppendLine($"{indentStr}");
-                sb.AppendLine($"{indentStr}Bases.registerBase(\"{baseDef.Id}\", {baseDifficulty}, vec3({pos.X}, {pos.Y}, {pos.Z}), angle({rot}), \"{baseDef.DisplayName}\")");
+                sb.AppendLine($"{indentStr}Bases.registerBase(\"{baseDef.Id}\", {baseDifficulty}, vec2({pos.X}, {pos.Y}), angle({rot}), \"{baseDef.DisplayName}\")");
 
                 foreach (var unitPlacement in baseDef.UnitPlacements)
-                {
-                    var localPos = unitPlacement.Position - pos;
-                    var localYaw = unitPlacement.RotationInRadians - rot;
-                    
+                {                    
                     var suffix = "";
                     string entityNameObj = m_entityLibrary.GetValue(unitPlacement.Id, UNIT_NAME_FIELD_ID, 0) as string;
                     if (entityNameObj is string entityName)
@@ -337,7 +334,7 @@ namespace W3xPipeline
                         suffix = $" // {entityName}";
                     }
 
-                    sb.AppendLine($"{indentStr2}..registerUnitSpawner('{unitPlacement.Id}', vec3({localPos.X}, {localPos.Y}, {localPos.Z}), angle({localYaw})) {suffix}");
+                    sb.AppendLine($"{indentStr2}..registerUnitSpawner('{unitPlacement.Id}', vec2({unitPlacement.Position.X}, {unitPlacement.Position.Y}), angle({unitPlacement.RotationInRadians})) {suffix}");
                 }
 
                 foreach (var region in baseDef.Regions)

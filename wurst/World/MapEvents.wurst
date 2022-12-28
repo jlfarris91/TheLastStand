@@ -19,9 +19,10 @@ import UnitExtensions
 import ErrorHandling
 import Bounds
 import CancellationToken
+import ObjectIds
+import DestructableUtility
 
 import initlater MapEventsInit
-import ObjectIds
 
 HashMap<string, Func<MapEventTemplate>> g_mapEventTemplateFactories = new HashMap<string, Func<MapEventTemplate>>()
 HashMap<string, Func<MapEvent>> g_mapEventFactories = new HashMap<string, Func<MapEvent>>()
@@ -29,9 +30,6 @@ LinkedList<MapEventTemplate> g_mapEventTemplates = new LinkedList<MapEventTempla
 LinkedList<MapEventInstance> g_mapEventInstances = new LinkedList<MapEventInstance>()
 LinkedList<MapEvent> g_mapEvents = new LinkedList<MapEvent>()
 LinkedList<MapEvent> g_runningMapEvents = new LinkedList<MapEvent>()
-location g_tempLoc = Location(0, 0)
-destructable array g_enumDestructables
-int g_enumDestructablesCount
 boolexpr g_filterUnitIsLootable = Condition(function filterUnitIsLootable)
 
 // ============================================================================
@@ -101,8 +99,8 @@ public class MapEventTemplate
     return m_id
 
   // --------------------------------------------------------------------------
-  function registerUnitSpawner(int unitTypeId, vec3 localPos, angle localYaw) returns UnitSpawner
-    let localTransform = transform(localPos, ZERO3, eulerToQuat(localYaw.radians(), 0.0, 0.0), 1.0)
+  function registerUnitSpawner(int unitTypeId, vec2 localPos, angle localYaw) returns UnitSpawner
+    let localTransform = transform(localPos, eulerToQuat(localYaw.radians(), 0.0, 0.0))
     return registerUnitSpawner(unitTypeId, localTransform)
 
   // --------------------------------------------------------------------------
@@ -114,6 +112,14 @@ public class MapEventTemplate
 
     if (unitTypeId == TlsMapEventIds.areaCleaner256)
       registerAreaCleaner(256.0, localTransform)
+      return null
+
+    if (unitTypeId == TlsMapEventIds.areaCleaner384)
+      registerAreaCleaner(384.0, localTransform)
+      return null
+
+    if (unitTypeId == TlsMapEventIds.areaCleaner512)
+      registerAreaCleaner(512.0, localTransform)
       return null
 
     let unitSpawner = new UnitSpawner(unitTypeId, localTransform)
@@ -134,7 +140,7 @@ public class MapEventTemplate
 
   // --------------------------------------------------------------------------
   function registerDestSpawner(int destructableTypeId, int variation, vec3 localPos, angle localYaw, real localScale)
-    let localTransform = transform(localPos, ZERO3, eulerToQuat(localYaw.radians(), 0.0, 0.0), localScale)
+    let localTransform = transform(localPos, eulerToQuat(localYaw.radians(), 0.0, 0.0), localScale)
     registerDestSpawner(destructableTypeId, variation, localTransform)
 
   // --------------------------------------------------------------------------
@@ -146,7 +152,7 @@ public class MapEventTemplate
 
   // --------------------------------------------------------------------------
   function registerAreaCleaner(real radius, vec2 localPos)
-    let localTransform = transform(localPos.toVec3(), ZERO3, IDENTITYQ, 1.0)
+    let localTransform = transform(localPos.toVec3(), IDENTITYQ)
     registerAreaCleaner(radius, localTransform)
 
   // --------------------------------------------------------------------------
@@ -156,7 +162,7 @@ public class MapEventTemplate
   // --------------------------------------------------------------------------
   function registerTileSpawner(int tilesetId, int variation, int localTileCornerX, int localTileCornerY)
     let localPos = vec3(localTileCornerX * 128.0, localTileCornerY * 128.0, 0.0)
-    let localTransform = transform(localPos, ZERO3, IDENTITYQ, 1.0)
+    let localTransform = transform(localPos, IDENTITYQ)
     registerTileSpawner(tilesetId, variation, localTransform)
 
   // --------------------------------------------------------------------------
@@ -218,6 +224,7 @@ public class MapEventInstance
     ..setEnabled(true)
 
   static Thread unitThread = new Thread("me_unit")
+    ..setTickInterval(0.3)
     ..setMaxWorkPerTick(1)
     ..setEnabled(true)
     ..setDependsOnThread(cleanerThread)
@@ -805,13 +812,6 @@ class MapEventDestructableSpawner
     return createDestructable(m_destructableTypeId, m_variation, worldTransform)
 
 // ============================================================================
-function enumDestructablesInCircle()
-  let enumDest = GetEnumDestructable()
-  if (enumDest.isAliveTrick())
-    g_enumDestructables[g_enumDestructablesCount] = enumDest
-    g_enumDestructablesCount++
-
-// ============================================================================
 function filterUnitIsLootable() returns bool
   let filterUnit = GetFilterUnit()
   return filterUnit.isLootable()
@@ -860,20 +860,11 @@ class MapEventAreaCleanerInstance
   // --------------------------------------------------------------------------
   function redo()
 
-    // Enum destructables in radius
-    MoveLocation(g_tempLoc, m_worldTransform.pos.x, m_worldTransform.pos.y)
-    g_enumDestructablesCount = 0
-    EnumDestructablesInCircleBJ(m_radius, g_tempLoc, function enumDestructablesInCircle)
+    m_destructables = new LinkedList<destructable>()
 
-    if (g_enumDestructablesCount > 0)
-    //{
-      m_destructables = new LinkedList<destructable>()
-
-      for i = 0 to g_enumDestructablesCount - 1
-        let dest = g_enumDestructables[i]
-        dest.show(false)
-        m_destructables.add(dest)
-    //}
+    enumDestructablesInCircle(m_worldTransform.pos.toVec2(), m_radius) (dest) ->
+      dest.show(false)
+      m_destructables.add(dest)
 
     m_units = getGroup()
     m_units.enumUnitsInRange(m_worldTransform.pos.toVec2(), m_radius, g_filterUnitIsLootable)
