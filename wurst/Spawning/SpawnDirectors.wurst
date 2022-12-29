@@ -1,58 +1,124 @@
 package SpawnDirectors
-import WeightedSet
 import ClosureTimers
-import Vector
 import Range
-import World
 import Jobs
+import Deck
+import SpawnUndeadUnitJob
+import Action
+import WaveSpawning
+import HashMap
+import GameConstants
+import Spawning
+import CancellationToken
+import ErrorHandling
+import GroupUtils
+import SoundUtils
+import Func
+import Vector
+import Math
 import UndeadTargetService
-import ISpawnPointProvider
+import UnitMetadata
+import BuffObjEditing
+import Coins
+import UnitModifiers
+import WaveGeneratorCommon
+import BossItemLibrary
+import Elites
+import TlsUpgradeIds
+import LinkedList
+import HumanPlayerComponent
+import GroupExtensions
+import UndeadTargetingComponent
+import TlsUnitDefinition
+import UnitExtensions
+import MinimapIconComponent
+import HumanPlayers
+import GameInstance
+import RealTime
 
 constant real TOO_CHEAP_COEFF = 6
 
-// ============================================================================
-public abstract class SpawnJobConfig
+LinkedList<Director> g_directors = new LinkedList<Director>()
+HashMap<unit, Director> g_unitToDirectorMap
+
+tuple drawnCard(Card card, int tier, int cost)
+constant drawnCard INVALID_CARD = drawnCard(null, -1, -1)
+
+int array[MAX_ELITE_TIER] TIER_VALUE_MULTIPLIER = [1, 6, 36]
 
 // ============================================================================
-public abstract class EntityDefinition
-  private string m_id
-  private int m_baseCost
-
-  // --------------------------------------------------------------------------
-  construct(string id)
-    m_id = id
-
-  // --------------------------------------------------------------------------
-  function getId() returns string
-    return m_id
-
-  // --------------------------------------------------------------------------
-  function getCost() returns int
-    return m_baseCost
-  
-  // --------------------------------------------------------------------------
-  function setBaseCost(int value)
-    m_baseCost = value
-
-  // --------------------------------------------------------------------------
-  abstract function createSpawnJob(SpawnJobConfig config) returns Job
-
-// ============================================================================
-public class MonsterDefinition extends EntityDefinition
-  private int array[3] m_unitTypeIds
-  private int m_tierCount
+public class SpawnCard extends Card
+  private SpawnRange m_spawnRange
+  private ITieredUnitTypeProvider m_unitTypeProvider
+  private Func1<SpawnContext, int> m_maxSpawnCount
+  private Func1<SpawnContext, int> m_maxAliveCount
+  private Func1<SpawnContext, int> m_groupSize
+  private Func1<SpawnContext, int> m_goldReward
+  private Action2<unit, SpawnContext> m_commonUnitModifier
+  private IterableMap<int, Action2<unit, SpawnContext>> m_unitModifiers
+  private Vector<string> m_tags
+  private bool m_waitForFullSpawnGroup = false
+  private bool m_useUnitRecycler = false
+  private rangeReal m_facingAngleRange = REAL_RANGE_ZERO
+  private SpawnPointProviderType m_spawnPointProviderType = SpawnPointProviderType.CACHED_HOSTILE
+  private SoundDefinition m_playSoundOnGroupSpawn = null
+  private string m_minimapIconPath = null
+  private color m_minimapIconColor = color(255, 255, 255)
+  private bool m_pingOnGroupSpawn = false
+  private color m_pingOnGroupSpawnColor = color(255, 255, 255)
+  private Func1<SpawnContext, int> m_spawnsPerGoldDrop
+  private Func1<SpawnContext, int> m_goldDropAmount
+  private int m_techIdToAdvance
+  private int m_tierCount = MAX_ELITE_TIER
 
   // --------------------------------------------------------------------------
   construct(string id)
     super(id)
+    m_tags = new Vector<string>()
 
   // --------------------------------------------------------------------------
-  function getUnitTypeId(int tier) returns int
-    return m_unitTypeIds[tier]
-  
-  // --------------------------------------------------------------------------
-  function setUnitTypeId(int tier, int value)
-    m_unitTypeIds[tier] = value
+  ondestroy
+
+    if (m_unitTypeProvider != null)
+      destroy m_unitTypeProvider
+      m_unitTypeProvider = null
+
+    if (m_maxSpawnCount != null)
+      m_maxSpawnCount.release()
+      m_maxSpawnCount = null
+
+    if (m_maxAliveCount != null)
+      m_maxAliveCount.release()
+      m_maxAliveCount = null
+
+    if (m_groupSize != null)
+      m_groupSize.release()
+      m_groupSize = null
+
+    if (m_spawnsPerGoldDrop != null)
+      m_spawnsPerGoldDrop.release()
+      m_spawnsPerGoldDrop = null
+
+    if (m_goldDropAmount != null)
+      m_goldDropAmount.release()
+      m_goldDropAmount = null
+
+    if (m_commonUnitModifier != null)
+      m_commonUnitModifier.release()
+      m_commonUnitModifier = null
+
+    if (m_unitModifiers != null)
+      for unitTypeId in m_unitModifiers
+        m_unitModifiers.get(unitTypeId).release()
+      destroy m_unitModifiers
+      m_unitModifiers = null
+
+    if (m_goldReward != null)
+      m_goldReward.release()
+      m_goldReward = null
+
+    destroy m_tags
+    m_tags = null
 
   // --------------------------------------------------------------------------
   function getTierCount() returns int
@@ -63,168 +129,318 @@ public class MonsterDefinition extends EntityDefinition
     m_tierCount = value
 
   // --------------------------------------------------------------------------
-  override function createSpawnJob(SpawnJobConfig _config) returns Job
-    return Job.succeeded
+  function setSpawnRange(SpawnRange spawnRange)
+    m_spawnRange = spawnRange
+
+  // --------------------------------------------------------------------------
+  function getSpawnRange() returns SpawnRange
+    return m_spawnRange
+
+  // --------------------------------------------------------------------------
+  function setUnitTypeProvider(ITieredUnitTypeProvider unitTypeProvider)
+    m_unitTypeProvider = unitTypeProvider
+
+  // --------------------------------------------------------------------------
+  function getUnitTypeProvider() returns ITieredUnitTypeProvider
+    return m_unitTypeProvider
+
+  // --------------------------------------------------------------------------
+  function setMaxSpawnCount(Func1<SpawnContext, int> value)
+    value.acquire()
+    if (m_maxSpawnCount != null)
+      m_maxSpawnCount.release()
+    m_maxSpawnCount = value
+
+  // --------------------------------------------------------------------------
+  function getMaxSpawnCount(SpawnContext context) returns int
+    if (m_maxSpawnCount == null)
+      return UNLIMITED
+    return clamp(m_maxSpawnCount.call(context), 1, UNLIMITED)
+
+  // --------------------------------------------------------------------------
+  function setMaxAliveCount(Func1<SpawnContext, int> value)
+    value.acquire()
+    if (m_maxAliveCount != null)
+      m_maxAliveCount.release()
+    m_maxAliveCount = value
+
+  // --------------------------------------------------------------------------
+  function getMaxAliveCount(SpawnContext context) returns int
+    if (m_maxAliveCount == null)
+      return UNLIMITED
+    return clamp(m_maxAliveCount.call(context), 1, UNLIMITED)
+
+  // --------------------------------------------------------------------------
+  function getGroupSize(SpawnContext context) returns int
+    if (m_groupSize == null)
+      return 1
+    return min(m_groupSize.call(context), getMaxAliveCount(context))
+
+  // --------------------------------------------------------------------------
+  function setGroupSize(Func1<SpawnContext, int> value)
+    value.acquire()
+    if (m_groupSize != null)
+      m_groupSize.release()
+    m_groupSize = value
+
+  // --------------------------------------------------------------------------
+  function setSpawnsPerGoldDrop(Func1<SpawnContext, int> value)
+    value.acquire()
+    if (m_spawnsPerGoldDrop != null)
+      m_spawnsPerGoldDrop.release()
+    m_spawnsPerGoldDrop = value
+
+  // --------------------------------------------------------------------------
+  function getSpawnsPerGoldDrop(SpawnContext context) returns int
+    if (m_spawnsPerGoldDrop == null)
+      return 0
+    return max(m_spawnsPerGoldDrop.call(context), 0)
+
+  // --------------------------------------------------------------------------
+  function setGoldDropAmount(Func1<SpawnContext, int> value)
+    value.acquire()
+    if (m_goldDropAmount != null)
+      m_goldDropAmount.release()
+    m_goldDropAmount = value
+
+  // --------------------------------------------------------------------------
+  function getGoldDropAmount(SpawnContext context) returns int
+    if (m_goldDropAmount == null)
+      return 0
+    return max(m_goldDropAmount.call(context), 0)
+
+  // --------------------------------------------------------------------------
+  function setCommonUnitModifier(Action2<unit, SpawnContext> action)
+    action.acquire()
+    if (m_commonUnitModifier != null)
+      m_commonUnitModifier.release()
+    m_commonUnitModifier = action
+
+  // --------------------------------------------------------------------------
+  function getCommonUnitModifier() returns Action2<unit, SpawnContext>
+    return m_commonUnitModifier
+
+  // --------------------------------------------------------------------------
+  function setUnitModifier(int unitTypeId, Action2<unit, SpawnContext> action)
+    action.acquire()
+    if (m_unitModifiers == null)
+      m_unitModifiers = new IterableMap<int, Action2<unit, SpawnContext>>()
+    let existing = m_unitModifiers.get(unitTypeId)
+    if (existing != null)
+      existing.release()
+    m_unitModifiers.put(unitTypeId, action)
+
+  // --------------------------------------------------------------------------
+  function getUnitModifier(int unitTypeId) returns Action2<unit, SpawnContext>
+    if (m_unitModifiers == null)
+      return null
+    return m_unitModifiers.get(unitTypeId)
+
+  // --------------------------------------------------------------------------
+  function setTags(vararg string tags)
+    m_tags.clear()
+    for tag in tags
+      m_tags.add(tag)
+
+  // --------------------------------------------------------------------------
+  function getTags() returns Vector<string>
+    return m_tags
+
+  // --------------------------------------------------------------------------
+  function getWaitForFullSpawnGroup() returns bool
+    return m_waitForFullSpawnGroup
+
+  // --------------------------------------------------------------------------
+  function setWaitForFullSpawnGroup(bool value)
+    m_waitForFullSpawnGroup = value
+
+  // --------------------------------------------------------------------------
+  function getUseUnitRecycler() returns bool
+    return m_useUnitRecycler
+
+  // --------------------------------------------------------------------------
+  function setUseUnitRecycler(bool value)
+    m_useUnitRecycler = value
+
+  // --------------------------------------------------------------------------
+  function getGoldReward(SpawnContext context) returns int
+    return m_goldReward != null ? m_goldReward.call(context) : 0
+
+  // --------------------------------------------------------------------------
+  function setGoldReward(Func1<SpawnContext, int> value)
+    value.acquire()
+    if (m_goldReward != null)
+      m_goldReward.release()
+    m_goldReward = value
+
+  // --------------------------------------------------------------------------
+  function getFacingAngleRange() returns rangeReal
+    return m_facingAngleRange
+
+  // --------------------------------------------------------------------------
+  function setFacingAngleRange(rangeReal range)
+    m_facingAngleRange = range
+  
+  // --------------------------------------------------------------------------
+  function getSpawnPointProviderType() returns SpawnPointProviderType
+    return m_spawnPointProviderType
+  
+  // --------------------------------------------------------------------------
+  function setSpawnPointProviderType(SpawnPointProviderType value)
+    m_spawnPointProviderType = value
+
+  // --------------------------------------------------------------------------
+  function playSoundOnGroupSpawn(SoundDefinition definition)
+    m_playSoundOnGroupSpawn = definition
+
+  // --------------------------------------------------------------------------
+  function getPlaySoundOnGroupSpawn() returns SoundDefinition
+    return m_playSoundOnGroupSpawn
+
+  // --------------------------------------------------------------------------
+  function showMinimapIcon(string iconPath, color color)
+    m_minimapIconPath = iconPath
+    m_minimapIconColor = color
+
+  // --------------------------------------------------------------------------
+  function getMinimapIconPath() returns string
+    return m_minimapIconPath
+
+  // --------------------------------------------------------------------------
+  function getMinimapIconColor() returns color
+    return m_minimapIconColor
+  
+  // --------------------------------------------------------------------------
+  function pingOnGroupSpawn(color color)
+    m_pingOnGroupSpawn = true
+    m_pingOnGroupSpawnColor = color
+  
+  // --------------------------------------------------------------------------
+  function getPingOnGroupSpawn() returns bool
+    return m_pingOnGroupSpawn
+  
+  // --------------------------------------------------------------------------
+  function getPingOnGroupSpawnColor() returns color
+    return m_pingOnGroupSpawnColor
+  
+  // --------------------------------------------------------------------------
+  function getTechIdToAdvance() returns int
+    return m_techIdToAdvance
+  
+  // --------------------------------------------------------------------------
+  function setTechIdToAdvance(int value)
+    m_techIdToAdvance = value
+
+  // --------------------------------------------------------------------------
+  function createSpawnJob(player owningPlayer, player targetPlayer, SpawnUndeadUnitJobConfig config) returns SpawnUndeadUnitJob
+    return new SpawnUndeadUnitJob(getId(), owningPlayer, targetPlayer, config)
 
 // ============================================================================
-public class SpawnCard
-  private EntityDefinition m_entityDef
-  protected SpawnCardCategory m_category
-  private real m_weight
-
-  // --------------------------------------------------------------------------
-  construct(EntityDefinition entityDef, real weight)
-    m_entityDef = entityDef
-    m_weight = weight
-
-  // --------------------------------------------------------------------------
-  function getEntityDef() returns EntityDefinition
-    return m_entityDef
-
-  // --------------------------------------------------------------------------
-  function getCost() returns int
-    return m_entityDef.getCost()
-
-  // --------------------------------------------------------------------------
-  function getWeight() returns real
-    return m_weight
-
-  // --------------------------------------------------------------------------
-  function getCategory() returns SpawnCardCategory
-    return m_category
-
-  // --------------------------------------------------------------------------
-  function canSpawn() returns bool
-    return true
-
-// ============================================================================
-public class SpawnCardCategory
-  private SpawnCardDeck m_deck
-  private string m_id
-  private WeightedSet<SpawnCard> m_cards = new WeightedSet<SpawnCard>()
-  private SpawnCard m_mostExpensiveCard
-
-  // --------------------------------------------------------------------------
-  construct(SpawnCardDeck deck, string id)
-    m_deck = deck
-    m_id = id
-
-  // --------------------------------------------------------------------------
-  function getId() returns string
-    return m_id
-
-  // --------------------------------------------------------------------------
-  function addCard(SpawnCard card)
-
-    if (card.m_category != null)
-      card.m_category.removeCard(card)
-
-    m_cards.add(card, card.getWeight())
-    card.m_category = this
-
-    if (m_mostExpensiveCard == null or card.getCost() > m_mostExpensiveCard.getCost())
-      m_mostExpensiveCard = card
-      m_deck.updateMostExpensiveCard()
-
-  // --------------------------------------------------------------------------
-  function removeCard(SpawnCard card)
-    m_cards.remove(card)
-    card.m_category = null
-
-    if (m_mostExpensiveCard == card)
-      updateMostExpensiveCard()
-
-  // --------------------------------------------------------------------------
-  function drawCard() returns SpawnCard
-    return m_cards.getRandom()
-
-  // --------------------------------------------------------------------------
-  function getMostExpensiveCard() returns SpawnCard
-    return m_mostExpensiveCard
-
-  // --------------------------------------------------------------------------
-  private function updateMostExpensiveCard()
-    m_mostExpensiveCard = null
-    for otherCard in m_cards
-      if (m_mostExpensiveCard == null or otherCard.getCost() > m_mostExpensiveCard.getCost())
-        m_mostExpensiveCard = otherCard
-    m_deck.updateMostExpensiveCard()
-
-// ============================================================================
-public class SpawnCardDeck
-  private WeightedSet<SpawnCardCategory> m_categories = new WeightedSet<SpawnCardCategory>()
-  private SpawnCard m_mostExpensiveCard
-
-  // --------------------------------------------------------------------------
-  function addCategory(string id, real weight) returns SpawnCardCategory
-    let category = new SpawnCardCategory(this, id)
-    m_categories.add(category, weight)
-    return category
-
-  // --------------------------------------------------------------------------
-  function getCategory(string id) returns SpawnCardCategory
-    for cat in m_categories
-      if cat.getId() == id
-        return cat
-    return null
-
-  // --------------------------------------------------------------------------
-  function getMostExpensiveCard() returns SpawnCard
-    return m_mostExpensiveCard
-
-  // --------------------------------------------------------------------------
-  function drawCard() returns SpawnCard
-    let category = m_categories.getRandom()
-    return category.drawCard()
-
-  // --------------------------------------------------------------------------
-  protected function updateMostExpensiveCard()
-    m_mostExpensiveCard = null
-    for category in m_categories
-      let categoryCard = category.getMostExpensiveCard()
-      if (m_mostExpensiveCard == null or categoryCard.getCost() > m_mostExpensiveCard.getCost())
-        m_mostExpensiveCard = categoryCard
+public function SpawnCard.setupForBoss()
+  this..showMinimapIcon(MINIMAP_ICON_PATH_BOSS, MINIMAP_ICON_COLOR_BOSS)
+      ..pingOnGroupSpawn(MINIMAP_ICON_COLOR_BOSS)
+      ..setTechIdToAdvance(TlsUpgradeIds.bossesKilled)
 
 // ============================================================================
 public abstract class Director
-  private string m_id
-  private int m_credits
+  private int m_id
+  private string m_name
+  private real m_credits
   private bool m_enabled
-  private SpawnCardDeck m_deck
-  private int m_creditsOnActivation
-  private int m_creditMultiplier
-  private int m_maxSpawns
-  protected DirectorGroup m_group
-
+  private Deck m_deck
+  private real m_creditsOnActivation = 0.0
+  private real m_creditMultiplier = 1.0
+  private group m_ownedUnits
   private CallbackPeriodic m_creditGeneratorTimer
+  private CancellationToken m_ct
+  private Thread m_workerThread
+  
+  private static int s_directorIdGen = 0
 
   // --------------------------------------------------------------------------
-  construct(string id)
-    m_id = id
-    m_deck = new SpawnCardDeck()
+  construct(string name)
+    m_name = name
+
+    m_workerThread = new Thread(name + "_worker")
+    ..setTickInterval(0.3)
+    ..setMaxWorkPerTick(1)
+
+    m_ownedUnits = getGroup()
+
+    s_directorIdGen++
+    m_id = s_directorIdGen
+
+    g_directors.add(this)
 
   // --------------------------------------------------------------------------
   ondestroy
+
+    g_directors.remove(this)
+
+    if (m_ct != null)
+      m_ct.cancelAndRelease()
+      m_ct = null
+
+    m_ownedUnits.release()
+    m_ownedUnits = null
 
     if (m_deck != null)
       destroy m_deck
       m_deck = null
 
+    if (m_workerThread != null)
+      destroy m_workerThread
+      m_workerThread = null
+
   // --------------------------------------------------------------------------
-  function getId() returns string
+  static function getStaticDirectorIdGen() returns int
+    return s_directorIdGen
+
+  // --------------------------------------------------------------------------
+  static function getAllDirectors() returns LinkedList<Director>
+    return g_directors
+
+  // --------------------------------------------------------------------------
+  function getId() returns int
     return m_id
 
   // --------------------------------------------------------------------------
-  function getCredits() returns int
+  function getName() returns string
+    return m_name
+
+  // --------------------------------------------------------------------------
+  function getWorkerThread() returns Thread
+    return m_workerThread
+
+  // --------------------------------------------------------------------------
+  function getCancellationToken() returns CancellationToken
+    if (m_ct == null)
+      m_ct = new CancellationToken()..acquire()
+    return m_ct
+
+  // --------------------------------------------------------------------------
+  function getCredits() returns real
     return m_credits
+
+  // --------------------------------------------------------------------------
+  function getCreditsInt() returns int
+    return m_credits.floor()
   
   // --------------------------------------------------------------------------
-  function setCredits(int value)
+  function setCredits(real value)
     m_credits = value
 
   // --------------------------------------------------------------------------
-  function getDeck() returns SpawnCardDeck
+  function getDeck() returns Deck
     return m_deck
+
+  // --------------------------------------------------------------------------
+  function setDeck(Deck deck)
+    m_deck = deck
+
+  // --------------------------------------------------------------------------
+  function getOwnedUnits() returns group
+    return m_ownedUnits
   
   // --------------------------------------------------------------------------
   function getEnabled() returns bool
@@ -249,146 +465,597 @@ public abstract class Director
 
   // --------------------------------------------------------------------------
   protected function onEnabled()
+
+    if (m_ct != null)
+      error("Cancellation token should be null")
+
+    m_ct = new CancellationToken()..acquire()
   
     m_credits = m_creditsOnActivation
 
     m_creditGeneratorTimer = doPeriodically(1.0, cb -> generateCredits())
 
+    m_workerThread.setEnabled(true)
+
   // --------------------------------------------------------------------------
   protected function onDisabled()
+
+    if (m_ct != null)
+      m_ct.cancelAndRelease()
+      m_ct = null
 
     if (m_creditGeneratorTimer != null)
       destroy m_creditGeneratorTimer
       m_creditGeneratorTimer = null
 
+    m_workerThread.setEnabled(false)
+
   // --------------------------------------------------------------------------
-  protected abstract function getCreditsPerSecond() returns int
+  protected function getDifficultyCoefficient() returns real
+    let difficultyValue = g_GameInstance.getGameDifficulty01()
+    let playerCount = g_PlayingHumanPlayerCount
+    let playerFactor = 1 + 0.3 * (playerCount - 1)
+    let timeFactor = 0.0506 * difficultyValue * Pow(playerCount.toReal(), 0.2)
+    let stageFactor = Pow(1.15, g_GameInstance.getNightsSurvived().toReal())
+    return (playerFactor + getRealTimeMinutes() * timeFactor) * stageFactor
+
+  // --------------------------------------------------------------------------
+  protected function getCreditsPerSecond() returns real
+    return m_creditMultiplier * (1 + 0.4 * getDifficultyCoefficient())
 
   // --------------------------------------------------------------------------
   protected function generateCredits()
     m_credits += getCreditsPerSecond()
 
-// ============================================================================
-public abstract class ContinuousDirector extends Director
-  private rangeReal m_spawnIntervalDuringWave
-  private rangeReal m_spawnIntervalBetweenWaves
-  private int m_maxSpawns
-  private int m_maxSpawnsPerWave
+  // --------------------------------------------------------------------------
+  protected function registerOwnedUnit(unit spawnedUnit)
 
-  private int m_spawnedUnitsCount
-  private int m_waveSpawnCount
+    if (g_unitToDirectorMap.has(spawnedUnit))
+      return
 
-  private bool m_prevSpawnSucceeded
-  private SpawnCard m_selectedCard
-  private int m_selectedTier
-  private int m_selectedCost
-
-  private CallbackManual m_spawnTimer
+    g_unitToDirectorMap.put(spawnedUnit, this)
+    m_ownedUnits.addUnit(spawnedUnit)
+  
+  // --------------------------------------------------------------------------
+  protected function unregisterOwnedUnit(unit spawnedUnit)
+    g_unitToDirectorMap.remove(spawnedUnit)
+    m_ownedUnits.removeUnit(spawnedUnit)
 
   // --------------------------------------------------------------------------
-  construct(string id)
-    super(id)
+  protected function onOwnedUnitKilled(unit dyingUnit)
+    unregisterOwnedUnit(dyingUnit)
+
+  // --------------------------------------------------------------------------
+  function writeDebugString(Action1<string> output)
+
+    output.acquire()
+    
+    output.call("Credits per second: " + getCreditsPerSecond().toString())
+
+    output.release()
+
+// ============================================================================
+public abstract class ContinuousDirector extends Director
+  private rangeReal m_fastActivationIntervalRange
+  private rangeReal m_slowActivationIntervalRange
+  private CallbackManual m_activationTimer
+  private bool m_prevActivationSucceeded
+  private string m_prevActivationFailedReason
+  private drawnCard m_selectedCard
+
+  // --------------------------------------------------------------------------
+  construct(string name)
+    super(name)
+
+  // --------------------------------------------------------------------------
+  function getFastActivationIntervalRange() returns rangeReal
+    return m_fastActivationIntervalRange
+  
+  // --------------------------------------------------------------------------
+  function setFastActivationIntervalRange(rangeReal value)
+    m_fastActivationIntervalRange = value
+
+  // --------------------------------------------------------------------------
+  function getSlowActivationIntervalRange() returns rangeReal
+    return m_slowActivationIntervalRange
+  
+  // --------------------------------------------------------------------------
+  function setSlowActivationIntervalRange(rangeReal value)
+    m_slowActivationIntervalRange = value
+
+  // --------------------------------------------------------------------------
+  function getPreviousActivationSucceeded() returns bool
+    return m_prevActivationSucceeded
 
   // --------------------------------------------------------------------------
   override protected function onEnabled()
     super.onEnabled()
 
-    prepareNextWave()
-
-    if (m_spawnTimer == null)
-      m_spawnTimer = doManual(0.0, true, () -> spawnOne())
+    if (m_activationTimer == null)
+      m_activationTimer = doManual(0.0, true, () -> tryActivateNextCard())
 
   // --------------------------------------------------------------------------
   override protected function onDisabled()
     super.onDisabled()
 
-    if (m_spawnTimer != null)
-      destroy m_spawnTimer
-      m_spawnTimer = null
+    if (m_activationTimer != null)
+      destroy m_activationTimer
+      m_activationTimer = null
 
   // --------------------------------------------------------------------------
-  function spawnOne()
+  function tryActivateNextCard() returns bool
 
-    if (m_spawnedUnitsCount >= m_maxSpawns or
-        m_waveSpawnCount >= m_maxSpawnsPerWave)
-      m_prevSpawnSucceeded = false
+    m_prevActivationSucceeded = false
+    m_prevActivationFailedReason = ""
 
-    if (m_prevSpawnSucceeded == false)
-      prepareNextWave()
-      m_spawnTimer.restart(m_spawnIntervalBetweenWaves.getRandom())
-      return
+    if (getCancellationToken().isCanceled())
+      m_prevActivationFailedReason = "canceled"
+      return false
+
+    if (not m_prevActivationSucceeded)
+      m_selectedCard = drawCard()
+
+    if (m_selectedCard.card == null)
+      restartTimerSlow()
+      m_prevActivationFailedReason = "too expensive"
+      return false
 
     let credits = getCredits()
 
-    if (credits > m_selectedCost * TOO_CHEAP_COEFF)
-      let deck = getDeck()
-      if (m_selectedCard != deck.getMostExpensiveCard())
-        m_prevSpawnSucceeded = false
-        return
-
-    setCredits(credits - m_selectedCost)
-
-    World.unitSpawnThread.enqueue(m_selectedCard.getEntityDef().createSpawnJob(null))
-
-    m_spawnTimer.restart(m_spawnIntervalDuringWave.getRandom())
-    m_prevSpawnSucceeded = true
-
-  // --------------------------------------------------------------------------
-  private function prepareNextWave()
+    // If the director can't afford the card at the current tier, drop down a tier
+    while (m_selectedCard.tier > 0 and credits < m_selectedCard.cost)
+      m_selectedCard.tier = m_selectedCard.tier - 1
+      m_selectedCard.cost = TIER_VALUE_MULTIPLIER[m_selectedCard.tier] * m_selectedCard.card.getCost()
     
-    m_selectedCost = 0
-    m_selectedTier = 0
-    m_selectedCard = getDeck().drawCard()
+    if (m_selectedCard.tier == 0 and credits < m_selectedCard.cost)
+      restartTimerSlow()
+      m_prevActivationFailedReason = "too expensive"
+      return false
 
-    let credits = getCredits()
-    let baseCost = m_selectedCard.getCost()
+    if (credits > m_selectedCard.cost * TOO_CHEAP_COEFF)
+      let deck = getDeck()
+      if (m_selectedCard.card != deck.getMostExpensiveCard())
+        restartTimerSlow()
+        m_prevActivationFailedReason = "too cheap"
+        return false
 
-    for tier = 2 to 0 step -1
-      let tierCost = m_maxSpawnsPerWave * tier * baseCost
-      if (credits > tierCost)
-        m_selectedTier = tier
-        m_selectedCost = tierCost
-        break
+    setCredits(credits - m_selectedCard.cost)
+
+    m_prevActivationSucceeded = activateCard(m_selectedCard)
+
+    if (m_prevActivationSucceeded)
+      restartTimerFast()
+    else
+      m_prevActivationFailedReason = "failed to activate"
+      restartTimerSlow()
+
+    return m_prevActivationSucceeded
+
+  // --------------------------------------------------------------------------
+  private function restartTimerSlow()
+    m_activationTimer.restart(m_slowActivationIntervalRange.getRandom())
+
+  // --------------------------------------------------------------------------
+  private function restartTimerFast()
+    m_activationTimer.restart(m_fastActivationIntervalRange.getRandom())
+
+  // --------------------------------------------------------------------------
+  abstract protected function drawCard() returns drawnCard
+
+  // --------------------------------------------------------------------------
+  abstract protected function activateCard(drawnCard card) returns bool
+
+  // --------------------------------------------------------------------------
+  override function writeDebugString(Action1<string> output)
+
+    output.acquire()
+
+    super.writeDebugString(output)
+
+    if (m_selectedCard.card != null)
+      output.call("Selected Card: {0} t:{1} c:{2}x{3}={4}".format(
+        m_selectedCard.card.getId(),
+        m_selectedCard.tier.toString(),
+        m_selectedCard.card.getCost().toString(),
+        TIER_VALUE_MULTIPLIER[m_selectedCard.tier].toString(),
+        m_selectedCard.cost.toString()))
+    else
+      output.call("Selected Card: none")
+    
+    if (m_activationTimer != null)
+      output.call("Next Activation In: " + m_activationTimer.getRemaining().toString())
+
+    output.call("Last Activation: " + (m_prevActivationSucceeded ? "succeeded" : m_prevActivationFailedReason))
+    
+    output.release()
 
 // ============================================================================
 public abstract class CombatDirector extends ContinuousDirector
+  private SpawnContext m_context
 
   // --------------------------------------------------------------------------
-  construct(string id)
-    super(id)
+  construct(string name)
+    super(name)
+    m_context = new SpawnContext()..acquire()
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    m_context.release()
+    m_context = null
+
+  // --------------------------------------------------------------------------
+  function getSpawnContext() returns SpawnContext
+    return m_context
+
+  // --------------------------------------------------------------------------
+  override protected function drawCard() returns drawnCard
+
+    let deck = getDeck()
+    if (deck == null)
+      return INVALID_CARD
+
+    let selectedCard = deck.drawCard() castTo SpawnCard
+    if (selectedCard == null)
+      return INVALID_CARD
+
+    var selectedTier = 0
+    var selectedCost = 0
+    var foundValidTier = false
+
+    let credits = getCredits()
+    let baseCost = selectedCard.getCost()
+
+    for tier = selectedCard.getTierCount() - 1 downto 0
+    //{
+      let tierCost = TIER_VALUE_MULTIPLIER[tier] * baseCost
+      if (credits > tierCost)
+        selectedTier = tier
+        selectedCost = tierCost
+        foundValidTier = true
+        break
+    //}
+
+    if (not foundValidTier)
+      return INVALID_CARD
+
+    return drawnCard(selectedCard, selectedTier, selectedCost)
 
 // ============================================================================
-// public class NightCombatDirector extends CombatDirector
+public class TargetCombatDirector extends CombatDirector
+  private player m_targetPlayer
+  private real m_difficultyCoefficient
+  private int m_spawnsPerGoldDrop
+  private int m_spawnsPerGoldDropCounter
+  private int m_goldAvailable
+  private int m_goldDrops
 
-//   // --------------------------------------------------------------------------
-//   construct(player targetPlayer)
-//     super("Night:"+targetPlayer.getId().toString())
+  // --------------------------------------------------------------------------
+  construct(player targetPlayer)
+    super("TCD:"+targetPlayer.getId().toString())
+    m_targetPlayer = targetPlayer
+
+    m_difficultyCoefficient = m_targetPlayer.getHumanPlayerComponentRequired().getDifficulty()
+    getSpawnContext().setPlayerDifficulty(m_difficultyCoefficient)
+
+  // --------------------------------------------------------------------------
+  function getSpawnsPerGoldDrop() returns int
+    return m_spawnsPerGoldDrop
+  
+  // --------------------------------------------------------------------------
+  function setSpawnsPerGoldDrop(int value)
+    m_spawnsPerGoldDrop = value
+
+  // --------------------------------------------------------------------------
+  override protected function getDifficultyCoefficient() returns real
+    let difficultyValue = m_difficultyCoefficient
+    let playerCount = 1
+    let playerFactor = 1
+    let timeFactor = 0.0506 * difficultyValue * Pow(playerCount.toReal(), 0.2)
+    let stageFactor = Pow(1.15, g_GameInstance.getNightsSurvived().toReal())
+    return (playerFactor + getRealTimeMinutes() * timeFactor) * stageFactor
+
+  // --------------------------------------------------------------------------
+  override protected function activateCard(drawnCard card) returns bool
+
+    let targetProvider = getUndeadTargetProviderForPlayer(m_targetPlayer)
+    if (targetProvider == null)
+      return false
+
+    let spawnCard = card.card castTo SpawnCard
+
+    let context = getSpawnContext().clone()
+
+    let config = new SpawnUndeadUnitJobConfig()
+    ..setTierSelector(context -> card.tier)
+    ..setTierSelectionMode(TierSelectionMode.Group)
+    ..setUnitTypeProvider(spawnCard.getUnitTypeProvider())
+    ..setSpawnPointProvider(getSpawnPointProvider(m_targetPlayer, spawnCard.getSpawnPointProviderType()))
+    ..setTargetProvider(targetProvider)
+    ..setGroupSize(spawnCard.getGroupSize(context))
+    ..setMaxSpawnCount(spawnCard.getMaxSpawnCount(context))
+    ..setMaxAliveCount(UNLIMITED)
+    ..setSpawnRange(spawnCard.getSpawnRange().toRangeReal())
+    ..setWaitForFullGroup(spawnCard.getWaitForFullSpawnGroup())
+    ..setPrepareUnitFunc((job, spawnedUnit) -> prepareUnit(context, spawnCard, spawnedUnit))
+    ..setUseRecycler(spawnCard.getUseUnitRecycler())
+
+    let spawnJob = spawnCard.createSpawnJob(PLAYER_UNDEAD, m_targetPlayer, config)
+    ..setCancellationToken(getCancellationToken())
+    ..setContext(context)
+
+    spawnJob.onUnitSpawned().register() (SpawnUndeadUnitJob job, unit spawnedUnit) ->
+      onUnitSpawned(context, spawnCard, spawnedUnit)
+
+    spawnJob.onGroupSpawned().register() (SpawnUndeadUnitJob job, group spawnedUnits) ->
+      onGroupSpawned(context, spawnCard, spawnedUnits)
+
+    getWorkerThread().enqueue(spawnJob)
+
+    return true
+
+  // --------------------------------------------------------------------------
+  private function prepareUnit(SpawnContext context, SpawnCard spawnCard, unit spawnedUnit) returns bool
+    let unitMetadata = spawnedUnit.getMetadata()
+    if (unitMetadata == null)
+      Log.error("[SpawnWave.setTargetPlayer] : Unit has no metadata! : {0} ({1} : {2})".format(
+        spawnedUnit.getName(),
+        spawnedUnit.getTypeId().toString(),
+        UnitId2StringBJ(spawnedUnit.getTypeId())))
+      return false
+
+    let commonUnitModifier = spawnCard.getCommonUnitModifier()
+    if (commonUnitModifier != null)
+      commonUnitModifier.call(spawnedUnit, context)
+
+    let unitModifier = spawnCard.getUnitModifier(spawnedUnit.getTypeId())
+    if (unitModifier != null)
+      unitModifier.call(spawnedUnit, context)
+
+    return true
+
+  // --------------------------------------------------------------------------
+  private function onUnitSpawned(SpawnContext context, SpawnCard card, unit spawnedUnit)
+
+    spawnedUnit.removeAbility(g_goldCarrierBuff.abilId)
+    spawnedUnit.removeAbility(g_goldCarrierBuff.buffId)
+
+    m_spawnsPerGoldDropCounter++
+    if (m_spawnsPerGoldDrop != 0 and m_spawnsPerGoldDropCounter == m_spawnsPerGoldDrop)
+      m_spawnsPerGoldDropCounter = 0
+      m_goldDrops++
+      makeSpawnedUnitDropGold(context, card, spawnedUnit)
+
+    registerOwnedUnit(spawnedUnit)
+
+  // --------------------------------------------------------------------------
+  private function onGroupSpawned(SpawnContext context, SpawnCard card, group spawnedUnits)
+
+    let firstUnit = spawnedUnits.getFirst()
+    if (firstUnit == null)
+      return
+
+    let targetUnit = context.getTargetUnit()
+    let targetPlayer = targetUnit.getOwner()
+
+    for spawnedUnit in spawnedUnits
+    //{
+      let unitMetadata = spawnedUnit.getMetadata()
+
+      let utc = unitMetadata.getUndeadTargetingComponent()
+      if (utc != null)
+        utc.setTargetUnit(targetUnit)
+
+      let unitDef = getUnitDefinition(spawnedUnit.getTypeId())
+      if (unitDef != null)
+        spawnedUnit.fadeIn(unitDef.getVertexColor())
+      else
+        spawnedUnit.fadeIn()
+
+      if (card.getMinimapIconPath() != null)
+        spawnedUnit.getOrAddMinimapIconComponent()
+        ..update(card.getMinimapIconPath(), card.getMinimapIconColor())
+        ..showOnlyFor(targetPlayer)
+    //}
+
+    if (localPlayer == targetPlayer and card.getPingOnGroupSpawn())
+      let color = card.getPingOnGroupSpawnColor()
+      PingMinimapEx(firstUnit.getX(), firstUnit.getY(), 3.0, color.red, color.green, color.blue, true)
+
+    let playSoundOnGroupSpawn = card.getPlaySoundOnGroupSpawn()
+    if (playSoundOnGroupSpawn != null)
+      playSoundOnGroupSpawn.playForPlayer(targetPlayer)
+
+  // --------------------------------------------------------------------------
+  private function makeSpawnedUnitDropGold(SpawnContext context, SpawnCard card, unit spawnedUnit)
+    var goldDropAmount = card.getGoldDropAmount(context)
+    if (goldDropAmount == 0)
+      return
+    spawnedUnit.addAbility(g_goldCarrierBuff.abilId)
+    goldDropAmount = min(goldDropAmount, 50) // 5 10g coins max
+    while (goldDropAmount > 0)
+      let coinTypeId = getCoinItemTypeFromGoldReward(goldDropAmount)
+      spawnedUnit.awardItemOnDeath(g_coinItemSet, coinTypeId, 1.0)
+      let coinValue = getGoldRewardFromCoinItemType(coinTypeId)
+      goldDropAmount -= coinValue
+      m_goldAvailable += coinValue
+
+  // --------------------------------------------------------------------------
+  override function writeDebugString(Action1<string> output)
+
+    output.acquire()
+
+    super.writeDebugString(output)
+    
+    output.call("Gold: d:{0} a:{1} c:{2}/{3}".format(
+      m_goldDrops.toString(),
+      m_goldAvailable.toString(),
+      m_spawnsPerGoldDropCounter.toString(),
+      m_spawnsPerGoldDrop.toString()))
+    
+    output.release()
 
 // ============================================================================
-public class DirectorGroup
-  private Vector<Director> m_directors = new Vector<Director>()
-
-  // --------------------------------------------------------------------------
-  function registerDirector(Director director)
-
-    if (director.m_group != null)
-      director.m_group.unregisterDirector(director)
-
-    director.m_group = this
-    m_directors.add(director)
-
-  // --------------------------------------------------------------------------
-  function unregisterDirector(Director director)
-    m_directors.remove(director)
-    director.m_group = null
-
-  // --------------------------------------------------------------------------
-  function getDirectorCount() returns int
-    return m_directors.size()
-
-  // --------------------------------------------------------------------------
-  function getDirector(int index) returns Director
-    return m_directors.get(index)
+function onUnitDeath()
+  let dyingUnit = GetDyingUnit()
+  if (not g_unitToDirectorMap.has(dyingUnit))
+    return
+  let director = g_unitToDirectorMap.get(dyingUnit)
+  director.onOwnedUnitKilled(dyingUnit)
 
 // ============================================================================
 init
+
+  g_unitToDirectorMap = new HashMap<unit, Director>()
+
+  nullTimer() () ->
+    let nightDirector = new TargetCombatDirector(players[0])
+    nightDirector.setSlowActivationIntervalRange(rangeReal(3.0, 10.0))
+    nightDirector.setFastActivationIntervalRange(rangeReal(0.1, 1.0))
+    nightDirector.setSpawnsPerGoldDrop(10)
+    nightDirector.setDeck(createNightSpawnDeck())
+    nightDirector.enable()
+
+// ============================================================================
+function createNightSpawnDeck() returns Deck
+
+  let deck = new Deck()
+  let categoryNormals = deck.addCategory("Normals", 9.0)
+  let categoryElites = deck.addCategory("Elites", 3.0)
+  let categoryBosses = deck.addCategory("Bosses", 1.0)
+  
+  // Normals
+  categoryNormals.addCard(createSpawnCard_Zombie(), 1.0)
+
+  // Elites
+  categoryElites.addCard(createSpawnCard_SkeletonArcher(), 1.0)
+
+  // Bosses
+  categoryBosses.addCard(createSpawnCard_Abomination(), 1.0)
+
+  return deck
+
+// ============================================================================
+function createSpawnCard_Zombie() returns SpawnCard
+
+  let card = new SpawnCard("Zombie")
+  ..setCost(3)
+  ..setMaxSpawnCount(context -> 1)
+  ..setSpawnsPerGoldDrop(context -> 20)
+  ..setGoldDropAmount(context -> 1)
+  ..setGroupSize(context -> 1)
+  ..setSpawnRange(SpawnRange.CLOSE)
+  ..setUseUnitRecycler(true)
+
+  let unitTypeProvider = new SpawnWaveTieredUnitTypeProvider()
+  for i = 0 to MAX_ELITE_TIER-1
+    unitTypeProvider.setUnitType(i, TlsUnitIds.Undead.zombiesNight[i])
+  card.setUnitTypeProvider(unitTypeProvider)
+
+  card.setCommonUnitModifier() (unit u, SpawnContext context) ->
+  //{
+    g_zombieMeleeModifiers.apply(context, u)
+    u.setMoveSpeed(lerp(120, 250, context.getGameProgress01()))
+    u.preferStructureTargets()
+  //}
+
+  card.setUnitModifier(TlsUnitIds.Undead.zombiesNight[0]) (u, context) ->
+    u.setDefenseType(ArmorType.Unarmored)
+
+  card.setUnitModifier(TlsUnitIds.Undead.zombiesNight[1]) (u, context) ->
+    u.setDefenseType(ArmorType.Normal)
+
+  card.setUnitModifier(TlsUnitIds.Undead.zombiesNight[2]) (u, context) ->
+    u.setDefenseType(ArmorType.Large)
+
+  return card
+
+// ============================================================================
+function createSpawnCard_SkeletonArcher() returns SpawnCard
+
+  let card = new SpawnCard("Skeleton Archer")
+  ..setCost(10)
+  ..setMaxSpawnCount(context -> 1)
+  ..setSpawnsPerGoldDrop(context -> calculateSpawnsPerGoldDropForElites(context))
+  ..setGoldDropAmount(context -> calculateGoldDropAmountForElites(context))
+  ..setGroupSize(context -> 1)
+  ..setSpawnRange(SpawnRange.MID)
+
+  let unitTypeProvider = new SpawnWaveTieredUnitTypeProvider()
+  for i = 0 to MAX_ELITE_TIER-1
+    unitTypeProvider.setUnitType(i, TlsUnitIds.Undead.skeletonArchers[i])
+  card.setUnitTypeProvider(unitTypeProvider)
+
+  card.setCommonUnitModifier() (unit u, SpawnContext context) ->
+    g_eliteRangedModifiers.apply(context, u)
+    u.setDefenseType(ArmorType.Medium)
+
+  return card
+
+// ============================================================================
+function createSpawnCard_Abomination() returns SpawnCard
+  
+  let card = new SpawnCard("Abominations")
+  ..setCost(50)
+  ..setMaxSpawnCount(context -> 1)
+  ..setSpawnsPerGoldDrop(context -> 1) // every spawn drops gold
+  ..setGoldDropAmount(context -> GOLD_PER_BOSS)
+  ..setSpawnRange(SpawnRange.MID)
+  ..setupForBoss()
+
+  let unitTypeProvider = new SpawnWaveTieredUnitTypeProvider()
+  for i = 0 to MAX_ELITE_TIER-1
+    unitTypeProvider.setUnitType(i, TlsUnitIds.Undead.abominations[i])
+  card.setUnitTypeProvider(unitTypeProvider)
+
+  card.setCommonUnitModifier() (unit u, SpawnContext context) ->
+  //{
+    g_eliteMeleeModifiers.applyHealth(context, u, 4.0)
+    g_eliteMeleeModifiers.applyArmor(context, u, 3.0)
+    g_eliteMeleeModifiers.applyAttack1DamageRange(context, u, 2.0)
+    g_eliteMeleeModifiers.applyAttack1Cooldown(context, u, 1.0)
+    u.awardXpOnDeath(100)
+    u.setAcquisitionRange(ELITE_SIGHT_RANGE)
+    u.setSightRadius(ELITE_SIGHT_RANGE)
+    u.setMoveSpeed(125.0)
+    u.awardRandomItemOnDeath(g_BossItemLibrary.rareSet, 1.0)
+    u.preferStructureTargets()
+  //}
+
+  return card
+
+
+
+@test function asdf()
+
+  let baseCost = 10
+  var credits = 450
+
+  var selectedTier = 0
+  var selectedCost = 0
+
+  for tier = 2 downto 0
+  //{
+    let tierCost = TIER_VALUE_MULTIPLIER[tier] * baseCost
+    if (credits >= tierCost)
+      selectedTier = tier
+      selectedCost = tierCost
+      Log.info("t: " + selectedTier.toString() + " c: " + selectedCost.toString())
+      break
+  //}
+
+  for i = 0 to 10
+    
+    while (selectedTier > 0 and credits < selectedCost)
+      selectedTier--
+      selectedCost = TIER_VALUE_MULTIPLIER[selectedTier] * baseCost
+      Log.info("t: " + selectedTier.toString() + " c: " + selectedCost.toString())
+
+    if (credits < selectedCost)
+      Log.info("too expensive!")
+      break
+
+    credits -= selectedCost
+    Log.info("spawned tier " + selectedTier.toString())
+    Log.info("credits: " + credits.toString())
+
+    

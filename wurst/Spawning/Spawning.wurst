@@ -6,8 +6,11 @@ import public SpawnPointCollection
 import public PlayerSpawnPointProviders
 import public RandomSpawnPointProvider
 import BuffObjEditing
-import GameConstants
 import RefObject
+import Difficulties
+import Math
+import GameInstance
+import GameConstants
 
 public bool SPAWNING_ENABLED = true
 
@@ -15,14 +18,16 @@ constant int SPAWNS_MAX_PER_TICK = 1
 constant int PROCESS_MAX_PER_TICK = 8 // 1 per player?
 constant real PROCESS_QUEUE_INTERVAL = 0.1
 
+constant int MAX_TIERS = 3
+constant int INVALID_UNIT_TYPE = -1
+
 public constant buffTuple g_goldCarrierBuff = compiletime(createDummyBuffObject("Gold Carrier", "This unit is carrying gold!", "ReplaceableTextures\\CommandButtons\\BTNMGExchange.blp", "Abilities\\Spells\\NightElf\\FaerieFire\\FaerieFireTarget.mdl", "chest"))
 
 public tuple tierChances(real tier1, real tier2, real tier3)
-public tuple tieredUnitType(int id, int tier)
 
 // ============================================================================
-public class TieredUnitTypeCollection
-  private tieredUnitType array[12] m_unitTypes
+public class UnitTypeCollection
+  private int array[12] m_unitTypes
   private int m_size = 0
 
   // --------------------------------------------------------------------------
@@ -30,18 +35,12 @@ public class TieredUnitTypeCollection
     m_size = 0
 
   // --------------------------------------------------------------------------
-  function add(tieredUnitType unitType)
+  function add(int unitType)
     m_unitTypes[m_size] = unitType
     m_size++
 
   // --------------------------------------------------------------------------
-  function add(int unitTypeId, int tier)
-    m_unitTypes[m_size].id = unitTypeId
-    m_unitTypes[m_size].tier = tier
-    m_size++
-
-  // --------------------------------------------------------------------------
-  function get(int index) returns tieredUnitType
+  function get(int index) returns int
     return m_unitTypes[index]
 
   // --------------------------------------------------------------------------
@@ -50,21 +49,38 @@ public class TieredUnitTypeCollection
 
 // ============================================================================
 public interface ITieredUnitTypeProvider
-  function getUnitTypes(SpawnContext context, int count, TieredUnitTypeCollection output)
+  function getUnitTypes(SpawnContext context, int count, UnitTypeCollection output)
+
+// ============================================================================
+public class TieredUnitTypeProvider implements ITieredUnitTypeProvider
+  private int array[MAX_TIERS] m_unitTypes
+
+  // --------------------------------------------------------------------------
+  construct()
+    for i = 0 to MAX_TIERS - 1
+      m_unitTypes[i] = INVALID_UNIT_TYPE
+
+  // --------------------------------------------------------------------------
+  function setUnitType(int tier, int unitType)
+    m_unitTypes[tier] = unitType
+
+  // --------------------------------------------------------------------------
+  function getUnitType(int tier) returns int
+    return m_unitTypes[tier]
+
+  // --------------------------------------------------------------------------
+  override function getUnitTypes(SpawnContext context, int count, UnitTypeCollection output)    
+    let tier = context.getTier()
+    let unitTypeId = getUnitType(tier)
+    for i = 0 to count - 1
+      output.add(unitTypeId)
 
 // ============================================================================
 public class SpawnContext
-  private real m_unitModifierGameProgress01
-  private real m_unitModifierDifficultyScalar01
-  private real m_unitDamageScalar01
-  private real m_unitHealthScalar01
-  private real m_gameProgress01
-  private real m_gameDifficulty01
   private int m_tier
   private int m_groupId
-  private real array[MAX_ELITE_TIER] m_tierChances = [ 1.0, 0.0, 0.0]
-  private player m_targetPlayer
   private unit m_targetUnit
+  private real m_playerDifficulty = 1.0
 
   use RefObject
 
@@ -73,71 +89,40 @@ public class SpawnContext
 
   // --------------------------------------------------------------------------
   construct(SpawnContext other)
-    m_unitModifierGameProgress01 = other.m_unitModifierGameProgress01
-    m_unitModifierDifficultyScalar01 = other.m_unitModifierDifficultyScalar01
-    m_unitDamageScalar01 = other.m_unitDamageScalar01
-    m_unitHealthScalar01 = other.m_unitHealthScalar01
-    m_gameProgress01 = other.m_gameProgress01
-    m_gameDifficulty01 = other.m_gameDifficulty01
     m_tier = other.m_tier
     m_groupId = other.m_groupId
-    m_tierChances[0] = other.m_tierChances[0]
-    m_tierChances[1] = other.m_tierChances[1]
-    m_tierChances[2] = other.m_tierChances[2]
-    m_targetPlayer = other.m_targetPlayer
     m_targetUnit = other.m_targetUnit
+    m_playerDifficulty = other.m_playerDifficulty
 
   // --------------------------------------------------------------------------
   function clone() returns SpawnContext
     return new SpawnContext(this)
 
   // --------------------------------------------------------------------------
-  function getUnitModifierGameProgress01() returns real
-    return m_unitModifierGameProgress01
-  
-  // --------------------------------------------------------------------------
-  function setUnitModifierGameProgress01(real value)
-    m_unitModifierGameProgress01 = value
+  function getGameProgress01() returns real
+    return parameterize(1, TOTAL_NIGHTS, g_GameInstance.getNight())
 
   // --------------------------------------------------------------------------
-  function getUnitModifierDifficultyScalar01() returns real
-    return m_unitModifierDifficultyScalar01
-  
+  function getGameDifficulty() returns real
+    return g_GameInstance.getGameDifficulty01()
+
   // --------------------------------------------------------------------------
-  function setUnitModifierDifficultyScalar01(real value)
-    m_unitModifierDifficultyScalar01 = value
+  function getDifficultyCoefficient() returns real
+    if (m_playerDifficulty != 0.0)
+      return DifficultyScaling.getEliteGeneralScalar01(m_playerDifficulty, m_tier.toReal())
+    return DifficultyScaling.getEliteGeneralScalar01(getGameDifficulty(), m_tier.toReal())
 
   // --------------------------------------------------------------------------
   function getUnitDamageScalar01() returns real
-    return m_unitDamageScalar01
-  
-  // --------------------------------------------------------------------------
-  function setUnitDamageScalar01(real value)
-    m_unitDamageScalar01 = value
+    if (m_playerDifficulty != 0.0)
+      return DifficultyScaling.getEliteDamageScalar01(m_playerDifficulty, m_tier.toReal())
+    return DifficultyScaling.getEliteDamageScalar01(getGameDifficulty(), m_tier.toReal())
 
   // --------------------------------------------------------------------------
   function getUnitHealthScalar01() returns real
-    return m_unitHealthScalar01
-  
-  // --------------------------------------------------------------------------
-  function setUnitHealthScalar01(real value)
-    m_unitHealthScalar01 = value
-
-  // --------------------------------------------------------------------------
-  function getGameProgress01() returns real
-    return m_gameProgress01
-  
-  // --------------------------------------------------------------------------
-  function setGameProgress01(real value)
-    m_gameProgress01 = value
-
-  // --------------------------------------------------------------------------
-  function getGameDifficulty01() returns real
-    return m_gameDifficulty01
-  
-  // --------------------------------------------------------------------------
-  function setGameDifficulty01(real value)
-    m_gameDifficulty01 = value
+    if (m_playerDifficulty != 0.0)
+      return DifficultyScaling.getEliteHealthScalar01(m_playerDifficulty, m_tier.toReal())
+    return DifficultyScaling.getEliteHealthScalar01(getGameDifficulty(), m_tier.toReal())
 
   // --------------------------------------------------------------------------
   function getTier() returns int
@@ -156,37 +141,17 @@ public class SpawnContext
     m_groupId = value
 
   // --------------------------------------------------------------------------
-  function getTierChance(int index) returns real
-    return m_tierChances[index]
-
-  // --------------------------------------------------------------------------
-  function setTierChance(int index, real value)
-    m_tierChances[index] = value
-
-  // --------------------------------------------------------------------------
-  function getRandomTier() returns int
-    var roll01 = GetRandomReal(0, 1)
-    var tier = 0
-    for i = 0 to MAX_ELITE_TIER - 1
-      let tierChance = m_tierChances[i]
-      if (roll01 < tierChance)
-        tier = i
-        break
-      roll01 -= tierChance
-    return tier
-
-  // --------------------------------------------------------------------------
-  function getTargetPlayer() returns player
-    return m_targetPlayer
-  
-  // --------------------------------------------------------------------------
-  function setTargetPlayer(player value)
-    m_targetPlayer = value
-
-  // --------------------------------------------------------------------------
   function getTargetUnit() returns unit
     return m_targetUnit
   
   // --------------------------------------------------------------------------
   function setTargetUnit(unit value)
     m_targetUnit = value
+
+  // --------------------------------------------------------------------------
+  function getPlayerDifficulty() returns real
+    return m_playerDifficulty
+  
+  // --------------------------------------------------------------------------
+  function setPlayerDifficulty(real value)
+    m_playerDifficulty = value

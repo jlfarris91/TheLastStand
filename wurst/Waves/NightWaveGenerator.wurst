@@ -15,7 +15,6 @@ import WaveCollection
 import NightWave
 import SpawnWave
 import StandardUnitModifiers
-import TieredUnitTypeProvider
 import FX
 import LinkedList
 import ActionUnitTypeProvider
@@ -186,11 +185,11 @@ function createSpawnWave_Zombies(int nightIndex, int spawnsPerGoldDrop) returns 
   ..setMaxAliveCount(context -> calculateMaxAliveCountForZombies(context))
   ..setSpawnsPerGoldDrop(context -> spawnsPerGoldDrop)
   ..setGoldDropAmount(context -> 1)
-  ..setSpawnGroupingFactor(context -> 0)
+  ..setGroupSize(context -> 1)
   ..setSpawnRange(SpawnRange.CLOSE)
   ..setUseUnitRecycler(true)
 
-  let unitTypeProvider = new TieredUnitTypeProvider()
+  let unitTypeProvider = new SpawnWaveTieredUnitTypeProvider()
   for i = 0 to MAX_ELITE_TIER-1
     unitTypeProvider.setUnitType(i, TlsUnitIds.Undead.zombiesNight[i])
   def.setUnitTypeProvider(unitTypeProvider)
@@ -228,11 +227,11 @@ function createSpawnWave_SkeletonArchers(int nightIndex) returns SpawnWaveDefini
   ..setMaxSpawnCount(context -> calculateMaxSpawnCountForElites(context))
   ..setSpawnsPerGoldDrop(context -> calculateSpawnsPerGoldDropForElites(context))
   ..setGoldDropAmount(context -> calculateGoldDropAmountForElites(context))
-  ..setSpawnGroupingFactor(context -> 0.5)
+  ..setGroupSize(context -> 2)
   ..setSpawnRange(SpawnRange.MID)
   ..setupForElite()
 
-  let unitTypeProvider = new TieredUnitTypeProvider()
+  let unitTypeProvider = new SpawnWaveTieredUnitTypeProvider()
   for i = 0 to MAX_ELITE_TIER-1
     unitTypeProvider.setUnitType(i, TlsUnitIds.Undead.skeletonArchers[i])
   def.setUnitTypeProvider(unitTypeProvider)
@@ -268,11 +267,11 @@ function createSpawnWave_Crows(int nightIndex) returns SpawnWaveDefinition
   ..setMaxSpawnCount(context -> calculateMaxSpawnCountForElites(context))
   ..setSpawnsPerGoldDrop(context -> calculateSpawnsPerGoldDropForElites(context))
   ..setGoldDropAmount(context -> calculateGoldDropAmountForElites(context))
-  ..setSpawnGroupingFactor(context -> 0.0)
+  ..setGroupSize(context -> 1)
   ..setSpawnRange(SpawnRange.MID)
   ..setupForElite()
 
-  let unitTypeProvider = new TieredUnitTypeProvider()
+  let unitTypeProvider = new SpawnWaveTieredUnitTypeProvider()
   for i = 0 to MAX_ELITE_TIER-1
     unitTypeProvider.setUnitType(i, TlsUnitIds.Undead.crows[i])
   def.setUnitTypeProvider(unitTypeProvider)
@@ -309,11 +308,11 @@ function createSpawnWave_Gargoyles(int nightIndex) returns SpawnWaveDefinition
   ..setMaxSpawnCount(context -> calculateMaxSpawnCountForElites(context))
   ..setSpawnsPerGoldDrop(context -> calculateSpawnsPerGoldDropForElites(context))
   ..setGoldDropAmount(context -> calculateGoldDropAmountForElites(context))
-  ..setSpawnGroupingFactor(context -> 0.0)
+  ..setGroupSize(context -> 1)
   ..setSpawnRange(SpawnRange.MID)
   ..setupForElite()
 
-  let unitTypeProvider = new TieredUnitTypeProvider()
+  let unitTypeProvider = new SpawnWaveTieredUnitTypeProvider()
   for i = 0 to MAX_ELITE_TIER-1
     unitTypeProvider.setUnitType(i, TlsUnitIds.Undead.gargoyles[i])
   def.setUnitTypeProvider(unitTypeProvider)
@@ -350,11 +349,11 @@ function createSpawnWave_Wyrms(int nightIndex) returns SpawnWaveDefinition
   ..setMaxSpawnCount(context -> calculateMaxSpawnCountForElites(context))
   ..setSpawnsPerGoldDrop(context -> calculateSpawnsPerGoldDropForElites(context))
   ..setGoldDropAmount(context -> calculateGoldDropAmountForElites(context))
-  ..setSpawnGroupingFactor(context -> 0.0)
+  ..setGroupSize(context -> 1)
   ..setSpawnRange(SpawnRange.MID)
   ..setupForElite()
 
-  let unitTypeProvider = new TieredUnitTypeProvider()
+  let unitTypeProvider = new SpawnWaveTieredUnitTypeProvider()
   for i = 0 to MAX_ELITE_TIER-1
     unitTypeProvider.setUnitType(i, TlsUnitIds.Undead.wyrms[i])
   def.setUnitTypeProvider(unitTypeProvider)
@@ -393,11 +392,11 @@ function createSpawnWave_Cultists(int nightIndex) returns SpawnWaveDefinition
   ..setMaxSpawnCount(context -> calculateMaxSpawnCountForElites(context))
   ..setSpawnsPerGoldDrop(context -> calculateSpawnsPerGoldDropForElites(context))
   ..setGoldDropAmount(context -> calculateGoldDropAmountForElites(context))
-  ..setSpawnGroupingFactor(context -> 0.0)
+  ..setGroupSize(context -> 1)
   ..setSpawnRange(SpawnRange.MID)
   ..setupForElite()
 
-  let unitTypeProvider = new TieredUnitTypeProvider()
+  let unitTypeProvider = new SpawnWaveTieredUnitTypeProvider()
   for i = 0 to MAX_ELITE_TIER-1
     unitTypeProvider.setUnitType(i, TlsUnitIds.Undead.cultists[i])
   def.setUnitTypeProvider(unitTypeProvider)
@@ -454,7 +453,11 @@ function createSpawnWave_Raiders(int nightIndex) returns SpawnWaveDefinition
   ..setTags(SpawnDefinitionTags.grouped, SpawnDefinitionTags.melee, SpawnDefinitionTags.piercing)
   ..setProgressFactory(context -> getProgressForSpawnWave(nightIndex))
   ..setSpawnRange(SpawnRange.MID)
-  ..setSpawnGroupingFactor(context -> 1.0)
+  ..setGroupSize(context -> begin
+    let tier = clamp(context.getTier(), 0, MAX_ELITE_TIER-1)
+    let groupId = clamp(context.getGroupId(), 0, RAIDER_GROUP_COUNT-1)
+    return s_groupUnitCounts[tier * MAX_ELITE_TIER + groupId]
+  end)
   ..setWaitForFullSpawnGroup(true)
   ..setMaxAliveCount(context -> begin
     let tier = clamp(context.getTier(), 0, MAX_ELITE_TIER-1)
@@ -469,37 +472,39 @@ function createSpawnWave_Raiders(int nightIndex) returns SpawnWaveDefinition
   ..setGoldDropAmount(context -> calculateGoldDropAmount(context))
   ..setupForElite()
 
-  def.setUnitTypeProvider(new ActionUnitTypeProvider((SpawnContext context, int count, TieredUnitTypeCollection result) -> begin
+  def.setUnitTypeProvider(new ActionUnitTypeProvider((SpawnContext context, int count, UnitTypeCollection result) -> begin
     let waveTier = clamp(context.getTier(), 0, MAX_ELITE_TIER-1)
     let groupId = clamp(context.getGroupId(), 0, RAIDER_GROUP_COUNT-1)
     var added = 0
 
+    let spawnWaveContext = context castTo SpawnWaveContext
+
     for i = 0 to s_fallenBandit[waveTier * RAIDER_GROUP_COUNT + groupId]
       if (added == count)
         break
-      let unitTier = context.getRandomTier()
-      result.add(TlsUnitIds.Undead.fallenBandit[unitTier], unitTier)
+      let unitTier = spawnWaveContext.getRandomTier()
+      result.add(TlsUnitIds.Undead.fallenBandit[unitTier])
       added++
 
     for i = 0 to s_fallenMarksman[waveTier * RAIDER_GROUP_COUNT + groupId]
       if (added == count)
         break
-      let unitTier = context.getRandomTier()
-      result.add(TlsUnitIds.Undead.fallenMarksman[unitTier], unitTier)
+      let unitTier = spawnWaveContext.getRandomTier()
+      result.add(TlsUnitIds.Undead.fallenMarksman[unitTier])
       added++
 
     for i = 0 to s_fallenWizard[waveTier * RAIDER_GROUP_COUNT + groupId]
       if (added == count)
         break
-      let unitTier = context.getRandomTier()
-      result.add(TlsUnitIds.Undead.fallenWizard[unitTier], unitTier)
+      let unitTier = spawnWaveContext.getRandomTier()
+      result.add(TlsUnitIds.Undead.fallenWizard[unitTier])
       added++
 
     for i = 0 to s_fallenBanditLord[waveTier * RAIDER_GROUP_COUNT + groupId]
       if (added == count)
         break
-      let unitTier = context.getRandomTier()
-      result.add(TlsUnitIds.Undead.fallenBanditLord[unitTier], unitTier)
+      let unitTier = spawnWaveContext.getRandomTier()
+      result.add(TlsUnitIds.Undead.fallenBanditLord[unitTier])
       added++
 
   end))
@@ -539,11 +544,11 @@ function createSpawnWave_Necromancers(int nightIndex) returns SpawnWaveDefinitio
   ..setMaxSpawnCount(context -> calculateMaxSpawnCountForElites(context))
   ..setSpawnsPerGoldDrop(context -> calculateSpawnsPerGoldDropForElites(context))
   ..setGoldDropAmount(context -> calculateGoldDropAmountForElites(context))
-  ..setSpawnGroupingFactor(context -> 0.0)
+  ..setGroupSize(context -> 1)
   ..setSpawnRange(SpawnRange.MID)
   ..setupForElite()
 
-  let unitTypeProvider = new TieredUnitTypeProvider()
+  let unitTypeProvider = new SpawnWaveTieredUnitTypeProvider()
   for i = 0 to MAX_ELITE_TIER-1
     unitTypeProvider.setUnitType(i, TlsUnitIds.Undead.necromancers[i])
   def.setUnitTypeProvider(unitTypeProvider)
@@ -603,14 +608,14 @@ function createSpawnWave_Tombstones(int nightIndex) returns SpawnWaveDefinition
   ..setMaxSpawnCount(context -> calculateMaxSpawnCountForElites(context))
   ..setSpawnsPerGoldDrop(context -> calculateSpawnsPerGoldDropForElites(context))
   ..setGoldDropAmount(context -> calculateGoldDropAmountForElites(context))
-  ..setSpawnGroupingFactor(context -> 0.0)
+  ..setGroupSize(context -> 1)
   ..setSpawnRange(SpawnRange.CLOSE)
   ..setFacingAngleRange(rangeReal(270.0, 360.0))
   ..setupForElite()
 
   // NOTE: Can't use common modifer here since summoned units would also share it
 
-  let unitTypeProvider = new TieredUnitTypeProvider()
+  let unitTypeProvider = new SpawnWaveTieredUnitTypeProvider()
   for i = 0 to MAX_ELITE_TIER-1
     unitTypeProvider.setUnitType(i, TlsUnitIds.Undead.tombstones[i])
   def.setUnitTypeProvider(unitTypeProvider)
@@ -667,11 +672,11 @@ function createSpawnWave_Ghosts(int nightIndex) returns SpawnWaveDefinition
   ..setMaxSpawnCount(context -> calculateMaxSpawnCountForElites(context))
   ..setSpawnsPerGoldDrop(context -> calculateSpawnsPerGoldDropForElites(context))
   ..setGoldDropAmount(context -> calculateGoldDropAmountForElites(context))
-  ..setSpawnGroupingFactor(context -> 0.0)
+  ..setGroupSize(context -> 1)
   ..setSpawnRange(SpawnRange.MID)
   ..setupForElite()
 
-  let unitTypeProvider = new TieredUnitTypeProvider()
+  let unitTypeProvider = new SpawnWaveTieredUnitTypeProvider()
   for i = 0 to MAX_ELITE_TIER-1
     unitTypeProvider.setUnitType(i, TlsUnitIds.Undead.ghosts[i])
   def.setUnitTypeProvider(unitTypeProvider)
@@ -706,14 +711,14 @@ function createSpawnWave_OrcSkeletons(int nightIndex) returns SpawnWaveDefinitio
   let def = new SpawnWaveDefinition("Orc Skeletons")
   ..setTags(SpawnDefinitionTags.grouped, SpawnDefinitionTags.melee, SpawnDefinitionTags.heavy, SpawnDefinitionTags.normal)
   ..setProgressFactory(context -> getProgressForSpawnWave(nightIndex))
-  ..setMaxAliveCount(context -> (2 + context.playerDifficulty.floor()))
+  ..setMaxAliveCount(context -> (2 + context.getPlayerDifficulty().floor()))
   ..setSpawnsPerGoldDrop(context -> calculateSpawnsPerGoldDropForElites(context))
   ..setGoldDropAmount(context -> calculateGoldDropAmountForElites(context))
-  ..setSpawnGroupingFactor(context -> 0.0)
+  ..setGroupSize(context -> 1)
   ..setSpawnRange(SpawnRange.MID)
   ..setupForElite()
 
-  let unitTypeProvider = new TieredUnitTypeProvider()
+  let unitTypeProvider = new SpawnWaveTieredUnitTypeProvider()
   for i = 0 to MAX_ELITE_TIER-1
     unitTypeProvider.setUnitType(i, TlsUnitIds.Undead.skeletonOrcs[i])
   def.setUnitTypeProvider(unitTypeProvider)
@@ -750,14 +755,14 @@ function createSpawnWave_MeatWagons(int nightIndex) returns SpawnWaveDefinition
   let def = new SpawnWaveDefinition("Meat Wagons")
   ..setTags(SpawnDefinitionTags.ranged, SpawnDefinitionTags.siege)
   ..setProgressFactory(context -> getProgressForSpawnWave(nightIndex))
-  ..setMaxAliveCount(context -> (1 + context.playerDifficulty.floor()))
+  ..setMaxAliveCount(context -> (1 + context.getPlayerDifficulty().floor()))
   ..setSpawnsPerGoldDrop(context -> calculateSpawnsPerGoldDropForElites(context))
   ..setGoldDropAmount(context -> calculateGoldDropAmountForElites(context))
-  ..setSpawnGroupingFactor(context -> 0.0)
+  ..setGroupSize(context -> 1)
   ..setSpawnRange(SpawnRange.MID)
   ..setupForElite()
 
-  let unitTypeProvider = new TieredUnitTypeProvider()
+  let unitTypeProvider = new SpawnWaveTieredUnitTypeProvider()
   for i = 0 to MAX_ELITE_TIER-1
     unitTypeProvider.setUnitType(i, TlsUnitIds.Undead.wagons[i])
   def.setUnitTypeProvider(unitTypeProvider)
@@ -799,7 +804,7 @@ function createSpawnWave_Abominations(int nightIndex) returns SpawnWaveDefinitio
   ..setSpawnRange(SpawnRange.MID)
   ..setupForBoss()
 
-  let unitTypeProvider = new TieredUnitTypeProvider()
+  let unitTypeProvider = new SpawnWaveTieredUnitTypeProvider()
   for i = 0 to MAX_ELITE_TIER-1
     unitTypeProvider.setUnitType(i, TlsUnitIds.Undead.abominations[i])
   def.setUnitTypeProvider(unitTypeProvider)
@@ -843,11 +848,11 @@ function createSpawnWave_CryptFiends(int nightIndex) returns SpawnWaveDefinition
   ..setMaxSpawnCount(context -> calculateMaxSpawnCountForBoss(context))
   ..setSpawnsPerGoldDrop(context -> 1) // every spawn drops gold
   ..setGoldDropAmount(context -> GOLD_PER_BOSS)
-  ..setSpawnGroupingFactor(context -> 0.0)
+  ..setGroupSize(context -> 1)
   ..setSpawnRange(SpawnRange.MID)
   ..setupForBoss()
 
-  let unitTypeProvider = new TieredUnitTypeProvider()
+  let unitTypeProvider = new SpawnWaveTieredUnitTypeProvider()
   for i = 0 to MAX_ELITE_TIER-1
     unitTypeProvider.setUnitType(i, TlsUnitIds.Undead.fiends[i])
   def.setUnitTypeProvider(unitTypeProvider)
@@ -890,15 +895,15 @@ function createSpawnWave_ForgottenOne(int nightIndex) returns SpawnWaveDefinitio
   let def = new SpawnWaveDefinition("Forbidden One")
   ..setTags(SpawnDefinitionTags.boss, SpawnDefinitionTags.ranged, SpawnDefinitionTags.chaos, SpawnDefinitionTags.hero, SpawnDefinitionTags.summoner)
   ..setProgressFactory(context -> getProgressForSpawnWave(nightIndex))
-  ..setMaxAliveCount(wavecontext -> 1)
-  ..setMaxSpawnCount(wavecontext -> 1)
+  ..setMaxAliveCount(context -> 1)
+  ..setMaxSpawnCount(context -> 1)
   ..setSpawnsPerGoldDrop(context -> 1) // every spawn drops gold
   ..setGoldDropAmount(context -> GOLD_PER_BOSS)
-  ..setSpawnGroupingFactor(wavecontext -> 0.0)
+  ..setGroupSize(context -> 1)
   ..setSpawnRange(SpawnRange.FAR)
   ..setupForBoss()
 
-  let unitTypeProvider = new TieredUnitTypeProvider()
+  let unitTypeProvider = new SpawnWaveTieredUnitTypeProvider()
   for i = 0 to MAX_ELITE_TIER-1
     unitTypeProvider.setUnitType(i, TlsUnitIds.Undead.forgottenOnes[i])
   def.setUnitTypeProvider(unitTypeProvider)
@@ -934,13 +939,13 @@ function createSpawnWave_Archimonde(int nightIndex) returns SpawnWaveDefinition
   let def = new SpawnWaveDefinition("Archimonde")
   ..setTags(SpawnDefinitionTags.boss, SpawnDefinitionTags.ranged, SpawnDefinitionTags.chaos, SpawnDefinitionTags.hero, SpawnDefinitionTags.summoner)
   ..setProgressFactory(context -> getProgressForSpawnWave(nightIndex))
-  ..setMaxAliveCount(wavecontext -> 1)
-  ..setMaxSpawnCount(wavecontext -> 1)
-  ..setSpawnGroupingFactor(wavecontext -> 0.0)
+  ..setMaxAliveCount(context -> 1)
+  ..setMaxSpawnCount(context -> 1)
+  ..setGroupSize(context -> 1)
   ..setSpawnRange(SpawnRange.MID)
   ..setupForBoss()
 
-  let unitTypeProvider = new TieredUnitTypeProvider()
+  let unitTypeProvider = new SpawnWaveTieredUnitTypeProvider()
   for i = 0 to MAX_ELITE_TIER-1
     unitTypeProvider.setUnitType(i, TlsUnitIds.Undead.archimonde)
   def.setUnitTypeProvider(unitTypeProvider)

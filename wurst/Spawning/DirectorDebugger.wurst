@@ -1,0 +1,123 @@
+package DirectorDebugger
+import Frame
+import ProjectConstants
+import DebuggerDialog
+import TabPanel
+import SpawnDirectors
+import ThreadDebugger
+import Deck
+import RealExtensions
+
+// ============================================================================
+class DirectorDebugger extends DebuggerRealtimeUpdateFrame
+  private int m_lastDirectorIdGen
+  private TabPanel m_tabPanel
+
+  // --------------------------------------------------------------------------
+  construct()
+    super(createFrame("FRAME", "DirectorDebugger", GAME_UI, "", 0))
+
+    m_tabPanel = new TabPanel()
+    addChild(m_tabPanel)
+
+  // --------------------------------------------------------------------------
+  override function realtimeUpdate(real _)
+
+    if (Director.getStaticDirectorIdGen() != m_lastDirectorIdGen)
+      rebuildTabPanel()
+
+  // --------------------------------------------------------------------------
+  private function rebuildTabPanel()
+
+    m_lastDirectorIdGen = Director.getStaticDirectorIdGen()
+
+    let prevSelectedContentId = m_tabPanel.getSelectedContentId()
+    m_tabPanel.removeAllContent()
+
+    for thread in Director.getAllDirectors()
+      m_tabPanel.addContent(thread.getName(), new DirectorFrame(thread))
+
+    if (m_tabPanel.getContent(prevSelectedContentId) != null)
+      m_tabPanel.setSelectedContentId(prevSelectedContentId)
+
+// ============================================================================
+class DirectorFrame extends Frame
+  private Director m_director
+  private TabPanel m_tabPanel
+
+  // --------------------------------------------------------------------------
+  construct(Director director)
+    super(createFrame("FRAME", "DirectorDebugger", GAME_UI, "", 0))
+    m_director = director
+
+    m_tabPanel = new TabPanel()
+    m_tabPanel.addContent("Info", new DirectorInfoFrame(m_director))
+    m_tabPanel.addContent("Deck", new DirectorDeckFrame(m_director))
+    m_tabPanel.addContent("Thread", new ThreadInfoFrame(m_director.getWorkerThread()))
+    addChild(m_tabPanel)
+
+// ============================================================================
+class DirectorInfoFrame extends DebuggerRealtimeUpdateFrame
+  private Director m_director
+
+  // --------------------------------------------------------------------------
+  construct(Director director)
+    super(createFrame("TEXTAREA", "DIF", GAME_UI, "", 0))
+    m_director = director
+
+  // --------------------------------------------------------------------------
+  override protected function realtimeUpdate(real _dt)
+    let contentFrame = getFrameHandle()
+    contentFrame.setOrAddText("Enabled: " + m_director.getEnabled().toString())
+    contentFrame.setOrAddText("Credits: " + m_director.getCredits().toString())
+    contentFrame.setOrAddText("Owned Units: " + m_director.getOwnedUnits().size().toString())
+
+    m_director.writeDebugString() (string text) ->
+      contentFrame.setOrAddText(text)
+
+// ============================================================================
+class DirectorDeckFrame extends DebuggerRealtimeUpdateFrame
+  private Director m_director
+
+  // --------------------------------------------------------------------------
+  construct(Director director)
+    super(createFrame("TEXTAREA", "DECK", GAME_UI, "", 0))
+    m_director = director
+
+  // --------------------------------------------------------------------------
+  override protected function realtimeUpdate(real _dt)
+    let contentFrame = getFrameHandle()
+
+    let deck = m_director.getDeck()
+
+    if (deck == null)
+      contentFrame.setText("No deck")
+      return
+
+    let categories = deck.getCategories()
+
+    for category in categories
+    //{
+      let cards = category.getCards()
+
+      contentFrame.setOrAddText("[{0}] x{1} w:{2} {3}".format(
+        category.getId(),
+        cards.size().toString(),
+        categories.getWeight(category).toString(),
+        categories.getChance(category).toPercentageString01()))
+
+      for card in cards
+      //{
+        contentFrame.setOrAddText(" > {0} {1}c a:{2} w:{3} {4}".format(
+          card.getId(),
+          card.getCost().toString(),
+          card.canActivate().toString(),
+          cards.getWeight(card).toString(),
+          cards.getChance(card).toPercentageString01()))
+      //}
+    //}
+
+// ============================================================================
+init
+  if (DEV_ENVIRONMENT)
+    DebuggerDialog.registerFrame("DRCT", () -> new DirectorDebugger())

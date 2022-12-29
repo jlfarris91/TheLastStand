@@ -4,14 +4,12 @@ import Vector
 import Runnable
 import Func
 import GameConstants
-import GameInstance
 import Action
 import Spawning
 import HashMap
 import Range
 import SoundUtils
 import Math
-import Difficulties
 
 // ============================================================================
 public interface ISpawnWaveActivator extends IRunnable
@@ -29,7 +27,7 @@ public class SpawnWaveDefinition
   private ITieredUnitTypeProvider m_unitTypeProvider
   private Func1<SpawnWaveContext, int> m_maxSpawnCount
   private Func1<SpawnWaveContext, int> m_maxAliveCount
-  private Func1<SpawnWaveContext, real> m_spawnGroupingFactor
+  private Func1<SpawnWaveContext, int> m_groupSize
   private Func1<SpawnWaveContext, int> m_goldReward
   private Action2<unit, SpawnWaveContext> m_commonUnitModifier
   private IterableMap<int, Action2<unit, SpawnWaveContext>> m_unitModifiers
@@ -76,9 +74,9 @@ public class SpawnWaveDefinition
       m_maxSpawnCount.release()
       m_maxSpawnCount = null
 
-    if (m_spawnGroupingFactor != null)
-      m_spawnGroupingFactor.release()
-      m_spawnGroupingFactor = null
+    if (m_groupSize != null)
+      m_groupSize.release()
+      m_groupSize = null
 
     if (m_spawnsPerGoldDrop != null)
       m_spawnsPerGoldDrop.release()
@@ -164,10 +162,17 @@ public class SpawnWaveDefinition
     return clamp(m_maxSpawnCount.call(context), 0, UNLIMITED)
 
   // --------------------------------------------------------------------------
-  function getSpawnGroupingFactor(SpawnWaveContext context) returns real
-    if (m_spawnGroupingFactor == null)
-      return 0.0
-    return clamp01(m_spawnGroupingFactor.call(context))
+  function getGroupSize(SpawnWaveContext context) returns int
+    if (m_groupSize == null)
+      return 1
+    return min(m_groupSize.call(context), getMaxAliveCount(context))
+
+  // --------------------------------------------------------------------------
+  function setGroupSize(Func1<SpawnWaveContext, int> value)
+    value.acquire()
+    if (m_groupSize != null)
+      m_groupSize.release()
+    m_groupSize = value
 
   // --------------------------------------------------------------------------
   function setSpawnsPerGoldDrop(Func1<SpawnWaveContext, int> value)
@@ -194,13 +199,6 @@ public class SpawnWaveDefinition
     if (m_goldDropAmount == null)
       return 0
     return max(m_goldDropAmount.call(context), 0)
-
-  // --------------------------------------------------------------------------
-  function setSpawnGroupingFactor(Func1<SpawnWaveContext, real> value)
-    value.acquire()
-    if (m_spawnGroupingFactor != null)
-      m_spawnGroupingFactor.release()
-    m_spawnGroupingFactor = value
 
   // --------------------------------------------------------------------------
   function setCommonUnitModifier(Action2<unit, SpawnWaveContext> action)
@@ -345,9 +343,10 @@ public class SpawnWaveContext extends SpawnContext
   SpawnWaveDefinition definition = null
   int waveNumber = 0
   real waveProgress = 0.0
-  real playerDifficulty = 1.0
   int goldDrops = 0
   int goldAvailable = 0
+
+  private real array[MAX_ELITE_TIER] m_tierChances = [ 1.0, 0.0, 0.0]
 
   private Event m_onUnitKilled
   private int m_killCount = 0
@@ -360,10 +359,12 @@ public class SpawnWaveContext extends SpawnContext
     definition = other.definition
     waveNumber = other.waveNumber
     waveProgress = other.waveProgress
-    playerDifficulty = other.playerDifficulty
     goldDrops = other.goldDrops
     goldAvailable = other.goldAvailable
     m_killCount = other.m_killCount
+    m_tierChances[0] = other.m_tierChances[0]
+    m_tierChances[1] = other.m_tierChances[1]
+    m_tierChances[2] = other.m_tierChances[2]
 
   // --------------------------------------------------------------------------
   ondestroy
@@ -380,26 +381,6 @@ public class SpawnWaveContext extends SpawnContext
     return ((waveNumber - 1).toReal() + waveProgress) / TOTAL_NIGHTS
 
   // --------------------------------------------------------------------------
-  override function getGameDifficulty01() returns real
-    return g_GameInstance.getGameDifficulty01()
-
-  // --------------------------------------------------------------------------
-  override function getUnitModifierGameProgress01() returns real
-    return parameterize(1, TOTAL_NIGHTS, waveNumber)
-
-  // --------------------------------------------------------------------------
-  override function getUnitModifierDifficultyScalar01() returns real
-    return DifficultyScaling.getEliteGeneralScalar01(playerDifficulty, getTier().toReal())
-  
-  // --------------------------------------------------------------------------
-  override function getUnitDamageScalar01() returns real
-    return DifficultyScaling.getEliteDamageScalar01(playerDifficulty, getTier().toReal())
-  
-  // --------------------------------------------------------------------------
-  override function getUnitHealthScalar01() returns real
-    return DifficultyScaling.getEliteHealthScalar01(playerDifficulty, getTier().toReal())
-
-  // --------------------------------------------------------------------------
   function onUnitKilled() returns IEvent
     if (m_onUnitKilled == null)
       m_onUnitKilled = new Event()
@@ -414,3 +395,33 @@ public class SpawnWaveContext extends SpawnContext
     m_killCount++
     if (m_onUnitKilled != null)
       m_onUnitKilled.call()
+
+  // --------------------------------------------------------------------------
+  function getTierChance(int index) returns real
+    return m_tierChances[index]
+
+  // --------------------------------------------------------------------------
+  function setTierChance(int index, real value)
+    m_tierChances[index] = value
+
+  // --------------------------------------------------------------------------
+  function getRandomTier() returns int
+    var roll01 = GetRandomReal(0, 1)
+    var tier = 0
+    for i = 0 to MAX_ELITE_TIER - 1
+      let tierChance = m_tierChances[i]
+      if (roll01 < tierChance)
+        tier = i
+        break
+      roll01 -= tierChance
+    return tier
+
+// ============================================================================
+public class SpawnWaveTieredUnitTypeProvider extends TieredUnitTypeProvider
+
+  // --------------------------------------------------------------------------
+  override function getUnitTypes(SpawnContext context, int count, UnitTypeCollection output)    
+    let spawnWaveContext = context castTo SpawnWaveContext    
+    for i = 0 to count - 1
+      let tier = spawnWaveContext.getRandomTier()
+      output.add(getUnitType(tier))

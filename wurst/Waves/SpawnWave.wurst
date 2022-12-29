@@ -118,7 +118,8 @@ public class SpawnWave extends Runnable
 
     // Update context
     let playerMetadata = m_targetPlayer.getHumanPlayerComponentRequired()
-    m_context.playerDifficulty = playerMetadata.getDifficulty()
+    m_context.setPlayerDifficulty(playerMetadata.getDifficulty())
+    
     for i = 0 to MAX_ELITE_TIER-1
       m_context.setTierChance(i, playerMetadata.getTierChance(i))
 
@@ -132,18 +133,22 @@ public class SpawnWave extends Runnable
       cancel()
       return
 
-    m_spawnJob = new SpawnUndeadUnitJob("SUUB" + m_definition.getName(), PLAYER_UNDEAD, m_targetPlayer)
-    ..setContext(m_context)
+    let spawnJobConfig = new SpawnUndeadUnitJobConfig()
+    ..setTierSelectionMode(TierSelectionMode.Group)
+    ..setTierSelector(context -> (context castTo SpawnWaveContext).getRandomTier())
     ..setUnitTypeProvider(m_definition.getUnitTypeProvider())
     ..setSpawnPointProvider(getSpawnPointProvider(m_targetPlayer, m_definition.getSpawnPointProviderType()))
     ..setTargetProvider(targetProvider)
-    ..setGroupingFactor(m_definition.getSpawnGroupingFactor(m_context))
+    ..setGroupSize(m_definition.getGroupSize(m_context))
     ..setMaxSpawnCount(m_definition.getMaxSpawnCount(m_context))
     ..setMaxAliveCount(m_definition.getMaxAliveCount(m_context))
     ..setSpawnRange(m_definition.getSpawnRange().toRangeReal())
     ..setWaitForFullGroup(m_definition.getWaitForFullSpawnGroup())
     ..setPrepareUnitFunc((job, spawnedUnit) -> prepareUnit(spawnedUnit))
     ..setUseRecycler(m_definition.getUseUnitRecycler())
+
+    m_spawnJob = new SpawnUndeadUnitJob("SUUB" + m_definition.getName(), PLAYER_UNDEAD, m_targetPlayer, spawnJobConfig)
+    ..setContext(m_context)
     ..acquire()
     
     m_spawnJob.onUnitSpawned().register((j, u) -> onUnitSpawned(j, u))
