@@ -1,0 +1,542 @@
+package Directors
+import ClosureTimers
+import Range
+import Jobs
+import Deck
+import Action
+import HashMap
+import GameConstants
+import CancellationToken
+import ErrorHandling
+import GroupUtils
+import LinkedList
+import GameInstance
+import Events
+import RegisterEvents
+
+constant real TOO_CHEAP_COEFF = 6
+
+LinkedList<Director> g_directors = new LinkedList<Director>()
+HashMap<unit, Admin> g_unitToAdminMap
+
+public tuple drawnCard(Card card, int tier, int cost)
+public constant drawnCard INVALID_CARD = drawnCard(null, -1, -1)
+
+Thread s_directorWorkerThread = new Thread("director")
+  ..setTickInterval(0.3)
+  ..setMaxWorkPerTick(1)
+
+// ============================================================================
+public class Admin
+  private string m_id
+  private group m_ownedUnits = getGroup()
+
+  private Event2<Admin, unit> m_onUnitRegistered
+  private Event2<Admin, unit> m_onUnitUnregistered
+
+  // --------------------------------------------------------------------------
+  construct(string id)
+    m_id = id
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    m_ownedUnits.release()
+
+    if (m_onUnitRegistered != null)
+      destroy m_onUnitRegistered
+      m_onUnitRegistered = null
+
+    if (m_onUnitUnregistered != null)
+      destroy m_onUnitUnregistered
+      m_onUnitUnregistered = null
+
+  // --------------------------------------------------------------------------
+  function getOwnedUnits() returns group
+    return m_ownedUnits
+
+  // --------------------------------------------------------------------------
+  function onUnitRegistered() returns IEvent2<Admin, unit>
+    if (m_onUnitRegistered == null)
+      m_onUnitRegistered = new Event2<Admin, unit>()
+    return m_onUnitRegistered
+
+  // --------------------------------------------------------------------------
+  function onUnitUnregistered() returns IEvent2<Admin, unit>
+    if (m_onUnitUnregistered == null)
+      m_onUnitUnregistered = new Event2<Admin, unit>()
+    return m_onUnitUnregistered
+
+  // --------------------------------------------------------------------------
+  function registerOwnedUnit(unit _unit)
+
+    let existingAdmin = g_unitToAdminMap.get(_unit)
+    if (existingAdmin != null and existingAdmin != this)
+      error("Unit belongs to a different admin")
+      return
+
+    g_unitToAdminMap.put(_unit, this)
+    m_ownedUnits.addUnit(_unit)
+
+    if (m_onUnitRegistered != null)
+      m_onUnitRegistered.call(this, _unit)
+
+  // --------------------------------------------------------------------------
+  function unregisterOwnedUnit(unit _unit)
+
+    let existingAdmin = g_unitToAdminMap.get(_unit)
+    if (existingAdmin == null)
+      return
+
+    if (existingAdmin != this)
+      error("Unit belongs to a different admin")
+      return
+    
+    g_unitToAdminMap.remove(_unit)
+    m_ownedUnits.removeUnit(_unit)
+
+    if (m_onUnitUnregistered != null)
+      m_onUnitUnregistered.call(this, _unit)
+
+  // --------------------------------------------------------------------------
+  protected function onOwnedUnitKilled(unit dyingUnit)
+    unregisterOwnedUnit(dyingUnit)
+
+// ============================================================================
+public abstract class Director
+  private int m_id
+  private string m_name
+  private real m_credits
+  private bool m_enabled
+  private Deck m_deck
+  private real m_creditsOnActivation = 0.0
+  private real m_creditMultiplier = 1.0
+  private CallbackPeriodic m_creditGeneratorTimer
+  private CancellationToken m_ct
+  private Thread m_workerThread
+  private Admin m_admin
+  
+  private static int s_directorIdGen = 0
+
+  // --------------------------------------------------------------------------
+  construct(string name)
+    m_name = name
+
+    m_workerThread = s_directorWorkerThread
+
+    m_admin = new Admin(name)
+
+    s_directorIdGen++
+    m_id = s_directorIdGen
+
+    g_directors.add(this)
+
+  // --------------------------------------------------------------------------
+  ondestroy
+
+    if (m_enabled)
+      disable()
+
+    g_directors.remove(this)
+
+    if (m_ct != null)
+      m_ct.cancelAndRelease()
+      m_ct = null
+
+    if (m_deck != null)
+      destroy m_deck
+      m_deck = null
+
+    if (m_workerThread != null)
+      destroy m_workerThread
+      m_workerThread = null
+
+    destroy m_admin
+    m_admin = null
+
+  // --------------------------------------------------------------------------
+  static function getStaticDirectorIdGen() returns int
+    return s_directorIdGen
+
+  // --------------------------------------------------------------------------
+  static function getAllDirectors() returns LinkedList<Director>
+    return g_directors
+
+  // --------------------------------------------------------------------------
+  function getId() returns int
+    return m_id
+
+  // --------------------------------------------------------------------------
+  function getName() returns string
+    return m_name
+
+  // --------------------------------------------------------------------------
+  function getWorkerThread() returns Thread
+    return m_workerThread
+
+  // --------------------------------------------------------------------------
+  function getAdmin() returns Admin
+    return m_admin
+
+  // --------------------------------------------------------------------------
+  function getCancellationToken() returns CancellationToken
+    if (m_ct == null)
+      m_ct = new CancellationToken()..acquire()
+    return m_ct
+
+  // --------------------------------------------------------------------------
+  function getCredits() returns real
+    return m_credits
+
+  // --------------------------------------------------------------------------
+  function getCreditsInt() returns int
+    return m_credits.floor()
+  
+  // --------------------------------------------------------------------------
+  function setCredits(real value)
+    m_credits = value
+
+  // --------------------------------------------------------------------------
+  function getDeck() returns Deck
+    return m_deck
+
+  // --------------------------------------------------------------------------
+  function setDeck(Deck deck)
+    m_deck = deck
+
+  // --------------------------------------------------------------------------
+  function getCreditsOnActivation() returns real
+    return m_creditsOnActivation
+  
+  // --------------------------------------------------------------------------
+  function setCreditsOnActivation(real value)
+    m_creditsOnActivation = value
+
+  // --------------------------------------------------------------------------
+  function getCreditMultiplier() returns real
+    return m_creditMultiplier
+  
+  // --------------------------------------------------------------------------
+  function setCreditMultiplier(real value)
+    m_creditMultiplier = value
+  
+  // --------------------------------------------------------------------------
+  function getEnabled() returns bool
+    return m_enabled
+  
+  // --------------------------------------------------------------------------
+  function setEnabled(bool value)
+    if (m_enabled != value)
+      m_enabled = value
+      if (value)
+        onEnabled()
+      else
+        onDisabled()
+
+  // --------------------------------------------------------------------------
+  function enable()
+    setEnabled(true)
+
+  // --------------------------------------------------------------------------
+  function disable()
+    setEnabled(false)
+
+  // --------------------------------------------------------------------------
+  protected function onEnabled()
+
+    if (m_ct != null)
+      error("Cancellation token should be null")
+
+    m_ct = new CancellationToken()..acquire()
+  
+    m_credits = m_creditsOnActivation
+
+    m_creditGeneratorTimer = doPeriodically(1.0, cb -> generateCredits())
+
+    m_workerThread.setEnabled(true)
+
+  // --------------------------------------------------------------------------
+  protected function onDisabled()
+
+    if (m_ct != null)
+      m_ct.cancelAndRelease()
+      m_ct = null
+
+    if (m_creditGeneratorTimer != null)
+      destroy m_creditGeneratorTimer
+      m_creditGeneratorTimer = null
+
+    m_workerThread.setEnabled(false)
+
+  // --------------------------------------------------------------------------
+  function canDrawCard() returns bool
+    return true
+
+  // --------------------------------------------------------------------------
+  abstract function drawCard() returns drawnCard
+
+  // --------------------------------------------------------------------------
+  abstract function activateCard(drawnCard card) returns bool
+
+  // --------------------------------------------------------------------------
+  protected function getDifficultyCoefficient() returns real
+    return g_GameInstance.getGameDifficultyCoeff()
+
+  // --------------------------------------------------------------------------
+  protected function getCreditsPerSecond() returns real
+    return m_creditMultiplier * (1 + 0.4 * getDifficultyCoefficient())
+
+  // --------------------------------------------------------------------------
+  protected function generateCredits()
+    m_credits += getCreditsPerSecond()
+
+  // --------------------------------------------------------------------------
+  function writeDebugString(Action1<string> output)
+
+    output.acquire()
+    
+    output.call("Credits per second: " + getCreditsPerSecond().toString())
+
+    output.release()
+
+// ============================================================================
+public abstract class ContinuousDirector extends Director
+  private rangeReal m_intervalDuringWaves
+  private rangeReal m_intervalBetweenWaves
+  private ContinuousDirectorJob m_job
+
+  // --------------------------------------------------------------------------
+  construct(string name)
+    super(name)
+
+  // --------------------------------------------------------------------------
+  function getIntervalDuringWaves() returns rangeReal
+    return m_intervalDuringWaves
+  
+  // --------------------------------------------------------------------------
+  function setIntervalDuringWaves(rangeReal value)
+    m_intervalDuringWaves = value
+
+  // --------------------------------------------------------------------------
+  function getIntervalBetweenWaves() returns rangeReal
+    return m_intervalBetweenWaves
+  
+  // --------------------------------------------------------------------------
+  function setIntervalBetweenWaves(rangeReal value)
+    m_intervalBetweenWaves = value
+
+  // --------------------------------------------------------------------------
+  override protected function onEnabled()
+    super.onEnabled()
+
+    m_job = new ContinuousDirectorJob(this)..acquire()
+    ..setIntervalBetweenWaves(m_intervalBetweenWaves)
+    ..setIntervalDuringWaves(m_intervalDuringWaves)
+
+    getWorkerThread().enqueue(getCancellationToken(), m_job)
+
+  // --------------------------------------------------------------------------
+  override protected function onDisabled()
+    super.onDisabled()
+
+    if (m_job != null)
+      m_job.complete()
+      m_job.release()
+      m_job = null
+
+  // --------------------------------------------------------------------------
+  override function writeDebugString(Action1<string> output)
+
+    output.acquire()
+
+    super.writeDebugString(output)
+
+    if (m_job != null)
+    //{
+      let selectedCard = m_job.getSelectedCard()
+
+      if (selectedCard.card != null)
+        output.call("Selected Card: {0} t:{1} c:{2}x{3}={4}".format(
+          selectedCard.card.getId(),
+          selectedCard.tier.toString(),
+          selectedCard.card.getCost().toString(),
+          TIER_VALUE_MULTIPLIER[selectedCard.tier].toString(),
+          selectedCard.cost.toString()))
+      else
+        output.call("Selected Card: none")
+
+      output.call("Next Activation In: " + m_job.getActivationTimer().toString())
+      output.call("Last Activation: " + (m_job.getLastActivationSucceeded() ? "succeeded" : m_job.getLastActivationFailedReason()))
+    //}    
+    
+    output.release()
+
+// ============================================================================
+class ContinuousDirectorJob extends Job
+  private Director m_director
+  private drawnCard m_selectedCard
+  private rangeReal m_slowActivationIntervalRange
+  private rangeReal m_fastActivationIntervalRange
+  private bool m_lastActivationSucceeded
+  private string m_lastActivationFailedReason
+  private real m_timer
+
+  // --------------------------------------------------------------------------
+  construct (Director director)
+    super(director.getName())
+    m_director = director
+
+  // --------------------------------------------------------------------------
+  function getSelectedCard() returns drawnCard
+    return m_selectedCard
+
+  // --------------------------------------------------------------------------
+  function getActivationTimer() returns real
+    return m_timer
+
+  // --------------------------------------------------------------------------
+  function getLastActivationSucceeded() returns bool
+    return m_lastActivationSucceeded
+
+  // --------------------------------------------------------------------------
+  function getLastActivationFailedReason() returns string
+    return m_lastActivationFailedReason
+
+  // ----------------------------------------------------------------------------
+  function getIntervalBetweenWaves() returns rangeReal
+    return m_slowActivationIntervalRange
+  
+  // ----------------------------------------------------------------------------
+  function setIntervalBetweenWaves(rangeReal value)
+    m_slowActivationIntervalRange = value
+
+  // ----------------------------------------------------------------------------
+  function getIntervalDuringWaves() returns rangeReal
+    return m_fastActivationIntervalRange
+  
+  // ----------------------------------------------------------------------------
+  function setIntervalDuringWaves(rangeReal value)
+    m_fastActivationIntervalRange = value
+
+  // --------------------------------------------------------------------------
+  private function restartTimerBetweenWaves()
+    m_timer += m_slowActivationIntervalRange.getRandom()
+
+  // --------------------------------------------------------------------------
+  private function restartTimerDuringWave()
+    m_timer += m_fastActivationIntervalRange.getRandom()
+
+  // --------------------------------------------------------------------------
+  override function next() returns int
+
+    let dt = getThread().getTickInterval()
+
+    m_timer = max(m_timer - dt, 0)
+    if (m_timer > 0)
+      return 0
+
+    m_lastActivationSucceeded = false
+    m_lastActivationFailedReason = ""
+
+    if (getCancellationToken().isCanceled())
+      m_lastActivationFailedReason = "canceled"
+      return 0
+
+    if (not m_director.canDrawCard())
+      restartTimerBetweenWaves()
+      m_lastActivationFailedReason = "director"
+      return 0
+
+    if (not m_lastActivationSucceeded)
+      m_selectedCard = m_director.drawCard()
+
+    if (m_selectedCard.card == null)
+      restartTimerBetweenWaves()
+      m_lastActivationFailedReason = "too expensive"
+      return 0
+
+    let credits = m_director.getCredits()
+
+    // If the director can't afford the card at the current tier, drop down a tier
+    while (m_selectedCard.tier > 0 and credits < m_selectedCard.cost)
+      m_selectedCard.tier = m_selectedCard.tier - 1
+      m_selectedCard.cost = TIER_VALUE_MULTIPLIER[m_selectedCard.tier] * m_selectedCard.card.getCost()
+    
+    if (m_selectedCard.tier == 0 and credits < m_selectedCard.cost)
+      restartTimerBetweenWaves()
+      m_lastActivationFailedReason = "too expensive"
+      return 0
+
+    if (credits > m_selectedCard.cost * TOO_CHEAP_COEFF)
+      let deck = m_director.getDeck()
+      if (m_selectedCard.card != deck.getMostExpensiveCard())
+        restartTimerBetweenWaves()
+        m_lastActivationFailedReason = "too cheap"
+        return 0
+
+    m_director.setCredits(credits - m_selectedCard.cost)
+
+    m_lastActivationSucceeded = m_director.activateCard(m_selectedCard)
+
+    if (m_lastActivationSucceeded)
+      restartTimerDuringWave()
+    else
+      m_lastActivationFailedReason = "failed to activate"
+      restartTimerBetweenWaves()
+
+    return 1
+
+  // --------------------------------------------------------------------------
+  override function hasNext() returns bool
+    return true
+
+  // --------------------------------------------------------------------------
+  override function getDebuggerStateString() returns string
+    return ""
+
+// ============================================================================
+function onUnitDeath()
+  let dyingUnit = GetDyingUnit()
+  if (not g_unitToAdminMap.has(dyingUnit))
+    return
+  let director = g_unitToAdminMap.get(dyingUnit)
+  director.onOwnedUnitKilled(dyingUnit)
+
+// ============================================================================
+init
+  g_unitToAdminMap = new HashMap<unit, Admin>()
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_DEATH, function onUnitDeath)
+
+@test function asdf()
+
+  let baseCost = 10
+  var credits = 450
+
+  var selectedTier = 0
+  var selectedCost = 0
+
+  for tier = 2 downto 0
+  //{
+    let tierCost = TIER_VALUE_MULTIPLIER[tier] * baseCost
+    if (credits >= tierCost)
+      selectedTier = tier
+      selectedCost = tierCost
+      Log.info("t: " + selectedTier.toString() + " c: " + selectedCost.toString())
+      break
+  //}
+
+  for i = 0 to 10
+    
+    while (selectedTier > 0 and credits < selectedCost)
+      selectedTier--
+      selectedCost = TIER_VALUE_MULTIPLIER[selectedTier] * baseCost
+      Log.info("t: " + selectedTier.toString() + " c: " + selectedCost.toString())
+
+    if (credits < selectedCost)
+      Log.info("too expensive!")
+      break
+
+    credits -= selectedCost
+    Log.info("spawned tier " + selectedTier.toString())
+    Log.info("credits: " + credits.toString())
+
+    

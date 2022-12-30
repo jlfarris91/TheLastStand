@@ -1,0 +1,97 @@
+package LeakDetection
+import Reflection
+import DebuggerDialog
+import ProjectConstants
+import WrapPanel
+import DockPanel
+import Layout
+import Frame
+import ClosureFrames
+
+int array g_instanceCount
+int array g_instanceCountDelta
+int g_instanceCountDeltaLargest
+
+// ============================================================================
+public class LeakDetection
+
+  // ----------------------------------------------------------------------------
+  static function takeSnapshot()
+
+    for i = 0 to maxTypeId() - 1
+      g_instanceCount[i] = instanceCount(i)
+      g_instanceCountDelta[i] = 0
+
+    g_instanceCountDeltaLargest = 0
+
+  // ----------------------------------------------------------------------------
+  static function updateDeltaCounts()
+
+    g_instanceCountDeltaLargest = 0
+
+    for i = 0 to maxTypeId() - 1
+      g_instanceCountDelta[i] = instanceCount(i) - g_instanceCount[i]
+      g_instanceCountDeltaLargest = max(g_instanceCountDeltaLargest, g_instanceCountDelta[i])
+
+// ============================================================================
+class LeakDetectionView extends DebuggerRealtimeUpdateFrame
+
+  private framehandle m_textFrame
+  private Frame m_takeSnapshotButton
+  private Frame m_updateDeltaButton
+
+  // --------------------------------------------------------------------------
+  construct()
+    super(createFrame("FRAME", "diff", GAME_UI, "", 0))
+
+    let dockPanel = new DockPanel("DP")
+    ..setLastChildFills(true)
+    addChild(dockPanel)
+
+    let buttons = new WrapPanel("WP")
+    ..setDock(Dock.TOP)
+    ..setOrientation(Orientation.HORIZONTAL)
+    ..setStretchItems(true)
+    dockPanel.addChild(buttons)
+
+    m_takeSnapshotButton = new Frame(createFrame("GLUETEXTBUTTON", "SPB", GAME_UI, "MemoryViewPageButton", 0))
+    ..setHeight(0.02)
+    ..setText("Take Snapshot")
+    m_takeSnapshotButton.getFrameHandle().onClick(() -> LeakDetection.takeSnapshot())
+    buttons.addChild(m_takeSnapshotButton)
+
+    m_updateDeltaButton = new Frame(createFrame("GLUETEXTBUTTON", "UDB", GAME_UI, "MemoryViewPageButton", 0))
+    ..setHeight(0.02)
+    ..setText("Update")
+    m_updateDeltaButton.getFrameHandle().onClick(() -> LeakDetection.updateDeltaCounts())
+    buttons.addChild(m_updateDeltaButton)
+
+    m_textFrame = createFrame("TEXTAREA", "text", GAME_UI, "", 0)
+    dockPanel.addChild(new Frame(m_textFrame))
+
+  // --------------------------------------------------------------------------
+  override function realtimeUpdate(real _)
+    
+    if (g_instanceCountDeltaLargest == 0)
+      return
+
+    var counter = 0
+    for i = 0 to maxTypeId() - 1
+      let p = g_instanceCountDelta[i] / g_instanceCountDeltaLargest
+      if (p > 0.05)
+      //{
+        m_textFrame.setOrAddText(" > {0} c:{1} d:{2}".format(
+          i.toString(),
+          g_instanceCount[i].toString(),
+          (g_instanceCountDelta[i] < 0 ? g_instanceCountDelta[i].toString() : "+"+g_instanceCountDelta[i].toString())
+        ))
+
+        counter++
+        if (counter == 10)
+          break
+      //}
+
+// ============================================================================
+init
+  if (DEV_ENVIRONMENT)
+    DebuggerDialog.registerFrame("LEAK", () -> new LeakDetectionView())

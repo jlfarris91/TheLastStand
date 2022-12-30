@@ -1,0 +1,612 @@
+package SpawnUndeadUnitDirector
+import Spawning
+import Func
+import Action
+import HashMap
+import Vector
+import Range
+import SoundUtils
+import GameConstants
+import Math
+import Elites
+import Deck
+import Directors
+import HumanPlayerComponent
+import GameInstance
+import RealTime
+import UndeadTargetService
+import SpawnUndeadUnitJob
+import UnitMetadata
+import BuffObjEditing
+import GroupExtensions
+import UndeadTargetingComponent
+import TlsUnitDefinition
+import UnitExtensions
+import MinimapIconComponent
+import Coins
+import UnitModifiers
+import WaveGeneratorCommon
+
+// ============================================================================
+public class SpawnDefinition
+  private string m_id
+  private SpawnRange m_spawnRange
+  private ITieredUnitTypeProvider m_unitTypeProvider
+  private Func1<SpawnContext, int> m_maxSpawnCount
+  private Func1<SpawnContext, int> m_groupSize
+  private Func1<SpawnContext, int> m_goldReward
+  private Action2<unit, SpawnContext> m_commonUnitModifier
+  private IterableMap<int, Action2<unit, SpawnContext>> m_unitModifiers
+  private Vector<string> m_tags
+  private bool m_waitForFullSpawnGroup = false
+  private bool m_useUnitRecycler = false
+  private rangeReal m_facingAngleRange = REAL_RANGE_ZERO
+  private SpawnPointProviderType m_spawnPointProviderType = SpawnPointProviderType.CACHED_HOSTILE
+  private SoundDefinition m_playSoundOnGroupSpawn = null
+  private string m_minimapIconPath = null
+  private color m_minimapIconColor = color(255, 255, 255)
+  private bool m_pingOnGroupSpawn = false
+  private color m_pingOnGroupSpawnColor = color(255, 255, 255)
+  private Func1<SpawnContext, int> m_goldDropAmount
+  private int m_tierCount = MAX_ELITE_TIER
+
+  // --------------------------------------------------------------------------
+  construct(string id)
+    m_id = id
+    m_tags = new Vector<string>()
+
+  // --------------------------------------------------------------------------
+  ondestroy
+
+    if (m_unitTypeProvider != null)
+      destroy m_unitTypeProvider
+      m_unitTypeProvider = null
+
+    if (m_maxSpawnCount != null)
+      m_maxSpawnCount.release()
+      m_maxSpawnCount = null
+
+    if (m_groupSize != null)
+      m_groupSize.release()
+      m_groupSize = null
+
+    if (m_goldDropAmount != null)
+      m_goldDropAmount.release()
+      m_goldDropAmount = null
+
+    if (m_commonUnitModifier != null)
+      m_commonUnitModifier.release()
+      m_commonUnitModifier = null
+
+    if (m_unitModifiers != null)
+      for unitTypeId in m_unitModifiers
+        m_unitModifiers.get(unitTypeId).release()
+      destroy m_unitModifiers
+      m_unitModifiers = null
+
+    if (m_goldReward != null)
+      m_goldReward.release()
+      m_goldReward = null
+
+    destroy m_tags
+    m_tags = null
+
+  // --------------------------------------------------------------------------
+  function getId() returns string
+    return m_id
+
+  // --------------------------------------------------------------------------
+  function getTierCount() returns int
+    return m_tierCount
+  
+  // --------------------------------------------------------------------------
+  function setTierCount(int value)
+    m_tierCount = value
+
+  // --------------------------------------------------------------------------
+  function setSpawnRange(SpawnRange spawnRange)
+    m_spawnRange = spawnRange
+
+  // --------------------------------------------------------------------------
+  function getSpawnRange() returns SpawnRange
+    return m_spawnRange
+
+  // --------------------------------------------------------------------------
+  function setUnitTypeProvider(ITieredUnitTypeProvider unitTypeProvider)
+    m_unitTypeProvider = unitTypeProvider
+
+  // --------------------------------------------------------------------------
+  function getUnitTypeProvider() returns ITieredUnitTypeProvider
+    return m_unitTypeProvider
+
+  // --------------------------------------------------------------------------
+  function setMaxSpawnCount(Func1<SpawnContext, int> value)
+    value.acquire()
+    if (m_maxSpawnCount != null)
+      m_maxSpawnCount.release()
+    m_maxSpawnCount = value
+
+  // --------------------------------------------------------------------------
+  function getMaxSpawnCount(SpawnContext context) returns int
+    if (m_maxSpawnCount == null)
+      return 1
+    return clamp(m_maxSpawnCount.call(context), 1, UNLIMITED)
+
+  // --------------------------------------------------------------------------
+  function getGroupSize(SpawnContext context) returns int
+    if (m_groupSize == null)
+      return 1
+    return min(m_groupSize.call(context), getMaxSpawnCount(context))
+
+  // --------------------------------------------------------------------------
+  function setGroupSize(Func1<SpawnContext, int> value)
+    value.acquire()
+    if (m_groupSize != null)
+      m_groupSize.release()
+    m_groupSize = value
+
+  // --------------------------------------------------------------------------
+  function setGoldDropAmount(Func1<SpawnContext, int> value)
+    value.acquire()
+    if (m_goldDropAmount != null)
+      m_goldDropAmount.release()
+    m_goldDropAmount = value
+
+  // --------------------------------------------------------------------------
+  function getGoldDropAmount(SpawnContext context) returns int
+    if (m_goldDropAmount == null)
+      return 0
+    return max(m_goldDropAmount.call(context), 0)
+
+  // --------------------------------------------------------------------------
+  function setCommonUnitModifier(Action2<unit, SpawnContext> action)
+    action.acquire()
+    if (m_commonUnitModifier != null)
+      m_commonUnitModifier.release()
+    m_commonUnitModifier = action
+
+  // --------------------------------------------------------------------------
+  function getCommonUnitModifier() returns Action2<unit, SpawnContext>
+    return m_commonUnitModifier
+
+  // --------------------------------------------------------------------------
+  function setUnitModifier(int unitTypeId, Action2<unit, SpawnContext> action)
+    action.acquire()
+    if (m_unitModifiers == null)
+      m_unitModifiers = new IterableMap<int, Action2<unit, SpawnContext>>()
+    let existing = m_unitModifiers.get(unitTypeId)
+    if (existing != null)
+      existing.release()
+    m_unitModifiers.put(unitTypeId, action)
+
+  // --------------------------------------------------------------------------
+  function getUnitModifier(int unitTypeId) returns Action2<unit, SpawnContext>
+    if (m_unitModifiers == null)
+      return null
+    return m_unitModifiers.get(unitTypeId)
+
+  // --------------------------------------------------------------------------
+  function setTags(vararg string tags)
+    m_tags.clear()
+    for tag in tags
+      m_tags.add(tag)
+
+  // --------------------------------------------------------------------------
+  function getTags() returns Vector<string>
+    return m_tags
+
+  // --------------------------------------------------------------------------
+  function getWaitForFullSpawnGroup() returns bool
+    return m_waitForFullSpawnGroup
+
+  // --------------------------------------------------------------------------
+  function setWaitForFullSpawnGroup(bool value)
+    m_waitForFullSpawnGroup = value
+
+  // --------------------------------------------------------------------------
+  function getUseUnitRecycler() returns bool
+    return m_useUnitRecycler
+
+  // --------------------------------------------------------------------------
+  function setUseUnitRecycler(bool value)
+    m_useUnitRecycler = value
+
+  // --------------------------------------------------------------------------
+  function getGoldReward(SpawnContext context) returns int
+    return m_goldReward != null ? m_goldReward.call(context) : 0
+
+  // --------------------------------------------------------------------------
+  function setGoldReward(Func1<SpawnContext, int> value)
+    value.acquire()
+    if (m_goldReward != null)
+      m_goldReward.release()
+    m_goldReward = value
+
+  // --------------------------------------------------------------------------
+  function getFacingAngleRange() returns rangeReal
+    return m_facingAngleRange
+
+  // --------------------------------------------------------------------------
+  function setFacingAngleRange(rangeReal range)
+    m_facingAngleRange = range
+  
+  // --------------------------------------------------------------------------
+  function getSpawnPointProviderType() returns SpawnPointProviderType
+    return m_spawnPointProviderType
+  
+  // --------------------------------------------------------------------------
+  function setSpawnPointProviderType(SpawnPointProviderType value)
+    m_spawnPointProviderType = value
+
+  // --------------------------------------------------------------------------
+  function playSoundOnGroupSpawn(SoundDefinition definition)
+    m_playSoundOnGroupSpawn = definition
+
+  // --------------------------------------------------------------------------
+  function getPlaySoundOnGroupSpawn() returns SoundDefinition
+    return m_playSoundOnGroupSpawn
+
+  // --------------------------------------------------------------------------
+  function showMinimapIcon(string iconPath, color color)
+    m_minimapIconPath = iconPath
+    m_minimapIconColor = color
+
+  // --------------------------------------------------------------------------
+  function getMinimapIconPath() returns string
+    return m_minimapIconPath
+
+  // --------------------------------------------------------------------------
+  function getMinimapIconColor() returns color
+    return m_minimapIconColor
+  
+  // --------------------------------------------------------------------------
+  function pingOnGroupSpawn(color color)
+    m_pingOnGroupSpawn = true
+    m_pingOnGroupSpawnColor = color
+  
+  // --------------------------------------------------------------------------
+  function getPingOnGroupSpawn() returns bool
+    return m_pingOnGroupSpawn
+  
+  // --------------------------------------------------------------------------
+  function getPingOnGroupSpawnColor() returns color
+    return m_pingOnGroupSpawnColor
+
+// ============================================================================
+public function SpawnDefinition.setupForBoss()
+  this..showMinimapIcon(MINIMAP_ICON_PATH_BOSS, MINIMAP_ICON_COLOR_BOSS)
+      ..pingOnGroupSpawn(MINIMAP_ICON_COLOR_BOSS)
+      // ..setTechIdToAdvance(TlsUpgradeIds.bossesKilled)
+
+// ============================================================================
+public class SpawnCard extends Card
+  private SpawnDefinition m_spawnDefinition
+
+  // --------------------------------------------------------------------------
+  construct(SpawnDefinition spawnDefinition)
+    super(spawnDefinition.getId())
+    m_spawnDefinition = spawnDefinition
+
+  // --------------------------------------------------------------------------
+  function getSpawnDefinition() returns SpawnDefinition
+    return m_spawnDefinition
+  
+  // --------------------------------------------------------------------------
+  function setSpawnDefinition(SpawnDefinition value)
+    m_spawnDefinition = value
+
+// ============================================================================
+public class SpawnUndeadUnitDirector extends ContinuousDirector
+  private player m_targetPlayer
+  private real m_playerDifficulty
+  private int m_spawnsPerGoldDropCounter
+  private int m_goldAvailable
+  private int m_goldDrops
+  private SpawnContext m_context
+
+  private Func1<SpawnContext, int> m_maxSpawnCount
+  private Func1<SpawnContext, int> m_maxAliveCount
+  private Func1<SpawnContext, int> m_goldDropAmount
+  private Func1<SpawnContext, int> m_spawnsPerGoldDrop
+
+  // --------------------------------------------------------------------------
+  construct(string id, player targetPlayer)
+    super(id)
+    m_targetPlayer = targetPlayer  
+    m_context = new SpawnContext().acquire()
+
+  // --------------------------------------------------------------------------
+  ondestroy
+
+    if (m_maxSpawnCount != null)
+      m_maxSpawnCount.release()
+      m_maxSpawnCount = null
+
+    if (m_maxAliveCount != null)
+      m_maxAliveCount.release()
+      m_maxAliveCount = null
+
+    if (m_goldDropAmount != null)
+      m_goldDropAmount.release()
+      m_goldDropAmount = null
+
+    if (m_spawnsPerGoldDrop != null)
+      m_spawnsPerGoldDrop.release()
+      m_spawnsPerGoldDrop = null
+
+    if (m_context != null)
+      m_context.release()
+      m_context = null
+
+  // --------------------------------------------------------------------------
+  function getGoldDropAmount() returns int
+    return m_goldDropAmount != null ? m_goldDropAmount.call(m_context) : 0
+
+  // --------------------------------------------------------------------------
+  function setGoldDropAmount(Func1<SpawnContext, int> value)
+    value.acquire()
+    if (m_goldDropAmount != null)
+      m_goldDropAmount.release()
+    m_goldDropAmount = value
+
+  // --------------------------------------------------------------------------
+  function getSpawnsPerGoldDrop() returns int
+    return m_spawnsPerGoldDrop != null ? m_spawnsPerGoldDrop.call(m_context) : 0
+  
+  // --------------------------------------------------------------------------
+  function setSpawnsPerGoldDrop(Func1<SpawnContext, int> value)
+    value.acquire()
+    if (m_spawnsPerGoldDrop != null)
+      m_spawnsPerGoldDrop.release()
+    m_spawnsPerGoldDrop = value
+
+  // --------------------------------------------------------------------------
+  function getMaxSpawnCount() returns int
+    return m_maxSpawnCount != null ? m_maxSpawnCount.call(m_context) : UNLIMITED
+  
+  // --------------------------------------------------------------------------
+  function setMaxSpawnCount(Func1<SpawnContext, int> value)
+    value.acquire()
+    if (m_maxSpawnCount != null)
+      m_maxSpawnCount.release()
+    m_maxSpawnCount = value
+
+  // --------------------------------------------------------------------------
+  function getMaxAliveCount() returns int
+    return m_maxAliveCount != null ? m_maxAliveCount.call(m_context) : UNLIMITED
+  
+  // --------------------------------------------------------------------------
+  function setMaxAliveCount(Func1<SpawnContext, int> value)
+    value.acquire()
+    if (m_maxAliveCount != null)
+      m_maxAliveCount.release()
+    m_maxAliveCount = value 
+
+  // --------------------------------------------------------------------------
+  override protected function onEnabled()
+    super.onEnabled()
+
+    m_goldAvailable = 0
+    m_spawnsPerGoldDropCounter = 0 
+
+  // --------------------------------------------------------------------------
+  override protected function getDifficultyCoefficient() returns real
+    let difficultyValue = m_playerDifficulty
+    let playerCount = 1
+    let playerFactor = 1
+    let timeFactor = 0.0506 * difficultyValue * Pow(playerCount.toReal(), 0.2)
+    let stageFactor = Pow(1.15, g_GameInstance.getNightsSurvived().toReal())
+    return (playerFactor + getRealTimeMinutes() * timeFactor) * stageFactor
+
+  // --------------------------------------------------------------------------
+  override function canDrawCard() returns bool
+    return getAdmin().getOwnedUnits().size() < getMaxAliveCount()
+
+  // --------------------------------------------------------------------------
+  override function drawCard() returns drawnCard
+
+    // update the spawn context
+    m_playerDifficulty = m_targetPlayer.getHumanPlayerComponentRequired().getDifficulty()
+    m_context.setDifficultyCoeff(getDifficultyCoefficient())
+
+    let deck = getDeck()
+    if (deck == null)
+      return INVALID_CARD
+
+    let selectedCard = deck.drawCard() castTo SpawnCard
+    if (selectedCard == null)
+      return INVALID_CARD
+
+    var selectedTier = 0
+    var selectedCost = 0
+    var foundValidTier = false
+
+    let credits = getCredits()
+    let baseCost = selectedCard.getCost()
+    let _tierCount = selectedCard.getSpawnDefinition().getTierCount()
+
+    for tier = (_tierCount - 1) downto 0
+    //{
+      let tierCost = TIER_VALUE_MULTIPLIER[tier] * baseCost
+      if (credits > tierCost)
+        selectedTier = tier
+        selectedCost = tierCost
+        foundValidTier = true
+        break
+    //}
+
+    if (not foundValidTier)
+      return INVALID_CARD
+
+    return drawnCard(selectedCard, selectedTier, selectedCost)
+
+  // --------------------------------------------------------------------------
+  override function activateCard(drawnCard card) returns bool
+
+    let targetProvider = getUndeadTargetProviderForPlayer(m_targetPlayer)
+    if (targetProvider == null)
+      return false
+
+    let spawnCard = card.card castTo SpawnCard
+    let spawnDef = spawnCard.getSpawnDefinition()
+
+    m_context.setTier(card.tier)
+
+    let context = m_context.clone()
+
+    let config = new SpawnUndeadUnitJobConfig()
+    ..setTierSelector(context -> card.tier)
+    ..setTierSelectionMode(TierSelectionMode.Group)
+    ..setUnitTypeProvider(spawnDef.getUnitTypeProvider())
+    ..setSpawnPointProvider(getSpawnPointProvider(m_targetPlayer, spawnDef.getSpawnPointProviderType()))
+    ..setTargetProvider(targetProvider)
+    ..setGroupSize(spawnDef.getGroupSize(context))
+    ..setMaxSpawnCount(spawnDef.getMaxSpawnCount(context))
+    ..setMaxAliveCount(UNLIMITED)
+    ..setSpawnRange(spawnDef.getSpawnRange().toRangeReal())
+    ..setWaitForFullGroup(spawnDef.getWaitForFullSpawnGroup())
+    ..setPrepareUnitFunc((job, spawnedUnit) -> prepareUnit(context, spawnDef, spawnedUnit))
+    ..setUseRecycler(spawnDef.getUseUnitRecycler())
+
+    let spawnJob = new SpawnUndeadUnitJob(spawnDef.getId(), PLAYER_UNDEAD, m_targetPlayer, config)
+    ..setCancellationToken(getCancellationToken())
+    ..setContext(context)
+
+    spawnJob.onUnitSpawned().register() (SpawnUndeadUnitJob job, unit spawnedUnit) ->
+      onUnitSpawned(spawnedUnit)
+
+    spawnJob.onGroupSpawned().register() (SpawnUndeadUnitJob job, group spawnedUnits) ->
+      onGroupSpawned(context, spawnDef, spawnedUnits)
+
+    getWorkerThread().enqueue(spawnJob)
+
+    return true
+
+  // --------------------------------------------------------------------------
+  private function prepareUnit(SpawnContext context, SpawnDefinition spawnDef, unit spawnedUnit) returns bool
+
+    let unitMetadata = spawnedUnit.getMetadata()
+    if (unitMetadata == null)
+      Log.error("[SpawnWave.setTargetPlayer] : Unit has no metadata! : {0} ({1} : {2})".format(
+        spawnedUnit.getName(),
+        spawnedUnit.getTypeId().toString(),
+        UnitId2StringBJ(spawnedUnit.getTypeId())))
+      return false
+
+    let commonUnitModifier = spawnDef.getCommonUnitModifier()
+    if (commonUnitModifier != null)
+      commonUnitModifier.call(spawnedUnit, context)
+
+    let unitModifier = spawnDef.getUnitModifier(spawnedUnit.getTypeId())
+    if (unitModifier != null)
+      unitModifier.call(spawnedUnit, context)
+
+    return true
+
+  // --------------------------------------------------------------------------
+  private function onUnitSpawned(unit spawnedUnit)
+
+    getAdmin().registerOwnedUnit(spawnedUnit)
+
+    spawnedUnit.removeAbility(g_goldCarrierBuff.abilId)
+    spawnedUnit.removeAbility(g_goldCarrierBuff.buffId)
+
+    m_spawnsPerGoldDropCounter++
+    let spawnsPerGoldDrop = getSpawnsPerGoldDrop()
+    if (spawnsPerGoldDrop != 0 and m_spawnsPerGoldDropCounter >= spawnsPerGoldDrop)
+      m_spawnsPerGoldDropCounter -= spawnsPerGoldDrop
+      m_goldDrops++
+      makeSpawnedUnitDropGold(spawnedUnit)
+
+  // --------------------------------------------------------------------------
+  private function onGroupSpawned(SpawnContext context, SpawnDefinition spawnDef, group spawnedUnits)
+
+    let firstUnit = spawnedUnits.getFirst()
+    if (firstUnit == null)
+      return
+
+    let targetUnit = context.getTargetUnit()
+    let targetPlayer = targetUnit.getOwner()
+
+    for spawnedUnit in spawnedUnits
+    //{
+      let unitMetadata = spawnedUnit.getMetadata()
+
+      let utc = unitMetadata.getUndeadTargetingComponent()
+      if (utc != null)
+        utc.setTargetUnit(targetUnit)
+
+      let unitDef = getUnitDefinition(spawnedUnit.getTypeId())
+      if (unitDef != null)
+        spawnedUnit.fadeIn(unitDef.getVertexColor())
+      else
+        spawnedUnit.fadeIn()
+
+      if (spawnDef.getMinimapIconPath() != null)
+        spawnedUnit.getOrAddMinimapIconComponent()
+        ..update(spawnDef.getMinimapIconPath(), spawnDef.getMinimapIconColor())
+        ..showOnlyFor(targetPlayer)
+    //}
+
+    if (localPlayer == targetPlayer and spawnDef.getPingOnGroupSpawn())
+      let color = spawnDef.getPingOnGroupSpawnColor()
+      PingMinimapEx(firstUnit.getX(), firstUnit.getY(), 3.0, color.red, color.green, color.blue, true)
+
+    let playSoundOnGroupSpawn = spawnDef.getPlaySoundOnGroupSpawn()
+    if (playSoundOnGroupSpawn != null)
+      playSoundOnGroupSpawn.playForPlayer(targetPlayer)
+
+  // --------------------------------------------------------------------------
+  private function makeSpawnedUnitDropGold(unit spawnedUnit)
+    var goldDropAmount = getGoldDropAmount()
+    if (goldDropAmount == 0)
+      return
+    spawnedUnit.addAbility(g_goldCarrierBuff.abilId)
+    goldDropAmount = min(goldDropAmount, 50) // 5 10g coins max
+    while (goldDropAmount > 0)
+      let coinTypeId = getCoinItemTypeFromGoldReward(goldDropAmount)
+      spawnedUnit.awardItemOnDeath(g_coinItemSet, coinTypeId, 1.0)
+      let coinValue = getGoldRewardFromCoinItemType(coinTypeId)
+      goldDropAmount -= coinValue
+      m_goldAvailable += coinValue
+
+  // --------------------------------------------------------------------------
+  override function writeDebugString(Action1<string> output)
+
+    output.acquire()
+
+    super.writeDebugString(output)
+
+    output.call("Player Diff: " + m_playerDifficulty.toString())
+    output.call("Diff Coeff: " + m_context.getDifficultyCoeff().toString())
+    output.call("Last Tier: " + m_context.getTier().toString())
+
+
+    output.call("Normal Stats: lvl:{0} hp:{1} armor:{2} dmg:{3}".format(
+      g_zombieMeleeModifiers.getLevel(m_context, 1.0).toString(),
+      g_zombieMeleeModifiers.getHealth(m_context, 1.0).toString(),
+      g_zombieMeleeModifiers.getArmor(m_context, 1.0).toString(),
+      g_zombieMeleeModifiers.getAttack1DamageRange(m_context, 1.0).toString()
+    ))
+
+    output.call("Elite Stats: lvl:{0} hp:{1} armor:{2} dmg:{3}".format(
+      g_eliteMeleeModifiers.getLevel(m_context, 1.0).toString(),
+      g_eliteMeleeModifiers.getHealth(m_context, 1.0).toString(),
+      g_eliteMeleeModifiers.getArmor(m_context, 1.0).toString(),
+      g_eliteMeleeModifiers.getAttack1DamageRange(m_context, 1.0).toString()
+    ))
+
+    output.call("Elite HP: {0}*{1}*{2}={3}".format(
+      g_eliteMeleeModifiers.baseHealth.toString(),
+      m_context.getDifficultyCoeff().toString(),
+      TIER_HEALTH_MULTIPLIER[m_context.getTier()].toString(),
+      g_eliteMeleeModifiers.getHealth(m_context, 1.0).toString()
+    ))
+    
+    output.call("Gold: d:{0} a:{1} c:{2}/{3}".format(
+      m_goldDrops.toString(),
+      m_goldAvailable.toString(),
+      m_spawnsPerGoldDropCounter.toString(),
+      getSpawnsPerGoldDrop().toString()))
+    
+    output.release()
