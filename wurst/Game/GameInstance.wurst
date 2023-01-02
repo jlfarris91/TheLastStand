@@ -33,8 +33,7 @@ public GameInstance g_GameInstance = new GameInstance()
 public class GameInstance
   private bool m_gracePeriod
   private bool m_updateGracePeriod
-  private int m_day
-  private int m_night
+  private int m_day = 0
   private real m_averagePlayerDifficulty = 1.0
   private PlayerWavesMap m_playerWaves
   private IDayWaveGenerator m_staticDayWaveGenerator
@@ -57,50 +56,32 @@ public class GameInstance
     return makeTime(m_day + (tod < TIME_OF_DAY ? 1 : 0), tod)
 
   // --------------------------------------------------------------------------
-  function getDayInt() returns int
-    return m_day
-
-  // --------------------------------------------------------------------------
-  function getDay() returns real
-    var days = m_day.toReal()
-    if (isDay())
-      let thisMorning = makeTime(m_day, TIME_OF_DAY)
-      let tonight = makeTime(m_day, TIME_OF_NIGHT)
-      days += now().parameterize(thisMorning, tonight)
-    return days
-
-  // --------------------------------------------------------------------------
-  function getNightInt() returns int
-    return m_night
-
-  // --------------------------------------------------------------------------
-  function getNight() returns real
-    var nights = m_night.toReal()
-    if (isNight())
-      let lastNight = makeTime(m_day, TIME_OF_NIGHT)
-      let tomorrowMorning = makeTime(m_day + 1, TIME_OF_DAY)
-      nights += now().parameterize(lastNight, tomorrowMorning)
-    return nights
-
-  // --------------------------------------------------------------------------
-  function getDaysSurvivedInt() returns int
-    return max(m_day - 1, 0)
+  function getDay() returns int
+    return max(m_day, 0)
 
   // --------------------------------------------------------------------------
   function getDaysSurvived() returns real
-    return min(getDay(), getDaysSurvivedInt().toReal())
+    var days = m_day - 1.0
+    let thisMorning = makeTime(m_day, TIME_OF_DAY)
+    let tonight = makeTime(m_day, TIME_OF_NIGHT)
+    days += clamp01(now().parameterize(thisMorning, tonight))
+    return days
 
   // --------------------------------------------------------------------------
-  function getNightsSurvivedInt() returns int
-    return max(m_night - 1, 0)
+  function getNight() returns int
+    return getDay()
 
   // --------------------------------------------------------------------------
   function getNightsSurvived() returns real
-    return min(getNight(), getNightsSurvivedInt().toReal())
+    var nights = m_day - 1.0
+    let lastNight = makeTime(m_day, TIME_OF_NIGHT)
+    let tomorrowMorning = makeTime(m_day + 1, TIME_OF_DAY)
+    nights += clamp01(now().parameterize(lastNight, tomorrowMorning))
+    return nights
 
   // --------------------------------------------------------------------------
   function getBossesSurvived() returns int
-    return (getDayInt() / 5).floor()
+    return (getDay() / 5).floor()
 
   // --------------------------------------------------------------------------
   function isGracePeriodActive() returns bool
@@ -150,10 +131,14 @@ public class GameInstance
     return getGeneralDifficultyCoeff(playerDifficulty, 1)
 
   // --------------------------------------------------------------------------
+  function getGameProgressCoeff() returns real
+    return (getDaysSurvived() * 0.5 + getNightsSurvived()) * 0.5
+
+  // --------------------------------------------------------------------------
   function getGeneralDifficultyCoeff(real difficulty, int playerCount) returns real
-    let gameProgress = g_GameInstance.getNightsSurvived()
+    let gameProgress = getGameProgressCoeff()
     let playerFactor = 1 + parameterize(1, MAX_PLAYER_COUNT, playerCount) * 0.5
-    return (playerFactor + gameProgress * difficulty * 0.05) * Pow(1.166, gameProgress)
+    return (playerFactor + gameProgress * difficulty * 0.05) * Pow(1.124, gameProgress)
 
   // --------------------------------------------------------------------------
   private function updatePlayerTierChances()
@@ -183,12 +168,8 @@ public class GameInstance
     return m_playerWaves.getOrCreatePlayerWaves(p)
 
   // --------------------------------------------------------------------------
-  function getGameProgress01() returns real
-    return now().parameterize(m_startTime, m_endTime)
-
-  // --------------------------------------------------------------------------
-  function getGameWaveProgress01() returns real
-    return parameterize(1, TOTAL_NIGHTS, m_night)
+  function getGameProgress() returns real
+    return getDaysSurvived() + getNightsSurvived()
 
   // --------------------------------------------------------------------------
   function getSpawnPedestals() returns bool
@@ -205,19 +186,16 @@ public class GameInstance
   // --------------------------------------------------------------------------
   function skipToDay(int day)
     m_day = day - 1
-    m_night = day - 1
     startNextDay()
 
   // --------------------------------------------------------------------------
   function skipToNight(int night)
     m_day = night
-    m_night = night - 1
     startNextNight()
 
   // --------------------------------------------------------------------------
-  function reset()    
+  function reset()
     m_day = 0
-    m_night = 0
     SetTimeOfDay(TIME_OF_DAY_INITIAL)
     g_GameProperties.setTODScale(TOD_SCALE_INITIAL)
 
@@ -344,7 +322,7 @@ public class GameInstance
     if (m_day == 1)
       showMultiboardsForPlayers()
 
-    g_GameProperties.getProperty(GameProperty.TOD_SCALE).setBase(TOD_DAY_SCALARS[m_day - 1])
+    g_GameProperties.getProperty(GameProperty.TOD_SCALE).setBase(TOD_DAY_SCALARS[m_day])
 
     // Start day waves for players
     // for p in g_PlayingHumanPlayers
@@ -392,11 +370,11 @@ public class GameInstance
       u.remove()
     temp.release()
 
-    m_night++
+    let night = getNight()
 
-    Log.debug("Starting night {0}...".format(m_night.toString()))
+    Log.debug("Starting night {0}...".format(night.toString()))
 
-    g_GameProperties.getProperty(GameProperty.TOD_SCALE).setBase(TOD_NIGHT_SCALARS[m_night - 1])
+    g_GameProperties.getProperty(GameProperty.TOD_SCALE).setBase(TOD_NIGHT_SCALARS[night])
 
     // Start night waves for players
     // for p in g_PlayingHumanPlayers
@@ -404,7 +382,7 @@ public class GameInstance
     //   Log.debug("Starting night wave {0} for player {1}".format(m_night.toString(), p.getName()))
     //   waves.getRunner().startNightWave(m_night)
 
-    Log.debug("Night {0} started.".format(m_night.toString()))
+    Log.debug("Night {0} started.".format(night.toString()))
 
   // --------------------------------------------------------------------------
   private function respawnDeadPlayers()
