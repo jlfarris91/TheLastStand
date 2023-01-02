@@ -3,7 +3,6 @@ import GameSettings
 import GameConstants
 import HumanPlayers
 import HumanPlayerComponent
-import initlater Heroes
 import ClosureTimers
 import BaseUnitsRectProvider
 import Time
@@ -14,19 +13,19 @@ import Bases
 import Execute
 import ErrorHandling
 import PlayerSaveData
-
-import initlater PlayerWaves
-import initlater IWaveGenerator
-import initlater GameStatsMultiboard
-import initlater NightWaveGenerator
-import initlater DayWaveGenerator
 import Math
 import SmartValue
 import GameProperties
 import Dialog
 import GroupUtils
 import TlsUnitIds
-import RealTime
+
+import initlater PlayerWaves
+import initlater IWaveGenerator
+import initlater GameStatsMultiboard
+import initlater NightWaveGenerator
+import initlater DayWaveGenerator
+import initlater Heroes
 
 public GameInstance g_GameInstance = new GameInstance()
 
@@ -36,7 +35,7 @@ public class GameInstance
   private bool m_updateGracePeriod
   private int m_day
   private int m_night
-  private real m_gameDifficulty = 1.0
+  private real m_averagePlayerDifficulty = 1.0
   private PlayerWavesMap m_playerWaves
   private IDayWaveGenerator m_staticDayWaveGenerator
   private IDayWaveGenerator m_randomDayWaveGenerator
@@ -53,24 +52,55 @@ public class GameInstance
     destroy m_weatherPlayer
 
   // --------------------------------------------------------------------------
-  function getDay() returns int
+  function now() returns time
+    let tod = GetTimeOfDay()
+    return makeTime(m_day + (tod < TIME_OF_DAY ? 1 : 0), tod)
+
+  // --------------------------------------------------------------------------
+  function getDayInt() returns int
     return m_day
 
   // --------------------------------------------------------------------------
-  function getNight() returns int
+  function getDay() returns real
+    var days = m_day.toReal()
+    if (isDay())
+      let thisMorning = makeTime(m_day, TIME_OF_DAY)
+      let tonight = makeTime(m_day, TIME_OF_NIGHT)
+      days += now().parameterize(thisMorning, tonight)
+    return days
+
+  // --------------------------------------------------------------------------
+  function getNightInt() returns int
     return m_night
 
   // --------------------------------------------------------------------------
-  function getDaysSurvived() returns int
+  function getNight() returns real
+    var nights = m_night.toReal()
+    if (isNight())
+      let lastNight = makeTime(m_day, TIME_OF_NIGHT)
+      let tomorrowMorning = makeTime(m_day + 1, TIME_OF_DAY)
+      nights += now().parameterize(lastNight, tomorrowMorning)
+    return nights
+
+  // --------------------------------------------------------------------------
+  function getDaysSurvivedInt() returns int
+    return max(m_day - 1, 0)
+
+  // --------------------------------------------------------------------------
+  function getDaysSurvived() returns real
+    return min(getDay(), getDaysSurvivedInt().toReal())
+
+  // --------------------------------------------------------------------------
+  function getNightsSurvivedInt() returns int
     return max(m_night - 1, 0)
 
   // --------------------------------------------------------------------------
-  function getBossesSurvived() returns int
-    return (getDay() / 5).floor()
+  function getNightsSurvived() returns real
+    return min(getNight(), getNightsSurvivedInt().toReal())
 
   // --------------------------------------------------------------------------
-  function getNightsSurvived() returns int
-    return max(m_day - 1, 0)
+  function getBossesSurvived() returns int
+    return (getDayInt() / 5).floor()
 
   // --------------------------------------------------------------------------
   function isGracePeriodActive() returns bool
@@ -85,20 +115,11 @@ public class GameInstance
     m_updateGracePeriod = value
 
   // --------------------------------------------------------------------------
-  function getGameDifficulty01() returns real
-    return m_gameDifficulty
+  function getWorldDifficulty() returns real
+    return m_averagePlayerDifficulty
 
   // --------------------------------------------------------------------------
-  function getGameDifficultyCoeff() returns real
-    let difficultyValue = getGameDifficulty01()
-    let playerCount = g_PlayingHumanPlayerCount
-    let playerFactor = 1 + 0.3 * (playerCount - 1)
-    let timeFactor = 0.0506 * difficultyValue * Pow(playerCount.toReal(), 0.2)
-    let stageFactor = Pow(1.15, g_GameInstance.getNightsSurvived().toReal())
-    return (playerFactor + getRealTimeMinutes() * timeFactor) * stageFactor
-
-  // --------------------------------------------------------------------------
-  function updateGameDifficulty()
+  function updateWorldDifficulty()
     int alivePlayerCount = 0
     real totalDifficulty = 0.0
     
@@ -111,9 +132,28 @@ public class GameInstance
         totalDifficulty += playerComp.getDifficulty()
     //}
 
-    m_gameDifficulty = alivePlayerCount != 0 ? totalDifficulty / alivePlayerCount : 1.0
+    m_averagePlayerDifficulty = alivePlayerCount != 0 ? totalDifficulty / alivePlayerCount : 1.0
 
     updatePlayerTierChances()
+
+  // --------------------------------------------------------------------------
+  function getWorldDifficultyCoeff() returns real
+    return getGeneralDifficultyCoeff(getWorldDifficulty(), g_PlayingHumanPlayerCount)
+
+  // --------------------------------------------------------------------------
+  function getPlayerDifficultyCoeff(player p) returns real
+    let playerDifficulty = p.getHumanPlayerComponentRequired().getDifficulty()
+    return getPlayerDifficultyCoeff(playerDifficulty)
+
+  // --------------------------------------------------------------------------
+  function getPlayerDifficultyCoeff(real playerDifficulty) returns real
+    return getGeneralDifficultyCoeff(playerDifficulty, 1)
+
+  // --------------------------------------------------------------------------
+  function getGeneralDifficultyCoeff(real difficulty, int playerCount) returns real
+    let gameProgress = g_GameInstance.getNightsSurvived()
+    let playerFactor = 1 + parameterize(1, MAX_PLAYER_COUNT, playerCount) * 0.5
+    return (playerFactor + gameProgress * difficulty * 0.05) * Pow(1.166, gameProgress)
 
   // --------------------------------------------------------------------------
   private function updatePlayerTierChances()
@@ -144,7 +184,7 @@ public class GameInstance
 
   // --------------------------------------------------------------------------
   function getGameProgress01() returns real
-    return getGameTime().parameterize(m_startTime, m_endTime)
+    return now().parameterize(m_startTime, m_endTime)
 
   // --------------------------------------------------------------------------
   function getGameWaveProgress01() returns real
@@ -212,7 +252,7 @@ public class GameInstance
 
     m_weatherPlayer.start()
 
-    updateGameDifficulty()
+    updateWorldDifficulty()
 
     initializeGeneral()
     initializeAlliances()
