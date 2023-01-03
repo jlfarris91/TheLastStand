@@ -8,79 +8,111 @@ import Time
 import Deck
 import SpawnCards
 import SpawnUndeadUnitDirector
+import Vector
+import GameConstants
+import HumanPlayers
+import GameInstance
 
-SpawnUndeadUnitDirector g_nightZombieDirector
-SpawnUndeadUnitDirector g_nightEliteDirector
+SpawnUndeadUnitDirector array g_zombieDirectors
+SpawnUndeadUnitDirector array g_eliteDirectors
+
+Vector<SpawnCard> g_normalCards = new Vector<SpawnCard>(16)
+Vector<SpawnCard> g_eliteCards = new Vector<SpawnCard>(16)
+
+Deck g_zombieDeck
+Vector<Deck> g_eliteDecks = new Vector<Deck>(TOTAL_NIGHTS)
 
 // ============================================================================
 function onNightStart()
-  g_nightZombieDirector.enable()
-  g_nightEliteDirector.enable()
+
+  for p in g_PlayingHumanPlayers
+  //{
+    let night = g_GameInstance.getNight()
+    let diff = g_GameInstance.getPlayerDifficultyCoeff(p)
+    let creditsOnActivation = 25 + ((night / 5).floor() + 1) * 25.0 * diff
+
+    g_zombieDirectors[p.getId()]
+    ..setCreditsOnActivation(creditsOnActivation)
+    ..enable()
+
+    if (night > 1)
+      g_eliteDirectors[p.getId()]
+      ..setDeck(g_eliteDecks.get(night - 2))
+      ..setCreditsOnActivation(creditsOnActivation)
+      ..enable()
+  //}
+
 
 // ============================================================================
 function onDayStart()
-  g_nightZombieDirector.disable()
-  g_nightEliteDirector.disable()
+
+  for p in g_PlayingHumanPlayers
+  //{
+    g_zombieDirectors[p.getId()].disable()
+    g_eliteDirectors[p.getId()].disable()
+  //}
 
 // ============================================================================
 init
 
-  nullTimer() () ->
-    g_nightZombieDirector = new SpawnUndeadUnitDirector("0:Zombies", players[0])
-    g_nightZombieDirector.setCreditsOnActivation(50)
-    g_nightZombieDirector.setIntervalBetweenWaves(rangeReal(3.0, 10.0))
-    g_nightZombieDirector.setIntervalDuringWaves(rangeReal(0.1, 1.0))
-    g_nightZombieDirector.setSpawnsPerGoldDrop(context -> 20)
-    g_nightZombieDirector.setGoldDropAmount(context -> 1)
-    g_nightZombieDirector.setMaxSpawnCount(context -> UNLIMITED)
-    g_nightZombieDirector.setMaxAliveCount(context -> 10)
-    g_nightZombieDirector.setDeck(createNightDirectorZombieDeck())
+  // Normal cards
+  g_normalCards.add(SpawnCards.zombies)
 
-    g_nightEliteDirector = new SpawnUndeadUnitDirector("0:Elites", players[0])
-    g_nightEliteDirector.setCreditsOnActivation(50)
-    g_nightEliteDirector.setIntervalBetweenWaves(rangeReal(3.0, 10.0))
-    g_nightEliteDirector.setIntervalDuringWaves(rangeReal(0.1, 1.0))
-    g_nightEliteDirector.setSpawnsPerGoldDrop(context -> calculateSpawnsPerGoldDropForElites(context))
-    g_nightEliteDirector.setGoldDropAmount(context -> calculateGoldDropAmountForElites(context))
-    g_nightEliteDirector.setMaxSpawnCount(context -> calculateMaxSpawnCountForElites(context))
-    g_nightEliteDirector.setMaxAliveCount(context -> calculateMaxAliveCountForElites(context))
-    g_nightEliteDirector.setDeck(createNightDirectorEliteDeck())
+  // Elite cards
+  g_eliteCards.add(SpawnCards.skeletonArchers)
+  g_eliteCards.add(SpawnCards.necromancers)
+  g_eliteCards.add(SpawnCards.crows)
+  g_eliteCards.add(SpawnCards.abominations)
+  g_eliteCards.add(SpawnCards.cultists)
+  g_eliteCards.add(SpawnCards.orcSkeletons)
+  g_eliteCards.add(SpawnCards.tombstones)
+  g_eliteCards.add(SpawnCards.gargoyles)
+  g_eliteCards.add(SpawnCards.cryptFiends)
+  g_eliteCards.add(SpawnCards.ghosts)
+  g_eliteCards.add(SpawnCards.meatWagons)
+  g_eliteCards.add(SpawnCards.raiders)
+  g_eliteCards.add(SpawnCards.wyrms)
+  g_eliteCards.add(SpawnCards.forgottenOne)
+  g_eliteCards.add(SpawnCards.archimonde)
+
+  for i = 0 to TOTAL_NIGHTS - 2
+  //{
+    let deck = new Deck()
+    let elites = deck.addCategory("Elites", 1.0)
+    elites.addCard(g_eliteCards.get(i), 1.0)
+    g_eliteDecks.add(deck)
+  //}
+
+  g_zombieDeck = new Deck()
+  let zombies = g_zombieDeck.addCategory("Zombies", 1.0)
+  zombies.addCard(SpawnCards.zombies, 1.0)
+
+  nullTimer() () ->
+
+    for p in g_PlayingHumanPlayers
+    //{
+      let zombieDirector = new SpawnUndeadUnitDirector(p.getId().toString() + ":Zombies", p)
+      zombieDirector.setCreditsOnActivation(50)
+      zombieDirector.setIntervalBetweenWaves(rangeReal(3.0, 10.0))
+      zombieDirector.setIntervalDuringWaves(rangeReal(0.1, 1.0))
+      zombieDirector.setSpawnsPerGoldDrop(context -> 20)
+      zombieDirector.setGoldDropAmount(context -> 1)
+      zombieDirector.setMaxSpawnCount(context -> UNLIMITED)
+      zombieDirector.setMaxAliveCount(context -> 10)
+      zombieDirector.setDeck(g_zombieDeck)
+      g_zombieDirectors[p.getId()] = zombieDirector
+
+      let eliteDirector = new SpawnUndeadUnitDirector(p.getId().toString() + ":Elites", p)
+      eliteDirector.setCreditsOnActivation(50)
+      eliteDirector.setIntervalBetweenWaves(rangeReal(3.0, 10.0))
+      eliteDirector.setIntervalDuringWaves(rangeReal(0.1, 1.0))
+      eliteDirector.setSpawnsPerGoldDrop(context -> calculateSpawnsPerGoldDropForElites(context))
+      eliteDirector.setGoldDropAmount(context -> calculateGoldDropAmountForElites(context))
+      eliteDirector.setMaxSpawnCount(context -> calculateMaxSpawnCountForElites(context))
+      eliteDirector.setMaxAliveCount(context -> calculateMaxAliveCountForElites(context))
+      eliteDirector.setDeck(g_eliteDecks.get(0))
+      g_eliteDirectors[p.getId()] = eliteDirector
+    //}
 
   registerNightEvent(function onNightStart)
   registerDayEvent(function onDayStart)
-
-// ============================================================================
-function createNightDirectorZombieDeck() returns Deck
-
-  let deck = new Deck()
-  let categoryNormals = deck.addCategory("Normals", 9.0)
-
-  categoryNormals.addCard(SpawnCards.zombies, 1.0)
-
-  return deck
-
-// ============================================================================
-function createNightDirectorEliteDeck() returns Deck
-
-  let deck = new Deck()
-
-  // Elites
-  let categoryElites = deck.addCategory("Elites", 3.0)
-  categoryElites.addCard(SpawnCards.skeletonArchers, 1.0)
-  categoryElites.addCard(SpawnCards.crows, 1.0)
-  categoryElites.addCard(SpawnCards.gargoyles, 1.0)
-  categoryElites.addCard(SpawnCards.wyrms, 1.0)
-  categoryElites.addCard(SpawnCards.cultists, 1.0)
-  categoryElites.addCard(SpawnCards.necromancers, 1.0)
-  categoryElites.addCard(SpawnCards.tombstones, 1.0)
-  categoryElites.addCard(SpawnCards.ghosts, 1.0)
-  categoryElites.addCard(SpawnCards.orcSkeletons, 1.0)
-  categoryElites.addCard(SpawnCards.meatWagons, 1.0)
-
-  // Bosses
-  let categoryBosses = deck.addCategory("Bosses", 1.0)
-  categoryBosses.addCard(SpawnCards.abominations, 1.0)
-  categoryBosses.addCard(SpawnCards.cryptFiends, 1.0)
-  categoryBosses.addCard(SpawnCards.forgottenOne, 1.0)
-
-  return deck
