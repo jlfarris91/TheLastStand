@@ -25,6 +25,7 @@ import MinimapIconComponent
 import Coins
 import UnitModifiers
 import WaveGeneratorCommon
+import PlayerSpawnPointProviders
 
 // ============================================================================
 public class SpawnDefinition
@@ -307,6 +308,7 @@ public class SpawnUndeadUnitDirector extends ContinuousDirector
   private Func1<SpawnContext, int> m_maxAliveCount
   private Func1<SpawnContext, int> m_goldDropAmount
   private Func1<SpawnContext, int> m_spawnsPerGoldDrop
+  private Func1<SpawnContext, TargetProvider> m_targetProviderProvider
 
   // --------------------------------------------------------------------------
   construct(string name, player targetPlayer)
@@ -332,6 +334,10 @@ public class SpawnUndeadUnitDirector extends ContinuousDirector
     if (m_spawnsPerGoldDrop != null)
       m_spawnsPerGoldDrop.release()
       m_spawnsPerGoldDrop = null
+
+    if (m_targetProviderProvider != null)
+      m_targetProviderProvider.release()
+      m_targetProviderProvider = null
 
     if (m_context != null)
       m_context.release()
@@ -379,7 +385,18 @@ public class SpawnUndeadUnitDirector extends ContinuousDirector
     value.acquire()
     if (m_maxAliveCount != null)
       m_maxAliveCount.release()
-    m_maxAliveCount = value 
+    m_maxAliveCount = value
+
+  // --------------------------------------------------------------------------
+  function getTargetUnitProvider() returns TargetProvider
+    return m_targetProviderProvider != null ? m_targetProviderProvider.call(m_context) : null
+  
+  // --------------------------------------------------------------------------
+  function setTargetUnitProvider(Func1<SpawnContext, TargetProvider> value)
+    value.acquire()
+    if (m_targetProviderProvider != null)
+      m_targetProviderProvider.release()
+    m_targetProviderProvider = value
 
   // --------------------------------------------------------------------------
   override protected function onEnabled()
@@ -438,9 +455,11 @@ public class SpawnUndeadUnitDirector extends ContinuousDirector
   // --------------------------------------------------------------------------
   override function activateCard(drawnCard card) returns bool
 
-    let targetProvider = getUndeadTargetProviderForPlayer(m_targetPlayer)
+    var targetProvider = getTargetUnitProvider()
     if (targetProvider == null)
-      return false
+      targetProvider = getUndeadTargetProviderForPlayer(m_targetPlayer)
+      if (targetProvider == null)
+        return false
 
     let spawnCard = card.card castTo SpawnCard
     let spawnDef = spawnCard.getSpawnDefinition()

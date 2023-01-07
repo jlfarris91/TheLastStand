@@ -1,44 +1,52 @@
-package LootableSurvivorReward
-import LootableReward
-import GameConstants
-import FX
-import Orders
-import LootableComponent
-import ColorUtility
+package LootSurvivorCard
+import Lootables
 import SurvivorJobs
-import WeightedSet
+import Action
+import LootableComponent
 import Survivors
-import SoundUtils
-import HashMap
-import TlsUnitIds
-import Notifications
+import GameConstants
 import UnitExtensions
+import Orders
+import FX
+import Notifications
+import ColorUtility
+import HashMap
+import WeightedSet
+import SoundUtils
+import TlsUnitIds
+import UnitMetadata
 
-WeightedSet<SurvivorJobType> g_weightedSurvivorJobSet
 HashMap<int, WeightedSet<SoundDefinition>> g_lootFinishedSoundMap
 
 // ============================================================================
-public class LootableSurvivorReward implements ILootableReward
+public class LootSurvivorCard extends LootCard
+  private SurvivorJobType m_jobType
+  private Action1<unit> m_modifier
 
   // --------------------------------------------------------------------------
-  override function getStopsRetrigger() returns bool
-    return true
+  construct(string id, SurvivorJobType jobType, Action1<unit> modifier)
+    super(id)
+    m_jobType = jobType
+    m_modifier = modifier.acquire()
+
+  // ----------------------------------------------------------------------------
+  ondestroy
+    m_modifier.release()
+    m_modifier = null
 
   // --------------------------------------------------------------------------
-  override function giveReward(LootableComponent lootable, unit looter) returns bool
-    spawnSurvivor(lootable, looter)
-    return true
-
-  // --------------------------------------------------------------------------
-  function spawnSurvivor(LootableComponent lootable, unit looter)
+  override function giveReward(unit lootable, unit looter) returns bool
     let owner = looter.getOwner()
-    let spawnPos = lootable.getSpawnPosition()
+    let lootableComp = lootable.getMetadata().getLootableComponent()
+    let spawnPos = lootableComp.getSpawnPosition()
     
-    let survivor = SurvivorUtility.spawnSurvivorWithRandomJob(PLAYER_VILLAGERS, spawnPos, g_weightedSurvivorJobSet)
+    let survivor = SurvivorUtility.spawnSurvivorWithJob(PLAYER_VILLAGERS, spawnPos, m_jobType)
     survivor.fadeIn(color(150, 150, 150))
     survivor.issuePointOrderById(OrderIds.move, looter.getPos())
 
     FX.createFoundSurvivorTag(spawnPos, owner)
+
+    m_modifier.call(survivor)
     
     let job = SurvivorJobs.getJobDefinitionForUnitType(survivor.getTypeId())
 
@@ -47,10 +55,11 @@ public class LootableSurvivorReward implements ILootableReward
       owner,
       looter.getPos(),
       getSoundDefinition(survivor.getTypeId()))
-    ..setMessage("Found " + "{0} {1}".format(job.getTitle(survivor.getTypeId()), survivor.getProperName()).colorize(Colors.gold))
+    ..setMessage("Found " + "{0} {1}".format(job.getTitle(survivor.getTypeId()), survivor.getProperName()).gold())
     ..setIconPath(survivor.getIconPath())
 
-    lootable.showLootRewardNotification(owner, notification)
+    lootableComp.showLootRewardNotification(owner, notification)
+    return true
 
 // ============================================================================
 function registerSoundDefinition(int unitTypeId, string soundPath, int volume, real weight)
@@ -71,14 +80,6 @@ function getSoundDefinition(int unitTypeId) returns SoundDefinition
 
 // ============================================================================
 init
-  
-  g_weightedSurvivorJobSet = new WeightedSet<SurvivorJobType>()
-    ..add(SurvivorJobType.None, 50)
-    ..add(SurvivorJobType.Builder, 5)
-    ..add(SurvivorJobType.Militia, 3)
-    ..add(SurvivorJobType.Spearman, 3)
-    ..add(SurvivorJobType.Priest, 3)
-    ..add(SurvivorJobType.Marksman, 1)
 
   g_lootFinishedSoundMap = new HashMap<int, WeightedSet<SoundDefinition>>()
 

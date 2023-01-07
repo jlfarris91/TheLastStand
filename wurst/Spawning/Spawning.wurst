@@ -1,14 +1,11 @@
 package Spawning
-import public ISpawnPointProvider
-import public SpawnRegion
-import public SpawnRegionInit
-import public SpawnPointCollection
-import public PlayerSpawnPointProviders
-import public RandomSpawnPointProvider
 import BuffObjEditing
 import RefObject
-import GameInstance
 import Action
+import GameConstants
+import Range
+import Bounds
+import ErrorHandling
 
 public bool SPAWNING_ENABLED = true
 
@@ -98,10 +95,6 @@ public class SpawnContext
     return new SpawnContext(this)
 
   // --------------------------------------------------------------------------
-  function getGameProgress01() returns real
-    return g_GameInstance.getGameProgress()
-
-  // --------------------------------------------------------------------------
   function getDifficultyCoeff() returns real
     return m_difficultyCoeff
 
@@ -147,3 +140,130 @@ public interface ISpawnDefinition
   function getCommonUnitModifier() returns Action2<unit, SpawnContext>
   function setUnitModifier(int unitTypeId, Action2<unit, SpawnContext> action)
   function getUnitModifier(int unitTypeId) returns Action2<unit, SpawnContext>
+
+// ============================================================================
+public enum SpawnRange
+  CLOSE
+  MID
+  FAR
+
+// ============================================================================
+public function SpawnRange.toRangeReal() returns rangeReal
+  switch (this)
+    case CLOSE
+      return SPAWN_RANGE_CLOSE
+    case MID
+      return SPAWN_RANGE_MID
+    case FAR
+      return SPAWN_RANGE_FAR
+
+// ============================================================================
+public function SpawnRange.toString() returns string
+  switch (this)
+    case CLOSE
+      return "Close"
+    case MID
+      return "Mid"
+    case FAR
+      return "Far"
+
+constant MAX_SPAWN_POINTS = 32
+
+// ============================================================================
+public class SpawnPointCollection
+  private vec2 array[MAX_SPAWN_POINTS] points
+  private int m_count
+
+  // --------------------------------------------------------------------------
+  construct()
+    m_count = 0
+
+  // --------------------------------------------------------------------------
+  function getCapacity() returns int
+    return MAX_SPAWN_POINTS
+
+  // --------------------------------------------------------------------------
+  function getCount() returns int
+    return m_count
+
+  // --------------------------------------------------------------------------
+  function isEmpty() returns bool
+    return m_count == 0
+
+  // --------------------------------------------------------------------------
+  function clear()
+    m_count = 0
+
+  // --------------------------------------------------------------------------
+  function getPoint(int index) returns vec2
+    if (index >= m_count)
+      error("Argument out of bounds: index")
+    return points[index]
+
+  // --------------------------------------------------------------------------
+  function pushPoint(vec2 point)
+    if (m_count == MAX_SPAWN_POINTS)
+      error("Too many spawn points")
+    points[m_count] = point
+    m_count++
+
+  // --------------------------------------------------------------------------
+  function popPoint() returns vec2
+    let point = peekPoint()
+    m_count--
+    return point
+
+  // --------------------------------------------------------------------------
+  function peekPoint() returns vec2
+    if (m_count == 0)
+      error("Collection is empty")
+    return points[m_count]
+
+  // --------------------------------------------------------------------------
+  function iterator() returns SpawnPointCollectionIterator
+    return new SpawnPointCollectionIterator(this)
+
+// ============================================================================
+public class SpawnPointCollectionIterator
+  private SpawnPointCollection m_collection
+  private int m_index
+
+  // --------------------------------------------------------------------------
+  construct(SpawnPointCollection collection)
+    m_collection = collection
+    m_index = 0
+
+  // --------------------------------------------------------------------------
+  function hasNext() returns bool
+    return m_index < m_collection.getCount()
+
+  // --------------------------------------------------------------------------
+  function next() returns vec2
+    let point = m_collection.getPoint(m_index)
+    m_index++
+    return point
+
+  // --------------------------------------------------------------------------
+  function close()
+    destroy this
+
+// ============================================================================
+public tuple spawnPointResult(bool succeeded, vec2 spawnPoint)
+public tuple spawnPointsResult(bool succeeded, SpawnPointCollection spawnPoints)
+
+// ============================================================================
+public interface ISpawnPointProvider
+  function getRandomSpawnPointInRange(vec2 pos, rangeReal range) returns spawnPointResult
+  function getRandomSpawnPointsInRange(vec2 pos, rangeReal range, int count) returns spawnPointsResult
+  function getRandomSpawnPointInRect(bounds bounds) returns spawnPointResult
+  function getRandomSpawnPointsInRect(bounds bounds, int count) returns spawnPointsResult
+
+// ============================================================================
+public function ISpawnPointProvider.getRandomSpawnPointInPlayableMap() returns spawnPointResult
+  return this.getRandomSpawnPointInRect(bounds(playableMin, playableMax))
+
+// ============================================================================
+public abstract class TargetProvider
+  use RefObject
+  // ----------------------------------------------------------------------------
+  abstract function getTargetUnit(SpawnContext context) returns unit
