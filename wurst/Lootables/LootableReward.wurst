@@ -7,6 +7,13 @@ import ClosureTimers
 import FullscreenFrame
 import ClosureFrames
 import StandardTooltip
+import Deck
+import Directors
+import FX
+import TlsSounds
+import Icons
+import ColorUtility
+import GameInstance
 
 public constant real LOOT_REWARD_NOTIFICATION_DURATION = 15.0
 
@@ -20,6 +27,139 @@ constant string PENDANT_TOOLTIP_EXTENDED = "This loot is a higher rarity thanks 
 public interface ILootableReward
   function giveReward(LootableComponent lootable, unit looter) returns bool
   function getStopsRetrigger() returns bool
+
+// ============================================================================
+public abstract class LootCard extends Card
+
+  // --------------------------------------------------------------------------
+  construct(string id)
+    super(id)
+
+  // --------------------------------------------------------------------------
+  abstract function giveReward(LootableComponent lootable, unit looter) returns bool
+
+// ============================================================================
+public class LumberLootCard extends LootCard
+  private int m_baseAmount
+
+  // --------------------------------------------------------------------------
+  construct(string id)
+    super(id)
+
+  // --------------------------------------------------------------------------
+  function getBaseAmount() returns int
+    return m_baseAmount
+  
+  // --------------------------------------------------------------------------
+  function setBaseAmount(int value)
+    m_baseAmount = value
+
+  // --------------------------------------------------------------------------
+  override function giveReward(LootableComponent lootable, unit looter) returns bool
+    let owner = looter.getOwner()
+
+    let diff = g_GameInstance.getPlayerDifficulty(owner)
+    let gameProgressCoeff = g_GameInstance.getGameProgressCoeff()
+    let lumber = (m_baseAmount + diff * Pow(gameProgressCoeff, 1.85)).round()
+
+    owner.addLumber(lumber)
+    
+    FX.createGainedLumberTag(looter.getPos(), lumber, owner)
+    FX.createGainedLumberEffect(looter.getPos(), owner)
+
+    let notification = new LootRewardNotification(
+      NotificationManager.nextNotificationId(),
+      owner,
+      looter.getPos(),
+      TlsSounds.getRandomFoundLumber())
+    ..setMessage("Found " + ("+" + lumber.toString() + " lumber").colorize(Colors.lumber))
+    ..setIconPath(Icons.bTNBundleOfLumber)
+
+    lootable.showLootRewardNotification(owner, notification)
+
+    return true
+
+// ============================================================================
+public class GoldLootCard extends LootCard
+  private int m_baseAmount
+
+  // --------------------------------------------------------------------------
+  construct(string id)
+    super(id)
+
+  // --------------------------------------------------------------------------
+  function getBaseAmount() returns int
+    return m_baseAmount
+  
+  // --------------------------------------------------------------------------
+  function setBaseAmount(int value)
+    m_baseAmount = value
+
+  // --------------------------------------------------------------------------
+  override function giveReward(LootableComponent lootable, unit looter) returns bool
+    let owner = looter.getOwner()
+
+    let diff = g_GameInstance.getPlayerDifficulty(owner)
+    let diffCoeff = g_GameInstance.getPlayerDifficultyCoeff(diff)
+    let gold = (Pow(diffCoeff, 0.65) + max(diff - 2, 0)).floor()
+
+    owner.addGold(gold)
+    
+    FX.createGainedGoldTag(looter.getPos(), gold, owner)
+    FX.createGainedGoldEffect(looter.getPos(), owner)
+
+    let notification = new LootRewardNotification(
+      NotificationManager.nextNotificationId(),
+      owner,
+      looter.getPos(),
+      TlsSounds.getRandomFoundGold())
+    ..setMessage("Found " + ("+" + gold.toString() + " gold").colorize(Colors.gold))
+    ..setIconPath(Icons.bTNChestOfGold)
+
+    lootable.showLootRewardNotification(owner, notification)
+
+    return true
+
+// ============================================================================
+public class SurvivorLootCard extends LootCard
+
+  // --------------------------------------------------------------------------
+  construct(string id)
+    super(id)
+
+  // --------------------------------------------------------------------------
+  override function giveReward(LootableComponent lootable, unit looter) returns bool
+    return true
+
+// ============================================================================
+public class ItemLootCard extends LootCard
+
+  // --------------------------------------------------------------------------
+  construct(string id)
+    super(id)
+
+  // --------------------------------------------------------------------------
+  override function giveReward(LootableComponent lootable, unit looter) returns bool
+    return true
+
+// ============================================================================
+public class ZombiesLootCard extends LootCard
+
+  // --------------------------------------------------------------------------
+  construct(string id)
+    super(id)
+
+  // --------------------------------------------------------------------------
+  override function giveReward(LootableComponent lootable, unit looter) returns bool
+    return true
+
+// ============================================================================
+public class LootableDirector extends Director
+
+  // --------------------------------------------------------------------------
+  construct(string name)
+    super(name)
+  
 
 // ============================================================================
 public class LootRewardNotification extends Notification
