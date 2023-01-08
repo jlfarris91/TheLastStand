@@ -2,31 +2,55 @@ package LootUndeadCard
 import Lootables
 import SpawnUndeadUnitDirector
 import Func
-import Directors
-import ItemSet
 
 // ============================================================================
 public class LootUndeadCard extends LootCard
-  private ItemSet m_itemSet
-  private Func2<unit, unit, SpawnUndeadUnitDirector> m_spawnDirectorFactory
+  private Func2<unit, unit, SpawnUndeadUnitDirector> array[3] m_spawnDirectorFactories
 
   // --------------------------------------------------------------------------
-  construct(string id, ItemSet itemSet, Func2<unit, unit, SpawnUndeadUnitDirector> spawnDirectorFactory)
+  construct(string id)
     super(id)
-    m_itemSet = itemSet
-    m_spawnDirectorFactory = spawnDirectorFactory.acquire()
 
   // --------------------------------------------------------------------------
   ondestroy
   
-    if (m_spawnDirectorFactory != null)
-      m_spawnDirectorFactory.release()
-      m_spawnDirectorFactory = null
+    for i = 0 to 2
+      if (m_spawnDirectorFactories[i] != null)
+        m_spawnDirectorFactories[i].release()
+        m_spawnDirectorFactories[i] = null
+
+  // ----------------------------------------------------------------------------
+  // ----------------------------------------------------------------------------
+  function getSpawnDirectorFactory(int tier) returns Func2<unit, unit, SpawnUndeadUnitDirector>
+    return m_spawnDirectorFactories[tier]
+  
+  // ----------------------------------------------------------------------------
+  function setSpawnDirectorFactory(int tier, Func2<unit, unit, SpawnUndeadUnitDirector> value)
+    value.acquire()
+    if (m_spawnDirectorFactories[tier] != null)
+      m_spawnDirectorFactories[tier].release()
+    m_spawnDirectorFactories[tier] = value
+
+  // ----------------------------------------------------------------------------
+  override function getTierCount() returns int
+    return 3
+
+  // ----------------------------------------------------------------------------
+  override function getTierValueMultiplier(int tier) returns real
+    return (tier + 1).toReal()
 
   // --------------------------------------------------------------------------
-  override function giveReward(unit lootable, unit looter) returns bool
+  override function activateCard(int tier) returns bool
+    
+    let lootable = getLootable()
+    let looter = getLooter()
 
-    let director = m_spawnDirectorFactory.call(lootable, looter)
+    let spawnDirectorFactory = getSpawnDirectorFactory(tier)
+    if (spawnDirectorFactory == null)
+      Log.error("No spawn director factory exists for tier " + tier.toString())
+      return false
+
+    let director = spawnDirectorFactory.call(lootable, looter)
     director.setEnabled(true)
 
     return true

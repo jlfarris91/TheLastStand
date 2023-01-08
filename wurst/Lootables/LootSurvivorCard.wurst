@@ -18,35 +18,59 @@ import UnitMetadata
 
 HashMap<int, WeightedSet<SoundDefinition>> g_lootFinishedSoundMap
 
+WeightedSet<SurvivorJobType> array[3] g_tieredJobTypes = [
+  new WeightedSet<SurvivorJobType>(),
+  new WeightedSet<SurvivorJobType>(),
+  new WeightedSet<SurvivorJobType>()
+]
+
 // ============================================================================
 public class LootSurvivorCard extends LootCard
-  private SurvivorJobType m_jobType
-  private Action1<unit> m_modifier
+  private Action1<unit> array[3] m_tierModifiers
 
   // --------------------------------------------------------------------------
-  construct(string id, SurvivorJobType jobType, Action1<unit> modifier)
+  construct(string id)
     super(id)
-    m_jobType = jobType
-    m_modifier = modifier.acquire()
+    
+    for i = 0 to 2
+      m_tierModifiers[i] = null
 
   // ----------------------------------------------------------------------------
   ondestroy
-    m_modifier.release()
-    m_modifier = null
+
+    for i = 0 to 2
+      if (m_tierModifiers[i] != null)
+        m_tierModifiers[i].release()
+        m_tierModifiers[i] = null
+
+  // ----------------------------------------------------------------------------
+  override function getTierCount() returns int
+    return 3
+
+  // ----------------------------------------------------------------------------
+  override function getTierValueMultiplier(int tier) returns real
+    return (tier + 1).toReal()
 
   // --------------------------------------------------------------------------
-  override function giveReward(unit lootable, unit looter) returns bool
+  override function activateCard(int tier) returns bool
+    
+    let lootable = getLootable()
+    let looter = getLooter()
     let owner = looter.getOwner()
     let lootableComp = lootable.getMetadata().getLootableComponent()
     let spawnPos = lootableComp.getSpawnPosition()
+
+    let jobTypeSet = g_tieredJobTypes[tier]
+    let jobType = jobTypeSet.getRandom()
     
-    let survivor = SurvivorUtility.spawnSurvivorWithJob(PLAYER_VILLAGERS, spawnPos, m_jobType)
+    let survivor = SurvivorUtility.spawnSurvivorWithJob(PLAYER_VILLAGERS, spawnPos, jobType)
     survivor.fadeIn(color(150, 150, 150))
     survivor.issuePointOrderById(OrderIds.move, looter.getPos())
 
     FX.createFoundSurvivorTag(spawnPos, owner)
 
-    m_modifier.call(survivor)
+    if (m_tierModifiers[tier] != null)
+      m_tierModifiers[tier].call(survivor)
     
     let job = SurvivorJobs.getJobDefinitionForUnitType(survivor.getTypeId())
 
@@ -80,6 +104,13 @@ function getSoundDefinition(int unitTypeId) returns SoundDefinition
 
 // ============================================================================
 init
+
+  g_tieredJobTypes[0].add(SurvivorJobType.None, 5)
+  g_tieredJobTypes[0].add(SurvivorJobType.Builder, 1)
+  g_tieredJobTypes[1].add(SurvivorJobType.Militia, 2)
+  g_tieredJobTypes[1].add(SurvivorJobType.Spearman, 1)
+  g_tieredJobTypes[1].add(SurvivorJobType.Priest, 1)
+  g_tieredJobTypes[2].add(SurvivorJobType.Marksman, 1)
 
   g_lootFinishedSoundMap = new HashMap<int, WeightedSet<SoundDefinition>>()
 
