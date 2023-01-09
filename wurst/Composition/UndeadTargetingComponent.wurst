@@ -11,10 +11,15 @@ import Range
 import TimerUtils
 import GroupExtensions
 import LeashComponent
-import UndeadTargetService
 import Trace
 // import Vector
 import Orders
+import UnitIndexer
+import LinkedList
+import Spawning
+import BuildingUndeadTarget
+import GroupUtils
+import TlsUnitIds
 
 public bool UTC_ENABLED = true
 
@@ -640,6 +645,407 @@ function issueOrders()
 
   g_numberOfTimesIssueOrdersEndCalled++
 
+public bool UTS_ENABLED = true
+
+constant real PROCESS_UPDATES_INTERVAL = 1.0
+constant real TARGET_STRUCTURE_SCORE_RANGE = 512.0
+constant real ATTACK_RANGE_SCALAR = 1.0
+
+UndeadTargetProvider array g_playerData
+int g_playerDataUpdateIndex = -1
+group array g_targetedUnitToUTCMap
+// int array g_targetUnitScore
+// texttag array g_targetUnitScoreTags
+LinkedList<UndeadTargetProvider> g_forceTargetCollections = new LinkedList<UndeadTargetProvider>()
+CallbackPeriodic g_processUpdates
+group g_temp = CreateGroup()
+
+// group g_targetUnitScoreFilterGroup
+// boolexpr g_targetUnitScoreFilter = Condition(function isUnitStructureInTargetCollection)
+
+
+// ============================================================================
+public function getUndeadTargetProviderForPlayer(player p) returns UndeadTargetProvider
+  return g_playerData[p.getId()]
+
+// ============================================================================
+public function getNumberOfRegisteredAttackers(unit target) returns int
+  let attackers = g_targetedUnitToUTCMap[target.getIndex()]
+  return attackers == null ? -1 : attackers.size()
+
+// ============================================================================
+public class UndeadTargetProvider extends TargetProvider
+  private force m_players = CreateForce()
+  private group m_structureTargets = CreateGroup()
+  private group m_nonStructureTargets = CreateGroup()
+  private group m_structureTargets_LowPri = CreateGroup()
+  private group m_structureTargets_HighPri = CreateGroup()
+  private bool m_preferOrganicTargets = false
+  private Event m_preferOrganicTargetsChanged = null
+
+  // --------------------------------------------------------------------------
+  construct()
+    registerHumanForceTargetCollection(this)
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    unregisterHumanForceTargetCollection(this)
+
+    if (m_preferOrganicTargetsChanged != null)
+      destroy m_preferOrganicTargetsChanged
+      m_preferOrganicTargetsChanged = null
+
+    m_players.destr()
+    m_structureTargets.destr()
+    m_nonStructureTargets.destr()
+    m_structureTargets_LowPri.destr()
+    m_structureTargets_HighPri.destr()
+
+  // --------------------------------------------------------------------------
+  function addPlayer(player p)
+    m_players.addPlayer(p)
+    g_playerData[p.getId()] = this
+
+    addPlayerUnitsToGroups(p)
+
+  // --------------------------------------------------------------------------
+  function removePlayer(player p)
+    m_players.removePlayer(p)
+    g_playerData[p.getId()] = null
+
+    removePlayerUnitsFromGroups(p)
+
+    if (m_players.count() == 0)
+      release()
+
+  // --------------------------------------------------------------------------
+  function getPlayers() returns force
+    return m_players
+
+  // --------------------------------------------------------------------------
+  function getStructures() returns group
+    return m_structureTargets
+
+  // --------------------------------------------------------------------------
+  function getAttackPriority(unit u) returns int
+    if (not m_structureTargets.contains(u))
+      return 0
+    if (m_structureTargets_LowPri.contains(u))
+      return 1
+    if (m_structureTargets_HighPri.contains(u))
+      return 2
+    return -1
+
+  // --------------------------------------------------------------------------
+  function setPreferOrganicTargets(bool value)
+    if (m_preferOrganicTargets != value)
+      m_preferOrganicTargets = value
+      preferOrganicTargetsChanged()
+
+  // --------------------------------------------------------------------------
+  function getPreferOrganicTargets() returns bool
+    return m_preferOrganicTargets
+
+  // --------------------------------------------------------------------------
+  function onPreferOrganicTargetsChanged() returns IEvent
+    if (m_preferOrganicTargetsChanged == null)
+      m_preferOrganicTargetsChanged = new Event()
+    return m_preferOrganicTargetsChanged
+
+  // --------------------------------------------------------------------------
+  function getNonStructures() returns group
+    return m_nonStructureTargets
+
+  // --------------------------------------------------------------------------
+  private function addPlayerUnitsToGroups(player p)
+    g_temp.enumUnitsOfPlayer(p, null)
+    for u in g_temp
+      registerPlayerUnit(u)
+
+  // --------------------------------------------------------------------------
+  private function removePlayerUnitsFromGroups(player p)
+    g_temp.enumUnitsOfPlayer(p, null)
+    for u in g_temp
+      unregisterPlayerUnit(u)
+
+  // ----------------------------------------------------------------------------
+  override function getTargetUnit(SpawnContext context) returns unit
+    return getRandomTargetUnit(false)
+
+  // --------------------------------------------------------------------------
+  function getRandomTargetUnit(bool preferOrganic) returns unit
+
+    if ((preferOrganic or m_preferOrganicTargets) and not m_nonStructureTargets.isEmpty())
+      return m_nonStructureTargets.getRandomUnit()
+
+    if (not m_structureTargets_HighPri.isEmpty())
+      return m_structureTargets_HighPri.getRandomUnit()
+
+    if (not m_structureTargets_LowPri.isEmpty())
+      return m_structureTargets_LowPri.getRandomUnit()
+
+    if (not m_nonStructureTargets.isEmpty())
+      return m_nonStructureTargets.getRandomUnit()
+    
+    return null
+
+  // --------------------------------------------------------------------------
+  function getClosestTargetUnit(vec2 pos, bool preferOrganic) returns unit
+    return getClosestTargetUnit(pos, REAL_MAX, preferOrganic)
+
+  // --------------------------------------------------------------------------
+  function getClosestTargetUnit(vec2 pos, real maxRange, bool preferOrganic) returns unit
+
+    if ((preferOrganic or m_preferOrganicTargets) and not m_nonStructureTargets.isEmpty())
+      let target = m_nonStructureTargets.getClosestUnit(pos, maxRange)
+      if (target != null)
+        return target
+
+    if (not m_structureTargets_HighPri.isEmpty())
+      let target = m_structureTargets_HighPri.getClosestUnit(pos)
+      if (target != null)
+        return target
+
+    if (not m_structureTargets_LowPri.isEmpty())
+      let target = m_structureTargets_LowPri.getClosestUnit(pos)
+      if (target != null)
+        return target
+
+    if (not m_nonStructureTargets.isEmpty())
+      let target = m_nonStructureTargets.getClosestUnit(pos)
+      if (target != null)
+        return target
+    
+    return null
+
+  // --------------------------------------------------------------------------
+  function clear()
+
+    m_structureTargets_LowPri.clear()
+    m_structureTargets_HighPri.clear()
+    
+    for targetStructure in m_structureTargets
+      unregisterTargetedUnit(targetStructure)
+
+    m_structureTargets.clear()
+
+    m_nonStructureTargets.clear()
+
+    m_preferOrganicTargets = false
+
+  // --------------------------------------------------------------------------
+  function registerPlayerUnit(unit _unit)
+
+    if (_unit.isBuilding())
+      if (unitIsValidTargetStructure(_unit) and not m_structureTargets.contains(_unit))
+        m_structureTargets.addUnit(_unit)
+        sortStructureTargetUnit(_unit)
+        updateBUTAttackEnabled(_unit, getBUTAttacksEnabled())
+        
+        // enumNearbyStructures(_unit.getPos())
+        // addScore(1)
+        // g_targetUnitScore[_unit.getIndex()] = g_temp.size()
+    else
+      if (unitIsValidTargetNonStructure(_unit))
+        m_nonStructureTargets.addUnit(_unit)
+
+  // --------------------------------------------------------------------------
+  function unregisterPlayerUnit(unit _unit)
+
+    if (_unit.isBuilding())
+    //{
+      if (m_structureTargets.contains(_unit))
+        m_structureTargets.removeUnit(_unit)
+        m_structureTargets_LowPri.removeUnit(_unit)
+        m_structureTargets_HighPri.removeUnit(_unit)
+        // enumNearbyStructures(_unit.getPos())
+        // addScore(-1)
+        // g_targetUnitScore[_unit.getIndex()] = 0
+        // if (g_targetUnitScoreTags[_unit.getIndex()] != null)
+        //   g_targetUnitScoreTags[_unit.getIndex()].destr()
+    //}
+    else
+      m_nonStructureTargets.removeUnit(_unit)
+      m_structureTargets.refresh()
+
+  // --------------------------------------------------------------------------
+  protected function sortStructureTargetUnits()
+    // Log.debug(m_player.getId().toString() + " Sorting structure targets")
+    m_structureTargets_HighPri.clear()
+    m_structureTargets_LowPri.clear()
+    for structureTarget in m_structureTargets
+      sortStructureTargetUnit(structureTarget)
+
+  // --------------------------------------------------------------------------
+  private function sortStructureTargetUnit(unit structureTarget)
+    group priorityGroup = m_structureTargets_HighPri
+    let attackerGroup = g_targetedUnitToUTCMap[structureTarget.getIndex()]
+    if (attackerGroup != null and attackerGroup.size() > VALID_HUMAN_STRUCTURE_TARGETS_ATTACKER_COUNT_THRESHOLD)
+      priorityGroup = m_structureTargets_LowPri
+    priorityGroup.addUnit(structureTarget)
+
+  // --------------------------------------------------------------------------
+  private function preferOrganicTargetsChanged()
+    updateAllBUTAttacksEnabled(getBUTAttacksEnabled())
+    if (m_preferOrganicTargetsChanged != null)
+      m_preferOrganicTargetsChanged.call()
+
+  // --------------------------------------------------------------------------
+  private function updateAllBUTAttacksEnabled(bool enabled)
+    for target in m_structureTargets
+      updateBUTAttackEnabled(target, enabled)
+
+  // --------------------------------------------------------------------------
+  private function updateBUTAttackEnabled(unit target, bool enabled)
+    if (target.isBuildingUndeadTargetWithSpecialDamage())
+      target.setFieldWeapon(UNIT_WEAPON_BF_ATTACKS_ENABLED, 0, enabled)
+
+  // --------------------------------------------------------------------------
+  private function getBUTAttacksEnabled() returns bool
+    return not m_preferOrganicTargets
+
+  // --------------------------------------------------------------------------
+  // private function enumNearbyStructures(vec2 pos)
+  //   g_targetUnitScoreFilterGroup = m_structureTargets
+  //   g_temp.enumUnitsInRange(pos, TARGET_STRUCTURE_SCORE_RANGE, g_targetUnitScoreFilter)
+  //   g_targetUnitScoreFilterGroup = null
+
+  // --------------------------------------------------------------------------
+  // private function addScore(int value)
+  //   for structureTarget in g_temp
+  //     g_targetUnitScore[structureTarget.getIndex()] += value
+  //   onScoreChanged(g_temp)
+
+  // --------------------------------------------------------------------------
+  // private function onScoreChanged(group structureTargets)
+  //   for structureTarget in structureTargets
+  //     updateScoreTag(structureTarget)
+      
+  // --------------------------------------------------------------------------
+  // private function updateScoreTag(unit u)
+    // var tag = g_targetUnitScoreTags[u.getIndex()]
+    // let score = g_targetUnitScore[u.getIndex()].toString()
+    // if (tag == null)
+    //   tag = createTTEx(u.getPos().withZ(64.0), score, 10.0)
+    //   g_targetUnitScoreTags[u.getIndex()] = tag
+    // tag.setText(score, 10.0)      
+
+// ============================================================================
+// function isUnitStructureInTargetCollection() returns bool
+//   if (g_targetUnitScoreFilterGroup == null)
+//     return false
+//   return g_targetUnitScoreFilterGroup.contains(GetFilterUnit())
+
+// ============================================================================
+function unitIsValidTargetStructure(unit u) returns bool
+  return u.isAlive() and u.isBuilding() and u.isBuildingUndeadTarget()
+
+// ============================================================================
+function filterUnitIsValidTargetStructure() returns bool
+  return unitIsValidTargetStructure(GetFilterUnit())
+
+// ============================================================================
+function unitIsValidTargetNonStructure(unit u) returns bool
+  return u.isAlive() and not u.isInvulnerable() and (u.isObelisk() or not u.isBuilding())
+
+// ============================================================================
+function filterUnitIsValidTargetNonStructure() returns bool
+  return unitIsValidTargetNonStructure(GetFilterUnit())  
+
+// ============================================================================
+public function registerTargetedUnit(unit targetedUnit, unit targetingUnit)
+  let index = targetedUnit.getIndex()
+  var attackerGroup = g_targetedUnitToUTCMap[index]
+  if (attackerGroup == null)
+    attackerGroup = getGroup()
+    g_targetedUnitToUTCMap[index] = attackerGroup
+  attackerGroup.addUnit(targetingUnit)
+
+// ============================================================================
+public function unregisterTargetedUnit(unit targetedUnit, unit targetingUnit)
+  let index = targetedUnit.getIndex()
+  let attackerGroup = g_targetedUnitToUTCMap[index]
+  attackerGroup.removeUnit(targetingUnit)
+  if (attackerGroup.isEmpty())
+    attackerGroup.release()
+  g_targetedUnitToUTCMap[index] = null
+
+// ============================================================================
+public function unregisterTargetedUnit(unit targetedUnit)
+  let index = targetedUnit.getIndex()
+  let attackerGroup = g_targetedUnitToUTCMap[index]
+  g_targetedUnitToUTCMap[index] = null
+  if (attackerGroup != null)
+    for utc in attackerGroup
+      let comp = utc.getUndeadTargetingComponent()
+      if (comp != null)
+        comp.onTargetUnitNoLongerTargettable()
+    attackerGroup.release()
+
+// ============================================================================
+function clearLeavingLosingPlayerData(player leavingLosingPlayer)
+  let playerData = g_playerData[leavingLosingPlayer.getId()]
+  if (playerData != null)
+    playerData.removePlayer(leavingLosingPlayer)
+
+// ============================================================================
+function processUpdates()
+
+  if (not UTS_ENABLED)
+    return
+
+  Trace.trace("UTS.processUpdates")
+  for provider in g_forceTargetCollections
+    provider.sortStructureTargetUnits()
+
+// ============================================================================
+function registerHumanForceTargetCollection(UndeadTargetProvider value)
+  g_forceTargetCollections.add(value)
+  if (g_forceTargetCollections.size() == 1)
+    g_processUpdates = doPeriodically(PROCESS_UPDATES_INTERVAL, cb -> processUpdates())
+
+// ============================================================================
+function unregisterHumanForceTargetCollection(UndeadTargetProvider value)
+  if (not g_forceTargetCollections.remove(value))
+    return
+  if (g_forceTargetCollections.isEmpty() and g_processUpdates != null)
+    destroy g_processUpdates
+    g_processUpdates = null
+
+// ============================================================================
+function getPlayerData(player p) returns UndeadTargetProvider
+  return g_playerData[p.getId()]
+
+// ============================================================================
+function getOrCreatePlayerData(player p) returns UndeadTargetProvider
+  var data = getPlayerData(p)
+  if (data == null)
+    data = new UndeadTargetProvider()..acquire()
+    g_playerData[p.getId()] = data
+  return data
+
+// ============================================================================
+function onUnitIndexed()
+  let indexingUnit = getIndexingUnit()
+  if (indexingUnit.isBuilding())
+    return
+  let owningPlayer = indexingUnit.getOwner()
+  let playerData = getOrCreatePlayerData(owningPlayer)
+  if (playerData != null)
+    playerData.registerPlayerUnit(indexingUnit)  
+
+// ============================================================================
+function onUnitDeindexed()
+  let indexingUnit = getIndexingUnit()
+  let owningPlayer = indexingUnit.getOwner()
+  let playerData = getPlayerData(owningPlayer)
+  if (playerData != null)
+    playerData.unregisterPlayerUnit(indexingUnit)
+
+// ============================================================================
+function onPlayerLeave()
+  clearLeavingLosingPlayerData(GetTriggerPlayer())
+
 // ============================================================================
 init
 
@@ -647,3 +1053,9 @@ init
 
   doPeriodically(UPDATE_INTERVAL, (CallbackPeriodic cb) -> issueOrders())
   doPeriodically(DOT_INTERVAL, (CallbackPeriodic cb) -> applyDOT())
+
+  onUnitIndex(() -> onUnitIndexed())
+  onUnitDeindex(() -> onUnitDeindexed())
+
+  onPlayerLost(() -> clearLeavingLosingPlayerData(getLosingPlayer()))
+  registerPlayerEvent(EVENT_PLAYER_LEAVE, function onPlayerLeave)

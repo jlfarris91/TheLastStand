@@ -2,9 +2,6 @@ package Classification
 import ColorUtility
 import ErrorHandling
 import Flags
-import initlater TlsItemDefinition
-import initlater TlsUnitDefinition
-import RegisterEvents
 
 constant colorA array UNIT_CLASSIFICATION_COLORS = [
   colorA(66, 211, 255, 255), // HUMAN
@@ -79,81 +76,3 @@ public function int.getTlsUnitClassSymbolsColored() returns string
   for c in this
     symbolString += (c castTo TlsUnitClassification).getSymbolStringColored()
   return symbolString
-
-// ============================================================================
-public function item.hasTlsUnitClass(vararg TlsUnitClassification values) returns bool
-  let itemDef = getItemDefinition(this.getTypeId())
-  let unitClass = itemDef.getTlsUnitClassRequirements()
-  for c in values
-    if (not unitClass.isBitSet(c castTo int))
-      return false
-  return true
-
-// ============================================================================
-public function unit.hasTlsUnitClass(vararg TlsUnitClassification values) returns bool
-  let itemDef = getUnitDefinition(this.getTypeId())
-  let unitClass = itemDef.getTlsUnitClass()
-  for c in values
-    if (not unitClass.isBitSet(c castTo int))
-      return false
-  return true
-
-// ============================================================================
-public function item.canBeUsedBy(unit carrier) returns bool
-  let itemDef = getItemDefinition(this.getTypeId())
-  if (itemDef == null)
-    // Log.trace(carrier.getName() + " can carry " + this.getName() + " : no item def")
-    return true
-
-  let itemClassRequirements = itemDef.getTlsUnitClassRequirements()
-  if (itemClassRequirements == 0)
-    // Log.trace(carrier.getName() + " can carry " + this.getName() + " : no class requirements")
-    return true
-
-  let unitDef = getUnitDefinition(carrier.getTypeId())
-  if (unitDef == null)
-    // Log.trace(carrier.getName() + " cannot carry " + this.getName() + " : no unit def")
-    return false
-
-  let unitClass = unitDef.getTlsUnitClass()
-  if (unitClass == 0)
-    // Log.trace(carrier.getName() + " cannot carry " + this.getName() + " : no unit class")
-    return false
-
-  let result = BlzBitAnd(itemClassRequirements, unitClass) == itemClassRequirements
-
-  // Log.trace(carrier.getName() + (result ? " can carry " : " cannot carry ") + " cannot carry " + this.getName() + " : " + BlzBitAnd(itemClassRequirements, unitClass).toString() + " == " + itemClassRequirements.toString())
-
-  return result
-
-// ============================================================================
-public function item.updateStatus(unit carrier)
-
-  let itemDef = getItemDefinition(this.getTypeId())
-  if (itemDef == null)
-    return
-
-  let canBeUsedByCarrier = this.canBeUsedBy(carrier)
-
-  this.setExtendedTooltip(canBeUsedByCarrier
-    ? itemDef.getTooltipExtended()
-    : "{0}|n|n{1}".format("Cannot be used by this unit!".colorize(Colors.red), itemDef.getTooltipExtended()))
-
-  if (canBeUsedByCarrier)
-    for abilId in itemDef.getAbilities()
-      if (this.getAbility(abilId) == null)
-        if (not this.addAbility(abilId))
-          error("Unable to add ability " + abilId.toRawCode() + " to item " + this.getName())
-  else
-    for abilId in itemDef.getAbilities()
-      if (this.getAbility(abilId) != null)
-        if (not this.removeAbility(abilId))
-          error("Unable to remove ability " + abilId.toRawCode() + " from item " + this.getName())
-
-// ============================================================================
-function onUnitPickupItem()
-  GetManipulatedItem().updateStatus(GetManipulatingUnit())
-
-// ============================================================================
-init
-  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_PICKUP_ITEM, function onUnitPickupItem)

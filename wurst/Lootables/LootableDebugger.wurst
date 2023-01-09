@@ -1,0 +1,77 @@
+package LootableDebugger
+import ProjectConstants
+import DebuggerDialog
+import PlayerExtensions
+import Host
+import UnitMetadata
+import ColorUtility
+import LootableComponent
+import Directors
+
+// ============================================================================
+class LootableDebugger extends DebuggerRealtimeUpdateFrame
+
+  // --------------------------------------------------------------------------
+  construct()
+    super(createFrame("TEXTAREA", "Lootable", GAME_UI, "", 0))
+
+  // --------------------------------------------------------------------------
+  override function realtimeUpdate(real _)
+
+    let frame = getFrameHandle()
+
+    let selectedUnit = g_HostPlayer.getFirstSelectedUnit()
+
+    if (selectedUnit == null)
+      frame.setText("Select a unit")
+      return
+    
+    let metadata = selectedUnit.getMetadata() castTo UnitMetadata
+
+    if (metadata == null)
+      frame.setText("Selected unit has no metadata".colorize(Colors.red))
+      return
+
+    let lootableComp = metadata.getLootableComponent()
+    if (lootableComp == null)
+      frame.setText("Selected unit has no lootable component".colorize(Colors.red))
+      return
+
+    frame.setOrAddText("Selected unit: " + selectedUnit.getName())
+
+    frame.addText("Can loot: " + lootableComp.canLoot().toString())
+    frame.addText("Cooldown: {0} days".format(lootableComp.getCooldownDays().toString()))
+
+    frame.addText("")
+    frame.addText("Loot count: " + lootableComp.getLootCount().toString())
+    for i = 0 to lootableComp.getLootCount() - 1
+      let drawnCard = lootableComp.getLootCard(i)
+      if (drawnCard.card != null)
+        frame.addText("Loot {0}: {1} t:{2} c:{3}".format(i.toString(), drawnCard.card.getId(), drawnCard.tier.toString(), drawnCard.cost.toString()))
+      else
+        frame.addText("Loot {0}: null".format(i.toString()))
+
+    let director = lootableComp.getDirector()
+    if (director != null)
+    //{
+      frame.addText("")
+      frame.addText("=== Director ===")
+      frame.setOrAddText("Enabled: " + director.getEnabled().toString())
+      frame.setOrAddText("Credits: " + director.getCredits().toString())
+      frame.setOrAddText("Owned Units: " + director.getAdmin().getOwnedUnits().size().toString())
+      director.writeDebugString((string text) -> frame.setOrAddText(text))
+    //}
+
+    let lootOperation = metadata.getLootOperationComponent()
+    if (lootOperation != null)
+    //{
+      frame.addText("")
+      frame.addText("=== Operation ===")
+      frame.addText("Running: " + lootOperation.getIsRunning().toString())
+      frame.addText("Time Remaining: " + lootOperation.getTimeRemaining().toString())
+    //}
+
+// ============================================================================
+init
+  if (DEV_ENVIRONMENT)
+    DebuggerDialog.registerFrame("LOOT", () -> new LootableDebugger())
