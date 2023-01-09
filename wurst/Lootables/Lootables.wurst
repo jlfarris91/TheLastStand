@@ -67,7 +67,7 @@ constant string PENDANT_TOOLTIP = "Treasure Hunter's Pendant"
 constant string PENDANT_TOOLTIP_EXTENDED = "This loot is a higher rarity thanks to the Treasure Hunter's Pendant item"
 
 // ============================================================================
-public abstract class LootCard extends Card
+public abstract class LootCard extends TieredCard
 
   static unit s_looter
   static unit s_lootable
@@ -91,43 +91,9 @@ public abstract class LootCard extends Card
   function getStopsRetrigger() returns bool
     return false
 
-  // ----------------------------------------------------------------------------
-  function getTierValueMultiplier(int _tier) returns real
-    return 1.0
-
-  // ----------------------------------------------------------------------------
-  function getTierCount() returns int
-    return 1
-
-  // ----------------------------------------------------------------------------
-  function getHighestAffordableTier(Card card, real credits) returns drawnCard
-
-    var selectedTier = 0
-    var selectedCost = 0
-    var foundValidTier = false
-
-    let baseCost = card.getCost()
-    let _tierCount = getTierCount()
-
-    for tier = (_tierCount - 1) downto 0
-    //{
-      let tierCost = (getTierValueMultiplier(tier) * baseCost).floor()
-      if (credits > tierCost)
-        selectedTier = tier
-        selectedCost = tierCost
-        foundValidTier = true
-        break
-    //}
-
-    if (not foundValidTier)
-      return INVALID_CARD
-
-    return drawnCard(card, selectedTier, selectedCost)
-
 // ============================================================================
 public class LootableDirector extends Director
   private unit m_lootable
-  private CardCategory m_selectedCardCategory
 
   // --------------------------------------------------------------------------
   construct(unit lootable)
@@ -135,23 +101,9 @@ public class LootableDirector extends Director
     m_lootable = lootable
 
   // ----------------------------------------------------------------------------
-  function pickRandomCategory()
-    m_selectedCardCategory = getDeck().getCategories().getRandom()
-
-  // ----------------------------------------------------------------------------
-  override protected function onEnabled()
-    super.onEnabled()
-    pickRandomCategory()
-
-  // ----------------------------------------------------------------------------
   override function drawCard() returns drawnCard
-
-    if (m_selectedCardCategory == null)
-      pickRandomCategory()
-
-    let selectedCard = m_selectedCardCategory.drawCard()
-
-    return drawnCard(selectedCard, 0, selectedCard.getCost())
+    let selectedCard = getDeck().drawCard() castTo TieredCard
+    return selectedCard.getHighestAffordableTier(getCredits())
 
   // ----------------------------------------------------------------------------
   override function activateCard(drawnCard card) returns bool

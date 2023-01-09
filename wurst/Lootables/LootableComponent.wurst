@@ -3,28 +3,25 @@ import UnitComponent
 import GameConstants
 import Range
 import Lootables
-import Math
-import DisplayTextToPlayer
-import ColorUtility
 import ErrorHandling
 import Time
 import FX
 import Vector
 import initlater LootOperationComponent
-import UnitPropertiesComponent
 import SoundUtils
 import ClosureTimers
 import Optional
 import GroupUtils
 import UnitExtensions
 import UnitIndexer
-import Deck
+import Directors
 
 constant colorA LOOTABLE_COLOR = colorA(255, 255, 255, 255)
 constant colorA LOOTED_COLOR = colorA(150, 150, 150, 150)
 constant colorA COUNTDOWN_COLOR = colorA(0, 170, 0, 255)
 constant real LOOTABLE_REFRESH_RANGE = 512.0
 constant real LOOTABLE_CAMP_RANGE = 512.0
+public constant int MAX_LOOT_COUNT = 5
 
 Vector<LootableComponent> g_lootableUnits = null
 SoundDefinition array[3] g_lootFinishedSound
@@ -35,13 +32,15 @@ public class LootableComponent extends UnitComponent
   private int m_cooldownDays
   private unit m_lootingUnit
   private texttag m_cooldownDayTextTag
-  private real m_chanceToRetrigger01
   private rangeInt m_cooldownDaysRange
   private int m_lootRewardMultiplier = 1  
   private int m_dueToLuckyHorseshoe = 0
   private optionalVec2 m_spawnPosOverride = none_vec2()
   private bool m_destroyOnLoot = false
   private LootableDirector m_director
+  private int m_lootCount = 1
+  private drawnCard array[MAX_LOOT_COUNT] m_lootCards
+  private int m_lootCardIndex = 0
 
   // --------------------------------------------------------------------------
   construct(IUnitMetadata owner)
@@ -97,13 +96,17 @@ public class LootableComponent extends UnitComponent
   function setSearchDuration(real duration)
     m_searchDurationUnscaled = duration
 
-  // --------------------------------------------------------------------------
-  function getChanceToRetrigger() returns real
-    return m_chanceToRetrigger01
+  // ----------------------------------------------------------------------------
+  function getLootCount() returns int
+    return m_lootCount
+  
+  // ----------------------------------------------------------------------------
+  function setLootCount(int value)
+    m_lootCount = min(value, MAX_LOOT_COUNT)
 
-  // --------------------------------------------------------------------------
-  function setChanceToRetrigger(real value)
-    m_chanceToRetrigger01 = value
+  // ----------------------------------------------------------------------------
+  function getLootCard(int index) returns drawnCard
+    return m_lootCards[index]
 
   // ----------------------------------------------------------------------------
   function getDirector() returns LootableDirector
@@ -188,8 +191,10 @@ public class LootableComponent extends UnitComponent
     // Stand 4 in HD
     m_lootingUnit.setAnimation(15)
 
+    resetLootAwards()
+
     let operation = getOwner().getOrAddLootOperationComponent()
-    operation.start(looter, scaledSearchDuration)
+    operation.start(looter, scaledSearchDuration, m_lootCount)
 
   // --------------------------------------------------------------------------
   function onLootingFinished(unit lootingUnit)
@@ -206,7 +211,7 @@ public class LootableComponent extends UnitComponent
     m_lootingUnit.setAbilityCooldown(ABILITY_ID_SEARCH, 0, 0.0)
 
     m_lootingUnit = null
-    giveRewards(lootingUnit)
+    // giveRewards(lootingUnit)
     onLooted()
 
     if (m_destroyOnLoot)
@@ -253,72 +258,98 @@ public class LootableComponent extends UnitComponent
 
     m_lootRewardMultiplier++
 
-  // --------------------------------------------------------------------------
-  protected function giveRewards(unit lootingUnit)
-    m_lootRewardMultiplier = 1
-    let deckInstance = m_director.getDeck().createInstance()
-    giveRewardsWithChanceToRetrigger(deckInstance, lootingUnit, m_chanceToRetrigger01, true, false)
-    destroy deckInstance
+  // ----------------------------------------------------------------------------
+  function resetLootAwards()
+    m_lootCardIndex = 0
 
-  // --------------------------------------------------------------------------
-  private function giveRewardsWithChanceToRetrigger(
-    DeckInstance deckInstance,
-    unit lootingUnit,
-    real chanceToRetrigger01,
-    bool allowLuckyHorseshoe,
-    bool rewardDueToLuckyHorseshoe)
+  // ----------------------------------------------------------------------------
+  function canAwardLoot() returns bool
+    return m_lootCardIndex < m_lootCount
 
-    // No more rewards to give
-    if (deckInstance.isEmpty())
+  // ----------------------------------------------------------------------------
+  function awardNextLoot(unit lootingUnit)
+
+    let lootCard = m_lootCards[m_lootCardIndex]
+    m_lootCardIndex++
+
+    if (lootCard == INVALID_CARD)
+      error("Invalid loot card at index "+ (m_lootCardIndex-1).toString())
       return
 
-    let ownerUnit = getOwnerUnit()
-
-    m_dueToLuckyHorseshoe += rewardDueToLuckyHorseshoe ? 1 : 0
-
-    // Give the player their reward
-    LootCard card = null
-    while (not deckInstance.isEmpty())
-    //{
-      card = deckInstance.drawCard() castTo LootCard
-
-      if (card == null)
-        Log.debug("No reward registered for lootable")
-        break
-
-      if (card.giveReward(ownerUnit, lootingUnit))
-        break
-    //}
-
-    m_dueToLuckyHorseshoe -= rewardDueToLuckyHorseshoe ? 1 : 0
-
-    // Some rewards necessarily must stop the retrigger loop
-    if (card == null or card.getStopsRetrigger())
-      return
-
-    var chanceToRetriggerWithHoreshoe01 = chanceToRetrigger01
-    var mutableLuckyHorseshoe = allowLuckyHorseshoe
-    var mutableRewardDueToLuckyHorseshoe = false
-
-    // Lucky Horseshoe item grants a small chance to immediately loot a second time
-    let metadata = lootingUnit.getMetadata()
-    if (metadata != null)
-      let comp = metadata.getUnitPropertiesComponent()
-      if (comp != null)
-        chanceToRetriggerWithHoreshoe01 = clamp01(chanceToRetriggerWithHoreshoe01 + comp.getPropertyValue(UnitProperty.LOOT_TWICE_CHANCE_01))
+    LootCard.s_lootable = getOwnerUnit()
+    LootCard.s_looter = lootingUnit
     
-    let roll = GetRandomReal(0, 1)
-    if (not passesChanceCheck(chanceToRetriggerWithHoreshoe01, roll))
-      return
+    m_director.activateCard(lootCard)
 
-    // The chance check would not have passed if it weren't for the effects of lucky horseshoe
-    if (not passesChanceCheck(chanceToRetrigger01, roll))
-      displayMessageToPlayer(lootingUnit.getOwner(), "Lucky Horseshoe!".colorize(Colors.lightBlue) + " You found even more loot!")
-      mutableLuckyHorseshoe = false // Lucky horseshoe can only fire once
-      mutableRewardDueToLuckyHorseshoe = true
+    LootCard.s_lootable = null
+    LootCard.s_looter = null
 
-    // Give the player another reward and give it another shot to retrigger
-    giveRewardsWithChanceToRetrigger(deckInstance, lootingUnit, chanceToRetrigger01 / 3.0, mutableLuckyHorseshoe, mutableRewardDueToLuckyHorseshoe)
+  // // --------------------------------------------------------------------------
+  // protected function giveRewards(unit lootingUnit)
+  //   m_lootRewardMultiplier = 1
+  //   let deckInstance = m_director.getDeck().createInstance()
+  //   giveRewardsWithChanceToRetrigger(deckInstance, lootingUnit, m_chanceToRetrigger01, true, false)
+  //   destroy deckInstance
+
+  // // --------------------------------------------------------------------------
+  // private function giveRewardsWithChanceToRetrigger(
+  //   DeckInstance deckInstance,
+  //   unit lootingUnit,
+  //   real chanceToRetrigger01,
+  //   bool allowLuckyHorseshoe,
+  //   bool rewardDueToLuckyHorseshoe)
+
+  //   // No more rewards to give
+  //   if (deckInstance.isEmpty())
+  //     return
+
+  //   let ownerUnit = getOwnerUnit()
+
+  //   m_dueToLuckyHorseshoe += rewardDueToLuckyHorseshoe ? 1 : 0
+
+  //   // Give the player their reward
+  //   LootCard card = null
+  //   while (not deckInstance.isEmpty())
+  //   //{
+  //     card = deckInstance.drawCard() castTo LootCard
+
+  //     if (card == null)
+  //       Log.debug("No reward registered for lootable")
+  //       break
+
+  //     if (card.giveReward(ownerUnit, lootingUnit))
+  //       break
+  //   //}
+
+  //   m_dueToLuckyHorseshoe -= rewardDueToLuckyHorseshoe ? 1 : 0
+
+  //   // Some rewards necessarily must stop the retrigger loop
+  //   if (card == null or card.getStopsRetrigger())
+  //     return
+
+  //   var chanceToRetriggerWithHoreshoe01 = chanceToRetrigger01
+  //   var mutableLuckyHorseshoe = allowLuckyHorseshoe
+  //   var mutableRewardDueToLuckyHorseshoe = false
+
+  //   // Lucky Horseshoe item grants a small chance to immediately loot a second time
+  //   let metadata = lootingUnit.getMetadata()
+  //   if (metadata != null)
+  //     let comp = metadata.getUnitPropertiesComponent()
+  //     if (comp != null)
+  //       chanceToRetriggerWithHoreshoe01 = clamp01(chanceToRetriggerWithHoreshoe01 + comp.getPropertyValue(UnitProperty.LOOT_TWICE_CHANCE_01))
+    
+  //   let roll = GetRandomReal(0, 1)
+  //   if (not passesChanceCheck(chanceToRetriggerWithHoreshoe01, roll))
+  //     return
+
+  //   // The chance check would not have passed if it weren't for the effects of lucky horseshoe
+  //   if (not passesChanceCheck(chanceToRetrigger01, roll))
+  //     displayMessageToPlayer(lootingUnit.getOwner(), "Lucky Horseshoe!".colorize(Colors.lightBlue) + " You found even more loot!")
+  //     mutableLuckyHorseshoe = false // Lucky horseshoe can only fire once
+  //     mutableRewardDueToLuckyHorseshoe = true
+
+  //   // Give the player another reward and give it another shot to retrigger
+  //   giveRewardsWithChanceToRetrigger(deckInstance, lootingUnit, chanceToRetrigger01 / 3.0, mutableLuckyHorseshoe, mutableRewardDueToLuckyHorseshoe)
 
   // --------------------------------------------------------------------------
   private function onLooted()
@@ -332,6 +363,19 @@ public class LootableComponent extends UnitComponent
     getOwnerUnit().setVertexColor(LOOTABLE_COLOR)
     // Makes the unit targettable by the search ability
     UnitAddType(getOwnerUnit(), UNIT_TYPE_ANCIENT)
+
+    drawLootCards()
+    m_lootCardIndex = 0
+
+  // ----------------------------------------------------------------------------
+  private function drawLootCards()
+
+    m_director.activate()
+
+    for i = (m_lootCount - 1) downto 0
+      if (m_director.canDrawCard())
+        m_lootCards[i] = m_director.drawCard()
+        m_director.setCredits(m_director.getCredits() - m_lootCards[i].cost) 
 
 // ============================================================================
 public function IUnitMetadata.getLootableComponent() returns LootableComponent

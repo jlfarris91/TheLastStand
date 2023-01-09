@@ -22,6 +22,7 @@ import Icons
 import Command
 import TlsSounds
 import Lootables
+import Vector
 
 constant int PROGRESS_BAR_LENGTH = 20
 constant colorA PROGRESS_BAR_FOREGROUND = colorA(0, 170, 0, 255)
@@ -47,6 +48,9 @@ public class LootOperationComponent extends RealtimeUnitComponent
   private real m_manaCost
   private bool m_isRunning
   private vec2 m_looterPos
+  private int m_lootCount = 1
+
+  private Vector<timer> m_lootTimers = new Vector<timer>(MAX_LOOT_COUNT)
 
   // --------------------------------------------------------------------------
   construct(IUnitMetadata owner)
@@ -77,6 +81,12 @@ public class LootOperationComponent extends RealtimeUnitComponent
     if (m_progress != null)
       destroy m_progress
       m_progress = null
+
+    if (m_lootTimers != null)
+      for t in m_lootTimers
+        if (t != null)
+          t.release()
+      destroy m_lootTimers
 
   // --------------------------------------------------------------------------
   override function onEnabled()
@@ -129,21 +139,28 @@ public class LootOperationComponent extends RealtimeUnitComponent
         cancel()
 
   // --------------------------------------------------------------------------
-  function start(unit looter, real duration)
+  function start(unit looter, real duration, int lootCount)
     if (getIsRunning())
       return
 
     m_isRunning = true
     m_lootingUnit = looter
     m_duration = duration
-    
-    let lootingPlayer = looter.getOwner()
-    let cameraPos = getOwnerUnit().getPos()
-
-    m_looterPos = looter.getPos()
+    m_lootCount = lootCount
 
     // Avoid implicit capture of 'this' by caching the result of m_lootableUnit
     let lootableUnitCached = getOwnerUnit()
+
+    m_lootTimers.resize(lootCount)
+    let timeBetweenLoot = m_duration / lootCount
+    for i = 0 to lootCount
+      let lootTimer = getTimer()..doManual(timeBetweenLoot * i, true, () -> onAwardLoot(lootableUnitCached, i))
+      m_lootTimers.add(lootTimer)
+    
+    let lootingPlayer = looter.getOwner()
+    let cameraPos = getOwnerUnit().getPos()
+    m_looterPos = looter.getPos()
+
     m_timer.doManual(duration, true, () -> onOperationFinished(lootableUnitCached))
 
     m_progress = new Progress()
@@ -196,6 +213,27 @@ public class LootOperationComponent extends RealtimeUnitComponent
       lootable.onLootingFinished(m_lootingUnit)
     cleanup()
 
+  // ----------------------------------------------------------------------------
+  private static function onAwardLoot(unit lootable, int index)
+    let metadata = lootable.getMetadata()
+    if (metadata == null)
+      return
+    let operation = metadata.getLootOperationComponent()
+    if (operation == null or operation.getIsRunning() == false)
+      return
+    operation.onAwardLoot(index)
+
+  // --------------------------------------------------------------------------
+  private function onAwardLoot(int index)
+    let lootable = getOwner().getLootableComponent()
+    if (lootable != null)
+      lootable.awardNextLoot(m_lootingUnit)
+
+    let lootTimer = m_lootTimers.get(index)
+    if (lootTimer != null)
+      lootTimer.release()
+      m_lootTimers.set(index, null)
+
   // --------------------------------------------------------------------------
   private function cleanup()
     m_isRunning = false
@@ -217,6 +255,11 @@ public class LootOperationComponent extends RealtimeUnitComponent
     if (m_progress != null)
       destroy m_progress
       m_progress = null
+
+    for t in m_lootTimers
+      if (t != null)
+        t.release()
+    m_lootTimers.clear()
 
     this.unregisterForRealtimeUpdate()
 
