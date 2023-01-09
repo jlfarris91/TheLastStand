@@ -69,8 +69,8 @@ vec2 g_currentRevealCenter = ZERO2
 
 unit g_traderUnit
 unit g_traderHorseUnit
-constant transform g_traderLocalTransform = IDENTITYT
-constant transform g_traderHorseLocalTransform = transform(vec3(-32.0, -64.0, 0), eulerToQuat(124.0.toRadians(), 0, 0))
+Transform g_traderTransform
+Transform g_traderHorseTransform
 effect g_flareEffect
 
 minimapicon array g_playerHintAreaIcons
@@ -87,7 +87,7 @@ constant int ITEM_ID_GOLD_TO_LUMBER = compiletime(ITEM_ID_GEN.next())
 
 // ============================================================================
 class TradingPost
-  transform transform
+  Transform transform
   real dd
   // effect debug
 
@@ -121,7 +121,7 @@ function initialize()
 
 // ============================================================================
 function update(TradingPost ts)
-  let p = ts.transform.pos.toVec2()
+  let p = ts.transform.getWorldPosition().toVec2()
   ts.dd = REAL_MAX
   for u in g_invalidatingUnits
     let dd = p.distanceToSq(u.getPos())
@@ -221,7 +221,7 @@ public class TraderPostDebugger extends DebuggerRealtimeUpdateFrame
 
     BlzFrameSetText(frameHandle, "Trading Posts: " + g_tradingPosts.size().toString())
     BlzFrameAddText(frameHandle, "Quadrant: " + g_currentQuadrant.toString())
-    BlzFrameAddText(frameHandle, "Current: " + (g_currentTradingPost != null ? g_currentTradingPost.transform.pos.toVec2().toString() : "None"))
+    BlzFrameAddText(frameHandle, "Current: " + (g_currentTradingPost != null ? g_currentTradingPost.transform.getWorldPosition().toVec2().toString() : "None"))
     BlzFrameAddText(frameHandle, "Trader: " + (g_traderUnit.isHidden() ? "Hidden" : "Visible"))
 
     if (g_updateTask == null or g_updateTaskContext == null)
@@ -254,7 +254,7 @@ function getNextTradingPost() returns TradingPost
   while (g_tradingPostCandidates.size() < g_tradingPostCandidates.capacity() and i < tradingPostCount-1)
   //{
     let tp = g_tradingPostsSorted.get(i)
-    if (quadrant.contains(tp.transform.pos.toVec2()))
+    if (quadrant.contains(tp.transform.getWorldPosition().toVec2()))
       g_tradingPostCandidates.push(tp)
     i++
   //}
@@ -267,7 +267,7 @@ function getNextHintAreaCenter() returns vec2
   if (g_currentTradingPost == null)
     return vec2(REAL_MAX, REAL_MAX)
   
-  var center = g_currentTradingPost.transform.pos.toVec2()
+  var center = g_currentTradingPost.transform.getWorldPosition().toVec2()
   center = center.polarOffset(GetRandomReal(0, 360).asAngleDegrees(), GetRandomReal(0, 0.5) * TRADER_REVEAL_RADIUS)
 
   var bounds = bounds(center, TRADER_REVEAL_RADIUS)
@@ -300,11 +300,8 @@ function onDayStart()
     if (g_currentTradingPost == null)
       error("Current trading post is null")
 
-  let traderWorldTransform = g_currentTradingPost.transform.concat(g_traderLocalTransform)
-  let traderHorseWorldTransform = traderWorldTransform.concat(g_traderHorseLocalTransform)
-
-  traderWorldTransform.apply(g_traderUnit)
-  traderHorseWorldTransform.apply(g_traderHorseUnit)
+  g_traderTransform.apply(g_traderUnit)
+  g_traderHorseTransform.apply(g_traderHorseUnit)
 
   g_traderUnit.fadeIn()
   g_traderHorseUnit.fadeIn()
@@ -512,6 +509,11 @@ function onItemSold()
 
 // ============================================================================
 init
+
+  
+  g_traderTransform = new Transform()
+  g_traderHorseTransform = new Transform(vec3(-32.0, -64.0, 0), eulerToQuat(124.0.toRadians(), 0, 0))
+  g_traderHorseTransform.setParent(g_traderTransform)
 
   g_comparator = (TradingPost a, TradingPost b) ->
     var result = 0

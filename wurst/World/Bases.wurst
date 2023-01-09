@@ -51,7 +51,7 @@ public enum BaseDifficulty
 
 // ============================================================================
 public class Base
-  protected transform m_transform = IDENTITYT
+  protected Transform m_transform = new Transform()
   protected BaseDifficulty m_difficulty
   protected real m_dd = REAL_MAX
   protected minimapicon m_icon = null
@@ -75,6 +75,9 @@ public class Base
     destroy m_unitSpawners
     m_unitSpawners = null
 
+    destroy m_transform
+    m_transform = null
+
     m_region.destr()
     m_region = null
 
@@ -95,7 +98,7 @@ public class Base
     return m_difficulty
 
   // ----------------------------------------------------------------------------
-  function getWorldTransform() returns transform
+  function getTransform() returns Transform
     return m_transform
 
   // ----------------------------------------------------------------------------
@@ -104,12 +107,11 @@ public class Base
 
   // --------------------------------------------------------------------------
   function registerUnitSpawner(int unitTypeId, vec2 localPos, angle localYaw) returns UnitSpawner
-    let localTransform = transform(localPos, eulerToQuat(localYaw.radians(), 0.0, 0.0))
-    return registerUnitSpawner(unitTypeId, localTransform)
 
-  // --------------------------------------------------------------------------
-  function registerUnitSpawner(int unitTypeId, transform localTransform) returns UnitSpawner
-    let unitSpawner = new UnitSpawner(unitTypeId, localTransform)
+    let unitSpawner = new UnitSpawner(unitTypeId)
+    unitSpawner.getTransform()
+      ..setLocalTransform(localPos, eulerToQuat(localYaw.radians(), 0.0, 0.0))
+    
     m_unitSpawners.add(unitSpawner)
 
     // Add to preloader so we don't get a hitch when spawning the map event
@@ -178,21 +180,26 @@ public abstract class Bases
     let _base = new Base(id)
     ..setName(displayName)
 
+    // Align to grid
+    var alignedPos = pos
+    alignedPos.x = (alignedPos.x / 128.0).floor() * 128.0
+    alignedPos.y = (alignedPos.y / 128.0).floor() * 128.0
+
     _base.m_difficulty = diff
-    _base.m_transform = transform(pos, eulerToQuat(yaw.radians(), 0, 0))
+    _base.m_transform = new Transform(alignedPos, eulerToQuat(yaw.radians(), 0, 0))
   
     if (diff == BaseDifficulty.EASY)
-      _base.m_icon = CreateMinimapIcon(pos.x, pos.y, BASE_EASY_COLOR.red, BASE_EASY_COLOR.green, BASE_EASY_COLOR.blue, BASE_MODEL_PATH, BASE_FOG_STATE)
+      _base.m_icon = CreateMinimapIcon(alignedPos.x, alignedPos.y, BASE_EASY_COLOR.red, BASE_EASY_COLOR.green, BASE_EASY_COLOR.blue, BASE_MODEL_PATH, BASE_FOG_STATE)
       g_easyBaseIcons[g_easyBaseCount] = _base.m_icon
       g_easyBaseCount++
     
     if (diff == BaseDifficulty.MEDIUM)
-      _base.m_icon = CreateMinimapIcon(pos.x, pos.y, BASE_MEDIUM_COLOR.red, BASE_MEDIUM_COLOR.green, BASE_MEDIUM_COLOR.blue, BASE_MODEL_PATH, BASE_FOG_STATE)
+      _base.m_icon = CreateMinimapIcon(alignedPos.x, alignedPos.y, BASE_MEDIUM_COLOR.red, BASE_MEDIUM_COLOR.green, BASE_MEDIUM_COLOR.blue, BASE_MODEL_PATH, BASE_FOG_STATE)
       g_mediumBaseIcons[g_mediumBaseCount] = _base.m_icon
       g_mediumBaseCount++
     
     if (diff == BaseDifficulty.HARD)
-      _base.m_icon = CreateMinimapIcon(pos.x, pos.y, BASE_HARD_COLOR.red, BASE_HARD_COLOR.green, BASE_HARD_COLOR.blue, BASE_MODEL_PATH, BASE_FOG_STATE)
+      _base.m_icon = CreateMinimapIcon(alignedPos.x, alignedPos.y, BASE_HARD_COLOR.red, BASE_HARD_COLOR.green, BASE_HARD_COLOR.blue, BASE_MODEL_PATH, BASE_FOG_STATE)
       g_hardBaseIcons[g_hardBaseCount] = _base.m_icon
       g_hardBaseCount++
 
@@ -213,7 +220,7 @@ public abstract class Bases
       if (b.m_dd < closestDD)
         closestDD = b.m_dd
         result.hasValue = true
-        result.value = b.getWorldTransform().pos.toVec2()
+        result.value = b.getTransform().getWorldPosition().toVec2()
     return result
 
   // --------------------------------------------------------------------------
@@ -221,7 +228,7 @@ public abstract class Bases
   static function getClosestSpawnPoints(int count, SpawnPointCollection outSpawnPoints) returns int
     var n = 0
     while (n < count and n < g_basesClosest.size())
-      outSpawnPoints.pushPoint(g_basesClosest.get(n).getWorldTransform().pos.toVec2())
+      outSpawnPoints.pushPoint(g_basesClosest.get(n).getTransform().getWorldPosition().toVec2())
       n++
     return n
 
@@ -234,7 +241,7 @@ public abstract class Bases
       if (b.m_dd > furthestDD)
         furthestDD = b.m_dd
         result.hasValue = true
-        result.value = b.getWorldTransform().pos.toVec2()
+        result.value = b.getTransform().getWorldPosition().toVec2()
     return result
 
   // --------------------------------------------------------------------------
@@ -242,7 +249,7 @@ public abstract class Bases
   static function getFurthestSpawnPoints(int count, SpawnPointCollection outSpawnPoints) returns int
     var n = 0
     while (n < count and n < g_basesFurthest.size())
-      outSpawnPoints.pushPoint(g_basesFurthest.get(n).getWorldTransform().pos.toVec2())
+      outSpawnPoints.pushPoint(g_basesFurthest.get(n).getTransform().getWorldPosition().toVec2())
       n++
     return n
 
@@ -301,7 +308,7 @@ function unit.isBaseUnit() returns bool
 
 // ============================================================================
 function update(Base b)
-  let basePos = b.getWorldTransform().pos.toVec2()
+  let basePos = b.getTransform().getWorldPosition().toVec2()
   var closestDD = REAL_MAX
   for invalidatingUnit in g_invalidatingUnits
     let dd = invalidatingUnit.getPos().distanceToSq(basePos)
@@ -323,7 +330,7 @@ function updateAll()
 function updateNearby(vec2 pos)
   var updated = 0
   for b in g_bases
-    let dd = pos.distanceToSq(b.getWorldTransform().pos.toVec2())
+    let dd = pos.distanceToSq(b.getTransform().getWorldPosition().toVec2())
     if (b.m_dd == REAL_MAX or dd < b.m_dd)
       b.m_dd = dd
       updated++
