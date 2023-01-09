@@ -9,6 +9,9 @@ import UnitIndexer
 import Circle
 import ColorUtility
 import Func
+import UnitMetadata
+import CampCenterComponent
+import HumanPlayerComponent
 
 @configurable public constant real FRIENDLY_INVALIDATION_RANGE = 512.0
 @configurable public constant real HOSTILE_INVALIDATION_RANGE = 800.0
@@ -47,14 +50,20 @@ public function getCachedFriendlySpawnPointProvider() returns ISpawnPointProvide
 public function getDynamicHostileSpawnPointProvider(player p) returns ISpawnPointProvider
   let playerId = p.getId()
   if (g_dynamicHostileSpawnPointProviders[playerId] == null)
-    g_dynamicHostileSpawnPointProviders[playerId] = new DynamicSpawnPointProvider(p, HOSTILE_INVALIDATION_RANGE, g_doesUnitInvalidateHostileSpawnPoint)
+    g_dynamicHostileSpawnPointProviders[playerId] = new DynamicSpawnPointProvider(
+      p.getHumanPlayerComponent().getCampCenter(),
+      HOSTILE_INVALIDATION_RANGE,
+      g_doesUnitInvalidateHostileSpawnPoint)
   return g_dynamicHostileSpawnPointProviders[playerId]
 
 // ============================================================================
 public function getDynamicFriendlySpawnPointProvider(player p) returns ISpawnPointProvider
   let playerId = p.getId()
   if (g_dynamicFriendlySpawnPointProviders[playerId] == null)
-    g_dynamicFriendlySpawnPointProviders[playerId] = new DynamicSpawnPointProvider(p, FRIENDLY_INVALIDATION_RANGE, g_doesUnitInvalidateFriendlySpawnPoint)
+    g_dynamicFriendlySpawnPointProviders[playerId] = new DynamicSpawnPointProvider(
+      p.getHumanPlayerComponent().getCampCenter(),
+      FRIENDLY_INVALIDATION_RANGE,
+      g_doesUnitInvalidateFriendlySpawnPoint)
   return g_dynamicFriendlySpawnPointProviders[playerId]
 
 // ============================================================================
@@ -116,6 +125,19 @@ function onUnitIndexing()
 
   if (g_cachedHostileSpawnPointProvider != null and doesUnitInvalidateHostileSpawnPoint(indexingUnit))
     g_cachedHostileSpawnPointProvider.invalidateSpawnPoints(circle(unitPos, HOSTILE_INVALIDATION_RANGE).getBounds())
+
+  let metadata = indexingUnit.getMetadata()
+  if (metadata != null)
+    let campCenterComp = metadata.getCampCenterComponent()
+    if (campCenterComp != null)
+      updateDynamicSpawnPointProviderCenter(indexingUnit.getOwner())
+
+// ============================================================================
+function updateDynamicSpawnPointProviderCenter(player p)
+  let humanComp = p.getHumanPlayerComponent()
+  let campCenter = humanComp.getCampCenter()
+  g_dynamicFriendlySpawnPointProviders[p.getId()].setCenter(campCenter)
+  g_dynamicHostileSpawnPointProviders[p.getId()].setCenter(campCenter)
 
 // ============================================================================
 init

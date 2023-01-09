@@ -1,6 +1,5 @@
 package UndeadTargetingComponent
 import UnitMetadata
-import HumanPlayerComponent
 import Events
 import RegisterEvents
 import HumanPlayers
@@ -20,6 +19,7 @@ import Spawning
 import BuildingUndeadTarget
 import GroupUtils
 import TlsUnitIds
+import HumanPlayerComponent
 
 public bool UTC_ENABLED = true
 
@@ -175,17 +175,6 @@ public class UndeadTargetingComponent extends UnitComponent
     return m_preferOrganicTargets
 
   // --------------------------------------------------------------------------
-  function shouldTargetOrganicUnits() returns bool
-    if (m_preferOrganicTargets)
-      return true
-    if (m_targetPlayer == null)
-      return false
-    let metadata = m_targetPlayer.getHumanPlayerComponent()
-    if (metadata == null)
-      return false
-    return metadata.getCanPathToHeadquartersOrHero()
-
-  // --------------------------------------------------------------------------
   function setIgnoreDOTFate(bool value)
     m_ignoreDOTFate = value
 
@@ -277,11 +266,6 @@ public class UndeadTargetingComponent extends UnitComponent
       // Unable to find a target unit
       if (m_targetUnit == null or not m_targetUnit.isAlive())
         //recordNote("iOTP_i", "2 m_targetUnit == null")
-
-        // 3. Try attack-moving to the target player's camp center (the HQ tent or the hero)
-        tryTargetCampCenter()
-        // if (tryTargetCampCenter())
-          //recordNote("iOTP_i", "Could not find target unit, attack-moving to camp center")
         
         // 4. The target player is either null or considered dead, so start damaging the unit over time
         if ((m_targetUnit == null or not m_targetUnit.isAlive()) and not m_ignoreDOTFate)
@@ -420,25 +404,6 @@ public class UndeadTargetingComponent extends UnitComponent
 
     setTargetUnit_impl(targetUnit)
     return true
-
-  // --------------------------------------------------------------------------
-  protected function tryTargetCampCenter() returns bool    
-    let targetPlayer = getTargetPlayer()
-    if (targetPlayer == null)
-      //recordNote("tTCC", "getTargetPlayer() == null")
-      return false
-
-    let playerMetadata = targetPlayer.getHumanPlayerComponent()
-    if (playerMetadata == null)
-      //recordNote("tTCC", "playerMetadata == null")
-      return false
-
-    let campCenter = playerMetadata.getObeliskOrHero()
-    if (campCenter == null or not campCenter.isAlive())
-      //recordNote("tTCC", "campCenter == null or campCenter.isAlive()")
-      return false
-
-    return setTargetUnit_impl(campCenter)
 
   // --------------------------------------------------------------------------
   function onTargetUnitNoLongerTargettable()
@@ -682,6 +647,7 @@ public class UndeadTargetProvider extends TargetProvider
   private group m_structureTargets_HighPri = CreateGroup()
   private bool m_preferOrganicTargets = false
   private Event m_preferOrganicTargetsChanged = null
+  private _handle array[24] m_hpcPropertyChangedEventHandlers
 
   // --------------------------------------------------------------------------
   construct()
@@ -690,6 +656,15 @@ public class UndeadTargetProvider extends TargetProvider
   // --------------------------------------------------------------------------
   ondestroy
     unregisterHumanForceTargetCollection(this)
+
+    for i = 0 to 23
+    //{
+      if (m_hpcPropertyChangedEventHandlers[i] != INVALID_HANDLE)
+        players[i].getHumanPlayerComponent()
+          .onPropertyChanged()
+          .unregister(m_hpcPropertyChangedEventHandlers[i])
+        m_hpcPropertyChangedEventHandlers[i] = INVALID_HANDLE
+    //}
 
     if (m_preferOrganicTargetsChanged != null)
       destroy m_preferOrganicTargetsChanged
@@ -706,6 +681,10 @@ public class UndeadTargetProvider extends TargetProvider
     m_players.addPlayer(p)
     g_playerData[p.getId()] = this
 
+    m_hpcPropertyChangedEventHandlers[p.getId()] = p.getHumanPlayerComponent()
+    .onPropertyChanged()
+    .register((HumanPlayerComponent sender, string propertyName) -> onHumanPlayerComponentPropertyChanged(sender, propertyName))
+
     addPlayerUnitsToGroups(p)
 
   // --------------------------------------------------------------------------
@@ -715,8 +694,22 @@ public class UndeadTargetProvider extends TargetProvider
 
     removePlayerUnitsFromGroups(p)
 
+    if (m_hpcPropertyChangedEventHandlers[p.getId()] != INVALID_HANDLE)
+      p.getHumanPlayerComponent()
+        .onPropertyChanged()
+        .unregister(m_hpcPropertyChangedEventHandlers[p.getId()])
+      m_hpcPropertyChangedEventHandlers[p.getId()] = INVALID_HANDLE
+
     if (m_players.count() == 0)
       release()
+
+  // ----------------------------------------------------------------------------
+  function onHumanPlayerComponentPropertyChanged(HumanPlayerComponent sender, string propertyName)
+    
+    if (propertyName == HumanPlayerComponent.Properties.canPathToHeadquartersOrHero)
+      let uts = getUndeadTargetProviderForPlayer(sender.getOwnerPlayer())
+      if (uts != null)
+        uts.setPreferOrganicTargets(sender.getCanPathToHeadquartersOrHero())
 
   // --------------------------------------------------------------------------
   function getPlayers() returns force
