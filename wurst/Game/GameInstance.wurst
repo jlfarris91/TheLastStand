@@ -10,8 +10,6 @@ import RandomWeatherPlayer
 import DisplayTextToPlayer
 import ColorUtility
 import Bases
-import Execute
-import ErrorHandling
 import PlayerSaveData
 import Math
 import SmartValue
@@ -19,13 +17,16 @@ import GameProperties
 import Dialog
 import GroupUtils
 import TlsUnitIds
-
-import initlater PlayerWaves
-import initlater IWaveGenerator
-import initlater GameStatsMultiboard
-import initlater NightWaveGenerator
-import initlater DayWaveGenerator
-import initlater Heroes
+import ErrorHandling
+import UnitMetadata
+import Orders
+import TlsItemIds
+import InvulnerableComponent
+import Spawning
+import PlayerSetup
+import TlsJobItemIds
+import ItemType
+import PlayerSpawnPointProviders
 
 public GameInstance g_GameInstance = new GameInstance()
 
@@ -35,11 +36,6 @@ public class GameInstance
   private bool m_updateGracePeriod
   private int m_day = 0
   private real m_averagePlayerDifficulty = 1.0
-  private PlayerWavesMap m_playerWaves
-  private IDayWaveGenerator m_staticDayWaveGenerator
-  private IDayWaveGenerator m_randomDayWaveGenerator
-  private INightWaveGenerator m_staticNightWaveGenerator
-  private INightWaveGenerator m_randomNightWaveGenerator
   private RandomWeatherPlayer m_weatherPlayer
   private time m_startTime
   private time m_endTime
@@ -164,14 +160,6 @@ public class GameInstance
     //}
 
   // --------------------------------------------------------------------------
-  function getWaves() returns PlayerWavesMap
-    return m_playerWaves
-
-  // --------------------------------------------------------------------------
-  function getPlayerWaves(player p) returns PlayerWaves
-    return m_playerWaves.getOrCreatePlayerWaves(p)
-
-  // --------------------------------------------------------------------------
   function getGameProgress() returns real
     return getDaysSurvived() + getNightsSurvived()
 
@@ -217,19 +205,6 @@ public class GameInstance
     m_startTime = makeTime(getGameTime().getDay(), TIME_OF_DAY.floor(), 0)
     m_endTime = m_startTime + makeTimespan(TOTAL_NIGHTS, 0, 0)
 
-    // These should move to a place that sets up the GameInstance
-    execute() () ->
-      m_staticDayWaveGenerator = new StaticDayWaveGenerator()
-      
-    execute() () ->
-      m_randomDayWaveGenerator = new RandomDayWaveGenerator()
-    
-    execute() () ->
-      m_staticNightWaveGenerator = new StaticNightWaveGenerator()
-      
-    execute() () ->
-      m_randomNightWaveGenerator = new RandomNightWaveGenerator()
-
     m_weatherPlayer = new RandomWeatherPlayer()
 
     m_weatherPlayer.start()
@@ -238,7 +213,6 @@ public class GameInstance
 
     initializeGeneral()
     initializeAlliances()
-    initializeWaves()
 
     doAfter(1.0) ->
       postStart()
@@ -246,30 +220,9 @@ public class GameInstance
   // ----------------------------------------------------------------------------
   function onTODScaleValueChanged()
 
-
   // --------------------------------------------------------------------------
   function complete()
-
     m_weatherPlayer.stop()
-
-    destroy m_playerWaves
-    m_playerWaves = null
-
-    if (m_staticNightWaveGenerator != null)
-      destroy m_staticNightWaveGenerator
-      m_staticNightWaveGenerator = null
-
-    if (m_randomNightWaveGenerator != null)
-      destroy m_randomNightWaveGenerator
-      m_randomNightWaveGenerator = null
-
-    if (m_staticDayWaveGenerator != null)
-      destroy m_staticDayWaveGenerator
-      m_staticDayWaveGenerator = null
-
-    if (m_randomDayWaveGenerator != null)
-      destroy m_randomDayWaveGenerator
-      m_randomDayWaveGenerator = null
 
   // --------------------------------------------------------------------------
   private function postStart()
@@ -322,10 +275,6 @@ public class GameInstance
     if (m_updateGracePeriod)
       updateGracePeriod()
 
-    // Show the player's multiboards on day 1
-    if (m_day == 1)
-      showMultiboardsForPlayers()
-
     g_GameProperties.getProperty(GameProperty.TOD_SCALE).setBase(TOD_DAY_SCALARS[m_day])
 
     // Start day waves for players
@@ -351,14 +300,6 @@ public class GameInstance
           d.display(p, true)
         //}
     //}
-
-  // --------------------------------------------------------------------------
-  function showMultiboardsForPlayers()
-    for _player in g_HumanPlayersInGame
-      showGameStatsMultiboard(_player)
-  
-    if (PLAYER_SPECTATOR.isPlayingHumanPlayer())
-      showGameStatsMultiboard(PLAYER_SPECTATOR)
 
   // --------------------------------------------------------------------------
   function startNight()
@@ -420,53 +361,6 @@ public class GameInstance
       SetPlayerHandicapXPBJ(p, 0.00)
 
   // --------------------------------------------------------------------------
-  private function initializeWaves()
-    m_playerWaves = new PlayerWavesMap()
-
-    Log.debug("Generating waves...")
-
-    for p in g_PlayingHumanPlayers
-      generateWavesForPlayer(p)
-
-    Log.debug("Done generating waves.")
-
-  // --------------------------------------------------------------------------
-  private function generateWavesForPlayer(player _player) returns bool
-    if (_player == null)
-      argumentNullError("_player")
-
-    let playerWaves = m_playerWaves.getOrCreatePlayerWaves(_player)
-    let playerDifficulty = _player.getHumanPlayerComponentRequired().getDifficulty()
-    let playerNightWaveGenerator = getNightWaveGenerator(playerDifficulty)
-    let playerDayWaveGenerator = getDayWaveGenerator(playerDifficulty)
-
-    execute() () ->
-      Log.debug("Generating night waves for player " + _player.getName() + " ...")
-      let nightWaves = playerWaves.getNightWaves()
-      playerNightWaveGenerator.generateWavesForPlayer(_player, nightWaves)
-
-    execute() () ->
-      Log.debug("Generating day waves for player " + _player.getName() + " ...")
-      let dayWaves = playerWaves.getDayWaves()
-      playerDayWaveGenerator.generateWavesForPlayer(_player, dayWaves)
-
-    return true
-
-  // --------------------------------------------------------------------------
-  private function getNightWaveGenerator(real difficulty) returns INightWaveGenerator
-    if (difficulty < DIFFICULTY_START_RANDOM_WAVES)
-      return m_staticNightWaveGenerator
-    else
-      return m_randomNightWaveGenerator
-
-  // --------------------------------------------------------------------------
-  private function getDayWaveGenerator(real difficulty) returns IDayWaveGenerator
-    if (difficulty < DIFFICULTY_START_RANDOM_WAVES)
-      return m_staticDayWaveGenerator
-    else
-      return m_randomDayWaveGenerator
-
-  // --------------------------------------------------------------------------
   private function initializeAlliances()  
     for p in g_HumanPlayers
       // Make player treat undead as an enemy
@@ -505,6 +399,71 @@ public class GameInstance
     SetPlayerAllianceStateBJ(PLAYER_SPECTATOR, PLAYER_LOOTABLES, bj_ALLIANCE_NEUTRAL )
     // Make lootables treat player as neutral
     SetPlayerAllianceStateBJ(PLAYER_LOOTABLES, PLAYER_SPECTATOR, bj_ALLIANCE_NEUTRAL )
+
+// ============================================================================
+public function spawnHeroForPlayer(player p, vec2 pos, bool firstTime) returns unit
+  let playerMetadata = p.getMetadata()
+  let playerComp = playerMetadata.getHumanPlayerComponent()
+
+  unit hero = playerComp.getHero()
+  let firstTimeSpawned = hero == null
+
+  // This is the first time the hero has been spawned for the player
+  // new hero metadata will be automatically generated
+  if (firstTimeSpawned)
+    hero = createUnitTLS(p, playerComp.getHeroTypeId(), pos, 270.0.asAngleDegrees())
+    PlayerSetup.getSetupForPlayer(p).setupHero(hero)
+  else
+    hero.revive(pos, false)
+
+  // Reset player's camera to look at new hero
+  if (not firstTime and p == localPlayer)
+    PanCameraToTimedForPlayer(p, pos.x, pos.y, 0)
+  
+  SelectUnitForPlayerSingle(hero, p)
+
+  // Set player name back to normal if they were deceased
+  playerMetadata.resetDisplayName()
+
+  // Give starting items
+  if (playerComp.getObelisk() == null)
+    ItemType.createItemForUnit(TlsItemIds.obelisk, hero)
+
+  if (firstTimeSpawned)
+    ItemType.createItemForUnit(TlsJobItemIds.acolyte, hero)
+    ItemType.createItemForUnit(TlsItemIds.flintAndTinder, hero)
+
+  // Make hero invulnerable for a short period of time
+  if (not firstTime)
+    hero.makeInvulnerable(HERO_RESPAWN_INVULNERABLE_DURATION)
+
+  return hero
+
+// ============================================================================
+public function spawnInitialPlayerUnitsAtRandomPoint(player p, bool _firstTime)
+  let sp = getDynamicFriendlySpawnPointProvider(p).getRandomSpawnPointInPlayableMap()
+  if (not sp.succeeded)
+    error("Could not find a safe spawn point to spawn hero for player " + p.getName())
+    return
+
+  // let hero = spawnHeroForPlayer(p, sp.spawnPoint, firstTime)
+  
+  // Create survivors for the player to start with
+  // spawnInitialSurvivorsForPlayer(p, hero)
+
+  let wisp = createUnitTLS(p, TlsUnitIds.wisp, sp.spawnPoint, 270.0.asAngleDegrees())
+  SelectUnitForPlayerSingle(wisp, p)
+
+  // Reset player's camera to look at new hero
+  if (p == localPlayer)
+    PanCameraToTimedForPlayer(p, sp.spawnPoint.x, sp.spawnPoint.y, 0)
+
+// ============================================================================
+function spawnInitialSurvivorsForPlayer(player p, unit hero)
+  let pos = hero.getPos()
+  for i = 1 to GameSettings.startingSurvivors
+    let survivor = createUnitTLS(p, TlsUnitIds.Survivors.survivorMale, pos, GetRandomDirectionDeg().asAngleDegrees())
+    survivor.issueTargetOrderById(OrderIds.move, hero)
 
 // ============================================================================
 function onDayStart()

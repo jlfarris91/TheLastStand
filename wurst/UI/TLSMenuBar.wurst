@@ -1,0 +1,495 @@
+package TLSMenuBar
+import LoadToc
+import HumanPlayers
+import HashMap
+import Frame
+import StackPanel
+import Layout
+import ProjectConstants
+import Alliances
+import ClosureFrames
+import Math
+import GameConstants
+import HumanPlayerComponent
+import DebuggerDialog
+import HelpMenu
+import RotateStructures
+import Icons
+import ColorUtility
+import StandardTooltip
+
+public constant int MENU_ITEM_DISCORD = 0
+public constant int MENU_ITEM_ALLIANCES = 1
+public constant int MENU_ITEM_CAMERA = 2
+public constant int MENU_ITEM_HELP_MENU = 3
+public constant int MENU_ITEM_ROTATE_BUILDINGS = 4
+public constant int MENU_ITEM_DEBUG = 5
+public constant int MENU_ITEM_COUNT = 6
+
+HashMap<player, TLSMenuBar> g_playerToMenuMap = new HashMap<player, TLSMenuBar>()
+
+// ============================================================================
+public class TLSMenuBar extends StackPanel
+  TLSMenuButton array[MENU_ITEM_COUNT] m_items
+
+  // --------------------------------------------------------------------------
+  construct(player _player)
+    super("TLSMB")
+
+    setPlayer(_player)
+
+    setOrientation(LayoutOrientation.LEFTTORIGHT)
+
+    m_items[MENU_ITEM_DISCORD] = new DiscordToggleButton(this, _player)
+    addChild(m_items[MENU_ITEM_DISCORD])
+
+    m_items[MENU_ITEM_ALLIANCES] = new AlliancesToggleButton(this, _player)
+    addChild(m_items[MENU_ITEM_ALLIANCES])
+
+    m_items[MENU_ITEM_CAMERA] = new CameraToggleButton(this, _player)
+    addChild(m_items[MENU_ITEM_CAMERA])
+
+    m_items[MENU_ITEM_HELP_MENU] = new HelpMenuButton(this, _player)
+    addChild(m_items[MENU_ITEM_HELP_MENU])
+
+    m_items[MENU_ITEM_ROTATE_BUILDINGS] = new RotateStructuresButton(this, _player)
+    addChild(m_items[MENU_ITEM_ROTATE_BUILDINGS])
+
+    if (DEV_ENVIRONMENT)
+      m_items[MENU_ITEM_DEBUG] = new DebuggerButton(this, _player)
+      addChild(m_items[MENU_ITEM_DEBUG])
+
+  // --------------------------------------------------------------------------
+  function uncheckOthers(TLSMenuButton menuButton)
+    for i = 0 to MENU_ITEM_COUNT - 1
+      let otherMenuToggleButton = m_items[i] castTo TLSMenuToggleButton
+      if (otherMenuToggleButton != null and otherMenuToggleButton != menuButton)
+        otherMenuToggleButton.setIsChecked(false)
+
+// ============================================================================
+public function createMenusForPlayers()
+
+  let itemSize = vec2(0.03, 0.03)
+  let pos = vec2(0.46, 0.57)
+  let size = vec2(REAL_MAX, itemSize.y)
+
+  for _player in g_PlayingHumanPlayers
+    let menu = new TLSMenuBar(_player)
+      ..setAbsArea(FRAMEPOINT_TOPLEFT, pos, size)
+      ..showOnly(_player)
+    g_playerToMenuMap.put(_player, menu)
+
+// ============================================================================
+public function getTLSMenu(player p) returns TLSMenuBar
+  return g_playerToMenuMap.get(p)
+
+// ============================================================================
+public class TLSMenuButton extends Frame
+  protected framehandle m_buttonFrameIcon
+  protected framehandle m_pushedBackdropFrame
+  protected framehandle m_highlightFrame
+  protected FrameHandleListener m_onClickListener
+  protected FrameHandleListener m_onMouseEnterListener
+  protected FrameHandleListener m_onMouseLeaveListener
+  protected string m_tooltipNormal
+  protected string m_tooltipExtended
+  protected string m_iconPath
+  protected string m_iconDisabledPath
+
+  // --------------------------------------------------------------------------
+  construct(string frameName)
+    super(createFrame(frameName))
+
+    m_buttonFrameIcon = getFrame("ButtonIcon", 0)..setTexture(m_iconPath, 0, true)
+
+    m_pushedBackdropFrame = getFrame("ButtonPushedBackdrop", 0)
+    m_highlightFrame = getFrame("ButtonMouseOverHighlight", 0)
+
+    m_onClickListener = getFrameHandle().onClick(() -> onClicked())
+    m_onMouseEnterListener = getFrameHandle().onMouseEnter(() -> onMouseEnter())
+    m_onMouseLeaveListener = getFrameHandle().onMouseLeave(() -> onMouseLeave())
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    destroyFrames()
+
+  // --------------------------------------------------------------------------
+  function getTooltipNormal() returns string
+    return m_tooltipNormal
+
+  // --------------------------------------------------------------------------
+  function setTooltipNormal(string value)
+    if (m_tooltipNormal != value)
+      m_tooltipNormal = value
+
+  // --------------------------------------------------------------------------
+  function getTooltipExtended() returns string
+    return m_tooltipExtended
+
+  // --------------------------------------------------------------------------
+  function setTooltipExtended(string value)
+    if (m_tooltipExtended != value)
+      m_tooltipExtended = value
+
+  // --------------------------------------------------------------------------
+  function getIconPath() returns string
+    return m_iconPath
+
+  // --------------------------------------------------------------------------
+  function setIconPath(string value)
+    if (m_iconPath != value)
+      m_iconPath = value
+      if (m_buttonFrameIcon != null)
+        m_buttonFrameIcon.setTexture(value, 0, true)
+
+  // --------------------------------------------------------------------------
+  function getIconDisabledPath() returns string
+    return m_iconDisabledPath
+
+  // --------------------------------------------------------------------------
+  function setIconDisabledPath(string value)
+    if (m_iconDisabledPath != value)
+      m_iconDisabledPath = value
+  
+  // --------------------------------------------------------------------------
+  protected function destroyFrames()
+
+    if (m_onClickListener != null)
+      destroy m_onClickListener
+      m_onClickListener = null
+
+    if (m_onMouseEnterListener != null)
+      destroy m_onMouseEnterListener
+      m_onMouseEnterListener = null
+
+    if (m_onMouseLeaveListener != null)
+      destroy m_onMouseLeaveListener
+      m_onMouseLeaveListener = null
+
+    if (m_pushedBackdropFrame != null)
+      m_pushedBackdropFrame.remove()
+      m_pushedBackdropFrame = null
+
+    if (m_highlightFrame != null)
+      m_highlightFrame.remove()
+      m_highlightFrame = null
+
+  // --------------------------------------------------------------------------
+  protected function onClicked()
+    getFrameHandle().clearFocus()
+
+  // --------------------------------------------------------------------------
+  protected function onMouseEnter()
+    m_highlightFrame.show(getPlayer())
+    StandardTooltip.show(m_tooltipNormal, m_tooltipExtended, getPlayer())
+
+  // --------------------------------------------------------------------------
+  protected function onMouseLeave()
+    m_highlightFrame.hide()
+    StandardTooltip.hide(getPlayer())
+
+// ============================================================================
+public class TLSMenuToggleButton extends TLSMenuButton
+  protected bool m_checked
+  private TLSMenuBar m_menuBar
+
+  // --------------------------------------------------------------------------
+  construct(TLSMenuBar menuBar, string frameName)
+    super(frameName)
+    m_menuBar = menuBar
+
+  // --------------------------------------------------------------------------
+  function getIsChecked() returns bool
+    return m_checked
+
+  // --------------------------------------------------------------------------
+  function setIsChecked(bool checked)
+    if (m_checked != checked)
+      m_checked = checked
+      if (m_checked)
+        onChecked()
+      else
+        onUnchecked()
+
+  // --------------------------------------------------------------------------
+  protected override function onClicked()
+    super.onClicked()
+    setIsChecked(not getIsChecked())
+
+  // --------------------------------------------------------------------------
+  protected override function onMouseLeave()
+    if (not getIsChecked())
+      m_highlightFrame.hide()
+    StandardTooltip.hide(getPlayer())
+
+  // --------------------------------------------------------------------------
+  protected function onChecked()
+    m_menuBar.uncheckOthers(this)
+    m_pushedBackdropFrame.show(getPlayer())
+    m_highlightFrame.show(getPlayer())
+
+  // --------------------------------------------------------------------------
+  protected function onUnchecked()
+    m_pushedBackdropFrame.hide()
+    m_highlightFrame.hide()
+
+// ============================================================================
+public class AlliancesToggleButton extends TLSMenuButton
+  private TLSMenuBar m_menuBar
+
+  // --------------------------------------------------------------------------
+  construct(TLSMenuBar menuBar, player _player)
+    super("TLSMenuButtonTemplate")
+    m_menuBar = menuBar
+    
+    setPlayer(_player)
+
+    setIconPath("ReplaceableTextures\\CommandButtons\\BTNHumanCaptureFlag.blp")
+    setIconDisabledPath("ReplaceableTextures\\CommandButtonsDisabled\\DISBTNHumanCaptureFlag.blp")
+    setTooltipNormal("Alliances")
+    setTooltipExtended("Show the alliances menu")
+
+  // --------------------------------------------------------------------------
+  protected override function onClicked()
+    super.onClicked()
+    showAlliancesDialogToPlayer(getPlayer())
+    m_menuBar.uncheckOthers(this)
+
+// ============================================================================
+public class CameraToggleButton extends TLSMenuToggleButton
+  private framehandle m_sliderFrame
+  private framehandle m_sliderLabel
+  private FrameHandleListener m_sliderValueChanged
+  private real m_value = CAMERA_DISTANCE_DEFAULT
+
+  // --------------------------------------------------------------------------
+  construct(TLSMenuBar menuBar, player _player)
+    super(menuBar, "TLSMenuButtonTemplate")
+    
+    setPlayer(_player)
+
+    setIconPath("ReplaceableTextures\\WorldEditUI\\Doodad-Cinematic.blp")
+    setIconDisabledPath("ReplaceableTextures\\WorldEditUI\\Doodad-Cinematic.blp")
+    setTooltipNormal("Camera Controls")
+    setTooltipExtended("Change camera settings")
+
+    m_sliderFrame = createFrame("EscMenuSliderTemplate", GAME_UI, 0, 0)
+
+    m_sliderLabel = createFrame("EscMenuLabelTextTemplate", m_sliderFrame, 0, 0)
+    m_sliderLabel.setPoint(FRAMEPOINT_LEFT, m_sliderFrame, FRAMEPOINT_RIGHT, 0, 0)
+    m_sliderLabel.setSize(0.15, 0.02)
+    m_sliderLabel.setTextAlignment(TEXT_JUSTIFY_MIDDLE, TEXT_JUSTIFY_LEFT)
+    m_sliderLabel.setText("Distance: " + m_value.floor().toString())
+
+    m_sliderFrame.setSize(0.15, 0.01)
+    m_sliderFrame.setPoint(FRAMEPOINT_TOPLEFT, getFrameHandle(), FRAMEPOINT_BOTTOMLEFT, -0.0002, 0.0)
+    m_sliderFrame.setMinMax(CAMERA_DISTANCE_MIN, CAMERA_DISTANCE_MAX)
+    m_sliderFrame.setValue(m_value)
+    m_sliderFrame.setStepSize(50)
+    m_sliderFrame.hide()
+
+    m_sliderValueChanged = m_sliderFrame.onSliderValueChange() -> 
+      onSliderValueChanged()
+
+    _player.getHumanPlayerComponentRequired().onPropertyChanged().register() (comp, propertyName) -> 
+      if (propertyName == HumanPlayerComponent.Properties.cameraDistance)
+        setCameraDistance(comp.getCameraDistance())
+
+  // --------------------------------------------------------------------------
+  function getCameraDistance() returns real
+    return m_value
+
+  // --------------------------------------------------------------------------
+  function setCameraDistance(real value)
+    let clampedValue = clamp(value, CAMERA_DISTANCE_MIN, CAMERA_DISTANCE_MAX)
+    if (m_value == clampedValue)
+      return
+    
+    m_value = clampedValue
+    
+    if (m_sliderFrame != null)
+      m_sliderFrame.setValue(clampedValue)
+    
+    if (m_sliderLabel != null)
+      m_sliderLabel.setText("Distance: " + m_value.floor().toString())
+
+    getPlayer().getHumanPlayerComponentRequired().setCameraDistance(m_value)
+
+  // --------------------------------------------------------------------------
+  protected override function destroyFrames()
+    super.destroyFrames()
+    
+    if (m_sliderValueChanged != null)
+      destroy m_sliderValueChanged
+      m_sliderValueChanged = null
+
+    if (m_sliderFrame != null)
+      m_sliderFrame.remove()
+      m_sliderFrame = null
+
+  // --------------------------------------------------------------------------
+  private function onSliderValueChanged()
+
+    if (m_sliderFrame == null)
+      return
+
+    let newValue = m_sliderFrame.getValue()
+    if (m_value == newValue)
+      return
+
+    setCameraDistance(newValue)
+
+  // --------------------------------------------------------------------------
+  protected override function onChecked()
+    super.onChecked()
+    
+    let parentFrame = getParent()
+    if (parentFrame != null)
+      m_sliderFrame.setPoint(FRAMEPOINT_TOPLEFT, parentFrame.getFrameHandle(), FRAMEPOINT_BOTTOMLEFT, -0.0002, 0.0)
+
+    m_sliderFrame.show(getPlayer())
+
+  // --------------------------------------------------------------------------
+  protected override function onUnchecked()
+    super.onUnchecked()
+    m_sliderFrame.hide()
+
+// ============================================================================
+public class DebuggerButton extends TLSMenuButton
+  private TLSMenuBar m_menuBar
+
+  // --------------------------------------------------------------------------
+  construct(TLSMenuBar menuBar, player _player)
+    super("TLSMenuButtonTemplate")
+    m_menuBar = menuBar
+    
+    setPlayer(_player)
+
+    setIconPath("ReplaceableTextures\\CommandButtons\\BTNHumanBuild.blp")
+    setIconDisabledPath("ReplaceableTextures\\CommandButtonsDisabled\\DISBTNHumanBuild.blp")
+    setTooltipNormal("Debug")
+    setTooltipExtended("Show the debug dialog")
+
+  // --------------------------------------------------------------------------
+  protected override function onClicked()
+    super.onClicked()
+    DebuggerDialog.toggleVisibility()
+    m_menuBar.uncheckOthers(this)
+
+// ============================================================================
+public class DiscordToggleButton extends TLSMenuToggleButton
+  private framehandle m_editBoxFrame
+  private framehandle m_qrCodeFrame
+
+  // --------------------------------------------------------------------------
+  construct(TLSMenuBar menuBar, player _player)
+    super(menuBar, "DiscordLinkMenuButtonTemplate")
+
+    setPlayer(_player)
+
+    setIconPath("Discord.tga")
+    setIconDisabledPath("Discord.tga")
+    setTooltipNormal("Discord Link")
+    setTooltipExtended("Display the link to the Last Stand Discord server")
+
+    m_editBoxFrame = BlzCreateFrameByType(
+      "GLUEEDITBOX",
+      "DiscordEditBox",
+      BlzGetOriginFrame(ORIGIN_FRAME_GAME_UI, 0),
+      "EscMenuEditBoxTemplate", 0)
+    m_editBoxFrame.hide()
+
+    m_editBoxFrame.setSize(0.15, 0.03)
+    m_editBoxFrame.setPoint(FRAMEPOINT_TOPLEFT, getFrameHandle(), FRAMEPOINT_BOTTOMLEFT, -0.0002, 0.0)
+    m_editBoxFrame.setText(DISCORD_LINK)
+
+    m_editBoxFrame.onEditboxChange() -> 
+      if (m_editBoxFrame.getText() != DISCORD_LINK)
+        m_editBoxFrame.setText(DISCORD_LINK)
+
+    m_qrCodeFrame = createFrame("BACKDROP", "", GAME_UI, "", 0)
+    ..setParent(m_editBoxFrame)
+    ..setSize(0.08, 0.08)
+    ..setPoint(FRAMEPOINT_TOP, m_editBoxFrame, FRAMEPOINT_BOTTOM, vec2(0, -0.005))
+    ..setTexture("QRCode.tga", 0, true)
+
+  // --------------------------------------------------------------------------
+  protected override function destroyFrames()
+    super.destroyFrames()
+    
+    if (m_editBoxFrame != null)
+      m_editBoxFrame.remove()
+      m_editBoxFrame = null
+
+  // --------------------------------------------------------------------------
+  protected override function onChecked()
+    super.onChecked()
+
+    let parentFrame = getParent()
+    if (parentFrame != null)
+      m_editBoxFrame.setPoint(FRAMEPOINT_TOPLEFT, parentFrame.getFrameHandle(), FRAMEPOINT_BOTTOMLEFT, -0.0002, 0.0)
+
+    m_editBoxFrame.show(getPlayer())
+
+  // --------------------------------------------------------------------------
+  protected override function onUnchecked()
+    super.onUnchecked()
+    m_editBoxFrame.hide()
+
+// ============================================================================
+public class HelpMenuButton extends TLSMenuButton
+  private TLSMenuBar m_menuBar
+
+  // --------------------------------------------------------------------------
+  construct(TLSMenuBar menuBar, player _player)
+    super("TLSMenuButtonTemplate")
+    m_menuBar = menuBar
+    
+    setPlayer(_player)
+
+    setIconPath("ReplaceableTextures\\WorldEditUI\\Editor-Random-Item.blp")
+    setIconDisabledPath("ReplaceableTextures\\WorldEditUI\\Editor-Random-Item.blp")
+    setTooltipNormal("Show Tips")
+    setTooltipExtended("Display the Tips window containing helpful tips for new players")
+
+  // --------------------------------------------------------------------------
+  protected override function onClicked()
+    super.onClicked()
+    m_menuBar.uncheckOthers(this)
+    getFrameHandle().clearFocus()    
+
+    let p = getPlayer()
+
+    if (HelpMenu.isVisible(p))
+      HelpMenu.hide(p)
+    else
+      HelpMenu.show(p)
+
+// ============================================================================
+public class RotateStructuresButton extends TLSMenuButton
+  private TLSMenuBar m_menuBar
+
+  // --------------------------------------------------------------------------
+  construct(TLSMenuBar menuBar, player _player)
+    super("TLSMenuButtonTemplate")
+    m_menuBar = menuBar
+    
+    setPlayer(_player)
+
+    setIconPath(Icons.bTNSelectUnit)
+    setIconDisabledPath(Icons.dISBTNSelectUnit)
+    setTooltipNormal("Rotate Structures ({0})".format("Ctrl+R".gold()))
+    setTooltipExtended("Some structures can be built facing different directions. Use this button to rotate the buildings in the build menu before building them.|n|n{0}".format("Fences, Gates".colorize(Colors.gold)))
+
+  // --------------------------------------------------------------------------
+  protected override function onClicked()
+    super.onClicked()
+    m_menuBar.uncheckOthers(this)
+    getFrameHandle().clearFocus()
+    rotateStructures(getPlayer())
+    if (getPlayer() == localPlayer)
+      ForceUIKey("B")
+
+// ============================================================================
+init
+  ensureTocIsLoaded()
