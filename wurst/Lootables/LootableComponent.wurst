@@ -1,6 +1,5 @@
 package LootableComponent
 import GameConstants
-import Range
 import Lootables
 import ErrorHandling
 import Time
@@ -58,14 +57,15 @@ int array g_notEnoughManaLastPlayedTime
 public class LootableComponent extends UnitComponent
   private real m_searchDurationUnscaled
   private int m_cooldownDays
+  private int m_cooldownDurationDays
   private unit m_lootingUnit
   private texttag m_cooldownDayTextTag
-  private rangeInt m_cooldownDaysRange
   private int m_lootRewardMultiplier = 1  
   private int m_dueToLuckyHorseshoe = 0
   private optionalVec2 m_spawnPosOverride = none_vec2()
   private bool m_destroyOnLoot = false
   private LootableDirector m_director
+  private int m_lootGeneratedPerCycle = 1
   private int m_maxLootCount = 1
   private LinkedList<DrawnCard> m_lootCards = new LinkedList<DrawnCard>()
 
@@ -75,7 +75,7 @@ public class LootableComponent extends UnitComponent
 
     m_searchDurationUnscaled = 3.0
     m_cooldownDays = 0
-    m_cooldownDaysRange = LOOTABLES_DEFAULT_COOLDOWN_RANGE
+    m_cooldownDurationDays = LOOTABLES_DEFAULT_COOLDOWN
 
     m_director = new LootableDirector(getOwnerUnit())
 
@@ -103,44 +103,43 @@ public class LootableComponent extends UnitComponent
     if (m_cooldownDayTextTag != null)
       m_cooldownDayTextTag.setPos(getOwnerUnit().getPos().withZ(20.0))
 
-    resetCooldown()
-    drawLootCards()
-    onLootable()
+    drawLootCards(getMaxGeneratedLootCount())
+    makeLootable()
 
   // --------------------------------------------------------------------------
   function canLoot() returns bool
-    return not getIsLooted() and not getIsBeingLooted()
-
-  // --------------------------------------------------------------------------
-  function getIsLooted() returns bool
-    return m_cooldownDays > 0
+    return hasLoot() and not getIsBeingLooted()
 
   // --------------------------------------------------------------------------
   function getIsBeingLooted() returns bool
     return m_lootingUnit != null
 
   // --------------------------------------------------------------------------
-  function getSearchDuration() returns real
+  function getSearchDurationPerLoot() returns real
     return m_searchDurationUnscaled
 
   // --------------------------------------------------------------------------
-  function setSearchDuration(real duration)
+  function setSearchDurationPerLoot(real duration)
     m_searchDurationUnscaled = duration
 
+  // --------------------------------------------------------------------------
+  function getTotalSearchDuration() returns real
+    return m_searchDurationUnscaled * getLootCount()
+
   // ----------------------------------------------------------------------------
-  function getLootCount() returns int
+  function getMaxGeneratedLootCount() returns int
     return m_maxLootCount
   
   // ----------------------------------------------------------------------------
-  function setLootCount(int value)
+  function setMaxGeneratedLootCount(int value)
     m_maxLootCount = min(value, MAX_LOOT_COUNT)
 
   // ----------------------------------------------------------------------------
-  function getLootCard(int index) returns DrawnCard
+  function getLoot(int index) returns DrawnCard
     return m_lootCards.get(index)
 
   // ----------------------------------------------------------------------------
-  function getLootCardCount() returns int
+  function getLootCount() returns int
     return m_lootCards.size()
 
   // ----------------------------------------------------------------------------
@@ -151,20 +150,28 @@ public class LootableComponent extends UnitComponent
   function getDirector() returns LootableDirector
     return m_director
 
-  // --------------------------------------------------------------------------
-  function getCooldownDaysRange() returns rangeInt
-    return m_cooldownDaysRange
+  // ----------------------------------------------------------------------------
+  function getLootGeneratedPerCycle() returns int
+    return m_lootGeneratedPerCycle
+  
+  // ----------------------------------------------------------------------------
+  function setLootGeneratedPerCycle(int value)
+    m_lootGeneratedPerCycle = value
 
   // --------------------------------------------------------------------------
-  function setCooldownDaysRange(rangeInt range)
-    m_cooldownDaysRange = range
+  function getCooldownDuration() returns int
+    return m_cooldownDurationDays
 
   // --------------------------------------------------------------------------
-  function getCooldownDays() returns int
+  function setCooldownDuration(int days)
+    m_cooldownDurationDays = days
+
+  // --------------------------------------------------------------------------
+  function getCooldown() returns int
     return m_cooldownDays
 
   // --------------------------------------------------------------------------
-  function setCooldownDays(int value)
+  function setCooldown(int value)
     
     let oldValue = m_cooldownDays
     m_cooldownDays = value
@@ -191,8 +198,8 @@ public class LootableComponent extends UnitComponent
         m_cooldownDayTextTag.setText("{0} DAYS".format(m_cooldownDays.toString()), 10.0)
     //}
 
-    if (oldValue != value and m_cooldownDays == 0)
-      onLootable()
+    if (oldValue != value and m_cooldownDays == 0 and canGenerateLoot())
+      onCooldownExpired()
 
   // --------------------------------------------------------------------------
   function getSpawnPosition() returns vec2
@@ -206,17 +213,15 @@ public class LootableComponent extends UnitComponent
   function setDestroyOnLoot(bool value)
     m_destroyOnLoot = value
 
-  // --------------------------------------------------------------------------
-  function resetCooldown()
-    if (m_cooldownDays == 0)
-      return
-    setCooldownDays(0)
+  // ----------------------------------------------------------------------------
+  function startCooldown()
+    setCooldown(m_cooldownDurationDays)
 
   // --------------------------------------------------------------------------
   function decrementCooldown()
     if (m_cooldownDays == 0)
       return
-    setCooldownDays(m_cooldownDays - 1)
+    setCooldown(m_cooldownDays - 1)
 
   // --------------------------------------------------------------------------
   function startLooting(unit looter)
@@ -232,10 +237,10 @@ public class LootableComponent extends UnitComponent
     m_lootingUnit.setAnimation(15)
 
     let operation = getOwner().getOrAddLootOperationComponent()
-    operation.start(looter, scaledSearchDuration, getLootCardCount())
+    operation.start(looter, scaledSearchDuration, getLootCount())
 
   // --------------------------------------------------------------------------
-  function onLootingFinished(unit lootingUnit)
+  protected function onLootingFinished(unit lootingUnit)
     if (lootingUnit == null)
       error("lootingUnit is null")
       return
@@ -247,15 +252,8 @@ public class LootableComponent extends UnitComponent
     m_lootingUnit.setAbilityCooldown(ABILITY_ID_SEARCH, 0, 0.0)
     m_lootingUnit = null
 
-    if (m_destroyOnLoot)
-      getOwnerUnit().remove()
-
-    if (m_lootCards.isEmpty())
-      setCooldownDays(m_cooldownDaysRange.getRandom())
-      onLooted()
-
   // --------------------------------------------------------------------------
-  function onLootingCanceled(unit lootingUnit)    
+  protected function onLootingCanceled(unit lootingUnit)    
     if (lootingUnit == null)
       return
 
@@ -264,8 +262,7 @@ public class LootableComponent extends UnitComponent
 
     if (m_lootingUnit != lootingUnit)
       Log.debug("Not the same unit that started looting")
-      resetCooldown()
-      onLootable()
+      makeLootable()
       return
 
     m_lootingUnit.resetAbilityCooldown(ABILITY_ID_SEARCH)
@@ -274,8 +271,6 @@ public class LootableComponent extends UnitComponent
 
     // reset state so it can be looted again
     m_lootingUnit = null
-    resetCooldown()
-    onLootable()
 
   // --------------------------------------------------------------------------
   function showLootRewardNotification(player _player, LootRewardNotification notification)
@@ -305,7 +300,7 @@ public class LootableComponent extends UnitComponent
     let lootCard = m_lootCards.dequeue()
 
     if (lootCard == null)
-      error("Invalid loot card at index 0")
+      error("Invalid loot card")
       return
 
     LootCard.s_lootable = getOwnerUnit()
@@ -317,6 +312,18 @@ public class LootableComponent extends UnitComponent
     LootCard.s_looter = null
 
     destroy lootCard
+
+    if (m_destroyOnLoot)
+      onLootingFinished(lootingUnit)
+      getOwnerUnit().remove()
+      return
+
+    if (m_lootCards.isEmpty())
+      onLootingFinished(lootingUnit)
+      makeUnlootable()
+
+    if (getCooldown() == 0 and canGenerateLoot())
+      startCooldown()
 
   // // --------------------------------------------------------------------------
   // protected function giveRewards(unit lootingUnit)
@@ -386,22 +393,34 @@ public class LootableComponent extends UnitComponent
   //   giveRewardsWithChanceToRetrigger(deckInstance, lootingUnit, chanceToRetrigger01 / 3.0, mutableLuckyHorseshoe, mutableRewardDueToLuckyHorseshoe)
 
   // --------------------------------------------------------------------------
-  private function onLooted()
+  private function makeUnlootable()
     getOwnerUnit().removeAbility(ABILITY_ID_LOOTABLE)
     getOwnerUnit().setVertexColor(LOOTED_COLOR)
     UnitRemoveType(getOwnerUnit(), UNIT_TYPE_ANCIENT)
 
   // --------------------------------------------------------------------------
-  private function onLootable()
+  private function makeLootable()
     getOwnerUnit().addAbility(ABILITY_ID_LOOTABLE)
     getOwnerUnit().setVertexColor(LOOTABLE_COLOR)
     // Makes the unit targettable by the search ability
     UnitAddType(getOwnerUnit(), UNIT_TYPE_ANCIENT)
 
   // ----------------------------------------------------------------------------
-  private function drawLootCards()
+  function canGenerateLoot() returns bool
+    return getLootCount() < getMaxGeneratedLootCount()
 
-    let numCards = m_maxLootCount - m_lootCards.size()
+  // ----------------------------------------------------------------------------
+  protected function onCooldownExpired()
+    drawLootCards(m_lootGeneratedPerCycle)
+    tryUpgradeLootCards()
+
+    if (canGenerateLoot())
+      startCooldown()
+
+  // ----------------------------------------------------------------------------
+  private function drawLootCards(int count)
+
+    let numCards = clamp(count, 0, min(m_maxLootCount - m_lootCards.size(), 0))
     if (numCards == 0)
       return
 
@@ -415,7 +434,6 @@ public class LootableComponent extends UnitComponent
     var credits = m_director.getCredits()
     let deckInstance = deck.createInstance()
 
-    // Draw one card for each loot reward, regardless of cost
     for i = 0 to numCards - 1
       let card = deckInstance.drawCard() castTo LootCard
       if (card != null)
@@ -424,45 +442,55 @@ public class LootableComponent extends UnitComponent
         if (not card.getDiscardOnActivate())
           deckInstance.add(card)
 
-    credits = max(credits, 0)
-
-    if (credits > 0)
-    //{
-      // Then loop through each loot reward and try to upgrade its tier using remaining credits.
-      // Upgrade in reverse order so that the better loot is at the end of the loot operation.
-      // Stop after making a full loop without upgrading any cards.
-      let lootCardCount = m_lootCards.size()
-      var index = lootCardCount
-      var upgradedCard = false
-      while (true)
-      //{
-        let drawnCard = m_lootCards.get(index)
-
-        let card = drawnCard.card castTo TieredCard
-        let currTier = drawnCard.tier
-        let currTierCost = drawnCard.cost
-
-        if (card != null and currTier < card.getTierCount())
-          let nextTier = currTier + 1
-          let nextTierCost = card.getCost(nextTier)
-          let costToUpgrade = nextTierCost - currTierCost
-          if (credits > costToUpgrade)
-            drawnCard.tier = nextTier
-            drawnCard.cost = nextTierCost
-            credits -= costToUpgrade
-            upgradedCard = true
-
-        index = wrap(index - 1, 0, lootCardCount - 1)
-
-        // Completed a full loop and wrapped around 
-        if (index == lootCardCount - 1)
-          if (not upgradedCard)
-            break
-          upgradedCard = false
-      //}
-    //}
-
     destroy deckInstance
+
+    credits = max(credits, 0)
+    m_director.setCredits(credits)
+
+    if (not m_lootCards.isEmpty())
+      makeLootable()
+
+  // ----------------------------------------------------------------------------
+  private function tryUpgradeLootCards()
+
+    var credits = m_director.getCredits()
+    if (credits == 0)
+      return
+
+    // Then loop through each loot reward and try to upgrade its tier using remaining credits.
+    // Upgrade in reverse order so that the better loot is at the end of the loot operation.
+    // Stop after making a full loop without upgrading any cards.
+    let lootCardCount = m_lootCards.size()
+    var index = lootCardCount
+    var upgradedCard = false
+    while (true)
+    //{
+      let drawnCard = m_lootCards.get(index)
+
+      let card = drawnCard.card castTo TieredCard
+      let currTier = drawnCard.tier
+      let currTierCost = drawnCard.cost
+
+      if (card != null and currTier < card.getTierCount())
+        let nextTier = currTier + 1
+        let nextTierCost = card.getCost(nextTier)
+        let costToUpgrade = nextTierCost - currTierCost
+        if (credits > costToUpgrade)
+          drawnCard.tier = nextTier
+          drawnCard.cost = nextTierCost
+          credits -= costToUpgrade
+          upgradedCard = true
+
+      index = wrap(index - 1, 0, lootCardCount - 1)
+
+      // Completed a full loop and wrapped around 
+        // Completed a full loop and wrapped around 
+      // Completed a full loop and wrapped around 
+      if (index == lootCardCount - 1)
+        if (not upgradedCard)
+          break
+        upgradedCard = false
+    //}
 
     m_director.setCredits(credits)
 
@@ -489,11 +517,11 @@ function refreshLootablesInRange(vec2 pos, real radius)
   temp.enumUnitsInRange(pos, radius)
   for _unit in temp
     if (_unit.isLootable())
-      refreshLootable(_unit)
+      updateLootableCooldownDuration(_unit)
   temp.release()
 
 // ============================================================================
-function refreshLootable(unit lootableUnit)
+function updateLootableCooldownDuration(unit lootableUnit)
 
   let metadata = lootableUnit.getMetadata()
   if (metadata == null)
@@ -512,7 +540,7 @@ function refreshLootable(unit lootableUnit)
       break
   temp.release()
 
-  comp.setCooldownDaysRange(foundCooldownAffector ? LOOTABLES_NEARCAMP_COOLDOWN_RANGE : LOOTABLES_DEFAULT_COOLDOWN_RANGE)
+  comp.setCooldownDuration(foundCooldownAffector ? LOOTABLES_NEARCAMP_COOLDOWN : LOOTABLES_DEFAULT_COOLDOWN)
 
 // ============================================================================
 function unitAffectsLootableCooldown(unit _unit) returns bool
@@ -788,8 +816,9 @@ function prepareSearchSpell(unit lootingUnit, unit lootableUnit)
   let lootableComp = lootableUnitMetadata.getLootableComponent()
   if (lootableComp == null)
     return
-  let searchDuration = getUnitSearchDuration(lootingUnit, lootableComp.getSearchDuration())
-  prepareSearchSpell(lootingUnit, searchDuration)
+  let adjustedSearchDurationPerLoot = getUnitSearchDuration(lootingUnit, lootableComp.getSearchDurationPerLoot())
+  let totalSearchDuration = adjustedSearchDurationPerLoot * lootableComp.getLootCount()
+  prepareSearchSpell(lootingUnit, totalSearchDuration)
 
 // ============================================================================
 function prepareSearchSpell(unit lootingUnit, real searchDuration)
@@ -835,7 +864,7 @@ function onSpellChannel()
     TlsSounds.errorSoundDef.playForPlayer(lootingPlayer)
     return
 
-  let scaledSearchDuration = getUnitSearchDuration(lootingUnit, lootable.getSearchDuration())
+  let scaledSearchDuration = getUnitSearchDuration(lootingUnit, lootable.getSearchDurationPerLoot())
   let manaRemainingAfterSearch = calculateManaRemainingAfterLootOperation(lootingUnit, scaledSearchDuration)
   if (manaRemainingAfterSearch < 0)
   //{
