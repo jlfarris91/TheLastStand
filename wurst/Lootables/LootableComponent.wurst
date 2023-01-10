@@ -66,8 +66,8 @@ public class LootableComponent extends UnitComponent
   private optionalVec2 m_spawnPosOverride = none_vec2()
   private bool m_destroyOnLoot = false
   private LootableDirector m_director
-  private int m_lootCount = 1
-  private drawnCard array[MAX_LOOT_COUNT] m_lootCards
+  private int m_maxLootCount = 1
+  private LinkedList<DrawnCard> m_lootCards = new LinkedList<DrawnCard>()
 
   // --------------------------------------------------------------------------
   construct(IUnitMetadata owner)
@@ -87,6 +87,9 @@ public class LootableComponent extends UnitComponent
   // --------------------------------------------------------------------------
   ondestroy
 
+    destroy m_lootCards
+    m_lootCards = null
+
     if (m_cooldownDayTextTag != null)
       m_cooldownDayTextTag.destr()
       m_cooldownDayTextTag = null
@@ -101,6 +104,7 @@ public class LootableComponent extends UnitComponent
       m_cooldownDayTextTag.setPos(getOwnerUnit().getPos().withZ(20.0))
 
     resetCooldown()
+    drawLootCards()
     onLootable()
 
   // --------------------------------------------------------------------------
@@ -125,15 +129,23 @@ public class LootableComponent extends UnitComponent
 
   // ----------------------------------------------------------------------------
   function getLootCount() returns int
-    return m_lootCount
+    return m_maxLootCount
   
   // ----------------------------------------------------------------------------
   function setLootCount(int value)
-    m_lootCount = min(value, MAX_LOOT_COUNT)
+    m_maxLootCount = min(value, MAX_LOOT_COUNT)
 
   // ----------------------------------------------------------------------------
-  function getLootCard(int index) returns drawnCard
-    return m_lootCards[index]
+  function getLootCard(int index) returns DrawnCard
+    return m_lootCards.get(index)
+
+  // ----------------------------------------------------------------------------
+  function getLootCardCount() returns int
+    return m_lootCards.size()
+
+  // ----------------------------------------------------------------------------
+  function hasLoot() returns bool
+    return not m_lootCards.isEmpty()
 
   // ----------------------------------------------------------------------------
   function getDirector() returns LootableDirector
@@ -143,6 +155,7 @@ public class LootableComponent extends UnitComponent
   function getCooldownDaysRange() returns rangeInt
     return m_cooldownDaysRange
 
+  // --------------------------------------------------------------------------
   function setCooldownDaysRange(rangeInt range)
     m_cooldownDaysRange = range
 
@@ -219,7 +232,7 @@ public class LootableComponent extends UnitComponent
     m_lootingUnit.setAnimation(15)
 
     let operation = getOwner().getOrAddLootOperationComponent()
-    operation.start(looter, scaledSearchDuration, m_lootCount)
+    operation.start(looter, scaledSearchDuration, getLootCardCount())
 
   // --------------------------------------------------------------------------
   function onLootingFinished(unit lootingUnit)
@@ -231,16 +244,15 @@ public class LootableComponent extends UnitComponent
       error("Not the same unit that started looting")
       return
 
-    setCooldownDays(m_cooldownDaysRange.getRandom())
-
     m_lootingUnit.setAbilityCooldown(ABILITY_ID_SEARCH, 0, 0.0)
-
     m_lootingUnit = null
-    // giveRewards(lootingUnit)
-    onLooted()
 
     if (m_destroyOnLoot)
       getOwnerUnit().remove()
+
+    if (m_lootCards.isEmpty())
+      setCooldownDays(m_cooldownDaysRange.getRandom())
+      onLooted()
 
   // --------------------------------------------------------------------------
   function onLootingCanceled(unit lootingUnit)    
@@ -284,12 +296,16 @@ public class LootableComponent extends UnitComponent
     m_lootRewardMultiplier++
 
   // ----------------------------------------------------------------------------
-  function awardLoot(unit lootingUnit, int index)
+  function awardLoot(unit lootingUnit)
 
-    let lootCard = m_lootCards[index]
+    if (m_lootCards.isEmpty())
+      error("No loot cards available")
+      return
 
-    if (lootCard == INVALID_CARD)
-      error("Invalid loot card at index "+ index.toString())
+    let lootCard = m_lootCards.dequeue()
+
+    if (lootCard == null)
+      error("Invalid loot card at index 0")
       return
 
     LootCard.s_lootable = getOwnerUnit()
@@ -299,6 +315,8 @@ public class LootableComponent extends UnitComponent
 
     LootCard.s_lootable = null
     LootCard.s_looter = null
+
+    destroy lootCard
 
   // // --------------------------------------------------------------------------
   // protected function giveRewards(unit lootingUnit)
@@ -380,13 +398,14 @@ public class LootableComponent extends UnitComponent
     // Makes the unit targettable by the search ability
     UnitAddType(getOwnerUnit(), UNIT_TYPE_ANCIENT)
 
-    drawLootCards()
-
   // ----------------------------------------------------------------------------
   private function drawLootCards()
 
-    let deck = m_director.getDeck()
+    let numCards = m_maxLootCount - m_lootCards.size()
+    if (numCards == 0)
+      return
 
+    let deck = m_director.getDeck()
     if (deck == null)
       error("Lootable deck is null!")
       return
@@ -397,10 +416,10 @@ public class LootableComponent extends UnitComponent
     let deckInstance = deck.createInstance()
 
     // Draw one card for each loot reward, regardless of cost
-    for i = (m_lootCount - 1) downto 0
+    for i = 0 to numCards - 1
       let card = deckInstance.drawCard() castTo LootCard
       if (card != null)
-        m_lootCards[i] = drawnCard(card, 0, card.getCost())
+        m_lootCards.push(new DrawnCard(card, 0, card.getCost()))
         credits -= card.getCost()
         if (not card.getDiscardOnActivate())
           deckInstance.add(card)
@@ -412,28 +431,31 @@ public class LootableComponent extends UnitComponent
       // Then loop through each loot reward and try to upgrade its tier using remaining credits.
       // Upgrade in reverse order so that the better loot is at the end of the loot operation.
       // Stop after making a full loop without upgrading any cards.
-      var index = m_lootCount - 1
+      let lootCardCount = m_lootCards.size()
+      var index = lootCardCount
       var upgradedCard = false
       while (true)
       //{
-        let card = m_lootCards[index].card castTo TieredCard
-        let currTier = m_lootCards[index].tier
-        let currTierCost = m_lootCards[index].cost
+        let drawnCard = m_lootCards.get(index)
+
+        let card = drawnCard.card castTo TieredCard
+        let currTier = drawnCard.tier
+        let currTierCost = drawnCard.cost
 
         if (card != null and currTier < card.getTierCount())
           let nextTier = currTier + 1
           let nextTierCost = card.getCost(nextTier)
           let costToUpgrade = nextTierCost - currTierCost
           if (credits > costToUpgrade)
-            m_lootCards[index].tier = nextTier
-            m_lootCards[index].cost = nextTierCost
+            drawnCard.tier = nextTier
+            drawnCard.cost = nextTierCost
             credits -= costToUpgrade
             upgradedCard = true
 
-        index = wrap(index - 1, 0, m_lootCount - 1)
+        index = wrap(index - 1, 0, lootCardCount - 1)
 
         // Completed a full loop and wrapped around 
-        if (index == m_lootCount - 1)
+        if (index == lootCardCount - 1)
           if (not upgradedCard)
             break
           upgradedCard = false
@@ -515,7 +537,6 @@ public class LootOperationComponent extends RealtimeUnitComponent
   private real m_manaCost
   private bool m_isRunning
   private vec2 m_looterPos
-  private int m_lootCount = 1
 
   private Vector<timer> m_lootTimers = new Vector<timer>(MAX_LOOT_COUNT)
 
@@ -612,8 +633,7 @@ public class LootOperationComponent extends RealtimeUnitComponent
 
     m_isRunning = true
     m_lootingUnit = looter
-    m_duration = duration
-    m_lootCount = lootCount
+    m_duration = duration * lootCount
 
     // Avoid implicit capture of 'this' by caching the result of m_lootableUnit
     let lootableUnitCached = getOwnerUnit()
@@ -628,7 +648,7 @@ public class LootOperationComponent extends RealtimeUnitComponent
     let cameraPos = getOwnerUnit().getPos()
     m_looterPos = looter.getPos()
 
-    m_timer.doManual(duration, true, () -> onOperationFinished(lootableUnitCached))
+    m_timer.doManual(m_duration, true, () -> onOperationFinished(lootableUnitCached))
 
     m_progress = new Progress()
     m_progress.report("Looting {0}...".format(getOwnerUnit().getName()))
@@ -638,7 +658,7 @@ public class LootOperationComponent extends RealtimeUnitComponent
     ..setSpeed(1.0 / (m_duration != 0.0 ? m_duration : 1.0))
     ..fadeIn()
 
-    m_notification = new Notification(duration)
+    m_notification = new Notification(m_duration)
     ..setProgress(m_progress)
     ..setIconPath(Icons.bTNTelescope)
     ..setMessage("Looting {0}...".format(getOwnerUnit().getName()))
@@ -694,7 +714,7 @@ public class LootOperationComponent extends RealtimeUnitComponent
   private function onAwardLoot(int index)
     let lootable = getOwner().getLootableComponent()
     if (lootable != null)
-      lootable.awardLoot(m_lootingUnit, index)
+      lootable.awardLoot(m_lootingUnit)
 
     let lootTimer = m_lootTimers.get(index)
     if (lootTimer != null)

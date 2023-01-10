@@ -18,12 +18,21 @@ constant real TOO_CHEAP_COEFF = 6
 LinkedList<Director> g_directors = new LinkedList<Director>()
 HashMap<unit, Admin> g_unitToAdminMap
 
-public tuple drawnCard(Card card, int tier, int cost)
-public constant drawnCard INVALID_CARD = drawnCard(null, -1, -1)
-
 Thread s_directorWorkerThread = new Thread("director")
   ..setTickInterval(0.3)
   ..setMaxWorkPerTick(1)
+
+// ============================================================================
+public class DrawnCard
+  Card card
+  int tier
+  int cost
+
+  // ----------------------------------------------------------------------------
+  construct(Card card, int tier, int cost)
+    this.card = card
+    this.tier = tier
+    this.cost = cost
 
 // ============================================================================
 public abstract class TieredCard extends Card
@@ -49,7 +58,7 @@ public abstract class TieredCard extends Card
     return (getTierValueMultiplier(tier) * getCost()).floor()
 
   // ----------------------------------------------------------------------------
-  function getHighestAffordableTier(real credits) returns drawnCard
+  function getHighestAffordableTier(real credits) returns DrawnCard
 
     var selectedTier = 0
     var selectedCost = 0
@@ -69,9 +78,9 @@ public abstract class TieredCard extends Card
     //}
 
     if (not foundValidTier)
-      return INVALID_CARD
+      return null
 
-    return drawnCard(this, selectedTier, selectedCost)
+    return new DrawnCard(this, selectedTier, selectedCost)
 
 // ============================================================================
 public class Admin
@@ -340,10 +349,10 @@ public abstract class Director
     return true
 
   // --------------------------------------------------------------------------
-  abstract function drawCard() returns drawnCard
+  abstract function drawCard() returns DrawnCard
 
   // --------------------------------------------------------------------------
-  abstract function activateCard(drawnCard card) returns bool
+  abstract function activateCard(DrawnCard card) returns bool
 
   // --------------------------------------------------------------------------
   protected function getDifficultyCoefficient() returns real
@@ -430,15 +439,15 @@ public abstract class ContinuousDirector extends Director
 
     if (m_job != null)
     //{
-      let selectedCard = m_job.getSelectedCard()
+      let drawnCard = m_job.getSelectedCard()
 
-      if (selectedCard.card != null)
+      if (drawnCard.card != null)
         output.call("Selected Card: {0} t:{1} c:{2}x{3}={4}".format(
-          selectedCard.card.getId(),
-          selectedCard.tier.toString(),
-          selectedCard.card.getCost().toString(),
-          TIER_VALUE_MULTIPLIER[selectedCard.tier].toString(),
-          selectedCard.cost.toString()))
+          drawnCard.card.getId(),
+          drawnCard.tier.toString(),
+          drawnCard.card.getCost().toString(),
+          TIER_VALUE_MULTIPLIER[drawnCard.tier].toString(),
+          drawnCard.cost.toString()))
       else
         output.call("Selected Card: none")
 
@@ -451,7 +460,7 @@ public abstract class ContinuousDirector extends Director
 // ============================================================================
 class ContinuousDirectorJob extends Job
   private Director m_director
-  private drawnCard m_selectedCard
+  private DrawnCard m_selectedCard
   private rangeReal m_slowActivationIntervalRange
   private rangeReal m_fastActivationIntervalRange
   private bool m_lastActivationSucceeded
@@ -464,8 +473,15 @@ class ContinuousDirectorJob extends Job
     super(director.getName())
     m_director = director
 
+  // ----------------------------------------------------------------------------
+  ondestroy
+  
+    if (m_selectedCard != null)
+      destroy m_selectedCard
+      m_selectedCard = null
+
   // --------------------------------------------------------------------------
-  function getSelectedCard() returns drawnCard
+  function getSelectedCard() returns DrawnCard
     return m_selectedCard
 
   // --------------------------------------------------------------------------
@@ -534,7 +550,12 @@ class ContinuousDirectorJob extends Job
       return 0
 
     if (not m_lastActivationSucceeded or m_alwaysDrawNewCard)
+    //{
+      if (m_selectedCard != null)
+        destroy m_selectedCard
+
       m_selectedCard = m_director.drawCard()
+    //}
 
     if (m_selectedCard.card == null)
       restartTimerBetweenWaves()
