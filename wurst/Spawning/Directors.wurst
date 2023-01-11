@@ -12,6 +12,7 @@ import GroupUtils
 import LinkedList
 import Events
 import RegisterEvents
+import Func
 
 constant real TOO_CHEAP_COEFF = 6
 
@@ -23,7 +24,7 @@ Thread s_directorWorkerThread = new Thread("director")
   ..setMaxWorkPerTick(1)
 
 // ============================================================================
-public class DrawnCard
+public class CardInstance
   Card card
   int tier
   int cost
@@ -58,7 +59,7 @@ public abstract class TieredCard extends Card
     return (getTierValueMultiplier(tier) * getCost()).floor()
 
   // ----------------------------------------------------------------------------
-  function getHighestAffordableTier(real credits) returns DrawnCard
+  function getHighestAffordableTier(real credits) returns CardInstance
 
     var selectedTier = 0
     var selectedCost = 0
@@ -80,7 +81,7 @@ public abstract class TieredCard extends Card
     if (not foundValidTier)
       return null
 
-    return new DrawnCard(this, selectedTier, selectedCost)
+    return new CardInstance(this, selectedTier, selectedCost)
 
 // ============================================================================
 public class Admin
@@ -164,7 +165,7 @@ public abstract class Director
   private real m_credits
   private bool m_enabled
   private Deck m_deck
-  private real m_creditsOnActivation = 0.0
+  private Func<real> m_creditsOnActivation
   private real m_creditMultiplier = 1.0
   private CallbackPeriodic m_creditGeneratorTimer
   private CancellationToken m_ct
@@ -206,6 +207,10 @@ public abstract class Director
     if (m_workerThread != null)
       destroy m_workerThread
       m_workerThread = null
+
+    if (m_creditsOnActivation != null)
+      m_creditsOnActivation.release()
+      m_creditsOnActivation = null
 
     destroy m_admin
     m_admin = null
@@ -269,10 +274,17 @@ public abstract class Director
 
   // --------------------------------------------------------------------------
   function getCreditsOnActivation() returns real
-    return m_creditsOnActivation
+    return m_creditsOnActivation != null ? m_creditsOnActivation.call() : 0.0
   
   // --------------------------------------------------------------------------
   function setCreditsOnActivation(real value)
+    setCreditsOnActivation(() -> value)
+
+  // --------------------------------------------------------------------------
+  function setCreditsOnActivation(Func<real> value)
+    value.acquire()
+    if (m_creditsOnActivation != null)
+      m_creditsOnActivation.release()
     m_creditsOnActivation = value
 
   // --------------------------------------------------------------------------
@@ -325,7 +337,7 @@ public abstract class Director
 
     m_ct = new CancellationToken()..acquire()
   
-    m_credits = m_creditsOnActivation
+    m_credits = getCreditsOnActivation()
 
     m_creditGeneratorTimer = doPeriodically(1.0, cb -> generateCredits())
 
@@ -345,33 +357,23 @@ public abstract class Director
     m_workerThread.setEnabled(false)
 
   // --------------------------------------------------------------------------
-  function canDrawCard() returns bool
-    return true
-
-  // --------------------------------------------------------------------------
-  abstract function drawCard() returns DrawnCard
-
-  // --------------------------------------------------------------------------
-  abstract function activateCard(DrawnCard card) returns bool
-
-  // --------------------------------------------------------------------------
   protected function getDifficultyCoefficient() returns real
     return 1.0
 
   // --------------------------------------------------------------------------
-  protected function getCreditsPerSecond() returns real
+  function getCreditsPerGeneration() returns real
     return m_creditMultiplier * (1 + 0.4 * getDifficultyCoefficient())
 
   // --------------------------------------------------------------------------
-  protected function generateCredits()
-    m_credits += getCreditsPerSecond()
+  function generateCredits()
+    m_credits += getCreditsPerGeneration()
 
   // --------------------------------------------------------------------------
   function writeDebugString(Action1<string> output)
 
     output.acquire()
     
-    output.call("Credits per second: " + getCreditsPerSecond().toString())
+    output.call("Credits per second: " + getCreditsPerGeneration().toString())
 
     output.release()
 
@@ -431,6 +433,16 @@ public abstract class ContinuousDirector extends Director
       m_job = null
 
   // --------------------------------------------------------------------------
+  function canDrawCard() returns bool
+    return true
+
+  // --------------------------------------------------------------------------
+  abstract function drawCard() returns CardInstance
+
+  // --------------------------------------------------------------------------
+  abstract function activateCard(CardInstance card) returns bool
+
+  // --------------------------------------------------------------------------
   override function writeDebugString(Action1<string> output)
 
     output.acquire()
@@ -459,8 +471,8 @@ public abstract class ContinuousDirector extends Director
 
 // ============================================================================
 class ContinuousDirectorJob extends Job
-  private Director m_director
-  private DrawnCard m_selectedCard
+  private ContinuousDirector m_director
+  private CardInstance m_selectedCard
   private rangeReal m_slowActivationIntervalRange
   private rangeReal m_fastActivationIntervalRange
   private bool m_lastActivationSucceeded
@@ -469,7 +481,7 @@ class ContinuousDirectorJob extends Job
   private bool m_alwaysDrawNewCard = false
 
   // --------------------------------------------------------------------------
-  construct (Director director)
+  construct (ContinuousDirector director)
     super(director.getName())
     m_director = director
 
@@ -481,7 +493,7 @@ class ContinuousDirectorJob extends Job
       m_selectedCard = null
 
   // --------------------------------------------------------------------------
-  function getSelectedCard() returns DrawnCard
+  function getSelectedCard() returns CardInstance
     return m_selectedCard
 
   // --------------------------------------------------------------------------
