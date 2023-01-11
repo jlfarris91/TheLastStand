@@ -13,6 +13,7 @@ import LinkedList
 import Events
 import RegisterEvents
 import Func
+import IsEnabled
 
 constant real TOO_CHEAP_COEFF = 6
 
@@ -159,6 +160,28 @@ public class Admin
     unregisterOwnedUnit(dyingUnit)
 
 // ============================================================================
+public class PerSecondCreditGenerator
+  private Director m_director
+  private CallbackPeriodic m_creditGeneratorTimer
+
+  use IsEnabled
+
+  // ----------------------------------------------------------------------------
+  construct(Director director)
+    m_director = director
+
+  // ----------------------------------------------------------------------------
+  override protected function onEnabled()
+    m_creditGeneratorTimer = doPeriodically(1.0, cb -> m_director.generateCredits())
+  
+  // ----------------------------------------------------------------------------
+  override protected function onDisabled()
+
+    if (m_creditGeneratorTimer != null)
+      destroy m_creditGeneratorTimer
+      m_creditGeneratorTimer = null
+
+// ============================================================================
 public abstract class Director
   private int m_id
   private string m_name
@@ -167,7 +190,6 @@ public abstract class Director
   private Deck m_deck
   private Func<real> m_creditsOnActivation
   private real m_creditMultiplier = 1.0
-  private CallbackPeriodic m_creditGeneratorTimer
   private CancellationToken m_ct
   private Thread m_workerThread
   private Admin m_admin
@@ -324,11 +346,6 @@ public abstract class Director
   function disable()
     setEnabled(false)
 
-  // ----------------------------------------------------------------------------
-  function activate()
-    disable()
-    enable()
-
   // --------------------------------------------------------------------------
   protected function onEnabled()
 
@@ -339,8 +356,6 @@ public abstract class Director
   
     m_credits = getCreditsOnActivation()
 
-    m_creditGeneratorTimer = doPeriodically(1.0, cb -> generateCredits())
-
     m_workerThread.setEnabled(true)
 
   // --------------------------------------------------------------------------
@@ -349,10 +364,6 @@ public abstract class Director
     if (m_ct != null)
       m_ct.cancelAndRelease()
       m_ct = null
-
-    if (m_creditGeneratorTimer != null)
-      destroy m_creditGeneratorTimer
-      m_creditGeneratorTimer = null
 
     m_workerThread.setEnabled(false)
 
@@ -373,7 +384,7 @@ public abstract class Director
 
     output.acquire()
     
-    output.call("Credits per second: " + getCreditsPerGeneration().toString())
+    output.call("Credits per gen: " + getCreditsPerGeneration().toString())
 
     output.release()
 
