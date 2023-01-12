@@ -17,6 +17,7 @@ import SpawnCards
 import Spawning
 import DirectorDebugger
 import GameInstance
+import ClosureTimers
 
 constant itemChances g_smallLootableItemChances_Start = itemChances(80.0, 15.0, 4.0, 1.0)
 constant itemChances g_smallLootableItemChances_End = itemChances(60.0, 30.0, 8.0, 2.0)
@@ -248,8 +249,8 @@ init
   g_spawnOverrides = CreateGroup()
   g_spawnOverrides.enumUnitsOfType(UNIT_ID_LOOTABLE_SPAWN_OVERRIDE, null)
 
-  let zombieCard = new SpawnCard(SpawnDefinitions.zombies)..setCost(3)..setWeight(3)..acquire()
-  let skeletonArchersCard = new SpawnCard(SpawnDefinitions.skeletonArchers)..setCost(10)..setWeight(2)..acquire()
+  let zombieCard = new SpawnCard(SpawnDefinitions.zombies)                  ..acquire() ..setCost(3)  ..setWeight(3)
+  let skeletonArchersCard = new SpawnCard(SpawnDefinitions.skeletonArchers) ..acquire() ..setCost(10) ..setWeight(2)
 
   let tier0SpawnDirectorDeck = new Deck()..acquire()
   tier0SpawnDirectorDeck.addDefaultCategory()
@@ -267,66 +268,82 @@ init
 
   Func2<unit, unit, SpawnUndeadUnitDirector> tier0SpawnDirectorFactory = (lootable, looter) ->
   //{
-    let targetProvider = new SingleTargetProvider(looter)
+    let lootableComp = lootable.getMetadata().getLootableComponent()
+    let targetProvider = new SingleTargetProvider(looter)..acquire()
+    let spawnPointProvider = new SingleSpawnPointProvider(lootableComp.getSpawnPosition())..acquire()
 
     let spawnDirector = new SpawnUndeadUnitDirector("lootable0", looter.getOwner())
     ..setDeck(tier0SpawnDirectorDeck)
     ..setCreditMultiplier(0.0)
-    ..setDestroyWhenOutOfCredits(true)
-    ..setCreditsOnActivation(50)
+    ..setCreditsOnActivation(15)
     ..setAlwaysDrawNewCard(true)
     ..setTargetUnitProvider(context -> targetProvider)
+    ..setSpawnPointProvider(context -> spawnPointProvider)
 
     DirectorDebugger.registerDirector(spawnDirector)
-    
-    spawnDirector.onDestroy().register() (director) ->
-      destroy targetProvider
+
+    doAfter(15.0) () ->
+      targetProvider.release()
+      spawnPointProvider.release()
       DirectorDebugger.unregisterDirector(spawnDirector)
+      destroy spawnDirector
 
     return spawnDirector
   //}
 
   Func2<unit, unit, SpawnUndeadUnitDirector> tier1SpawnDirectorFactory = (lootable, looter) ->
   //{
-    let targetProvider = new SingleTargetProvider(looter)
+    let lootableComp = lootable.getMetadata().getLootableComponent()
+    let targetProvider = new SingleTargetProvider(looter)..acquire()
+    let spawnPointProvider = new SingleSpawnPointProvider(lootableComp.getSpawnPosition())..acquire()
 
     let spawnDirector = new SpawnUndeadUnitDirector("lootable1", looter.getOwner())
     ..setDeck(tier1SpawnDirectorDeck)
     ..setCreditMultiplier(0.0)
-    ..setDestroyWhenOutOfCredits(true)
-    ..setCreditsOnActivation(100)
+    ..setCreditsOnActivation(30)
     ..setAlwaysDrawNewCard(true)
     ..setTargetUnitProvider(context -> targetProvider)
+    ..setSpawnPointProvider(context -> spawnPointProvider)
 
     DirectorDebugger.registerDirector(spawnDirector)
-    
-    spawnDirector.onDestroy().register() (director) ->
-      destroy targetProvider
+
+    doAfter(15.0) () ->
+      targetProvider.release()
+      spawnPointProvider.release()
       DirectorDebugger.unregisterDirector(spawnDirector)
+      destroy spawnDirector
 
     return spawnDirector
   //}
 
   Func2<unit, unit, SpawnUndeadUnitDirector> tier2SpawnDirectorFactory = (lootable, looter) ->
   //{
-    let targetProvider = new SingleTargetProvider(looter)
+    let lootableComp = lootable.getMetadata().getLootableComponent()
+    let targetProvider = new SingleTargetProvider(looter)..acquire()
+    let spawnPointProvider = new SingleSpawnPointProvider(lootableComp.getSpawnPosition())..acquire()
 
     let spawnDirector = new SpawnUndeadUnitDirector("lootable2", looter.getOwner())
     ..setDeck(tier2SpawnDirectorDeck)
     ..setCreditMultiplier(0.0)
-    ..setDestroyWhenOutOfCredits(true)
-    ..setCreditsOnActivation(200)
+    ..setCreditsOnActivation(45)
     ..setAlwaysDrawNewCard(true)
     ..setTargetUnitProvider(context -> targetProvider)
+    ..setSpawnPointProvider(context -> spawnPointProvider)
 
     DirectorDebugger.registerDirector(spawnDirector)
-    
-    spawnDirector.onDestroy().register() (director) ->
-      destroy targetProvider
+
+    doAfter(15.0) () ->
+      targetProvider.release()
+      spawnPointProvider.release()
       DirectorDebugger.unregisterDirector(spawnDirector)
+      destroy spawnDirector
 
     return spawnDirector
   //}
+
+  tier0SpawnDirectorFactory.acquire()
+  tier1SpawnDirectorFactory.acquire()
+  tier2SpawnDirectorFactory.acquire()
 
   g_smallLootableDeck = new Deck()..acquire()
   g_smallLootableDeck.addDefaultCategory()
@@ -336,10 +353,10 @@ init
 
   g_mediumLootableDeck = new Deck()..acquire()
   g_mediumLootableDeck.addDefaultCategory()
-  ..addCard(new LootLumberCard("lumber", 50)  ..setCost(3)  ..setWeight(12))
-  ..addCard(new LootItemCard("item")          ..setCost(6)  ..setWeight(6))
-  ..addCard(new LootGoldCard("gold")          ..setCost(30) ..setWeight(1))
-  ..addCard(new LootSurvivorCard("survivor")  ..setCost(30) ..setWeight(1))
+  // ..addCard(new LootLumberCard("lumber", 50)  ..setCost(3)  ..setWeight(12))
+  // ..addCard(new LootItemCard("item")          ..setCost(6)  ..setWeight(6))
+  // ..addCard(new LootGoldCard("gold")          ..setCost(30) ..setWeight(1))
+  // ..addCard(new LootSurvivorCard("survivor")  ..setCost(30) ..setWeight(1))
   ..addCard(new LootUndeadCard("undead")      ..setCost(15) ..setWeight(1)
     ..setSpawnDirectorFactory(0, tier0SpawnDirectorFactory)
     ..setSpawnDirectorFactory(1, tier1SpawnDirectorFactory)
@@ -347,10 +364,10 @@ init
 
   g_largeLootableDeck = new Deck()..acquire()
   g_largeLootableDeck.addDefaultCategory()
-  ..addCard(new LootLumberCard("lumber", 50)  ..setCost(3)  ..setWeight(12))
-  ..addCard(new LootItemCard("item")          ..setCost(6)  ..setWeight(6))
-  ..addCard(new LootGoldCard("gold")          ..setCost(30) ..setWeight(1))
-  ..addCard(new LootSurvivorCard("survivor")  ..setCost(30) ..setWeight(1))
+  // ..addCard(new LootLumberCard("lumber", 50)  ..setCost(3)  ..setWeight(12))
+  // ..addCard(new LootItemCard("item")          ..setCost(6)  ..setWeight(6))
+  // ..addCard(new LootGoldCard("gold")          ..setCost(30) ..setWeight(1))
+  // ..addCard(new LootSurvivorCard("survivor")  ..setCost(30) ..setWeight(1))
   ..addCard(new LootUndeadCard("undead")      ..setCost(15) ..setWeight(1)
     ..setSpawnDirectorFactory(0, tier0SpawnDirectorFactory)
     ..setSpawnDirectorFactory(1, tier1SpawnDirectorFactory)

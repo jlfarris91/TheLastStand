@@ -279,7 +279,7 @@ public function SpawnDefinition.setupForBoss()
       // ..setTechIdToAdvance(TlsUpgradeIds.bossesKilled)
 
 // ============================================================================
-public class SpawnCard extends Card
+public class SpawnCard extends TieredCard
   private SpawnDefinition m_spawnDefinition
 
   // --------------------------------------------------------------------------
@@ -295,6 +295,14 @@ public class SpawnCard extends Card
   function setSpawnDefinition(SpawnDefinition value)
     m_spawnDefinition = value
 
+  // ----------------------------------------------------------------------------
+  override function getTierValueMultiplier(int tier) returns real
+    return ELITE_TIER_VALUE_MULTIPLIER[clamp(tier, 0, MAX_ELITE_TIER - 1)]
+
+  // ----------------------------------------------------------------------------
+  override function getTierCount() returns int
+    return MAX_ELITE_TIER
+
 // ============================================================================
 public class SpawnUndeadUnitDirector extends ContinuousDirector
   private player m_targetPlayer
@@ -309,7 +317,8 @@ public class SpawnUndeadUnitDirector extends ContinuousDirector
   private Func1<SpawnContext, int> m_maxAliveCount
   private Func1<SpawnContext, int> m_goldDropAmount
   private Func1<SpawnContext, int> m_spawnsPerGoldDrop
-  private Func1<SpawnContext, TargetProvider> m_targetProviderProvider
+  private Func1<SpawnContext, TargetProvider> m_targetProviderProviderFunc
+  private Func1<SpawnContext, SpawnPointProvider> m_spawnPointProviderFunc
 
   use Observable
 
@@ -343,9 +352,13 @@ public class SpawnUndeadUnitDirector extends ContinuousDirector
       m_spawnsPerGoldDrop.release()
       m_spawnsPerGoldDrop = null
 
-    if (m_targetProviderProvider != null)
-      m_targetProviderProvider.release()
-      m_targetProviderProvider = null
+    if (m_targetProviderProviderFunc != null)
+      m_targetProviderProviderFunc.release()
+      m_targetProviderProviderFunc = null
+
+    if (m_spawnPointProviderFunc != null)
+      m_spawnPointProviderFunc.release()
+      m_spawnPointProviderFunc = null
 
     if (m_context != null)
       m_context.release()
@@ -397,20 +410,32 @@ public class SpawnUndeadUnitDirector extends ContinuousDirector
 
   // --------------------------------------------------------------------------
   function getTargetUnitProvider() returns TargetProvider
-    return m_targetProviderProvider != null ? m_targetProviderProvider.call(m_context) : null
+    return m_targetProviderProviderFunc != null ? m_targetProviderProviderFunc.call(m_context) : null
   
   // --------------------------------------------------------------------------
   function setTargetUnitProvider(Func1<SpawnContext, TargetProvider> value)
     value.acquire()
-    if (m_targetProviderProvider != null)
-      m_targetProviderProvider.release()
-    m_targetProviderProvider = value
+    if (m_targetProviderProviderFunc != null)
+      m_targetProviderProviderFunc.release()
+    m_targetProviderProviderFunc = value
+
+  // --------------------------------------------------------------------------
+  function getSpawnPointProvider() returns SpawnPointProvider
+    return m_spawnPointProviderFunc != null ? m_spawnPointProviderFunc.call(m_context) : null
+  
+  // --------------------------------------------------------------------------
+  function setSpawnPointProvider(Func1<SpawnContext, SpawnPointProvider> value)
+    value.acquire()
+    if (m_spawnPointProviderFunc != null)
+      m_spawnPointProviderFunc.release()
+    m_spawnPointProviderFunc = value
 
   // --------------------------------------------------------------------------
   override protected function onEnabled()
     super.onEnabled()
 
-    m_creditGenerator.enable()
+    if (m_creditGenerator != null)
+      m_creditGenerator.enable()
 
     m_goldAvailable = 0
     m_spawnsPerGoldDropCounter = 0 
@@ -420,7 +445,8 @@ public class SpawnUndeadUnitDirector extends ContinuousDirector
   override protected function onDisabled()
     super.onDisabled()
 
-    m_creditGenerator.disable()
+    if (m_creditGenerator != null)
+      m_creditGenerator.disable()
 
   // --------------------------------------------------------------------------
   override protected function getDifficultyCoefficient() returns real
@@ -445,28 +471,8 @@ public class SpawnUndeadUnitDirector extends ContinuousDirector
     if (selectedCard == null)
       return null
 
-    var selectedTier = 0
-    var selectedCost = 0
-    var foundValidTier = false
-
     let credits = getCredits()
-    let baseCost = selectedCard.getCost()
-    let _tierCount = selectedCard.getSpawnDefinition().getTierCount()
-
-    for tier = (_tierCount - 1) downto 0
-    //{
-      let tierCost = TIER_VALUE_MULTIPLIER[tier] * baseCost
-      if (credits > tierCost)
-        selectedTier = tier
-        selectedCost = tierCost
-        foundValidTier = true
-        break
-    //}
-
-    if (not foundValidTier)
-      return null
-
-    return new CardInstance(selectedCard, selectedTier, selectedCost)
+    return selectedCard.getHighestAffordableTier(credits)
 
   // --------------------------------------------------------------------------
   override function activateCard(CardInstance card) returns bool
@@ -482,13 +488,19 @@ public class SpawnUndeadUnitDirector extends ContinuousDirector
 
     m_context.setTier(card.tier)
 
+    var spawnPointProvider = getSpawnPointProvider()
+    if (spawnPointProvider == null)
+      spawnPointProvider = getSpawnPointProviderForPlayer(m_targetPlayer, spawnDef.getSpawnPointProviderType())
+      if (spawnPointProvider == null)
+        return false
+
     let context = m_context.clone()
 
     let config = new SpawnUndeadUnitJobConfig()
     ..setTierSelector(context -> card.tier)
     ..setTierSelectionMode(TierSelectionMode.Group)
     ..setUnitTypeProvider(spawnDef.getUnitTypeProvider())
-    ..setSpawnPointProvider(getSpawnPointProvider(m_targetPlayer, spawnDef.getSpawnPointProviderType()))
+    ..setSpawnPointProvider(spawnPointProvider)
     ..setTargetProvider(targetProvider)
     ..setGroupSize(spawnDef.getGroupSize(context))
     ..setMaxSpawnCount(spawnDef.getMaxSpawnCount(context))
@@ -607,31 +619,34 @@ public class SpawnUndeadUnitDirector extends ContinuousDirector
 
     super.writeDebugString(output)
 
-    output.call("Player Diff: " + m_playerDifficulty.toString())
-    output.call("Diff Coeff: " + m_context.getDifficultyCoeff().toString())
-    output.call("Last Tier: " + m_context.getTier().toString())
+    if (m_context != null)
+    //{
+      output.call("Player Diff: " + m_playerDifficulty.toString())
+      output.call("Diff Coeff: " + m_context.getDifficultyCoeff().toString())
+      output.call("Last Tier: " + m_context.getTier().toString())
 
 
-    output.call("Normal Stats: lvl:{0} hp:{1} armor:{2} dmg:{3}".format(
-      g_zombieMeleeModifiers.getLevel(m_context, 1.0).toString(),
-      g_zombieMeleeModifiers.getHealth(m_context, 1.0).toString(),
-      g_zombieMeleeModifiers.getArmor(m_context, 1.0).toString(),
-      g_zombieMeleeModifiers.getAttack1DamageRange(m_context, 1.0).toString()
-    ))
+      output.call("Normal Stats: lvl:{0} hp:{1} armor:{2} dmg:{3}".format(
+        g_zombieMeleeModifiers.getLevel(m_context, 1.0).toString(),
+        g_zombieMeleeModifiers.getHealth(m_context, 1.0).toString(),
+        g_zombieMeleeModifiers.getArmor(m_context, 1.0).toString(),
+        g_zombieMeleeModifiers.getAttack1DamageRange(m_context, 1.0).toString()
+      ))
 
-    output.call("Elite Stats: lvl:{0} hp:{1} armor:{2} dmg:{3}".format(
-      g_eliteMeleeModifiers.getLevel(m_context, 1.0).toString(),
-      g_eliteMeleeModifiers.getHealth(m_context, 1.0).toString(),
-      g_eliteMeleeModifiers.getArmor(m_context, 1.0).toString(),
-      g_eliteMeleeModifiers.getAttack1DamageRange(m_context, 1.0).toString()
-    ))
+      output.call("Elite Stats: lvl:{0} hp:{1} armor:{2} dmg:{3}".format(
+        g_eliteMeleeModifiers.getLevel(m_context, 1.0).toString(),
+        g_eliteMeleeModifiers.getHealth(m_context, 1.0).toString(),
+        g_eliteMeleeModifiers.getArmor(m_context, 1.0).toString(),
+        g_eliteMeleeModifiers.getAttack1DamageRange(m_context, 1.0).toString()
+      ))
 
-    output.call("Elite HP: {0}*{1}*{2}={3}".format(
-      g_eliteMeleeModifiers.baseHealth.toString(),
-      m_context.getDifficultyCoeff().toString(),
-      TIER_HEALTH_MULTIPLIER[m_context.getTier()].toString(),
-      g_eliteMeleeModifiers.getHealth(m_context, 1.0).toString()
-    ))
+      output.call("Elite HP: {0}*{1}*{2}={3}".format(
+        g_eliteMeleeModifiers.baseHealth.toString(),
+        m_context.getDifficultyCoeff().toString(),
+        ELITE_TIER_HEALTH_MULTIPLIER[m_context.getTier()].toString(),
+        g_eliteMeleeModifiers.getHealth(m_context, 1.0).toString()
+      ))
+    //}
     
     output.call("Gold: d:{0} a:{1} c:{2}/{3}".format(
       m_goldDrops.toString(),

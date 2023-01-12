@@ -10,11 +10,10 @@ import Directors
 import LinkedList
 
 LinkedList<Director> g_debuggerDirectors = new LinkedList<Director>()
-int g_debuggerDirectorGen = 0
+LinkedList<DirectorDebugger> g_directorDebuggers = new LinkedList<DirectorDebugger>()
 
 // ============================================================================
 class DirectorDebugger extends DebuggerRealtimeUpdateFrame
-  private int m_lastDebuggerDirectorGen
   private TabPanel m_tabPanel
 
   // --------------------------------------------------------------------------
@@ -24,33 +23,51 @@ class DirectorDebugger extends DebuggerRealtimeUpdateFrame
     m_tabPanel = new TabPanel()
     addChild(m_tabPanel)
 
+    g_directorDebuggers.add(this)
+
+    rebuildTabPanel()
+
+  // ----------------------------------------------------------------------------
+  ondestroy
+    g_directorDebuggers.remove(this)
+
   // ----------------------------------------------------------------------------
   static function registerDirector(Director director)
     g_debuggerDirectors.add(director)
+    for debugger in g_directorDebuggers
+      debugger.onDirectorRegistered(director)
 
   // ----------------------------------------------------------------------------
   static function unregisterDirector(Director director)
     g_debuggerDirectors.remove(director)
+    for debugger in g_directorDebuggers
+      debugger.onDirectorUnregistered(director)
 
   // --------------------------------------------------------------------------
   override function realtimeUpdate(real _)
-
-    if (g_debuggerDirectorGen != m_lastDebuggerDirectorGen)
-      rebuildTabPanel()
+    skip
 
   // --------------------------------------------------------------------------
   private function rebuildTabPanel()
 
-    m_lastDebuggerDirectorGen = g_debuggerDirectorGen
-
     let prevSelectedContentId = m_tabPanel.getSelectedContentId()
     m_tabPanel.removeAllContent()
 
-    for thread in g_debuggerDirectors
-      m_tabPanel.addContent(thread.getName(), new DirectorFrame(thread))
+    for director in g_debuggerDirectors
+      m_tabPanel.addContent(director.getId().toString(), director.getName(), new DirectorFrame(director))
 
     if (m_tabPanel.getContent(prevSelectedContentId) != null)
       m_tabPanel.setSelectedContentId(prevSelectedContentId)
+
+  // ----------------------------------------------------------------------------
+  private function onDirectorRegistered(Director director)
+    if (m_tabPanel != null)
+      m_tabPanel.addContent(director.getId().toString(), director.getName(), new DirectorFrame(director))
+
+  // ----------------------------------------------------------------------------
+  private function onDirectorUnregistered(Director director)
+    if (m_tabPanel != null)
+      m_tabPanel.removeContent(director.getId().toString())
 
 // ============================================================================
 class DirectorFrame extends Frame

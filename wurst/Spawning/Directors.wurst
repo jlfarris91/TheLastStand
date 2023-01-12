@@ -14,6 +14,7 @@ import Events
 import RegisterEvents
 import Func
 import IsEnabled
+import GroupExtensions
 
 constant real TOO_CHEAP_COEFF = 6
 
@@ -98,6 +99,10 @@ public class Admin
 
   // --------------------------------------------------------------------------
   ondestroy
+
+    while not m_ownedUnits.isEmpty()
+      unregisterOwnedUnit(m_ownedUnits.getFirst())
+
     m_ownedUnits.release()
 
     if (m_onUnitRegistered != null)
@@ -226,10 +231,6 @@ public abstract class Director
     if (m_deck != null)
       m_deck.release()
       m_deck = null
-
-    if (m_workerThread != null)
-      destroy m_workerThread
-      m_workerThread = null
 
     if (m_creditsOnActivation != null)
       m_creditsOnActivation.release()
@@ -470,7 +471,7 @@ public abstract class ContinuousDirector extends Director
           drawnCard.card.getId(),
           drawnCard.tier.toString(),
           drawnCard.card.getCost().toString(),
-          TIER_VALUE_MULTIPLIER[drawnCard.tier].toString(),
+          ELITE_TIER_VALUE_MULTIPLIER[drawnCard.tier].toString(),
           drawnCard.cost.toString()))
       else
         output.call("Selected Card: none")
@@ -591,7 +592,7 @@ class ContinuousDirectorJob extends Job
     // If the director can't afford the card at the current tier, drop down a tier
     while (m_selectedCard.tier > 0 and credits < m_selectedCard.cost)
       m_selectedCard.tier = m_selectedCard.tier - 1
-      m_selectedCard.cost = TIER_VALUE_MULTIPLIER[m_selectedCard.tier] * m_selectedCard.card.getCost()
+      m_selectedCard.cost = (ELITE_TIER_VALUE_MULTIPLIER[m_selectedCard.tier] * m_selectedCard.card.getCost()).floor()
     
     if (m_selectedCard.tier == 0 and credits < m_selectedCard.cost)
       restartTimerBetweenWaves()
@@ -644,7 +645,7 @@ init
 
   for tier = 2 downto 0
   //{
-    let tierCost = TIER_VALUE_MULTIPLIER[tier] * baseCost
+    let tierCost = (ELITE_TIER_VALUE_MULTIPLIER[tier] * baseCost).floor()
     if (credits >= tierCost)
       selectedTier = tier
       selectedCost = tierCost
@@ -656,7 +657,7 @@ init
     
     while (selectedTier > 0 and credits < selectedCost)
       selectedTier--
-      selectedCost = TIER_VALUE_MULTIPLIER[selectedTier] * baseCost
+      selectedCost = (ELITE_TIER_VALUE_MULTIPLIER[selectedTier] * baseCost).floor()
       Log.info("t: " + selectedTier.toString() + " c: " + selectedCost.toString())
 
     if (credits < selectedCost)
