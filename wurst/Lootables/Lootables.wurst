@@ -35,6 +35,7 @@ import GroupUtils
 import IProgress
 import Command
 import GameInstance
+import Jobs
 
 // Buildings
 public constant int UNIT_ID_LOOTABLE_BARN = 'h01H'
@@ -107,7 +108,14 @@ HashMap<unit, LootOperationComponent> g_looterToOperationMap = new HashMap<unit,
 SoundDefinition g_notEnoughManaSoundDef
 int array g_notEnoughManaLastPlayedTime
 
-HashList<LootableDirector> g_lootableDirectors = new HashList<LootableDirector>()
+HashList<LootDirector> g_lootDirectors = new HashList<LootDirector>()
+int g_lootDirectorsGen = 0
+UpdateLootDirectorsJob g_lootDirectorJob = new UpdateLootDirectorsJob()..acquire()
+
+Thread g_lootThread = new Thread("loot")
+..setEnabled(true)
+..setMaxWorkPerTick(1)
+..setTickInterval(0.1)
 
 public HashList<int> g_LootableUnitTypes
 
@@ -141,12 +149,8 @@ public abstract class LootCard extends TieredCard
     return false
 
 // ============================================================================
-public class LootableDirector extends Director
+public class LootDirector extends Director
   private LootableComponent m_lootable
-  private int m_cooldownDays
-  private int m_cooldownDurationDays
-  private int m_lootGeneratedPerCycle = 1
-  private texttag m_cooldownDayTextTag
 
   // --------------------------------------------------------------------------
   construct(LootableComponent lootable)
@@ -154,77 +158,15 @@ public class LootableDirector extends Director
     m_lootable = lootable
 
   // ----------------------------------------------------------------------------
-  function getLootGeneratedPerCycle() returns int
-    return m_lootGeneratedPerCycle
-  
-  // ----------------------------------------------------------------------------
-  function setLootGeneratedPerCycle(int value)
-    m_lootGeneratedPerCycle = value
-
-  // --------------------------------------------------------------------------
-  function getCooldownDuration() returns int
-    return m_cooldownDurationDays
-
-  // --------------------------------------------------------------------------
-  function setCooldownDuration(int days)
-    m_cooldownDurationDays = days
-
-  // --------------------------------------------------------------------------
-  function getCooldown() returns int
-    return m_cooldownDays
-
-  // --------------------------------------------------------------------------
-  function setCooldown(int value)
-    
-    let oldValue = m_cooldownDays
-    m_cooldownDays = value
-
-    if (m_cooldownDays == 0 and m_cooldownDayTextTag != null)
-      m_cooldownDayTextTag.destr()
-      m_cooldownDayTextTag = null
-
-    if (m_cooldownDays > 0)
-    //{
-      if (m_cooldownDayTextTag == null)
-        m_cooldownDayTextTag = CreateTextTag()
-      
-      m_cooldownDayTextTag
-        ..setVisibility(value > 0)
-        ..setPermanent(true)
-        ..setColor(COUNTDOWN_COLOR)
-        ..setPos(m_lootable.getOwnerUnit().getPos().withZ(20.0))
-        ..setVelocity(0, 0)
-
-      if (m_cooldownDays == 1)
-        m_cooldownDayTextTag.setText("{0} DAY".format(m_cooldownDays.toString()), 10.0)
-      else
-        m_cooldownDayTextTag.setText("{0} DAYS".format(m_cooldownDays.toString()), 10.0)
-    //}
-
-    if (oldValue != value and m_cooldownDays == 0 and m_lootable.getLootCount() < m_lootable.getMaxLootCount())
-      onCooldownExpired()
-
-  // ----------------------------------------------------------------------------
   override protected function onEnabled()
     super.onEnabled()
-    g_lootableDirectors.add(this)
-
-    m_cooldownDays = 0
-    m_cooldownDurationDays = LOOTABLES_DEFAULT_COOLDOWN
-
+    registerActiveLootDirector(this)
     drawLootCards(m_lootable.getMaxLootCount())
-    
-    if (m_cooldownDayTextTag != null)
-      m_cooldownDayTextTag.setPos(m_lootable.getOwnerUnit().getPos().withZ(20.0))
 
   // ----------------------------------------------------------------------------
   override protected function onDisabled()
     super.onDisabled()
-    g_lootableDirectors.remove(this)
-
-    if (m_cooldownDayTextTag != null)
-      m_cooldownDayTextTag.destr()
-      m_cooldownDayTextTag = null
+    unregisterActiveLootDirector(this)
 
   // --------------------------------------------------------------------------
   override protected function getDifficultyCoefficient() returns real
@@ -232,7 +174,7 @@ public class LootableDirector extends Director
 
   // --------------------------------------------------------------------------
   override function getCreditsPerGeneration() returns real
-    return getCreditMultiplier() * (getCreditsOnActivation() / 3) * getDifficultyCoefficient()
+    return getCreditMultiplier() * (getCreditsOnActivation() / 5) * getDifficultyCoefficient()
 
   // ----------------------------------------------------------------------------
   private function drawLootCards(int count)
@@ -251,7 +193,6 @@ public class LootableDirector extends Director
 
     var credits = getCredits()
     let deckInstance = deck.createInstance()
-    let addedCards = new LinkedList<CardInstance>()
 
     for i = 0 to currentLootCount - 1
       let lootCardInstance = m_lootable.getLoot(i)
@@ -262,24 +203,23 @@ public class LootableDirector extends Director
     for i = 0 to numCards - 1
       let lootCard = deckInstance.draw() castTo LootCard
       if (lootCard != null)
-        let cardInstance = new CardInstance(lootCard, 0, lootCard.getCost())
-        addedCards.add(cardInstance)
-        credits -= cardInstance.cost
-        if (not lootCard.getDiscardOnActivate())
-          deckInstance.add(lootCard)
+        let cardInstance = lootCard.getHighestAffordableTier(credits)
+        // let cardInstance = new CardInstance(lootCard, 0, lootCard.getCost())
+        if (cardInstance != null)
+          m_lootable.addLoot(cardInstance)
+          credits -= cardInstance.cost
+          if (not lootCard.getDiscardOnActivate())
+            deckInstance.add(lootCard)
 
-    tryUpgradeLootCards(addedCards)
-
-    for cardInstance in addedCards
-      m_lootable.addLoot(cardInstance)
-
-    destroy addedCards
     destroy deckInstance
 
     setCredits(credits)
 
   // ----------------------------------------------------------------------------
-  private function tryUpgradeLootCards(LinkedList<CardInstance> cards)
+  private function tryUpgradeLootCards()
+
+    if (not m_lootable.hasLoot())
+      return
 
     var credits = getCredits()
     if (credits == 0)
@@ -288,19 +228,19 @@ public class LootableDirector extends Director
     // Then loop through each loot reward and try to upgrade its tier using remaining credits.
     // Upgrade in reverse order so that the better loot is at the end of the loot operation.
     // Stop after making a full loop without upgrading any cards.
-    let lootCardCount = cards.size()
-    var index = lootCardCount
+    let lootCardCount = m_lootable.getLootCount()
+    var index = lootCardCount - 1
     var upgradedCard = false
     while (true)
     //{
-      let drawnCard = cards.get(index)
+      let drawnCard = m_lootable.getLoot(index)
 
       let card = drawnCard.card castTo TieredCard
       let currTier = drawnCard.tier
+      let nextTier = currTier + 1
       let currTierCost = drawnCard.cost
 
-      if (card != null and currTier < card.getTierCount())
-        let nextTier = currTier + 1
+      if (card != null and nextTier < card.getTierCount())
         let nextTierCost = card.getCost(nextTier)
         let costToUpgrade = nextTierCost - currTierCost
         if (credits > costToUpgrade)
@@ -312,8 +252,6 @@ public class LootableDirector extends Director
       index = wrap(index - 1, 0, lootCardCount - 1)
 
       // Completed a full loop and wrapped around 
-        // Completed a full loop and wrapped around 
-      // Completed a full loop and wrapped around 
       if (index == lootCardCount - 1)
         if (not upgradedCard)
           break
@@ -324,22 +262,60 @@ public class LootableDirector extends Director
 
   // ----------------------------------------------------------------------------
   protected function onDayStart()
-    decrementCooldown()
-
-  // ----------------------------------------------------------------------------
-  function restartCooldown()
-    setCooldown(m_cooldownDurationDays)
-
-  // --------------------------------------------------------------------------
-  private function decrementCooldown()
-    if (m_cooldownDays == 0)
-      return
-    setCooldown(m_cooldownDays - 1)
-
-  // ----------------------------------------------------------------------------
-  private function onCooldownExpired()
     generateCredits()
-    drawLootCards(m_lootGeneratedPerCycle)
+    drawLootCards(1)
+    tryUpgradeLootCards()
+
+// ----------------------------------------------------------------------------
+function registerActiveLootDirector(LootDirector director)
+  g_lootDirectors.add(director)
+  g_lootDirectorsGen++
+
+// ----------------------------------------------------------------------------
+function unregisterActiveLootDirector(LootDirector director)
+  g_lootDirectors.remove(director)
+  g_lootDirectorsGen++
+
+// ============================================================================
+class UpdateLootDirectorsJob extends Job
+  private HLIterator<LootDirector> m_iter = null
+  private int m_lootDirectorsGen = 0
+  private int m_count = 0
+
+  // ----------------------------------------------------------------------------
+  construct()
+    super("uplootdir")
+
+  // ----------------------------------------------------------------------------
+  ondestroy
+    if (m_iter != null)
+      m_iter.close()
+      m_iter = null
+
+  // ----------------------------------------------------------------------------
+  override function reset()
+    super.reset()
+
+    if (m_iter != null)
+      m_iter.close()
+    m_iter = g_lootDirectors.staticItr()
+    m_lootDirectorsGen = g_lootDirectorsGen
+    m_count = 0
+
+  // ----------------------------------------------------------------------------
+  override function hasNext() returns bool
+    return m_iter != null and m_iter.hasNext()
+
+  // ----------------------------------------------------------------------------
+  override function next() returns int
+    let director = m_iter.next()
+    director.onDayStart()
+    m_count++
+    return 1
+
+  // ----------------------------------------------------------------------------
+  override function getDebuggerStateString() returns string
+    return m_count.toString() + "/" + g_lootDirectors.size().toString()
 
 // ============================================================================
 public class CardInstanceComparator implements Comparator<CardInstance>
@@ -356,7 +332,7 @@ public class LootableComponent extends UnitComponent
   private int m_dueToLuckyHorseshoe = 0
   private optionalVec2 m_spawnPosOverride = none_vec2()
   private bool m_destroyOnLoot = false
-  private LootableDirector m_director
+  private LootDirector m_director
   private int m_maxLootCount = 1
   private LinkedList<CardInstance> m_lootCards = new LinkedList<CardInstance>()
 
@@ -365,7 +341,7 @@ public class LootableComponent extends UnitComponent
     super(owner)
 
     m_searchDurationUnscaled = 3.0
-    m_director = new LootableDirector(this)
+    m_director = new LootDirector(this)
 
     if (g_lootableUnits == null)
       g_lootableUnits = new Vector<LootableComponent>()
@@ -439,7 +415,7 @@ public class LootableComponent extends UnitComponent
     return not m_lootCards.isEmpty()
 
   // ----------------------------------------------------------------------------
-  function getDirector() returns LootableDirector
+  function getDirector() returns LootDirector
     return m_director
 
   // --------------------------------------------------------------------------
@@ -455,7 +431,7 @@ public class LootableComponent extends UnitComponent
     m_destroyOnLoot = value
 
   // --------------------------------------------------------------------------
-  function startLooting(unit looter)
+  function startLooting(unit looter, int lootCount)
 
     if (not canLoot() or getIsBeingLooted())
       return
@@ -468,7 +444,7 @@ public class LootableComponent extends UnitComponent
     m_lootingUnit.setAnimation(15)
 
     let operation = getOwner().getOrAddLootOperationComponent()
-    operation.start(looter, scaledSearchDuration, getLootCount())
+    operation.start(looter, scaledSearchDuration, lootCount)
 
   // --------------------------------------------------------------------------
   protected function onLootingFinished(unit lootingUnit)
@@ -652,21 +628,21 @@ public function IUnitMetadata.getOrAddLootableComponent() returns LootableCompon
 
 // ============================================================================
 function onDayStart()
-  if (g_lootableDirectors != null)
-    for lootableDirector in g_lootableDirectors
-      lootableDirector.onDayStart()
+  if (not g_lootDirectors.isEmpty() and g_lootDirectorJob.getThread() == null)
+    g_lootDirectorJob.reset()
+    g_lootThread.enqueue(g_lootDirectorJob)
 
 // ============================================================================
-function refreshLootablesInRange(vec2 pos, real radius)
+function updateLootablesInRange(vec2 pos, real radius)
   let temp = getGroup()
   temp.enumUnitsInRange(pos, radius)
   for _unit in temp
     if (_unit.isLootable())
-      updateLootableCooldownDuration(_unit)
+      updateLootablesNearCamps(_unit)
   temp.release()
 
 // ============================================================================
-function updateLootableCooldownDuration(unit lootableUnit)
+function updateLootablesNearCamps(unit lootableUnit)
 
   let metadata = lootableUnit.getMetadata()
   if (metadata == null)
@@ -685,7 +661,7 @@ function updateLootableCooldownDuration(unit lootableUnit)
       break
   temp.release()
 
-  comp.getDirector().setCooldownDuration(foundCooldownAffector ? LOOTABLES_NEARCAMP_COOLDOWN : LOOTABLES_DEFAULT_COOLDOWN)
+  comp.getDirector().setCreditMultiplier(foundCooldownAffector ? 0.5 : 1.0)
 
 // ============================================================================
 function unitAffectsLootableCooldown(unit _unit) returns bool
@@ -696,7 +672,7 @@ function unitAffectsLootableCooldown(unit _unit) returns bool
 
 // ============================================================================
 function onUnitIndexDeindexed()
-  refreshLootablesInRange(getIndexingUnit().getPos(), LOOTABLE_REFRESH_RANGE)
+  updateLootablesInRange(getIndexingUnit().getPos(), LOOTABLE_REFRESH_RANGE)
 
 // ============================================================================
 public class LootOperationComponent extends RealtimeUnitComponent
@@ -821,7 +797,7 @@ public class LootOperationComponent extends RealtimeUnitComponent
     let cameraPos = getOwnerUnit().getPos()
     m_looterPos = looter.getPos()
 
-    m_timer.start(m_duration, null)
+    m_timer.doManual(m_duration, true, () -> onOperationFinished(lootableUnitCached))
 
     m_progress = new Progress()
     m_progress.report("Looting {0}...".format(getOwnerUnit().getName()))
@@ -854,6 +830,20 @@ public class LootOperationComponent extends RealtimeUnitComponent
     let lootable = getOwner().getLootableComponent()
     if (lootable != null)
       lootable.onLootingCanceled(m_lootingUnit)
+    cleanup()
+  
+  // --------------------------------------------------------------------------
+  private static function onOperationFinished(unit lootable)
+    let metadata = lootable.getMetadata()
+    if (metadata == null)
+      return
+    let operation = metadata.getLootOperationComponent()
+    if (operation == null or operation.getIsRunning() == false)
+      return
+    operation.onOperationFinished()
+
+  // --------------------------------------------------------------------------
+  private function onOperationFinished()
     cleanup()
 
   // ----------------------------------------------------------------------------
@@ -937,7 +927,7 @@ function resetUnitAnimationAfterRightClickingSameLootable(unit lootingUnit, Loot
   prepareSearchSpell(lootingUnit, lootOperation.getTimeRemaining())
 
 // ============================================================================
-function prepareSearchSpell(unit lootingUnit, unit lootableUnit)
+function prepareSearchSpell(unit lootingUnit, unit lootableUnit, int lootCount)
   let lootableUnitMetadata = lootableUnit.getMetadata()
   if (lootableUnitMetadata == null)
     return
@@ -945,7 +935,7 @@ function prepareSearchSpell(unit lootingUnit, unit lootableUnit)
   if (lootableComp == null)
     return
   let adjustedSearchDurationPerLoot = getUnitSearchDuration(lootingUnit, lootableComp.getSearchDurationPerLoot())
-  let totalSearchDuration = adjustedSearchDurationPerLoot * lootableComp.getLootCount()
+  let totalSearchDuration = adjustedSearchDurationPerLoot * lootCount
   prepareSearchSpell(lootingUnit, totalSearchDuration)
 
 // ============================================================================
@@ -992,7 +982,9 @@ function onSpellChannel()
     TlsSounds.errorSoundDef.playForPlayer(lootingPlayer)
     return
 
-  let scaledSearchDuration = getUnitSearchDuration(lootingUnit, lootable.getSearchDurationPerLoot())
+  var scaledSearchDuration = getUnitSearchDuration(lootingUnit, lootable.getSearchDurationPerLoot())
+  scaledSearchDuration = max(scaledSearchDuration, 0.1)
+
   let manaRemainingAfterSearch = calculateManaRemainingAfterLootOperation(lootingUnit, scaledSearchDuration)
   if (manaRemainingAfterSearch < 0)
   //{
@@ -1024,9 +1016,13 @@ function onSpellChannel()
       resetUnitAnimationAfterRightClickingSameLootable(lootingUnit, activeLootingOperation)
   //}
   else
-    // Log.info("unit is starting to loot")
-    prepareSearchSpell(lootingUnit, lootableUnit)
-    lootable.startLooting(lootingUnit)
+  //{
+    let lootCountPossible = max(1, (manaRemainingAfterSearch / scaledSearchDuration).floor())
+    let lootCountActual = clamp(lootCountPossible, 0, lootable.getLootCount())
+    // Log.info("unit is starting to loot {0} times".format(lootCountActual.toString()))
+    prepareSearchSpell(lootingUnit, lootableUnit, lootCountActual)
+    lootable.startLooting(lootingUnit, lootCountActual)
+  //}
 
 // ============================================================================
 function onUnitIssuedUnitOrder()
@@ -1259,3 +1255,5 @@ init
     g_lootFinishedSound[i] = new SoundDefinition("sound\\interface\\goodjob.flac", false, false)
     g_lootFinishedSound[i].volume = 100
     g_lootFinishedSound[i].pitch += i * 0.1
+
+  
