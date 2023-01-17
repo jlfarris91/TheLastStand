@@ -2,7 +2,6 @@ package BreakableComponent
 import UnitMetadata
 import DamageEvent
 import Damage
-import AbilityIds
 import Events
 import RepairTracking
 import ErrorHandling
@@ -27,6 +26,7 @@ public class BreakableComponent extends UnitComponent
   private effect m_disabledEffect
   private bool m_isBroken = false
   private bool m_changingState = false
+  private real m_zoffset = 120.0
 
   private Event m_onStateChanged
 
@@ -51,6 +51,14 @@ public class BreakableComponent extends UnitComponent
     m_brokenStateUnitTypeId = value
 
   // ----------------------------------------------------------------------------
+  function getEffectZOffset() returns real
+    return m_zoffset
+  
+  // ----------------------------------------------------------------------------
+  function setEffectZOffset(real value)
+    m_zoffset = value
+
+  // ----------------------------------------------------------------------------
   function isBroken() returns bool
     return m_isBroken
 
@@ -59,6 +67,14 @@ public class BreakableComponent extends UnitComponent
     if (m_onStateChanged == null)
       m_onStateChanged = new Event()
     return m_onStateChanged
+
+  // ----------------------------------------------------------------------------
+  override protected function onDisabled()
+    super.onDisabled()
+
+    if (m_disabledEffect != null)
+      m_disabledEffect.destr()
+      m_disabledEffect = null
 
   // ----------------------------------------------------------------------------
   protected function onDamageEventFinal()
@@ -82,7 +98,7 @@ public class BreakableComponent extends UnitComponent
   // ----------------------------------------------------------------------------
   private function startEnterBrokenState()
 
-    // Log.info("startEnterBrokenState")
+    Log.info("startEnterBrokenState -> " +  m_brokenStateUnitTypeId.toRawCode())
 
     let ownerUnit = getOwnerUnit()
 
@@ -90,14 +106,14 @@ public class BreakableComponent extends UnitComponent
 
     // Upgrade to the broken version of the unit
     if (not ownerUnit.issueImmediateOrderById(m_brokenStateUnitTypeId))
-      error("Failed to issue upgrade to repaired unit")
+      error("Failed to issue upgrade to broken unit")
     else
       m_changingState = true
 
   // ----------------------------------------------------------------------------
   private function startEnterRepairedState()
 
-    // Log.info("startEnterRepairedState")
+    Log.info("startEnterRepairedState -> " + m_repairedStateUnitTypeId.toRawCode())
 
     let ownerUnit = getOwnerUnit()
 
@@ -112,7 +128,10 @@ public class BreakableComponent extends UnitComponent
     super.onOwnerUpgraded()
 
     if (not m_changingState)
+      Log.info("onOwnerUpgraded: not changing state")
       return
+
+    Log.info("onOwnerUpgraded: changing state")
 
     let ownerUnit = getOwnerUnit()
     let ownerUnitTypeId = ownerUnit.getTypeId()
@@ -140,15 +159,15 @@ public class BreakableComponent extends UnitComponent
   protected function onRepairEnd()
 
     if (not m_isBroken)
-      // Log.info("onRepairEnd: not broken")
+      Log.info("onRepairEnd: not broken")
       return
 
     let ownerUnit = getOwnerUnit()
     let deltaHP = ownerUnit.getMaxHP() - ownerUnit.getHP()
     if (deltaHP < 1)
       startEnterRepairedState()
-    // else
-      // Log.info("onRepairEnd: broken, {0} < {1}".format(ownerUnit.getHP().toString(), ownerUnit.getMaxHP().toString()))
+    else
+      Log.info("onRepairEnd: broken, {0} < {1}".format(ownerUnit.getHP().toString(), ownerUnit.getMaxHP().toString()))
 
   // ----------------------------------------------------------------------------
   /** Attempt to prevent players from canceling upgrade */
@@ -175,17 +194,17 @@ public class BreakableComponent extends UnitComponent
     let ownerUnit = getOwnerUnit()
 
     if (m_disabledEffect == null)
-      let pos = ownerUnit.getPos().withTerrainZ(120.0)
+      let pos = ownerUnit.getPos().withTerrainZ(m_zoffset)
       m_disabledEffect = AddSpecialEffect(BROKEN_EFFECT_PATH, pos.x, pos.y)..setPos(pos)
 
     ownerUnit.setVertexColor(BROKEN_VERTEX_COLOR)
-    ownerUnit.addAbility(AbilityIds.invulnerable)
+    // ownerUnit.addAbility(AbilityIds.invulnerable)
     ownerUnit.addAbility(BROKEN_BUFF.abilId)
     ownerUnit.addAbility(BROKEN_BUFF.buffId)
 
     triggerPathingUpdate(ownerUnit.getPos())
 
-    // Log.info("onBroken")
+    Log.info("onBroken")
     
   // ----------------------------------------------------------------------------
   protected function onRepaired()
@@ -195,7 +214,7 @@ public class BreakableComponent extends UnitComponent
       m_disabledEffect.destr()
       m_disabledEffect = null
 
-    ownerUnit.removeAbility(AbilityIds.invulnerable)
+    // ownerUnit.removeAbility(AbilityIds.invulnerable)
     ownerUnit.removeAbility(BROKEN_BUFF.abilId)
     ownerUnit.removeAbility(BROKEN_BUFF.buffId)
 
@@ -204,7 +223,7 @@ public class BreakableComponent extends UnitComponent
 
     triggerPathingUpdate(ownerUnit.getPos())
 
-    // Log.info("onRepaired")
+    Log.info("onRepaired")
 
   // --------------------------------------------------------------------------
   private static function triggerPathingUpdate(vec2 pos)
