@@ -6,6 +6,58 @@ import TlsUpgradeIds
 import HashList
 import CardinalUnitDefinition
 import BuildingUndeadTarget
+import HashMap
+
+constant int  UNIT_WALL_BUILD_TIME = 20             // How long it takes to build a wall
+constant int  UNIT_WALL_REPAIR_TIME = 20            // How long it takes to repair a wall from 0 to full health
+
+HashList<int> g_allWallIds = new HashList<int>()
+HashList<int> g_allDeadWallIds = new HashList<int>()
+public HashMap<int, WallCardinalUnitDefinitionHelper> g_unitTypeToWallHelperMap = new HashMap<int, WallCardinalUnitDefinitionHelper>()
+
+// ============================================================================
+public function unit.isWall() returns bool
+  return g_allWallIds.has(this.getTypeId()) or
+         g_allDeadWallIds.has(this.getTypeId())
+
+// ============================================================================
+public class WallCardinalUnitDefinitionHelper extends CardinalUnitDefinitionHelper
+  private int array[4] m_deadIds
+  private string array[4] m_deadModelPaths
+  private string array[4] m_deadPathMaps
+  private int array[4] m_aliveIds
+
+  // --------------------------------------------------------------------------
+  function getDeadId(CardinalUnitAngle angle) returns int
+    return m_deadIds[angle castTo int]
+
+  // --------------------------------------------------------------------------
+  function setDeadId(CardinalUnitAngle angle, int unitId)
+    m_deadIds[angle castTo int] = unitId
+
+  // --------------------------------------------------------------------------
+  function getDeadModelPath(CardinalUnitAngle angle) returns string
+    return m_deadModelPaths[angle castTo int]
+
+  // --------------------------------------------------------------------------
+  function setDeadModelPath(CardinalUnitAngle angle, string modelPath)
+    m_deadModelPaths[angle castTo int] = modelPath
+
+  // --------------------------------------------------------------------------
+  function getDeadPathMap(CardinalUnitAngle angle) returns string
+    return m_deadPathMaps[angle castTo int]
+
+  // --------------------------------------------------------------------------
+  function setDeadPathMap(CardinalUnitAngle angle, string iconPath)
+    m_deadPathMaps[angle castTo int] = iconPath
+
+  // --------------------------------------------------------------------------
+  function getAliveId(CardinalUnitAngle angle) returns int
+    return m_aliveIds[angle castTo int]
+
+  // --------------------------------------------------------------------------
+  function setAliveId(CardinalUnitAngle angle, int unitId)
+    m_aliveIds[angle castTo int] = unitId
 
 // ============================================================================
 // 
@@ -24,62 +76,25 @@ public constant int WOOD_FENCE_REPAIR_TIME = 10
 public constant int WOOD_FENCE_BUILD_TIME = 10
 public constant int WOOD_FENCE_HEALTH = 625
 public constant int WOOD_FENCE_ARMOR = 1
+public constant real WOOD_WALL_SCALE_DIAGONAL = 1.0
+public constant real WOOD_WALL_SCALE_HORIZONTAL = 1.0
 
-public CardinalUnitDefinitionHelper g_woodFenceHelper = new CardinalUnitDefinitionHelper()
+public WallCardinalUnitDefinitionHelper g_woodWallHelper = new WallCardinalUnitDefinitionHelper()
 public HashList<int> g_woodFenceIds = new HashList<int>()
 
-// ============================================================================
 public class WoodFenceIds
   static constant int ew = compiletime(UNIT_ID_GEN.next())
   static constant int nesw = compiletime(UNIT_ID_GEN.next())
   static constant int ns = compiletime(UNIT_ID_GEN.next())
   static constant int nwse = compiletime(UNIT_ID_GEN.next())
-
-// ============================================================================
-class WoodFenceDefinition extends TlsBuildingDefinition
-  construct(int newId)
-    super(newId, UnitIds.scouttower)
-    this.makeBuildingUndeadTarget()
-    setName("Wood Fence")
-    setShadowTextureBuilding("")
-    setButtonPositionX(1)
-    setButtonPositionY(0)
-    setDeathTimeseconds(0.83)
-    setGroundTexture("")
-    setSelectionScale(4.0)
-    setDeathType(DeathType.CannotRaiseDoesNotDecay)
-    setArmorType(ArmorType.Fortified)
-    setCollisionSize(0.0)
-    setPlacementRequires("unbuildable,unwalkable")
-    setBuildTime(WOOD_FENCE_BUILD_TIME)
-    setCanFlee(false)
-    
-    setGoldCost(WOOD_FENCE_GOLD_COST)
-    setLumberCost(WOOD_FENCE_LUMBER_COST)
-    setRepairGoldCost(WOOD_FENCE_REPAIR_GOLD_COST)
-    setRepairLumberCost(WOOD_FENCE_REPAIR_LUMBER_COST)
-    setRecycleGoldRewarded(WOOD_FENCE_RECYCLE_GOLD_COST)
-    setRecycleLumberRewarded(WOOD_FENCE_RECYCLE_LUMBER_COST)
-    setDefenseBase(WOOD_FENCE_ARMOR)
-    setDefenseUpgradeBonus(2)
-
-    setHideMinimapDisplay(true)
-    setHitPointsMaximumBase(WOOD_FENCE_HEALTH)
-    setRepairTime(WOOD_FENCE_REPAIR_TIME)
-    setSightRadiusDay(STRUCTURE_LARGE_SIGHT_RANGE_DAY)
-    setSightRadiusNight(STRUCTURE_LARGE_SIGHT_RANGE_NIGHT)
-    setNormalAbilities(commaList(TlsAbilityIds.recycle))
-    setRequirements(commaList(TlsUnitIds.obelisk1))
-    setUpgradesUsed(commaList(TlsUpgradeIds.campDefense))
-
-    setHotkey("F")
-
-    setTooltipBasic("Build Wood Fence")
-    setTooltipExtended("Build a wood fence the offers a sturdy protection against intruders.")
-
-// ============================================================================
-public function unit.isWoodFence() returns bool
-  return g_woodFenceIds.has(this.getTypeId())
+  static constant int ew_dead = compiletime(UNIT_ID_GEN.next())
+  static constant int nesw_dead = compiletime(UNIT_ID_GEN.next())
+  static constant int ns_dead = compiletime(UNIT_ID_GEN.next())
+  static constant int nwse_dead = compiletime(UNIT_ID_GEN.next())
+  static constant int ew_alive = compiletime(UNIT_ID_GEN.next())
+  static constant int nesw_alive = compiletime(UNIT_ID_GEN.next())
+  static constant int ns_alive = compiletime(UNIT_ID_GEN.next())
+  static constant int nwse_alive = compiletime(UNIT_ID_GEN.next())
 
 // ============================================================================
 //
@@ -101,55 +116,22 @@ public constant int STONE_WALL_ARMOR = 2
 public constant real STONE_WALL_SCALE_DIAGONAL = 0.60
 public constant real STONE_WALL_SCALE_HORIZONTAL = 0.65
 
-public CardinalUnitDefinitionHelper g_stoneWallHelper = new CardinalUnitDefinitionHelper()
+public WallCardinalUnitDefinitionHelper g_stoneWallHelper = new WallCardinalUnitDefinitionHelper()
 public HashList<int> g_stoneWallIds = new HashList<int>()
 
-// ============================================================================
 public class StoneWallIds
   static constant int ew = compiletime(UNIT_ID_GEN.next())
   static constant int nesw = compiletime(UNIT_ID_GEN.next())
   static constant int ns = compiletime(UNIT_ID_GEN.next())
   static constant int nwse = compiletime(UNIT_ID_GEN.next())
-
-// ============================================================================
-class StoneWallDefinition extends TlsBuildingDefinition
-  construct(int newId)
-    super(newId, UnitIds.scouttower)
-    this.makeBuildingUndeadTarget()
-    setName("Stone Wall")
-    setShadowTextureBuilding("")
-    setButtonPositionX(0)
-    setButtonPositionY(0)
-    setDeathTimeseconds(0.83)
-    setGroundTexture("")
-    setSelectionScale(4.0)
-    setDeathType(DeathType.CannotRaiseDoesNotDecay)
-    setArmorType(ArmorType.Fortified)
-    setCollisionSize(0.0)
-    setPlacementRequires("unbuildable,unwalkable")
-    setBuildTime(STONE_WALL_BUILD_TIME)
-    setCanFlee(false)
-    setHideMinimapDisplay(true)
-    setHitPointsMaximumBase(STONE_WALL_HEALTH)
-    setDefenseBase(STONE_WALL_ARMOR)
-    setDefenseUpgradeBonus(2)
-
-    setGoldCost(STONE_WALL_GOLD_COST)
-    setLumberCost(STONE_WALL_LUMBER_COST)
-    setRepairGoldCost(STONE_WALL_REPAIR_GOLD_COST)
-    setRepairLumberCost(STONE_WALL_REPAIR_LUMBER_COST)
-    setRecycleGoldRewarded(STONE_WALL_RECYCLE_GOLD_COST)
-    setRecycleLumberRewarded(STONE_WALL_RECYCLE_LUMBER_COST)
-
-    setRepairTime(STONE_WALL_REPAIR_TIME)
-    setSightRadiusDay(STRUCTURE_LARGE_SIGHT_RANGE_DAY)
-    setSightRadiusNight(STRUCTURE_LARGE_SIGHT_RANGE_NIGHT)
-    setNormalAbilities(commaList(TlsAbilityIds.recycle))
-    setRequirements(commaList(TlsUnitIds.workbench))
-    setUpgradesUsed(commaList(TlsUpgradeIds.campDefense))
-
-    setTooltipBasic("Build Fence")
-    setTooltipExtended("Upgrade to a strong stone wall.")
+  static constant int ew_dead = compiletime(UNIT_ID_GEN.next())
+  static constant int nesw_dead = compiletime(UNIT_ID_GEN.next())
+  static constant int ns_dead = compiletime(UNIT_ID_GEN.next())
+  static constant int nwse_dead = compiletime(UNIT_ID_GEN.next())
+  static constant int ew_alive = compiletime(UNIT_ID_GEN.next())
+  static constant int nesw_alive = compiletime(UNIT_ID_GEN.next())
+  static constant int ns_alive = compiletime(UNIT_ID_GEN.next())
+  static constant int nwse_alive = compiletime(UNIT_ID_GEN.next())
 
 // ============================================================================
 //
@@ -171,60 +153,22 @@ public constant int BRICK_WALL_ARMOR = 3
 public constant real BRICK_WALL_SCALE_DIAGONAL = 0.60
 public constant real BRICK_WALL_SCALE_HORIZONTAL = 0.65
 
-public CardinalUnitDefinitionHelper g_brickWallHelper = new CardinalUnitDefinitionHelper()
+public WallCardinalUnitDefinitionHelper g_brickWallHelper = new WallCardinalUnitDefinitionHelper()
 public HashList<int> g_brickWallIds = new HashList<int>()
 
-// ============================================================================
 public class BrickWallIds
   static constant int ew = compiletime(UNIT_ID_GEN.next())
   static constant int nesw = compiletime(UNIT_ID_GEN.next())
   static constant int ns = compiletime(UNIT_ID_GEN.next())
   static constant int nwse = compiletime(UNIT_ID_GEN.next())
-    
-// ============================================================================
-class BrickWallDefinition extends TlsBuildingDefinition
-  construct(int newId)
-    super(newId, UnitIds.scouttower)
-    this.makeBuildingUndeadTarget()
-    setName("Brick Wall")
-    setShadowTextureBuilding("")
-    setButtonPositionX(0)
-    setButtonPositionY(0)
-    setDeathTimeseconds(0.83)
-    setGroundTexture("")
-    setSelectionScale(4.0)
-    setDeathType(DeathType.CannotRaiseDoesNotDecay)
-    setArmorType(ArmorType.Fortified)
-    setCollisionSize(0.0)
-    setPlacementRequires("unbuildable,unwalkable")
-    setBuildTime(BRICK_WALL_BUILD_TIME)
-    setCanFlee(false)
-    setHideMinimapDisplay(true)
-    setHitPointsMaximumBase(BRICK_WALL_HEALTH)
-    setDefenseBase(BRICK_WALL_ARMOR)
-    setDefenseUpgradeBonus(2)
-    
-    setTintingColorRed(255)
-    setTintingColorGreen(100)
-    setTintingColorBlue(100)
-
-    setGoldCost(BRICK_WALL_GOLD_COST)
-    setLumberCost(BRICK_WALL_LUMBER_COST)
-    setRepairGoldCost(BRICK_WALL_REPAIR_GOLD_COST)
-    setRepairLumberCost(BRICK_WALL_REPAIR_LUMBER_COST)
-    setRecycleGoldRewarded(BRICK_WALL_RECYCLE_GOLD_COST)
-    setRecycleLumberRewarded(BRICK_WALL_RECYCLE_LUMBER_COST)
-
-    setRepairTime(BRICK_WALL_REPAIR_TIME)
-    setSightRadiusDay(STRUCTURE_LARGE_SIGHT_RANGE_DAY)
-    setSightRadiusNight(STRUCTURE_LARGE_SIGHT_RANGE_NIGHT)
-    setNormalAbilities(commaList(TlsAbilityIds.recycle))
-    setRequirements(commaList(""))
-    setUpgradesUsed(commaList(TlsUpgradeIds.campDefense))
-
-    setTooltipBasic("Build Brick Wall")
-    setTooltipExtended("Upgrade to a strong wall made of brick and cement.")
-
+  static constant int ew_dead = compiletime(UNIT_ID_GEN.next())
+  static constant int nesw_dead = compiletime(UNIT_ID_GEN.next())
+  static constant int ns_dead = compiletime(UNIT_ID_GEN.next())
+  static constant int nwse_dead = compiletime(UNIT_ID_GEN.next())
+  static constant int ew_alive = compiletime(UNIT_ID_GEN.next())
+  static constant int nesw_alive = compiletime(UNIT_ID_GEN.next())
+  static constant int ns_alive = compiletime(UNIT_ID_GEN.next())
+  static constant int nwse_alive = compiletime(UNIT_ID_GEN.next())
 
 // ============================================================================
 //
@@ -246,60 +190,59 @@ public constant int METAL_WALL_ARMOR = 4
 public constant real METAL_WALL_SCALE_DIAGONAL = 0.60
 public constant real METAL_WALL_SCALE_HORIZONTAL = 0.65
 
-public CardinalUnitDefinitionHelper g_metalWallHelper = new CardinalUnitDefinitionHelper()
+public WallCardinalUnitDefinitionHelper g_metalWallHelper = new WallCardinalUnitDefinitionHelper()
 public HashList<int> g_metalWallIds = new HashList<int>()
 
-// ============================================================================
 public class MetalWallIds
   static constant int ew = compiletime(UNIT_ID_GEN.next())
   static constant int nesw = compiletime(UNIT_ID_GEN.next())
   static constant int ns = compiletime(UNIT_ID_GEN.next())
   static constant int nwse = compiletime(UNIT_ID_GEN.next())
+  static constant int ew_dead = compiletime(UNIT_ID_GEN.next())
+  static constant int nesw_dead = compiletime(UNIT_ID_GEN.next())
+  static constant int ns_dead = compiletime(UNIT_ID_GEN.next())
+  static constant int nwse_dead = compiletime(UNIT_ID_GEN.next())
+  static constant int ew_alive = compiletime(UNIT_ID_GEN.next())
+  static constant int nesw_alive = compiletime(UNIT_ID_GEN.next())
+  static constant int ns_alive = compiletime(UNIT_ID_GEN.next())
+  static constant int nwse_alive = compiletime(UNIT_ID_GEN.next())
 
-// ============================================================================
-class MetalWallDefinition extends TlsBuildingDefinition
+//=============================================================================
+public class BaseWallDefinition extends TlsBuildingDefinition
   construct(int newId)
     super(newId, UnitIds.scouttower)
-    this.makeBuildingUndeadTarget()
-    setName("Iron Wall")
+    setName("Gate")
+    setTintingColorRed(255)
+    setTintingColorGreen(255)
+    setTintingColorBlue(255)
     setShadowTextureBuilding("")
     setButtonPositionX(0)
     setButtonPositionY(0)
     setDeathTimeseconds(0.83)
     setGroundTexture("")
     setSelectionScale(4.0)
-    setDeathType(DeathType.CannotRaiseDoesNotDecay)
+    setScalingValue(0.4)
     setArmorType(ArmorType.Fortified)
+    setDeathType(DeathType.CannotRaiseDoesNotDecay)
     setCollisionSize(0.0)
     setPlacementRequires("unbuildable,unwalkable")
-    setBuildTime(METAL_WALL_BUILD_TIME)
+    setBuildTime(1)
     setCanFlee(false)
-    setDefenseBase(METAL_WALL_ARMOR)
-    setDefenseUpgradeBonus(2)
-
-    setTintingColorRed(255)
-    setTintingColorGreen(200)
-    setTintingColorBlue(200)
-
-    setGoldCost(METAL_WALL_GOLD_COST)
-    setLumberCost(METAL_WALL_LUMBER_COST)
-    setRepairGoldCost(METAL_WALL_REPAIR_GOLD_COST)
-    setRepairLumberCost(METAL_WALL_REPAIR_LUMBER_COST)
-    setRecycleGoldRewarded(METAL_WALL_RECYCLE_GOLD_COST)
-    setRecycleLumberRewarded(METAL_WALL_RECYCLE_LUMBER_COST)
-
     setHideMinimapDisplay(true)
-    setHitPointsMaximumBase(METAL_WALL_HEALTH)
-    setRepairTime(METAL_WALL_REPAIR_TIME)
+    setHitPointsMaximumBase(1000)
     setSightRadiusDay(STRUCTURE_LARGE_SIGHT_RANGE_DAY)
     setSightRadiusNight(STRUCTURE_LARGE_SIGHT_RANGE_NIGHT)
     setNormalAbilities(commaList(TlsAbilityIds.recycle))
     setRequirements(commaList(TlsUnitIds.obelisk1))
     setUpgradesUsed(commaList(TlsUpgradeIds.campDefense))
-    setUpgradesTo("")
+    setDefenseUpgradeBonus(2)
 
-    setTooltipBasic("Build Fence")
-    setTooltipExtended("Upgrade to a strong metal wall.")
+    setBuildTime(UNIT_WALL_BUILD_TIME)
+    setRepairTime(UNIT_WALL_REPAIR_TIME)
+    setGoldCost(0)
+    setLumberCost(0)
+    setRepairGoldCost(0)
+    setRepairLumberCost(0)
 
 // ============================================================================
 function initialize()
@@ -309,29 +252,61 @@ function initialize()
   ..add(WoodFenceIds.nesw)
   ..add(WoodFenceIds.ns)
   ..add(WoodFenceIds.nwse)
+  ..add(WoodFenceIds.ew_dead)
+  ..add(WoodFenceIds.nesw_dead)
+  ..add(WoodFenceIds.ns_dead)
+  ..add(WoodFenceIds.nwse_dead)
+  ..add(WoodFenceIds.ew_alive)
+  ..add(WoodFenceIds.nesw_alive)
+  ..add(WoodFenceIds.ns_alive)
+  ..add(WoodFenceIds.nwse_alive)
 
-  g_woodFenceHelper.setId(CardinalUnitAngle.NS, WoodFenceIds.ns)
-  g_woodFenceHelper.setId(CardinalUnitAngle.NWSE, WoodFenceIds.nwse)
-  g_woodFenceHelper.setId(CardinalUnitAngle.EW, WoodFenceIds.ew)
-  g_woodFenceHelper.setId(CardinalUnitAngle.NESW, WoodFenceIds.nesw)
-  g_woodFenceHelper.setPathMap(CardinalUnitAngle.NS, "Units\\Wall1\\Wall1_0.tga")
-  g_woodFenceHelper.setPathMap(CardinalUnitAngle.NWSE, "Units\\Wall1\\Wall1_45.tga")
-  g_woodFenceHelper.setPathMap(CardinalUnitAngle.EW, "Units\\Wall1\\Wall1_90.tga")
-  g_woodFenceHelper.setPathMap(CardinalUnitAngle.NESW, "Units\\Wall1\\Wall1_135.tga")
-  g_woodFenceHelper.setModelPath(CardinalUnitAngle.NS, "Units\\Wall1\\Wall1_0.mdx")
-  g_woodFenceHelper.setModelPath(CardinalUnitAngle.NWSE, "Units\\Wall1\\Wall1_45.mdx")
-  g_woodFenceHelper.setModelPath(CardinalUnitAngle.EW, "Units\\Wall1\\Wall1_90.mdx")
-  g_woodFenceHelper.setModelPath(CardinalUnitAngle.NESW, "Units\\Wall1\\Wall1_135.mdx")
-  g_woodFenceHelper.setIconPath(CardinalUnitAngle.NS, "ReplaceableTextures\\CommandButtons\\BTNWall1_0.BLP")
-  g_woodFenceHelper.setIconPath(CardinalUnitAngle.NWSE, "ReplaceableTextures\\CommandButtons\\BTNWall1_45.BLP")
-  g_woodFenceHelper.setIconPath(CardinalUnitAngle.EW, "ReplaceableTextures\\CommandButtons\\BTNWall1_90.BLP")
-  g_woodFenceHelper.setIconPath(CardinalUnitAngle.NESW, "ReplaceableTextures\\CommandButtons\\BTNWall1_135.BLP")
+  g_woodWallHelper.setId(CardinalUnitAngle.NS, WoodFenceIds.ns)
+  g_woodWallHelper.setId(CardinalUnitAngle.NWSE, WoodFenceIds.nwse)
+  g_woodWallHelper.setId(CardinalUnitAngle.EW, WoodFenceIds.ew)
+  g_woodWallHelper.setId(CardinalUnitAngle.NESW, WoodFenceIds.nesw)
+  g_woodWallHelper.setPathMap(CardinalUnitAngle.NS, "Units\\Wall1\\Wall1_0.tga")
+  g_woodWallHelper.setPathMap(CardinalUnitAngle.NWSE, "Units\\Wall1\\Wall1_45.tga")
+  g_woodWallHelper.setPathMap(CardinalUnitAngle.EW, "Units\\Wall1\\Wall1_90.tga")
+  g_woodWallHelper.setPathMap(CardinalUnitAngle.NESW, "Units\\Wall1\\Wall1_135.tga")
+  g_woodWallHelper.setModelPath(CardinalUnitAngle.NS, "Units\\Wall1\\Wall1_0.mdx")
+  g_woodWallHelper.setModelPath(CardinalUnitAngle.NWSE, "Units\\Wall1\\Wall1_45.mdx")
+  g_woodWallHelper.setModelPath(CardinalUnitAngle.EW, "Units\\Wall1\\Wall1_90.mdx")
+  g_woodWallHelper.setModelPath(CardinalUnitAngle.NESW, "Units\\Wall1\\Wall1_135.mdx")
+  g_woodWallHelper.setIconPath(CardinalUnitAngle.NS, "ReplaceableTextures\\CommandButtons\\BTNWall1_0.BLP")
+  g_woodWallHelper.setIconPath(CardinalUnitAngle.NWSE, "ReplaceableTextures\\CommandButtons\\BTNWall1_45.BLP")
+  g_woodWallHelper.setIconPath(CardinalUnitAngle.EW, "ReplaceableTextures\\CommandButtons\\BTNWall1_90.BLP")
+  g_woodWallHelper.setIconPath(CardinalUnitAngle.NESW, "ReplaceableTextures\\CommandButtons\\BTNWall1_135.BLP")
+  g_woodWallHelper.setDeadId(CardinalUnitAngle.NS, WoodFenceIds.ns_dead)
+  g_woodWallHelper.setDeadId(CardinalUnitAngle.NWSE, WoodFenceIds.nwse_dead)
+  g_woodWallHelper.setDeadId(CardinalUnitAngle.EW, WoodFenceIds.ew_dead)
+  g_woodWallHelper.setDeadId(CardinalUnitAngle.NESW, WoodFenceIds.nesw_dead)
+  g_woodWallHelper.setDeadPathMap(CardinalUnitAngle.EW, "PathTextures\\Gate_0_Open.tga")
+  g_woodWallHelper.setDeadPathMap(CardinalUnitAngle.NESW, "PathTextures\\Gate_225_Open.tga")
+  g_woodWallHelper.setDeadPathMap(CardinalUnitAngle.NS, "PathTextures\\Gate_270_Open.tga")
+  g_woodWallHelper.setDeadPathMap(CardinalUnitAngle.NWSE, "PathTextures\\Gate_315_Open.tga")
+  g_woodWallHelper.setDeadModelPath(CardinalUnitAngle.NS, "Units\\Wall1\\Wall1_0.mdx")
+  g_woodWallHelper.setDeadModelPath(CardinalUnitAngle.NWSE, "Units\\Wall1\\Wall1_45.mdx")
+  g_woodWallHelper.setDeadModelPath(CardinalUnitAngle.EW, "Units\\Wall1\\Wall1_90.mdx")
+  g_woodWallHelper.setDeadModelPath(CardinalUnitAngle.NESW, "Units\\Wall1\\Wall1_135.mdx")
+  g_woodWallHelper.setAliveId(CardinalUnitAngle.NS, WoodFenceIds.ns_alive)
+  g_woodWallHelper.setAliveId(CardinalUnitAngle.NWSE, WoodFenceIds.nwse_alive)
+  g_woodWallHelper.setAliveId(CardinalUnitAngle.EW, WoodFenceIds.ew_alive)
+  g_woodWallHelper.setAliveId(CardinalUnitAngle.NESW, WoodFenceIds.nesw_alive)
 
   g_stoneWallIds
   ..add(StoneWallIds.ew)
   ..add(StoneWallIds.nesw)
   ..add(StoneWallIds.ns)
   ..add(StoneWallIds.nwse)
+  ..add(StoneWallIds.ew_dead)
+  ..add(StoneWallIds.nesw_dead)
+  ..add(StoneWallIds.ns_dead)
+  ..add(StoneWallIds.nwse_dead)
+  ..add(StoneWallIds.ew_alive)
+  ..add(StoneWallIds.nesw_alive)
+  ..add(StoneWallIds.ns_alive)
+  ..add(StoneWallIds.nwse_alive)
 
   g_stoneWallHelper.setId(CardinalUnitAngle.NS, StoneWallIds.ns)
   g_stoneWallHelper.setId(CardinalUnitAngle.NWSE, StoneWallIds.nwse)
@@ -349,12 +324,36 @@ function initialize()
   g_stoneWallHelper.setIconPath(CardinalUnitAngle.NWSE, "ReplaceableTextures\\CommandButtons\\BTNWall1_45.BLP")
   g_stoneWallHelper.setIconPath(CardinalUnitAngle.EW, "ReplaceableTextures\\CommandButtons\\BTNWall1_90.BLP")
   g_stoneWallHelper.setIconPath(CardinalUnitAngle.NESW, "ReplaceableTextures\\CommandButtons\\BTNWall1_135.BLP")
+  g_stoneWallHelper.setDeadId(CardinalUnitAngle.NS, StoneWallIds.ns_dead)
+  g_stoneWallHelper.setDeadId(CardinalUnitAngle.NWSE, StoneWallIds.nwse_dead)
+  g_stoneWallHelper.setDeadId(CardinalUnitAngle.EW, StoneWallIds.ew_dead)
+  g_stoneWallHelper.setDeadId(CardinalUnitAngle.NESW, StoneWallIds.nesw_dead)
+  g_stoneWallHelper.setDeadPathMap(CardinalUnitAngle.EW, "PathTextures\\Gate_0_Open.tga")
+  g_stoneWallHelper.setDeadPathMap(CardinalUnitAngle.NESW, "PathTextures\\Gate_225_Open.tga")
+  g_stoneWallHelper.setDeadPathMap(CardinalUnitAngle.NS, "PathTextures\\Gate_270_Open.tga")
+  g_stoneWallHelper.setDeadPathMap(CardinalUnitAngle.NWSE, "PathTextures\\Gate_315_Open.tga")
+  g_stoneWallHelper.setDeadModelPath(CardinalUnitAngle.NS, "Doodads\\LordaeronSummer\\Terrain\\StoneWall0\\StoneWall02.mdl")
+  g_stoneWallHelper.setDeadModelPath(CardinalUnitAngle.NWSE, "Doodads\\LordaeronSummer\\Terrain\\StoneWall135\\StoneWall1352.mdl")
+  g_stoneWallHelper.setDeadModelPath(CardinalUnitAngle.EW, "Doodads\\LordaeronSummer\\Terrain\\StoneWall90\\StoneWall902.mdl")
+  g_stoneWallHelper.setDeadModelPath(CardinalUnitAngle.NESW, "Doodads\\LordaeronSummer\\Terrain\\StoneWall45\\StoneWall452.mdl")
+  g_stoneWallHelper.setAliveId(CardinalUnitAngle.NS, StoneWallIds.ns_alive)
+  g_stoneWallHelper.setAliveId(CardinalUnitAngle.NWSE, StoneWallIds.nwse_alive)
+  g_stoneWallHelper.setAliveId(CardinalUnitAngle.EW, StoneWallIds.ew_alive)
+  g_stoneWallHelper.setAliveId(CardinalUnitAngle.NESW, StoneWallIds.nesw_alive)
   
   g_brickWallIds
   ..add(BrickWallIds.ew)
   ..add(BrickWallIds.nesw)
   ..add(BrickWallIds.ns)
   ..add(BrickWallIds.nwse)
+  ..add(BrickWallIds.ew_dead)
+  ..add(BrickWallIds.nesw_dead)
+  ..add(BrickWallIds.ns_dead)
+  ..add(BrickWallIds.nwse_dead)
+  ..add(BrickWallIds.ew_alive)
+  ..add(BrickWallIds.nesw_alive)
+  ..add(BrickWallIds.ns_alive)
+  ..add(BrickWallIds.nwse_alive)
 
   g_brickWallHelper.setId(CardinalUnitAngle.NS, BrickWallIds.ns)
   g_brickWallHelper.setId(CardinalUnitAngle.NWSE, BrickWallIds.nwse)
@@ -372,12 +371,36 @@ function initialize()
   g_brickWallHelper.setIconPath(CardinalUnitAngle.NWSE, "ReplaceableTextures\\CommandButtons\\BTNWall1_45.BLP")
   g_brickWallHelper.setIconPath(CardinalUnitAngle.EW, "ReplaceableTextures\\CommandButtons\\BTNWall1_90.BLP")
   g_brickWallHelper.setIconPath(CardinalUnitAngle.NESW, "ReplaceableTextures\\CommandButtons\\BTNWall1_135.BLP")
+  g_brickWallHelper.setDeadId(CardinalUnitAngle.NS, BrickWallIds.ns_dead)
+  g_brickWallHelper.setDeadId(CardinalUnitAngle.NWSE, BrickWallIds.nwse_dead)
+  g_brickWallHelper.setDeadId(CardinalUnitAngle.EW, BrickWallIds.ew_dead)
+  g_brickWallHelper.setDeadId(CardinalUnitAngle.NESW, BrickWallIds.nesw_dead)
+  g_brickWallHelper.setDeadPathMap(CardinalUnitAngle.EW, "PathTextures\\Gate_0_Open.tga")
+  g_brickWallHelper.setDeadPathMap(CardinalUnitAngle.NESW, "PathTextures\\Gate_225_Open.tga")
+  g_brickWallHelper.setDeadPathMap(CardinalUnitAngle.NS, "PathTextures\\Gate_270_Open.tga")
+  g_brickWallHelper.setDeadPathMap(CardinalUnitAngle.NWSE, "PathTextures\\Gate_315_Open.tga")
+  g_brickWallHelper.setDeadModelPath(CardinalUnitAngle.NS, "Doodads\\Ruins\\Terrain\\RuinsWall0\\RuinsWall02.mdl")
+  g_brickWallHelper.setDeadModelPath(CardinalUnitAngle.NWSE, "Doodads\\Ruins\\Terrain\\RuinsWall135\\RuinsWall1352.mdl")
+  g_brickWallHelper.setDeadModelPath(CardinalUnitAngle.EW, "Doodads\\Ruins\\Terrain\\RuinsWall90\\RuinsWall902.mdl")
+  g_brickWallHelper.setDeadModelPath(CardinalUnitAngle.NESW, "Doodads\\Ruins\\Terrain\\RuinsWall45\\RuinsWall452.mdl")
+  g_brickWallHelper.setAliveId(CardinalUnitAngle.NS, BrickWallIds.ns_alive)
+  g_brickWallHelper.setAliveId(CardinalUnitAngle.NWSE, BrickWallIds.nwse_alive)
+  g_brickWallHelper.setAliveId(CardinalUnitAngle.EW, BrickWallIds.ew_alive)
+  g_brickWallHelper.setAliveId(CardinalUnitAngle.NESW, BrickWallIds.nesw_alive)
 
   g_metalWallIds
   ..add(MetalWallIds.ew)
   ..add(MetalWallIds.nesw)
   ..add(MetalWallIds.ns)
   ..add(MetalWallIds.nwse)
+  ..add(MetalWallIds.ew_dead)
+  ..add(MetalWallIds.nesw_dead)
+  ..add(MetalWallIds.ns_dead)
+  ..add(MetalWallIds.nwse_dead)
+  ..add(MetalWallIds.ew_alive)
+  ..add(MetalWallIds.nesw_alive)
+  ..add(MetalWallIds.ns_alive)
+  ..add(MetalWallIds.nwse_alive)
 
   g_metalWallHelper.setId(CardinalUnitAngle.NS, MetalWallIds.ns)
   g_metalWallHelper.setId(CardinalUnitAngle.NWSE, MetalWallIds.nwse)
@@ -395,105 +418,235 @@ function initialize()
   g_metalWallHelper.setIconPath(CardinalUnitAngle.NWSE, "ReplaceableTextures\\CommandButtons\\BTNWall1_45.BLP")
   g_metalWallHelper.setIconPath(CardinalUnitAngle.EW, "ReplaceableTextures\\CommandButtons\\BTNWall1_90.BLP")
   g_metalWallHelper.setIconPath(CardinalUnitAngle.NESW, "ReplaceableTextures\\CommandButtons\\BTNWall1_135.BLP")
+  g_metalWallHelper.setDeadId(CardinalUnitAngle.NS, MetalWallIds.ns_dead)
+  g_metalWallHelper.setDeadId(CardinalUnitAngle.NWSE, MetalWallIds.nwse_dead)
+  g_metalWallHelper.setDeadId(CardinalUnitAngle.EW, MetalWallIds.ew_dead)
+  g_metalWallHelper.setDeadId(CardinalUnitAngle.NESW, MetalWallIds.nesw_dead)
+  g_metalWallHelper.setDeadPathMap(CardinalUnitAngle.EW, "PathTextures\\Gate_0_Open.tga")
+  g_metalWallHelper.setDeadPathMap(CardinalUnitAngle.NESW, "PathTextures\\Gate_225_Open.tga")
+  g_metalWallHelper.setDeadPathMap(CardinalUnitAngle.NS, "PathTextures\\Gate_270_Open.tga")
+  g_metalWallHelper.setDeadPathMap(CardinalUnitAngle.NWSE, "PathTextures\\Gate_315_Open.tga")
+  g_metalWallHelper.setDeadModelPath(CardinalUnitAngle.NS, "Doodads\\Icecrown\\Terrain\\IceCrownWall0\\IceCrownWall02.mdl")
+  g_metalWallHelper.setDeadModelPath(CardinalUnitAngle.NWSE, "Doodads\\Icecrown\\Terrain\\IceCrownWall135\\IceCrownWall1352.mdl")
+  g_metalWallHelper.setDeadModelPath(CardinalUnitAngle.EW, "Doodads\\Icecrown\\Terrain\\IceCrownWall90\\IceCrownWall902.mdl")
+  g_metalWallHelper.setDeadModelPath(CardinalUnitAngle.NESW, "Doodads\\Icecrown\\Terrain\\IceCrownWall45\\IceCrownWall452.mdl")
+  g_metalWallHelper.setAliveId(CardinalUnitAngle.NS, MetalWallIds.ns_alive)
+  g_metalWallHelper.setAliveId(CardinalUnitAngle.NWSE, MetalWallIds.nwse_alive)
+  g_metalWallHelper.setAliveId(CardinalUnitAngle.EW, MetalWallIds.ew_alive)
+  g_metalWallHelper.setAliveId(CardinalUnitAngle.NESW, MetalWallIds.nesw_alive)
 
 // ============================================================================
 function createWallUnitVariations()
 
   // Wood Fence
-  createWoodFenceUnitVariation(CardinalUnitAngle.EW, 1, 1, "Vertical (EW)")
-  createWoodFenceUnitVariation(CardinalUnitAngle.NESW, 1, 1, "Diagonal (NE SW)")
-  createWoodFenceUnitVariation(CardinalUnitAngle.NS, 1, 1, "Horizontal (NS)")
-  createWoodFenceUnitVariation(CardinalUnitAngle.NWSE, 1, 1, "Diagonal (NW SE)")
+  createWoodWallUnitVariation(CardinalUnitAngle.EW,    1, 1, "Vertical (EW)",    WOOD_WALL_SCALE_HORIZONTAL)
+  createWoodWallUnitVariation(CardinalUnitAngle.NESW,  1, 1, "Diagonal (NE SW)", WOOD_WALL_SCALE_DIAGONAL)
+  createWoodWallUnitVariation(CardinalUnitAngle.NS,    1, 1, "Horizontal (NS)",  WOOD_WALL_SCALE_HORIZONTAL)
+  createWoodWallUnitVariation(CardinalUnitAngle.NWSE,  1, 1, "Diagonal (NW SE)", WOOD_WALL_SCALE_DIAGONAL)
 
   // Stone Wall
-  createStoneWallUnitVariation(CardinalUnitAngle.EW, 0, 2, "Vertical (EW)", STONE_WALL_SCALE_HORIZONTAL)
-  createStoneWallUnitVariation(CardinalUnitAngle.NESW, 0, 2, "Diagonal (NE SW)", STONE_WALL_SCALE_DIAGONAL)
-  createStoneWallUnitVariation(CardinalUnitAngle.NS, 0, 2, "Horizontal (NS)", STONE_WALL_SCALE_HORIZONTAL)
-  createStoneWallUnitVariation(CardinalUnitAngle.NWSE, 0, 2, "Diagonal (NW SE)", STONE_WALL_SCALE_DIAGONAL)
+  createStoneWallUnitVariation(CardinalUnitAngle.EW,    0, 2, "Vertical (EW)",    STONE_WALL_SCALE_HORIZONTAL)
+  createStoneWallUnitVariation(CardinalUnitAngle.NESW,  0, 2, "Diagonal (NE SW)", STONE_WALL_SCALE_DIAGONAL)
+  createStoneWallUnitVariation(CardinalUnitAngle.NS,    0, 2, "Horizontal (NS)",  STONE_WALL_SCALE_HORIZONTAL)
+  createStoneWallUnitVariation(CardinalUnitAngle.NWSE,  0, 2, "Diagonal (NW SE)", STONE_WALL_SCALE_DIAGONAL)
   
   // Brick Wall
-  createBrickWallUnitVariation(CardinalUnitAngle.EW, 0, 2, "Vertical (EW)", BRICK_WALL_SCALE_HORIZONTAL)
-  createBrickWallUnitVariation(CardinalUnitAngle.NESW, 0, 2, "Diagonal (NE SW)", BRICK_WALL_SCALE_DIAGONAL)
-  createBrickWallUnitVariation(CardinalUnitAngle.NS, 0, 2, "Horizontal (NS)", BRICK_WALL_SCALE_HORIZONTAL)
-  createBrickWallUnitVariation(CardinalUnitAngle.NWSE, 0, 2, "Diagonal (NW SE)", BRICK_WALL_SCALE_DIAGONAL)
+  createBrickWallUnitVariation(CardinalUnitAngle.EW,    0, 2, "Vertical (EW)",    BRICK_WALL_SCALE_HORIZONTAL)
+  createBrickWallUnitVariation(CardinalUnitAngle.NESW,  0, 2, "Diagonal (NE SW)", BRICK_WALL_SCALE_DIAGONAL)
+  createBrickWallUnitVariation(CardinalUnitAngle.NS,    0, 2, "Horizontal (NS)",  BRICK_WALL_SCALE_HORIZONTAL)
+  createBrickWallUnitVariation(CardinalUnitAngle.NWSE,  0, 2, "Diagonal (NW SE)", BRICK_WALL_SCALE_DIAGONAL)
   
   // Metal Wall
-  createMetalWallUnitVariation(CardinalUnitAngle.EW, 0, 2, "Vertical (EW)", METAL_WALL_SCALE_HORIZONTAL)
-  createMetalWallUnitVariation(CardinalUnitAngle.NESW, 0, 2, "Diagonal (NE SW)", METAL_WALL_SCALE_DIAGONAL)
-  createMetalWallUnitVariation(CardinalUnitAngle.NS, 0, 2, "Horizontal (NS)", METAL_WALL_SCALE_HORIZONTAL)
-  createMetalWallUnitVariation(CardinalUnitAngle.NWSE, 0, 2, "Diagonal (NW SE)", METAL_WALL_SCALE_DIAGONAL)
+  createMetalWallUnitVariation(CardinalUnitAngle.EW,    0, 2, "Vertical (EW)",    METAL_WALL_SCALE_HORIZONTAL)
+  createMetalWallUnitVariation(CardinalUnitAngle.NESW,  0, 2, "Diagonal (NE SW)", METAL_WALL_SCALE_DIAGONAL)
+  createMetalWallUnitVariation(CardinalUnitAngle.NS,    0, 2, "Horizontal (NS)",  METAL_WALL_SCALE_HORIZONTAL)
+  createMetalWallUnitVariation(CardinalUnitAngle.NWSE,  0, 2, "Diagonal (NW SE)", METAL_WALL_SCALE_DIAGONAL)
 
 // ============================================================================
-function createWoodFenceUnitVariation(CardinalUnitAngle angle, int buttonPosX, int buttonPosY, string name) returns WoodFenceDefinition
-  let def = new WoodFenceDefinition(g_woodFenceHelper.getId(angle))
-    ..setNameEditorSuffix(name + "(Wall Level 1)")
+function createWoodWallUnitVariation(CardinalUnitAngle angle, int buttonPosX, int buttonPosY, string name, real scale)
+
+  BaseWallDefinition array[3] wallDefs
+  wallDefs[0] = defineWallUnit(g_woodWallHelper, g_woodWallHelper.getId(angle), angle, g_stoneWallHelper)
+  wallDefs[1] = defineWallUnit(g_woodWallHelper, g_woodWallHelper.getAliveId(angle), angle, g_stoneWallHelper)
+  wallDefs[2] = defineWallUnit(g_woodWallHelper, g_woodWallHelper.getDeadId(angle), angle, g_stoneWallHelper)
+
+  for i = 0 to 2
+    wallDefs[i]
+    ..setName("Wood Wall")
     ..setButtonPositionX(buttonPosX)
     ..setButtonPositionY(buttonPosY)
-    ..setTooltipBasic("Build Wood Fence")
-    ..setTooltipExtendedRotatable("|cffffcc00" + name + "|r|nBuild a wood fence the offers a sturdy protection against intruders.")    
-    ..setIconGameInterface(g_woodFenceHelper.getIconPath(angle))
-    ..setModelFile(g_woodFenceHelper.getModelPath(angle))
-    ..setPathingMap(g_woodFenceHelper.getPathMap(angle))
+    ..setScalingValue(scale)
+    ..setTooltipBasic("Build Wood Wall")
+    ..setTooltipExtendedRotatable("|cffffcc00" + name + "|r|nBuild a wall wall the offers basic protection against intruders.")
+    ..setHitPointsMaximumBase(WOOD_FENCE_HEALTH)
+    ..setDefenseBase(WOOD_FENCE_ARMOR)
+    ..setGoldCost(WOOD_FENCE_GOLD_COST)
+    ..setLumberCost(WOOD_FENCE_LUMBER_COST)
+    ..setRepairGoldCost(WOOD_FENCE_REPAIR_GOLD_COST)
+    ..setRepairLumberCost(WOOD_FENCE_REPAIR_LUMBER_COST)
+    ..setRecycleGoldRewarded(WOOD_FENCE_RECYCLE_GOLD_COST)
+    ..setRecycleLumberRewarded(WOOD_FENCE_RECYCLE_LUMBER_COST)
+    ..setBuildTime(WOOD_FENCE_BUILD_TIME)
+    ..setRepairTime(WOOD_FENCE_REPAIR_TIME)
     
-  let stoneWallId = g_stoneWallHelper.getId(angle)
-  // let gateId = g_gate1Helper.getId(angle)
-  def.setUpgradesTo(commaList(stoneWallId))
-
-  return def
-
+  wallDefs[1].setAliveWallOptions()
+  wallDefs[2].setDeadWallOptions(g_woodWallHelper, angle)
+  
 // ============================================================================
-function createStoneWallUnitVariation(CardinalUnitAngle angle, int buttonPosX, int buttonPosY, string name, real scale) returns StoneWallDefinition
-  let def = new StoneWallDefinition(g_stoneWallHelper.getId(angle))
-    ..setNameEditorSuffix(name + " (Wall Level 2)")
+function createStoneWallUnitVariation(CardinalUnitAngle angle, int buttonPosX, int buttonPosY, string name, real scale)
+
+  BaseWallDefinition array[3] wallDefs
+  wallDefs[0] = defineWallUnit(g_stoneWallHelper, g_stoneWallHelper.getId(angle), angle, g_brickWallHelper)
+  wallDefs[1] = defineWallUnit(g_stoneWallHelper, g_stoneWallHelper.getAliveId(angle), angle, g_brickWallHelper)
+  wallDefs[2] = defineWallUnit(g_stoneWallHelper, g_stoneWallHelper.getDeadId(angle), angle, g_brickWallHelper)
+
+  for i = 0 to 2
+    wallDefs[i]
+    ..setName("Stone Wall")
     ..setButtonPositionX(buttonPosX)
     ..setButtonPositionY(buttonPosY)
+    ..setScalingValue(scale)
     ..setTooltipBasic("Upgrade to Stone Wall")
     ..setTooltipExtended("|cffffcc00" + name + "|r|nUpgrade to a strong stone wall.")
-    ..setScalingValue(scale)
-    ..setIconGameInterface(g_stoneWallHelper.getIconPath(angle))
-    ..setModelFile(g_stoneWallHelper.getModelPath(angle))
-    ..setPathingMap(g_stoneWallHelper.getPathMap(angle))
-    
-  let brickWallId = g_brickWallHelper.getId(angle)
-  // let gateId = g_gate2Helper.getId(angle)
-  def.setUpgradesTo(commaList(brickWallId))
+    ..setRequirements(commaList(TlsUnitIds.workbench))
+    ..setHitPointsMaximumBase(STONE_WALL_HEALTH)
+    ..setDefenseBase(STONE_WALL_ARMOR)
+    ..setGoldCost(STONE_WALL_GOLD_COST)
+    ..setLumberCost(STONE_WALL_LUMBER_COST)
+    ..setRepairGoldCost(STONE_WALL_REPAIR_GOLD_COST)
+    ..setRepairLumberCost(STONE_WALL_REPAIR_LUMBER_COST)
+    ..setRecycleGoldRewarded(STONE_WALL_RECYCLE_GOLD_COST)
+    ..setRecycleLumberRewarded(STONE_WALL_RECYCLE_LUMBER_COST)
+    ..setBuildTime(STONE_WALL_BUILD_TIME)
+    ..setRepairTime(STONE_WALL_REPAIR_TIME)
 
-  return def
+  wallDefs[1].setAliveWallOptions()
+  wallDefs[2].setDeadWallOptions(g_stoneWallHelper, angle)
 
 // ============================================================================
-function createBrickWallUnitVariation(CardinalUnitAngle angle, int buttonPosX, int buttonPosY, string name, real scale) returns BrickWallDefinition
-  let def = new BrickWallDefinition(g_brickWallHelper.getId(angle))
-    ..setNameEditorSuffix(name + " (Wall Level 3)")
+function createBrickWallUnitVariation(CardinalUnitAngle angle, int buttonPosX, int buttonPosY, string name, real scale)
+
+  BaseWallDefinition array[3] wallDefs
+  wallDefs[0] = defineWallUnit(g_brickWallHelper, g_brickWallHelper.getId(angle), angle, g_metalWallHelper)
+  wallDefs[1] = defineWallUnit(g_brickWallHelper, g_brickWallHelper.getAliveId(angle), angle, g_metalWallHelper)
+  wallDefs[2] = defineWallUnit(g_brickWallHelper, g_brickWallHelper.getDeadId(angle), angle, g_metalWallHelper)
+
+  for i = 0 to 2
+    wallDefs[i]
+    ..setName("Brick Wall")
     ..setButtonPositionX(buttonPosX)
     ..setButtonPositionY(buttonPosY)
+    ..setScalingValue(scale)
     ..setTooltipBasic("Upgrade to Brick Wall")
     ..setTooltipExtended("|cffffcc00" + name + "|r|nUpgrade to an even stronger wall made of brick and cement.")
+    ..setHitPointsMaximumBase(BRICK_WALL_HEALTH)
+    ..setDefenseBase(BRICK_WALL_ARMOR)
+    ..setGoldCost(BRICK_WALL_GOLD_COST)
+    ..setLumberCost(BRICK_WALL_LUMBER_COST)
+    ..setRepairGoldCost(BRICK_WALL_REPAIR_GOLD_COST)
+    ..setRepairLumberCost(BRICK_WALL_REPAIR_LUMBER_COST)
+    ..setRecycleGoldRewarded(BRICK_WALL_RECYCLE_GOLD_COST)
+    ..setRecycleLumberRewarded(BRICK_WALL_RECYCLE_LUMBER_COST)
+    ..setBuildTime(BRICK_WALL_BUILD_TIME)
+    ..setRepairTime(BRICK_WALL_REPAIR_TIME)
+    ..setTintingColorRed(255)
+    ..setTintingColorGreen(100)
+    ..setTintingColorBlue(100)
+
+  wallDefs[1].setAliveWallOptions()
+  wallDefs[2].setDeadWallOptions(g_brickWallHelper, angle)
+
+// ============================================================================
+function createMetalWallUnitVariation(CardinalUnitAngle angle, int buttonPosX, int buttonPosY, string name, real scale)
+
+  BaseWallDefinition array[3] wallDefs
+  wallDefs[0] = defineWallUnit(g_metalWallHelper, g_metalWallHelper.getId(angle), angle, null)
+  wallDefs[1] = defineWallUnit(g_metalWallHelper, g_metalWallHelper.getAliveId(angle), angle, null)
+  wallDefs[2] = defineWallUnit(g_metalWallHelper, g_metalWallHelper.getDeadId(angle), angle, null)
+
+  for i = 0 to 2
+    wallDefs[i]
+    ..setName("Iron Wall")
+    ..setButtonPositionX(buttonPosX)
+    ..setButtonPositionY(buttonPosY)
     ..setScalingValue(scale)
-    ..setIconGameInterface(g_brickWallHelper.getIconPath(angle))
-    ..setModelFile(g_brickWallHelper.getModelPath(angle))
-    ..setPathingMap(g_brickWallHelper.getPathMap(angle))
-    
-  let metalWallId = g_metalWallHelper.getId(angle)
-  // let gateId = g_gate3Helper.getId(angle)
-  def.setUpgradesTo(commaList(metalWallId))
+    ..setTooltipBasic("Upgrade to Iron Wall")
+    ..setTooltipExtended("|cffffcc00" + name + "|r|nUpgrade to a wall infused with iron.")
+    ..setRequirements(commaList(TlsUnitIds.obelisk1))
+    ..setHitPointsMaximumBase(METAL_WALL_HEALTH)
+    ..setDefenseBase(METAL_WALL_ARMOR)
+    ..setGoldCost(METAL_WALL_GOLD_COST)
+    ..setLumberCost(METAL_WALL_LUMBER_COST)
+    ..setRepairGoldCost(METAL_WALL_REPAIR_GOLD_COST)
+    ..setRepairLumberCost(METAL_WALL_REPAIR_LUMBER_COST)
+    ..setRecycleGoldRewarded(METAL_WALL_RECYCLE_GOLD_COST)
+    ..setRecycleLumberRewarded(METAL_WALL_RECYCLE_LUMBER_COST)
+    ..setBuildTime(METAL_WALL_BUILD_TIME)
+    ..setRepairTime(METAL_WALL_REPAIR_TIME)
+    ..setTintingColorRed(255)
+    ..setTintingColorGreen(200)
+    ..setTintingColorBlue(200)
+
+  wallDefs[1].makeBuildingUndeadTarget()
+  wallDefs[1].setAliveWallOptions()
+  wallDefs[2].setDeadWallOptions(g_metalWallHelper, angle)
+
+//=============================================================================
+function defineWallUnit(
+  WallCardinalUnitDefinitionHelper helper,
+  int newId,
+  CardinalUnitAngle angle,
+  WallCardinalUnitDefinitionHelper upgradesToHelper) returns BaseWallDefinition
+
+  let def = new BaseWallDefinition(newId)
+    ..setIconGameInterface(helper.getIconPath(angle))
+    ..setModelFile(helper.getModelPath(angle))
+    ..setPathingMap(helper.getPathMap(angle))
+
+  if (upgradesToHelper != null)
+    let deadWallId = helper.getDeadId(angle)
+    let nextWallId = upgradesToHelper.getId(angle)
+    def.setUpgradesTo(commaList(deadWallId, nextWallId))
+  else
+    let deadWallId = helper.getDeadId(angle)
+    def.setUpgradesTo(commaList(deadWallId))
+
+  g_allWallIds.add(newId)
+  g_unitTypeToWallHelperMap.put(newId, helper)
 
   return def
 
 // ============================================================================
-function createMetalWallUnitVariation(CardinalUnitAngle angle, int buttonPosX, int buttonPosY, string name, real scale) returns MetalWallDefinition
-  let def = new MetalWallDefinition(g_metalWallHelper.getId(angle))
-    ..setNameEditorSuffix(name + " (Wall Level 4)")
-    ..setButtonPositionX(buttonPosX)
-    ..setButtonPositionY(buttonPosY)
-    ..setTooltipBasic("Upgrade to Iron Wall")
-    ..setTooltipExtended("|cffffcc00" + name + "|r|nUpgrade to a wall infused with iron.")
-    ..setScalingValue(scale)
-    ..setIconGameInterface(g_metalWallHelper.getIconPath(angle))
-    ..setModelFile(g_metalWallHelper.getModelPath(angle))
-    ..setPathingMap(g_metalWallHelper.getPathMap(angle))
-    ..setUpgradesTo("")
+function BaseWallDefinition.setAliveWallOptions()
+  this
+  ..makeBuildingUndeadTarget()
+  ..setNameEditorSuffix("(Alive)")
+  ..setRequirements("")
+  ..setButtonPositionX(0)
+  ..setButtonPositionY(-11)
+  ..setGoldCost(0)
+  ..setLumberCost(0)
+  ..setBuildTime(1)
 
-  return def
+// ============================================================================
+function BaseWallDefinition.setDeadWallOptions(
+  WallCardinalUnitDefinitionHelper helper,
+  CardinalUnitAngle angle)
+
+  this
+  ..setName("Broken " + this.getName())
+  ..setNameEditorSuffix("(Dead)")
+  ..setRequirements("")
+  ..setButtonPositionX(0)
+  ..setButtonPositionY(-11)
+  ..setGoldCost(0)
+  ..setLumberCost(0)
+  ..setBuildTime(1)
+  ..setModelFile(helper.getDeadModelPath(angle))
+  ..setPathingMap(helper.getDeadPathMap(angle))
+
+  let aliveWallId = helper.getAliveId(angle)
+  this.setUpgradesTo(commaList(aliveWallId))
 
 // ============================================================================
 init
@@ -503,16 +656,16 @@ init
 // ============================================================================
 @compiletime
 function init_compiletime()
-  g_woodFenceHelper = new CardinalUnitDefinitionHelper()
+  g_woodWallHelper = new WallCardinalUnitDefinitionHelper()
   g_woodFenceIds = new HashList<int>()
 
-  g_stoneWallHelper = new CardinalUnitDefinitionHelper()
+  g_stoneWallHelper = new WallCardinalUnitDefinitionHelper()
   g_stoneWallIds = new HashList<int>()
 
-  g_brickWallHelper = new CardinalUnitDefinitionHelper()
+  g_brickWallHelper = new WallCardinalUnitDefinitionHelper()
   g_brickWallIds = new HashList<int>()
 
-  g_metalWallHelper = new CardinalUnitDefinitionHelper()
+  g_metalWallHelper = new WallCardinalUnitDefinitionHelper()
   g_metalWallIds = new HashList<int>()
 
   initialize()

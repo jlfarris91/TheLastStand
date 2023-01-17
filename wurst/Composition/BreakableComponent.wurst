@@ -1,0 +1,261 @@
+package BreakableComponent
+import UnitMetadata
+import DamageEvent
+import Damage
+import AbilityIds
+import Events
+import RepairTracking
+import ErrorHandling
+import TlsDestructableIds
+import ClosureTimers
+import RegisterEvents
+import Icons
+import BuffObjEditing
+import TlsUnitDefinition
+import Orders
+
+constant string BROKEN_EFFECT_PATH = "Abilities\\Disarm\\Disarm Red\\Disarm Red.mdx"
+constant colorA BROKEN_VERTEX_COLOR = colorA(50, 50, 50, 150)
+
+constant buffTuple BROKEN_BUFF = compiletime(createDummyBuffObject("Broken", "This building is broken and must be repaired", Icons.bTNDemolish))
+
+// ============================================================================
+public class BreakableComponent extends UnitComponent
+  private int m_brokenStateUnitTypeId
+  private int m_repairedStateUnitTypeId
+  private ITlsUnitDefinition m_repairedStateUnitDef
+  private effect m_disabledEffect
+  private bool m_isBroken = false
+  private bool m_changingState = false
+
+  private Event m_onStateChanged
+
+  // --------------------------------------------------------------------------
+  construct(IUnitMetadata metadata)
+    super(metadata)
+
+  // ----------------------------------------------------------------------------
+  ondestroy
+
+    if (m_onStateChanged != null)
+      destroy m_onStateChanged
+      m_onStateChanged = null
+
+  // ----------------------------------------------------------------------------
+  function setRepairedStateUnitTypeId(int value)
+    m_repairedStateUnitTypeId = value
+    m_repairedStateUnitDef = getUnitDefinition(m_repairedStateUnitTypeId)
+
+  // ----------------------------------------------------------------------------
+  function setBrokenStateUnitTypeId(int value)
+    m_brokenStateUnitTypeId = value
+
+  // ----------------------------------------------------------------------------
+  function isBroken() returns bool
+    return m_isBroken
+
+  // ----------------------------------------------------------------------------
+  function onStateChanged() returns IEvent
+    if (m_onStateChanged == null)
+      m_onStateChanged = new Event()
+    return m_onStateChanged
+
+  // ----------------------------------------------------------------------------
+  protected function onDamageEventFinal()
+    let ownerUnit = getOwnerUnit()
+
+    if (m_isBroken or m_changingState)
+      DamageEvent.setAmount(0)
+      return
+
+    if (DamageEvent.getAmount() >= ownerUnit.getHP())
+    //{
+      // Nullify damage so that the unit is not actually killed
+      DamageEvent.setAmount(0)
+
+      // Cancel any current upgrade or action
+      ownerUnit.issueImmediateOrderById(OrderIds.cancel)
+
+      startEnterBrokenState()
+    //}
+
+  // ----------------------------------------------------------------------------
+  private function startEnterBrokenState()
+
+    // Log.info("startEnterBrokenState")
+
+    let ownerUnit = getOwnerUnit()
+
+    ownerUnit.setHP(1)
+
+    // Upgrade to the broken version of the unit
+    if (not ownerUnit.issueImmediateOrderById(m_brokenStateUnitTypeId))
+      error("Failed to issue upgrade to repaired unit")
+    else
+      m_changingState = true
+
+  // ----------------------------------------------------------------------------
+  private function startEnterRepairedState()
+
+    // Log.info("startEnterRepairedState")
+
+    let ownerUnit = getOwnerUnit()
+
+    // Upgrade to the alive version of the unit
+    if (not ownerUnit.issueImmediateOrderById(m_repairedStateUnitTypeId))
+      error("Failed to issue upgrade to repaired unit")
+    else
+      m_changingState = true
+
+  // ----------------------------------------------------------------------------
+  override protected function onOwnerUpgraded()
+    super.onOwnerUpgraded()
+
+    if (not m_changingState)
+      return
+
+    let ownerUnit = getOwnerUnit()
+    let ownerUnitTypeId = ownerUnit.getTypeId()
+    
+    var isBroken = false
+    if (ownerUnitTypeId == m_brokenStateUnitTypeId)
+      isBroken = true
+
+    m_changingState = false
+
+    if (isBroken != m_isBroken)
+    //{
+      m_isBroken = isBroken
+
+      if (m_isBroken)
+        onBroken()
+      else
+        onRepaired()
+
+      if (m_onStateChanged != null)
+        m_onStateChanged.call()
+    //}
+
+  // ----------------------------------------------------------------------------
+  protected function onRepairEnd()
+
+    if (not m_isBroken)
+      // Log.info("onRepairEnd: not broken")
+      return
+
+    let ownerUnit = getOwnerUnit()
+    let deltaHP = ownerUnit.getMaxHP() - ownerUnit.getHP()
+    if (deltaHP < 1)
+      startEnterRepairedState()
+    // else
+      // Log.info("onRepairEnd: broken, {0} < {1}".format(ownerUnit.getHP().toString(), ownerUnit.getMaxHP().toString()))
+
+  // ----------------------------------------------------------------------------
+  /** Attempt to prevent players from canceling upgrade */
+  protected function onUpgradeCanceled()
+
+    if (not m_changingState)
+      return
+  
+    let ownerUnit = getOwnerUnit()
+    switch (ownerUnit.getTypeId())
+      case m_brokenStateUnitTypeId
+        nullTimer(() -> startEnterRepairedState())
+      case m_repairedStateUnitTypeId
+        nullTimer(() -> startEnterBrokenState())
+      default
+        error("Unexpected breakable unit type id")
+
+    // Deselecting the unit will make it harder to cheat
+    if (ownerUnit.getOwner() == localPlayer)
+      SelectUnitRemove(ownerUnit)
+
+  // ----------------------------------------------------------------------------
+  protected function onBroken()
+    let ownerUnit = getOwnerUnit()
+
+    if (m_disabledEffect == null)
+      let pos = ownerUnit.getPos().withTerrainZ(120.0)
+      m_disabledEffect = AddSpecialEffect(BROKEN_EFFECT_PATH, pos.x, pos.y)..setPos(pos)
+
+    ownerUnit.setVertexColor(BROKEN_VERTEX_COLOR)
+    ownerUnit.addAbility(AbilityIds.invulnerable)
+    ownerUnit.addAbility(BROKEN_BUFF.abilId)
+    ownerUnit.addAbility(BROKEN_BUFF.buffId)
+
+    triggerPathingUpdate(ownerUnit.getPos())
+
+    // Log.info("onBroken")
+    
+  // ----------------------------------------------------------------------------
+  protected function onRepaired()
+    let ownerUnit = getOwnerUnit()
+
+    if (m_disabledEffect != null)
+      m_disabledEffect.destr()
+      m_disabledEffect = null
+
+    ownerUnit.removeAbility(AbilityIds.invulnerable)
+    ownerUnit.removeAbility(BROKEN_BUFF.abilId)
+    ownerUnit.removeAbility(BROKEN_BUFF.buffId)
+
+    if (m_repairedStateUnitDef != null)
+      ownerUnit.setVertexColor(m_repairedStateUnitDef.getVertexColor())
+
+    triggerPathingUpdate(ownerUnit.getPos())
+
+    // Log.info("onRepaired")
+
+  // --------------------------------------------------------------------------
+  private static function triggerPathingUpdate(vec2 pos)
+    let pathFixer = createDestructable(TlsDestructableIds.gatePathFixer, pos, bj_UNIT_FACING.asAngleDegrees(), 1.0, 0)
+    doAfter(0.1) () ->
+      pathFixer.remove()
+
+// ============================================================================
+public function IUnitMetadata.getBreakableComponent() returns BreakableComponent
+  return this.getComponent(BreakableComponent.typeId) castTo BreakableComponent
+
+// ============================================================================
+public function IUnitMetadata.getOrAddBreakableComponent() returns BreakableComponent
+  var component = this.getBreakableComponent()
+  if (component == null)
+    component = this.addComponent(new BreakableComponent(this)) castTo BreakableComponent
+  return component
+
+// ============================================================================
+function onDamageEventFinal()
+  let metadata = DamageEvent.getTarget().getMetadata()
+  if (metadata == null)
+    return
+  let breakableComp = metadata.getBreakableComponent()
+  if (breakableComp == null)
+    return
+  breakableComp.onDamageEventFinal()
+
+// ============================================================================
+function onRepairEnd()
+  let metadata = getRepairTargetUnit().getMetadata()
+  if (metadata == null)
+    return
+  let breakableComp = metadata.getBreakableComponent()
+  if (breakableComp == null)
+    return
+  breakableComp.onRepairEnd()
+
+// ============================================================================
+function onUpgradeCanceled()
+  let metadata = GetTriggerUnit().getMetadata()
+  if (metadata == null)
+    return
+  let breakableComp = metadata.getBreakableComponent()
+  if (breakableComp == null)
+    return
+  breakableComp.onUpgradeCanceled()
+
+// ============================================================================
+init
+
+  DamageEvent.addListener(DAMAGE_EVENT_PRIO_FINAL, () -> onDamageEventFinal())
+  registerRepairEnd(function onRepairEnd)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_UPGRADE_CANCEL, function onUpgradeCanceled)
