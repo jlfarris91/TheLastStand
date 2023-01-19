@@ -1,4 +1,4 @@
-package SpawnUndeadUnitJob
+package SpawnUnitJob
 import Jobs
 import Spawning
 import UnitRecycler
@@ -13,12 +13,10 @@ import HashMap
 import GroupExtensions
 import Math
 import Func
-import PlayerMetadata
 import RealTime
-import ColorUtility
 import RefObject
 
-HashMap<unit, SpawnUndeadUnitJob> g_unitToJobMap
+HashMap<unit, SpawnUnitJob> g_unitToJobMap
 
 // ============================================================================
 public enum SpawnJobState
@@ -33,7 +31,7 @@ public enum TierSelectionMode
   Group
 
 // ============================================================================
-public class SpawnUndeadUnitJobConfig
+public class SpawnUnitJobConfig
   private TierSelectionMode m_tierSelectorMode = TierSelectionMode.Group
   private Func1<SpawnContext, int> m_tierSelector = null
   private ITieredUnitTypeProvider m_unitTypeProvider = null
@@ -46,7 +44,7 @@ public class SpawnUndeadUnitJobConfig
   private rangeReal m_spawnRange
   private rangeReal m_facingAngleRange = rangeReal(0, 360)
   private bool m_useRecycler = false
-  private Func2<SpawnUndeadUnitJob, unit, bool> m_prepareUnitFunc = null
+  private Func2<SpawnUnitJob, unit, bool> m_prepareUnitFunc = null
 
   use RefObject
 
@@ -62,8 +60,8 @@ public class SpawnUndeadUnitJobConfig
       m_prepareUnitFunc = null
 
   // --------------------------------------------------------------------------
-  function clone() returns SpawnUndeadUnitJobConfig
-    let clone = new SpawnUndeadUnitJobConfig()
+  function clone() returns SpawnUnitJobConfig
+    let clone = new SpawnUnitJobConfig()
     ..setTierSelectionMode(getTierSelectionMode())
     ..setTierSelector(getTierSelector())
     ..setUnitTypeProvider(getUnitTypeProvider())
@@ -139,7 +137,8 @@ public class SpawnUndeadUnitJobConfig
   
   // --------------------------------------------------------------------------
   function setTargetProvider(TargetProvider value)
-    value.acquire()
+    if (value != null)
+      value.acquire()
     if (m_targetProvider != null)
       m_targetProvider.release()
     m_targetProvider = value
@@ -169,11 +168,11 @@ public class SpawnUndeadUnitJobConfig
     m_maxAliveCount = value
 
   // --------------------------------------------------------------------------
-  function getPrepareUnitFunc() returns Func2<SpawnUndeadUnitJob, unit, bool>
+  function getPrepareUnitFunc() returns Func2<SpawnUnitJob, unit, bool>
     return m_prepareUnitFunc
   
   // --------------------------------------------------------------------------
-  function setPrepareUnitFunc(Func2<SpawnUndeadUnitJob, unit, bool> value)
+  function setPrepareUnitFunc(Func2<SpawnUnitJob, unit, bool> value)
     value.acquire()
     if (m_prepareUnitFunc != null)
       m_prepareUnitFunc.release()
@@ -196,12 +195,11 @@ public class SpawnUndeadUnitJobConfig
     m_groupSize = value
 
 // ============================================================================
-public class SpawnUndeadUnitJob extends Job
+public class SpawnUnitJob extends Job
 
-  private player m_targetPlayer = null
   private player m_owningPlayer = null
   private SpawnContext m_context = null
-  private SpawnUndeadUnitJobConfig m_config = null
+  private SpawnUnitJobConfig m_config = null
 
   private group m_currentGroup = null
   private group m_spawnedUnits = null
@@ -216,15 +214,14 @@ public class SpawnUndeadUnitJob extends Job
   private UnitTypeCollection m_unitTypes = null
   private int m_unitTypeIndex = -1
 
-  private Event2<SpawnUndeadUnitJob, unit> m_onUnitSpawned = null
-  private Event2<SpawnUndeadUnitJob, group> m_onGroupSpawned = null
+  private Event2<SpawnUnitJob, unit> m_onUnitSpawned = null
+  private Event2<SpawnUnitJob, group> m_onGroupSpawned = null
 
   // --------------------------------------------------------------------------
-  construct(string id, player owningPlayer, player targetPlayer, SpawnUndeadUnitJobConfig config)
+  construct(string id, player owningPlayer, SpawnUnitJobConfig config)
     super(id, REAL_MAX)
 
     m_owningPlayer = owningPlayer
-    m_targetPlayer = targetPlayer
     m_config = config.acquire()
     m_currentGroup = getGroup()
     m_spawnedUnits = getGroup()
@@ -296,15 +293,15 @@ public class SpawnUndeadUnitJob extends Job
     return m_spawnedUnits.size()
 
   // --------------------------------------------------------------------------
-  function onUnitSpawned() returns IEvent2<SpawnUndeadUnitJob, unit>
+  function onUnitSpawned() returns IEvent2<SpawnUnitJob, unit>
     if (m_onUnitSpawned == null)
-      m_onUnitSpawned = new Event2<SpawnUndeadUnitJob, unit>()
+      m_onUnitSpawned = new Event2<SpawnUnitJob, unit>()
     return m_onUnitSpawned
 
   // --------------------------------------------------------------------------
-  function onGroupSpawned() returns IEvent2<SpawnUndeadUnitJob, group>
+  function onGroupSpawned() returns IEvent2<SpawnUnitJob, group>
     if (m_onGroupSpawned == null)
-      m_onGroupSpawned = new Event2<SpawnUndeadUnitJob, group>()
+      m_onGroupSpawned = new Event2<SpawnUnitJob, group>()
     return m_onGroupSpawned
 
   // --------------------------------------------------------------------------
@@ -345,12 +342,12 @@ public class SpawnUndeadUnitJob extends Job
 
     let spawnedUnit = createUnit(unitType)
     if (spawnedUnit == null)
-      Log.error("SpawnUndeadUnitJob", "next", "", "Unable to spawn unit " + UnitId2String(unitType))
+      Log.error("SpawnUnitJob", "next", "", "Unable to spawn unit " + UnitId2String(unitType))
       spawnedUnit.removeOrStock()
       return 0
 
     if (not prepareUnit(spawnedUnit))
-      Log.error("SpawnUndeadUnitJob", "next", "", "Unable to prepare unit " + UnitId2String(unitType))
+      Log.error("SpawnUnitJob", "next", "", "Unable to prepare unit " + UnitId2String(unitType))
       spawnedUnit.removeOrStock()
       return 0
 
@@ -409,16 +406,23 @@ public class SpawnUndeadUnitJob extends Job
     if (m_currentGroup.isEmpty())
       return
 
+    var targetSpawnPos = ZERO2
+
     // TODO: prefer organic targets?
-    let groupTargetUnit = m_config.getTargetProvider().getTargetUnit(m_context)
-    m_context.setTargetUnit(groupTargetUnit)
+    let targetProvider = m_config.getTargetProvider()
+    if (targetProvider != null)
+      let groupTargetUnit = targetProvider.getTargetUnit(m_context)
+      m_context.setTargetUnit(groupTargetUnit)
+      targetSpawnPos = groupTargetUnit.getPos()
+    else
+      m_context.setTargetUnit(null)
 
     let result = m_config
       .getSpawnPointProvider()
-      .getRandomSpawnPointInRange(groupTargetUnit.getPos(), m_config.getSpawnRange())
+      .getRandomSpawnPointInRange(targetSpawnPos, m_config.getSpawnRange())
 
     if (not result.succeeded)
-      Log.warn("[SpawnWave.onActivated] Found no spawn points!")
+      Log.warn("[SpawnUnitJob.completeGroup] Found no spawn points!")
       cancel()
       return
 
@@ -477,16 +481,6 @@ public class SpawnUndeadUnitJob extends Job
     if (getAliveUnitCount() == m_config.getMaxAliveCount())
       return SpawnJobState.Wait
 
-    if (m_targetPlayer == null)
-      return SpawnJobState.Done
-
-    if (not m_targetPlayer.isIngame())
-      return SpawnJobState.Done
-
-    let playerMetadata = m_targetPlayer.getMetadata()
-    if (playerMetadata == null or playerMetadata.getHasLostGame())
-      return SpawnJobState.Done
-
     return SpawnJobState.Spawn
 
   // --------------------------------------------------------------------------
@@ -509,7 +503,6 @@ public class SpawnUndeadUnitJob extends Job
       m_config.getGroupSize().toString(),
       m_groupId.toString(),
       (getRealTimeSeconds() - m_startTime).toString())
-      .colorize(m_targetPlayer.getColor().toColor())
 
   // --------------------------------------------------------------------------
   private function registerSpawnedUnit(unit spawnedUnit)
@@ -542,5 +535,5 @@ function onUnitDeath()
 // ============================================================================
 init
 
-  g_unitToJobMap = new HashMap<unit, SpawnUndeadUnitJob>()
+  g_unitToJobMap = new HashMap<unit, SpawnUnitJob>()
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_DEATH, function onUnitDeath)

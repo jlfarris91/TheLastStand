@@ -1,0 +1,125 @@
+package MapEventDirector
+import Directors
+import Deck
+import GameInstance
+import MapEvents
+import LinkedList
+import LinkedListExtensions
+import Bases
+import Time
+import DirectorDebugger
+
+Deck g_mapEventDeck
+MapEventDirector g_mapEventDirector
+LinkedList<Base> g_bases = new LinkedList<Base>()
+LinkedList<Base> g_basesWorking = new LinkedList<Base>()
+
+// ============================================================================
+public class MapEventCards
+  static MapEventCard raiderCamp =  new MapEventCard("RaiderCamp")    ..setCost(100)  ..setWeight(1.0)
+  static MapEventCard wolvesDen =   new MapEventCard("WolvesDen")     ..setCost(20)   ..setWeight(1.0)
+  static MapEventCard bloodShrine = new MapEventCard("BloodShrine")   ..setCost(20)   ..setWeight(1.0)
+
+// ============================================================================
+public class MapEventCard extends TieredCard
+
+  // ----------------------------------------------------------------------------
+  construct(string id)
+    super(id)
+
+// ============================================================================
+public class MapEventDirector extends Director
+
+  // ----------------------------------------------------------------------------
+  construct()
+    super("map_events")
+
+  // --------------------------------------------------------------------------
+  override protected function getDifficultyCoefficient() returns real
+    return g_GameInstance.getWorldDifficultyCoeff()
+
+  // ----------------------------------------------------------------------------
+  function tryDrawAndActivateCard()
+
+    let cardInstance = drawCard()
+    if (cardInstance == null)
+      return
+
+    activateCard(cardInstance)
+
+  // --------------------------------------------------------------------------
+  function drawCard() returns CardInstance
+
+    let deck = getDeck()
+    if (deck == null)
+      return null
+
+    let selectedCard = deck.drawCard() castTo MapEventCard
+    if (selectedCard == null)
+      return null
+
+    let credits = getCredits()
+    return selectedCard.getHighestAffordableTier(credits)
+
+  // --------------------------------------------------------------------------
+  function activateCard(CardInstance card) returns bool
+  
+    let mapEventCard = card.card castTo MapEventCard
+
+    let mapEvent = MapEvent.createMapEvent(mapEventCard.getId())
+    if (mapEvent == null)
+      return false
+
+    let selectedBase = getNextBase()
+    if (selectedBase == null)
+      return false
+
+    let selectedBaseTransform = selectedBase.getTransform()
+    
+    mapEvent.getTransform()
+      ..setWorldPosition(selectedBaseTransform.getWorldPosition())
+      ..setWorldYaw(selectedBaseTransform.getWorldYaw())
+
+    mapEvent.start()
+
+    setCredits(getCredits() - card.cost)
+
+    return true
+
+// ============================================================================
+function getNextBase() returns Base
+
+  if (g_basesWorking.isEmpty())
+    for i = 0 to Bases.getBaseCount() - 1
+      g_bases.add(Bases.getBase(i))  
+
+  let selectedBase = g_basesWorking.getRandom()
+  g_basesWorking.remove(selectedBase)
+
+  return selectedBase
+
+// ============================================================================
+function onDayStart()
+
+  if (g_GameInstance.getDay() < 2)
+    return
+
+  if (g_mapEventDirector == null)
+    g_mapEventDirector = new MapEventDirector()
+    ..setDeck(g_mapEventDeck)
+    ..setCreditsOnActivation(1000)
+    ..setEnabled(true)
+    DirectorDebugger.registerDirector(g_mapEventDirector)
+
+  g_mapEventDirector.tryDrawAndActivateCard()
+
+// ============================================================================
+init
+
+  g_mapEventDeck = new Deck()
+  g_mapEventDeck.addDefaultCategory()
+  ..addCard(MapEventCards.raiderCamp)
+  ..addCard(MapEventCards.wolvesDen)
+  ..addCard(MapEventCards.bloodShrine)
+
+  registerDayEvent(function onDayStart)
