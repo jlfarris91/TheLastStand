@@ -615,6 +615,12 @@ public bool UTS_ENABLED = true
 constant real PROCESS_UPDATES_INTERVAL = 1.0
 constant real TARGET_STRUCTURE_SCORE_RANGE = 512.0
 constant real ATTACK_RANGE_SCALAR = 1.0
+constant int UNDEAD_TARGET_PROVIDER_PRI_COUNT = 3
+
+public enum UndeadTargetProviderPriority
+  Organic
+  StructureHigh
+  StructureLow
 
 UndeadTargetProvider array g_playerData
 int g_playerDataUpdateIndex = -1
@@ -627,7 +633,6 @@ group g_temp = CreateGroup()
 
 // group g_targetUnitScoreFilterGroup
 // boolexpr g_targetUnitScoreFilter = Condition(function isUnitStructureInTargetCollection)
-
 
 // ============================================================================
 public function getUndeadTargetProviderForPlayer(player p) returns UndeadTargetProvider
@@ -642,9 +647,7 @@ public function getNumberOfRegisteredAttackers(unit target) returns int
 public class UndeadTargetProvider extends TargetProvider
   private force m_players = CreateForce()
   private group m_structureTargets = CreateGroup()
-  private group m_nonStructureTargets = CreateGroup()
-  private group m_structureTargets_LowPri = CreateGroup()
-  private group m_structureTargets_HighPri = CreateGroup()
+  private group array[UNDEAD_TARGET_PROVIDER_PRI_COUNT] m_targetsByPriority
   private bool m_preferOrganicTargets = false
   private Event m_preferOrganicTargetsChanged = null
   private _handle array[24] m_hpcPropertyChangedEventHandlers
@@ -652,6 +655,9 @@ public class UndeadTargetProvider extends TargetProvider
   // --------------------------------------------------------------------------
   construct()
     registerHumanForceTargetCollection(this)
+
+    for i = 0 to UNDEAD_TARGET_PROVIDER_PRI_COUNT - 1
+      m_targetsByPriority[i] = CreateGroup()
 
   // --------------------------------------------------------------------------
   ondestroy
@@ -672,9 +678,10 @@ public class UndeadTargetProvider extends TargetProvider
 
     m_players.destr()
     m_structureTargets.destr()
-    m_nonStructureTargets.destr()
-    m_structureTargets_LowPri.destr()
-    m_structureTargets_HighPri.destr()
+
+    for i = 0 to UNDEAD_TARGET_PROVIDER_PRI_COUNT - 1
+      m_targetsByPriority[i].destr()
+      m_targetsByPriority[i] = null
 
   // --------------------------------------------------------------------------
   function addPlayer(player p)
@@ -723,10 +730,9 @@ public class UndeadTargetProvider extends TargetProvider
   function getAttackPriority(unit u) returns int
     if (not m_structureTargets.contains(u))
       return 0
-    if (m_structureTargets_LowPri.contains(u))
-      return 1
-    if (m_structureTargets_HighPri.contains(u))
-      return 2
+    for i = 0 to UNDEAD_TARGET_PROVIDER_PRI_COUNT - 1
+      if (m_targetsByPriority[i].contains(u))
+        return i + 1
     return -1
 
   // --------------------------------------------------------------------------
@@ -746,8 +752,8 @@ public class UndeadTargetProvider extends TargetProvider
     return m_preferOrganicTargetsChanged
 
   // --------------------------------------------------------------------------
-  function getNonStructures() returns group
-    return m_nonStructureTargets
+  function getOrganicTargets() returns group
+    return m_targetsByPriority[UndeadTargetProviderPriority.Organic castTo int]
 
   // --------------------------------------------------------------------------
   private function addPlayerUnitsToGroups(player p)
@@ -768,17 +774,14 @@ public class UndeadTargetProvider extends TargetProvider
   // --------------------------------------------------------------------------
   function getRandomTargetUnit(bool preferOrganic) returns unit
 
-    if ((preferOrganic or m_preferOrganicTargets) and not m_nonStructureTargets.isEmpty())
-      return m_nonStructureTargets.getRandomUnit()
+    let organicTargets = getOrganicTargets()
 
-    if (not m_structureTargets_HighPri.isEmpty())
-      return m_structureTargets_HighPri.getRandomUnit()
+    if ((preferOrganic or m_preferOrganicTargets) and organicTargets != null and not organicTargets.isEmpty())
+      return organicTargets.getRandomUnit()
 
-    if (not m_structureTargets_LowPri.isEmpty())
-      return m_structureTargets_LowPri.getRandomUnit()
-
-    if (not m_nonStructureTargets.isEmpty())
-      return m_nonStructureTargets.getRandomUnit()
+    for i = 0 to UNDEAD_TARGET_PROVIDER_PRI_COUNT - 1
+      if (not m_targetsByPriority[i].isEmpty())
+        return m_targetsByPriority[i].getRandomUnit()
     
     return null
 
@@ -789,40 +792,31 @@ public class UndeadTargetProvider extends TargetProvider
   // --------------------------------------------------------------------------
   function getClosestTargetUnit(vec2 pos, real maxRange, bool preferOrganic) returns unit
 
-    if ((preferOrganic or m_preferOrganicTargets) and not m_nonStructureTargets.isEmpty())
-      let target = m_nonStructureTargets.getClosestUnit(pos, maxRange)
+    let organicTargets = getOrganicTargets()
+
+    if ((preferOrganic or m_preferOrganicTargets) and organicTargets != null and not organicTargets.isEmpty())
+      let target = organicTargets.getClosestUnit(pos, maxRange)
       if (target != null)
         return target
 
-    if (not m_structureTargets_HighPri.isEmpty())
-      let target = m_structureTargets_HighPri.getClosestUnit(pos)
-      if (target != null)
-        return target
-
-    if (not m_structureTargets_LowPri.isEmpty())
-      let target = m_structureTargets_LowPri.getClosestUnit(pos)
-      if (target != null)
-        return target
-
-    if (not m_nonStructureTargets.isEmpty())
-      let target = m_nonStructureTargets.getClosestUnit(pos)
-      if (target != null)
-        return target
+    for i = 0 to UNDEAD_TARGET_PROVIDER_PRI_COUNT - 1
+      if (not m_targetsByPriority[i].isEmpty())
+        let target = m_targetsByPriority[i].getClosestUnit(pos)
+        if (target != null)
+          return target
     
     return null
 
   // --------------------------------------------------------------------------
   function clear()
 
-    m_structureTargets_LowPri.clear()
-    m_structureTargets_HighPri.clear()
+    for i = 0 to UNDEAD_TARGET_PROVIDER_PRI_COUNT - 1
+      m_targetsByPriority[i].clear()
     
     for targetStructure in m_structureTargets
       unregisterTargetedUnit(targetStructure)
 
     m_structureTargets.clear()
-
-    m_nonStructureTargets.clear()
 
     m_preferOrganicTargets = false
 
@@ -840,42 +834,36 @@ public class UndeadTargetProvider extends TargetProvider
         // g_targetUnitScore[_unit.getIndex()] = g_temp.size()
     else
       if (unitIsValidTargetNonStructure(_unit))
-        m_nonStructureTargets.addUnit(_unit)
+        getOrganicTargets().addUnit(_unit)
 
   // --------------------------------------------------------------------------
   function unregisterPlayerUnit(unit _unit)
 
-    if (_unit.isBuilding())
-    //{
-      if (m_structureTargets.contains(_unit))
-        m_structureTargets.removeUnit(_unit)
-        m_structureTargets_LowPri.removeUnit(_unit)
-        m_structureTargets_HighPri.removeUnit(_unit)
-        // enumNearbyStructures(_unit.getPos())
-        // addScore(-1)
-        // g_targetUnitScore[_unit.getIndex()] = 0
-        // if (g_targetUnitScoreTags[_unit.getIndex()] != null)
-        //   g_targetUnitScoreTags[_unit.getIndex()].destr()
-    //}
-    else
-      m_nonStructureTargets.removeUnit(_unit)
-      m_structureTargets.refresh()
+    for i = 0 to UNDEAD_TARGET_PROVIDER_PRI_COUNT - 1
+      m_targetsByPriority[i].removeUnit(_unit)
+
+    m_structureTargets.removeUnit(_unit)
 
   // --------------------------------------------------------------------------
   protected function sortStructureTargetUnits()
     // Log.debug(m_player.getId().toString() + " Sorting structure targets")
-    m_structureTargets_HighPri.clear()
-    m_structureTargets_LowPri.clear()
+
+    m_targetsByPriority[UndeadTargetProviderPriority.StructureHigh castTo int].clear()
+    m_targetsByPriority[UndeadTargetProviderPriority.StructureLow castTo int].clear()
+
     for structureTarget in m_structureTargets
       sortStructureTargetUnit(structureTarget)
 
   // --------------------------------------------------------------------------
   private function sortStructureTargetUnit(unit structureTarget)
-    group priorityGroup = m_structureTargets_HighPri
+
+    var priority = UndeadTargetProviderPriority.StructureHigh
+
     let attackerGroup = g_targetedUnitToUTCMap[structureTarget.getIndex()]
     if (attackerGroup != null and attackerGroup.size() > VALID_HUMAN_STRUCTURE_TARGETS_ATTACKER_COUNT_THRESHOLD)
-      priorityGroup = m_structureTargets_LowPri
-    priorityGroup.addUnit(structureTarget)
+      priority = UndeadTargetProviderPriority.StructureLow
+
+    m_targetsByPriority[priority castTo int].addUnit(structureTarget)
 
   // --------------------------------------------------------------------------
   private function preferOrganicTargetsChanged()
@@ -1018,16 +1006,6 @@ function getOrCreatePlayerData(player p) returns UndeadTargetProvider
   return data
 
 // ============================================================================
-function onUnitIndexed()
-  let indexingUnit = getIndexingUnit()
-  if (indexingUnit.isBuilding())
-    return
-  let owningPlayer = indexingUnit.getOwner()
-  let playerData = getOrCreatePlayerData(owningPlayer)
-  if (playerData != null)
-    playerData.registerPlayerUnit(indexingUnit)  
-
-// ============================================================================
 function onUnitDeindexed()
   let indexingUnit = getIndexingUnit()
   let owningPlayer = indexingUnit.getOwner()
@@ -1047,8 +1025,10 @@ init
   doPeriodically(UPDATE_INTERVAL, (CallbackPeriodic cb) -> issueOrders())
   doPeriodically(DOT_INTERVAL, (CallbackPeriodic cb) -> applyDOT())
 
-  onUnitIndex(() -> onUnitIndexed())
   onUnitDeindex(() -> onUnitDeindexed())
 
   onPlayerLost(() -> clearLeavingLosingPlayerData(getLosingPlayer()))
   registerPlayerEvent(EVENT_PLAYER_LEAVE, function onPlayerLeave)
+
+  for p in g_PlayingHumanPlayers
+    getOrCreatePlayerData(p)
