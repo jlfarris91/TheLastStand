@@ -19,12 +19,20 @@ import Result
 import ChannelAbilityPreset
 import RegisterEvents
 import HumanPlayers
+import DamageEvent
+import Damage
 
 public SurvivorUnitDefinition g_builderDefinition
 
 constant int BUILDER_ABILITY_MAX_LEVEL = 10
 constant int IMPACT_BRACING_AFFECTOR_ID = 'IMBR'
-constant int THORNS_AURA_BUFF_ID = compiletime(BUFF_ID_GEN.next())
+
+constant int array[20] THORNS_AURA_BUFF_ID = [
+  compiletime(BUFF_ID_GEN.next()), compiletime(BUFF_ID_GEN.next()), compiletime(BUFF_ID_GEN.next()), compiletime(BUFF_ID_GEN.next()),
+  compiletime(BUFF_ID_GEN.next()), compiletime(BUFF_ID_GEN.next()), compiletime(BUFF_ID_GEN.next()), compiletime(BUFF_ID_GEN.next()),
+  compiletime(BUFF_ID_GEN.next()), compiletime(BUFF_ID_GEN.next()), compiletime(BUFF_ID_GEN.next()), compiletime(BUFF_ID_GEN.next()),
+  compiletime(BUFF_ID_GEN.next()), compiletime(BUFF_ID_GEN.next()), compiletime(BUFF_ID_GEN.next()), compiletime(BUFF_ID_GEN.next()),
+  compiletime(BUFF_ID_GEN.next()), compiletime(BUFF_ID_GEN.next()), compiletime(BUFF_ID_GEN.next()), compiletime(BUFF_ID_GEN.next())]
 
 // ============================================================================
 function calculateRepairTimeRatio(int level) returns real
@@ -42,7 +50,7 @@ function calculateImpactBracingDuration(int level) returns real
 
 // ============================================================================
 function calculateThornsDamageReturned01(int level) returns real
-  return clamp(level, 1, 20) * 0.05
+  return 0.25 * clamp(level, 1, 20)
 
 // ============================================================================
 @compiletime function createObjectDefinitions()
@@ -141,27 +149,29 @@ function calculateThornsDamageReturned01(int level) returns real
       calculateImpactBracingDuration(lvl).toString(0),
       "Does not stack.".red()))
 
-  new BuffDefinition(THORNS_AURA_BUFF_ID, 'BEah')
-    ..setIconNormal(1, Icons.bTNSpikedBarricades)
-    ..setArtTarget(1, "Abilities\\Spells\\Orc\\ReinforcedTrollBurrow\\ReinforcedTrollBurrowTarget.mdl")
-    ..setTooltipNormal(1, "Reinforced with Spikes")
-    ..setTooltipNormalExtended(1, "This structure is reinforced with spikes")
+  for i = 0 to 19
+    new BuffDefinition(THORNS_AURA_BUFF_ID[i], 'BEah')
+      ..setIconNormal(1, Icons.bTNSpikedBarricades)
+      ..setArtTarget(1, "Abilities\\Spells\\Orc\\ReinforcedTrollBurrow\\ReinforcedTrollBurrowTarget.mdl")
+      ..setTooltipNormal(1, "Reinforced with Spikes")
+      ..setTooltipNormalExtended(1, "This structure is reinforced with spikes")
 
   new AbilityDefinitionKeeperoftheGroveThornsAura(TlsAbilityIds.builderThornsAura)
     ..setLevels(20)
     ..setButtonPositionNormalX(3)
     ..setButtonPositionNormalY(2)
     ..setIconNormal(Icons.bTNSpikedBarricades)
+    ..setHeroAbility(false)
     ..setRequirements(commaList(TlsUpgradeIds.builderNoviceTraining))
+    ..setRequirementsLevels("2")
     ..presetAreaofEffect(lvl -> 200.0)
     ..presetDamageDealttoAttackers(lvl -> calculateThornsDamageReturned01(lvl))
     ..presetDamageisPercentReceived(lvl -> true)
-    ..presetBuffs(lvl -> commaList(THORNS_AURA_BUFF_ID))
-    ..setRequirementsLevels("2")
-    ..presetTargetsAllowed(lvl -> "ground,structure,friend,vulnerable")
+    ..presetBuffs(lvl -> commaList(THORNS_AURA_BUFF_ID[lvl-1]))
+    ..presetTargetsAllowed(lvl -> "structure,friend,vulnerable")
     ..presetTooltipNormal((int lvl) -> "Spiked Reinforcement [|cffffcc00Level {0}|r]".format(lvl.toString()))
     ..presetTooltipNormalExtended((int lvl) -> "An aura that gives friendly nearby structures a damage shield, which returns {0} of a melee attacker's damage back to it.|n|n{1}".format(
-        calculateThornsDamageReturned01(lvl).toPercentageString(),
+        calculateThornsDamageReturned01(lvl).toPercentageString01(),
         "Does not stack.".red()))
 
   new AbilityDefinition(TlsAbilityIds.fellTree, 'Ahan')
@@ -323,6 +333,47 @@ public function onResearchFinished()
   owningPlayer.setTechAvailability(TlsUpgradeIds.builderFurtherStudy, true)
 
 // ============================================================================
+function unit.getThornsLevel() returns int
+  for i = 1 to 20
+    if (this.hasAbility(THORNS_AURA_BUFF_ID[i-1]))
+      return i
+  return 0
+
+// ============================================================================
+function onUnreducedDamageTaken()
+  let damageSource = DamageEvent.getSource()
+
+  if (not IsUnitType(damageSource, UNIT_TYPE_MELEE_ATTACKER))
+    return
+  
+  let damageTarget = DamageEvent.getTarget()
+  if (not IsUnitType(damageTarget, UNIT_TYPE_STRUCTURE))
+    return
+
+  if (not damageSource.isEnemyOf(damageTarget))
+    return
+
+  let thornsBuffLevel = damageTarget.getThornsLevel()
+  if (thornsBuffLevel == 0)
+    return
+
+  let damageReturned01 = calculateThornsDamageReturned01(thornsBuffLevel)
+  let damageReturned = damageReturned01 * DamageEvent.getUnreducedOriginalAmount()
+
+  DamageEvent.setNextDamageFromCode()
+  DamageEvent.setNextDamageId(THORNS_AURA_BUFF_ID[thornsBuffLevel-1])
+
+  UnitDamageTarget(
+    damageTarget,
+    damageSource,
+    damageReturned,
+    false,
+    false,
+    ATTACK_TYPE_MAGIC,
+    DAMAGE_TYPE_PLANT,
+    null)
+
+// ============================================================================
 init
   if (g_builderDefinition == null)
     createObjectDefinitions()
@@ -333,6 +384,8 @@ init
   registerRepairEnd(function onRepairAddRemoveStartEnd)
 
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_RESEARCH_FINISH, function onResearchFinished)
+  
+  DamageEvent.addUnreducedListener(DAMAGE_EVENT_PRIO_FINAL, () -> onUnreducedDamageTaken())
 
   for p in g_PlayingHumanPlayers
     p.setTechAvailability(TlsUpgradeIds.builderFurtherStudy, false)
