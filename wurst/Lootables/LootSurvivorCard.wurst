@@ -2,7 +2,6 @@ package LootSurvivorCard
 import Lootables
 import SurvivorJobs
 import Action
-import Survivors
 import GameConstants
 import UnitExtensions
 import Orders
@@ -14,6 +13,9 @@ import WeightedSet
 import SoundUtils
 import TlsUnitIds
 import UnitMetadata
+import CreateUnitJob
+import Jobs
+import World
 
 HashMap<int, WeightedSet<SoundDefinition>> g_lootFinishedSoundMap
 
@@ -65,27 +67,40 @@ public class LootSurvivorCard extends LootCard
 
     let jobTypeSet = g_tieredJobTypes[tier]
     let jobType = jobTypeSet.getRandom()
-    
-    let survivor = SurvivorUtility.spawnSurvivorWithJob(PLAYER_VILLAGERS, spawnPos, jobType)
-    survivor.fadeIn(color(150, 150, 150))
-    survivor.issuePointOrderById(OrderIds.move, looter.getPos())
 
-    FX.createFoundSurvivorTag(spawnPos, owner)
+    let jobDef = SurvivorJobs.getJobDefinition(jobType)
 
-    if (m_tierModifiers[tier] != null)
-      m_tierModifiers[tier].call(survivor)
-    
-    let job = SurvivorJobs.getJobDefinitionForUnitType(survivor.getTypeId())
+    let createUnitJob = World.createUnit(
+      PLAYER_VILLAGERS,
+      jobDef.getInitialUnitType(),
+      spawnPos,
+      GetRandomDirectionDeg().asAngleDegrees())
 
-    let notification = new LootRewardNotification(
-      NotificationManager.nextNotificationId(),
-      owner,
-      looter.getPos(),
-      getSoundDefinition(survivor.getTypeId()))
-    ..setMessage("Found " + "{0} {1}".format(job.getTitle(survivor.getTypeId()), survivor.getProperName()).gold())
-    ..setIconPath(survivor.getIconPath())
+    createUnitJob.onCompleted().register() (Job job) ->
+    //{
+      let survivor = (job castTo CreateUnitJob).getLastCreatedUnit()
 
-    lootableComp.showLootRewardNotification(owner, notification)
+      survivor.fadeIn(color(150, 150, 150))
+      survivor.issuePointOrderById(OrderIds.move, looter.getPos())
+
+      FX.createFoundSurvivorTag(spawnPos, owner)
+
+      if (m_tierModifiers[tier] != null)
+        m_tierModifiers[tier].call(survivor)
+      
+      let survivorJob = SurvivorJobs.getJobDefinitionForUnitType(survivor.getTypeId())
+
+      let notification = new LootRewardNotification(
+        NotificationManager.nextNotificationId(),
+        owner,
+        looter.getPos(),
+        getSoundDefinition(survivor.getTypeId()))
+      ..setMessage("Found " + "{0} {1}".format(survivorJob.getTitle(survivor.getTypeId()), survivor.getProperName()).gold())
+      ..setIconPath(survivor.getIconPath())
+
+      lootableComp.showLootRewardNotification(owner, notification)
+    //}
+
     return true
 
 // ============================================================================

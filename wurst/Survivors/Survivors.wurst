@@ -1,7 +1,6 @@
 package Survivors
 import TlsUnitIds
 import HumanPlayerComponent
-import UnitMetadata
 import WeightedSet
 import DisplayTextToPlayer
 import Orders
@@ -15,12 +14,13 @@ import Range
 import HumanPlayers
 import UnitExtensions
 import SurvivorJobs
-import Math
-import GameInstance
 import Spawning
 import Notifications
 import RegisterEvents
 import PlayerSpawnPointProviders
+import Jobs
+import CreateUnitJob
+import World
 
 constant real SURVIVOR_SPAWN_TELEPORT_THRESHOLD_SQ = 4000.0*4000.0
 
@@ -31,57 +31,34 @@ WeightedSet<SurvivorJobType> g_weightedSurvivorJobSet
 public class SurvivorUtility
 
   // --------------------------------------------------------------------------
-  static function spawnSurvivorWithRandomJob(player forPlayer, vec2 pos) returns unit
-    return spawnSurvivorWithRandomJob(forPlayer, pos, g_weightedSurvivorJobSet)
-
-  // --------------------------------------------------------------------------
-  static function spawnSurvivorWithRandomJob(player forPlayer, vec2 pos, WeightedSet<SurvivorJobType> jobSet) returns unit
-    return spawnSurvivorWithJob(forPlayer, pos, jobSet.getRandom())
-
-  // --------------------------------------------------------------------------
-  static function spawnSurvivorWithJob(player forPlayer, vec2 pos, SurvivorJobType job) returns unit
-
-    let jobDef = SurvivorJobs.getJobDefinition(job)
-
-    let survivor = createUnitTLS(forPlayer, jobDef.getInitialUnitType(), pos, GetRandomDirectionDeg().asAngleDegrees())
-
-    // Scale survivor level with game progress
-    let gameProgress01 = clamp01(g_GameInstance.getGameProgress())
-    let survivorLevel = SURVIVORS_SPAWN_LEVEL_RANGE.lerp(gameProgress01).floor()
-    if (survivorLevel > 1)
-      survivor.setLevel(survivorLevel, false)
-
-    return survivor
-
-  // --------------------------------------------------------------------------
-  static function spawnSurvivorUnitForPlayer(player _player) returns unit
+  static function spawnSurvivorUnitForPlayer(player _player)
     let job = g_weightedSurvivorJobSet.getRandom()
-    return spawnSurvivorUnitForPlayer(_player, job)
+    spawnSurvivorUnitForPlayer(_player, job)
 
   // --------------------------------------------------------------------------
-  static function spawnSurvivorUnitForPlayer(player _player, SurvivorJobType job) returns unit
+  static function spawnSurvivorUnitForPlayer(player _player, SurvivorJobType job) returns bool
 
     if (_player == null)
       argumentNullError("_player")
-      return null
+      return false
 
     let playerMetadata = _player.getMetadata()
     if (playerMetadata == null)
       Log.debug("[spawnSurvivorUnitForPlayer] Player {0} has no metadata")
-      return null
+      return false
 
     if (playerMetadata.getHasLostGame())
       Log.debug("[spawnSurvivorUnitForPlayer] Player {0} has lost the game")
-      return null
+      return false
 
     if (not _player.isIngame())
       Log.debug("[spawnSurvivorUnitForPlayer] Player {0} has left the game")
-      return null
+      return false
 
     let playerHumanComp = playerMetadata.getHumanPlayerComponent()
     if (playerHumanComp == null)
       Log.debug("[spawnSurvivorUnitForPlayer] Player {0} has no human player component")
-      return null
+      return false
 
     let spawnPointResult = getSpawnPoint(_player)
 
@@ -96,27 +73,36 @@ public class SurvivorUtility
     if (not spawnPointResult.succeeded or spawnPoint.distanceToSq(campCenter) > SURVIVOR_SPAWN_TELEPORT_THRESHOLD_SQ)
       spawnPoint = campCenter
 
-    let survivor = spawnSurvivorWithJob(_player, spawnPoint, job)
-
-    survivor.issuePointOrderById(OrderIds.move, playerHumanComp.getCampCenter())
-
     let jobDef = SurvivorJobs.getJobDefinition(job)
 
-    let message = "{0} {1} has joined your camp!".format(
-      jobDef.getTitle(survivor.getTypeId()).colorize(Colors.gold),
-      survivor.getProperName())
+    let createUnitJob = World.createUnit(
+      _player,
+      jobDef.getInitialUnitType(),
+      spawnPoint,
+      GetRandomDirectionDeg().asAngleDegrees())
 
-    notifyPlayer(_player, message, survivor.getIconPath()) () ->
-      GetTriggerPlayer().selectSingle(survivor)
-      if (GetTriggerPlayer() == localPlayer)
-        PanCameraToForPlayer(localPlayer, survivor.getX(), survivor.getY())
+    createUnitJob.onCompleted().register() (Job job) ->
+    //{
+      let survivor = (job castTo CreateUnitJob).getLastCreatedUnit()
 
-    AddIndicator(survivor, 0, 255, 0, 255)
+      survivor.issuePointOrderById(OrderIds.move, playerHumanComp.getCampCenter())
 
-    // Fade the survivor in over time
-    survivor.fadeIn(color(150, 150, 150))
+      let message = "{0} {1} has joined your camp!".format(
+        jobDef.getTitle(survivor.getTypeId()).colorize(Colors.gold),
+        survivor.getProperName())
 
-    return survivor
+      notifyPlayer(_player, message, survivor.getIconPath()) () ->
+        GetTriggerPlayer().selectSingle(survivor)
+        if (GetTriggerPlayer() == localPlayer)
+          PanCameraToForPlayer(localPlayer, survivor.getX(), survivor.getY())
+
+      AddIndicator(survivor, 0, 255, 0, 255)
+
+      // Fade the survivor in over time
+      survivor.fadeIn(color(150, 150, 150))
+    //}
+
+    return true
 
   // --------------------------------------------------------------------------
   static function trySpawnSurvivorForPlayer(player _player)
