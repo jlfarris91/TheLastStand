@@ -12,15 +12,20 @@ import Vector
 import GameConstants
 import HumanPlayers
 import GameInstance
+import ProjectConstants
+import DirectorDebugger
 
 SpawnUndeadUnitDirector array g_zombieDirectors
 SpawnUndeadUnitDirector array g_eliteDirectors
+SpawnUndeadUnitDirector array g_bossDirectors
 
-Vector<SpawnCard> g_normalCards = new Vector<SpawnCard>(16)
+Vector<SpawnCard> g_normalCards = new Vector<SpawnCard>(4)
 Vector<SpawnCard> g_eliteCards = new Vector<SpawnCard>(16)
+Vector<SpawnCard> g_bossCards = new Vector<SpawnCard>(8)
 
 Deck g_zombieDeck
 Vector<Deck> g_eliteDecks = new Vector<Deck>(TOTAL_NIGHTS)
+Vector<Deck> g_bossDecks = new Vector<Deck>(4)
 
 // ============================================================================
 function onNightStart()
@@ -36,10 +41,23 @@ function onNightStart()
     ..enable()
 
     if (night > 1)
-      g_eliteDirectors[p.getId()]
-      ..setDeck(g_eliteDecks.get(night - 2))
-      ..setCreditsOnActivation(creditsOnActivation)
-      ..enable()
+    //{
+      if (night mod 5 == 0)
+        g_bossDirectors[p.getId()]
+        ..setDeck(g_bossDecks.get((night / 5).floor() - 1))
+        ..setCreditsOnActivation(creditsOnActivation)
+        ..enable()
+      else if (night == 16)
+        g_bossDirectors[p.getId()]
+        ..setDeck(g_bossDecks.get(4))
+        ..setCreditsOnActivation(creditsOnActivation)
+        ..enable()
+      else
+        g_eliteDirectors[p.getId()]
+        ..setDeck(g_eliteDecks.get(night - 2))
+        ..setCreditsOnActivation(creditsOnActivation)
+        ..enable()
+    //}
   //}
 
 
@@ -50,6 +68,7 @@ function onDayStart()
   //{
     g_zombieDirectors[p.getId()].disable()
     g_eliteDirectors[p.getId()].disable()
+    g_bossDirectors[p.getId()].disable()
   //}
 
 // ============================================================================
@@ -62,18 +81,18 @@ init
   g_eliteCards.add(SpawnCards.skeletonArchers)
   g_eliteCards.add(SpawnCards.necromancers)
   g_eliteCards.add(SpawnCards.crows)
-  g_eliteCards.add(SpawnCards.abominations)
+  g_eliteCards.add(SpawnCards.crows) // Boss
   g_eliteCards.add(SpawnCards.cultists)
   g_eliteCards.add(SpawnCards.orcSkeletons)
   g_eliteCards.add(SpawnCards.tombstones)
   g_eliteCards.add(SpawnCards.gargoyles)
-  g_eliteCards.add(SpawnCards.cryptFiends)
+  g_eliteCards.add(SpawnCards.gargoyles) // Boss
   g_eliteCards.add(SpawnCards.ghosts)
   g_eliteCards.add(SpawnCards.meatWagons)
   g_eliteCards.add(SpawnCards.raiders)
   g_eliteCards.add(SpawnCards.wyrms)
-  g_eliteCards.add(SpawnCards.forgottenOne)
-  g_eliteCards.add(SpawnCards.archimonde)
+  g_eliteCards.add(SpawnCards.wyrms) // Boss
+  g_eliteCards.add(SpawnCards.wyrms) // Boss
 
   for i = 0 to TOTAL_NIGHTS - 2
   //{
@@ -83,15 +102,31 @@ init
     g_eliteDecks.add(deck)
   //}
 
+  g_bossCards.add(SpawnCards.abominations)
+  g_bossCards.add(SpawnCards.cryptFiends)
+  g_bossCards.add(SpawnCards.forgottenOne)
+  g_bossCards.add(SpawnCards.archimonde)
+
+  for i = 0 to 3
+  //{
+    let deck = new Deck()
+    deck.addCategory("Boss", 1.0)
+    ..addCard(g_bossCards.get(i))
+    g_bossDecks.add(deck)
+  //}
+
   g_zombieDeck = new Deck()
-  let zombies = g_zombieDeck.addCategory("Zombies", 1.0)
-  zombies.addCard(SpawnCards.zombies)
+  g_zombieDeck.addCategory("Zombies", 1.0)
+  ..addCard(SpawnCards.zombies)
 
   nullTimer() () ->
+  //{
 
     for p in g_PlayingHumanPlayers
     //{
-      let zombieDirector = new SpawnUndeadUnitDirector(p.getId().toString() + ":Zombies", p)
+      let playerDifficulty = g_GameInstance.getPlayerDifficulty(p)
+
+      let zombieDirector = new SpawnUndeadUnitDirector(p.getId().toString() + ":Basic", p)
       zombieDirector.setCreditsOnActivation(50)
       zombieDirector.setIntervalBetweenWaves(rangeReal(3.0, 10.0))
       zombieDirector.setIntervalDuringWaves(rangeReal(0.1, 1.0))
@@ -102,7 +137,7 @@ init
       zombieDirector.setDeck(g_zombieDeck)
       g_zombieDirectors[p.getId()] = zombieDirector
 
-      let eliteDirector = new SpawnUndeadUnitDirector(p.getId().toString() + ":Elites", p)
+      let eliteDirector = new SpawnUndeadUnitDirector(p.getId().toString() + ":Elite", p)
       eliteDirector.setCreditsOnActivation(50)
       eliteDirector.setIntervalBetweenWaves(rangeReal(3.0, 10.0))
       eliteDirector.setIntervalDuringWaves(rangeReal(0.1, 1.0))
@@ -112,7 +147,24 @@ init
       eliteDirector.setMaxAliveCount(context -> calculateMaxAliveCountForElites(context))
       eliteDirector.setDeck(g_eliteDecks.get(0))
       g_eliteDirectors[p.getId()] = eliteDirector
+
+      let bossDirector = new SpawnUndeadUnitDirector(p.getId().toString() + ":Boss", p)
+      bossDirector.setCreditsOnActivation(100)
+      bossDirector.setIntervalBetweenWaves(rangeReal(3.0, 10.0))
+      bossDirector.setIntervalDuringWaves(rangeReal(0.1, 1.0))
+      bossDirector.setSpawnsPerGoldDrop(context -> 1)
+      bossDirector.setGoldDropAmount(context -> GOLD_PER_BOSS)
+      bossDirector.setMaxSpawnCount(context -> max(playerDifficulty.floor(), 1))
+      bossDirector.setMaxAliveCount(context -> max(playerDifficulty.floor(), 1))
+      bossDirector.setDeck(g_bossDecks.get(0))
+      g_bossDirectors[p.getId()] = bossDirector
     //}
+
+    if (DEV_ENVIRONMENT)
+      DirectorDebugger.registerDirector(g_zombieDirectors[0])
+      DirectorDebugger.registerDirector(g_eliteDirectors[0])
+      DirectorDebugger.registerDirector(g_bossDirectors[0])
+  //}
 
   registerNightEvent(function onNightStart)
   registerDayEvent(function onDayStart)
