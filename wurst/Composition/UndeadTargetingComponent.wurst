@@ -256,39 +256,70 @@ public class UndeadTargetingComponent extends UnitComponent
 
     //recordNote("iOTP_i", "Order dispatched")
 
+    restartAttackTimer()
+
     if (m_targetUnit == null or not m_targetUnit.isAlive())
+    //{
       //recordNote("iOTP_i", "1 m_targetUnit == null")
 
-      // 1. Try targetting the nearest structure
-      // 2. Try targetting the nearest non-structure
       tryTargetClosestUnit()
 
       // Unable to find a target unit
       if (m_targetUnit == null or not m_targetUnit.isAlive())
+      //{
         //recordNote("iOTP_i", "2 m_targetUnit == null")
         
-        // 4. The target player is either null or considered dead, so start damaging the unit over time
-        if ((m_targetUnit == null or not m_targetUnit.isAlive()) and not m_ignoreDOTFate)
+        bool invalidTargetPlayer = m_targetPlayer == null
+        if (m_targetPlayer != null)
+          invalidTargetPlayer = m_targetPlayer.getMetadata().getHasLostGame()
+
+        // The target player is null or has lost the game, so start damaging the unit over time
+        if (invalidTargetPlayer and not m_ignoreDOTFate)
           //recordNote("iOTP_i", "3 m_targetUnit == null")
           startDOT()
           return
+      //}
+    //}
 
-    restartAttackTimer()
+    if (m_targetUnit == null)
+    //{
+      m_orderFailedReason = "Target unit is null"
+      m_numberOfTimesFailedOrder++
+
+      // Unable to issue the order so clear the target unit and try again later
+      clearTargetAndIssueNewOrder()
+      return
+    //}
+
+    if (not m_targetUnit.isAlive())
+    //{
+      m_orderFailedReason = "Target unit is dead"
+      m_numberOfTimesFailedOrder++
+
+      // Unable to issue the order so clear the target unit and try again later
+      clearTargetAndIssueNewOrder()
+      return
+    //}
 
     tryTeleportCloserToTargetUnit()
 
     if (not tryIssueOrder())
+    //{
       m_orderFailedReason = "Failed to issue attack order"
       m_numberOfTimesFailedOrder++
+
       // if (m_numberOfTimesFailedOrder > 3)
         // m_notes.clear()
       //recordNote("iOTP_i", "Unable to issue order ({0}), trying again".format(m_numberOfTimesFailedOrder.toString()))
+
       // Unable to issue the order so clear the target unit and try again later
       clearTargetAndIssueNewOrder()
-    else
-      m_numberOfTimesFailedOrder = 0
-      //recordNote("iOTP_i", "Success!")
-      m_orderFailedReason = "Success"
+      return
+    //}
+    
+    m_numberOfTimesFailedOrder = 0
+    //recordNote("iOTP_i", "Success!")
+    m_orderFailedReason = "Success"
 
   // --------------------------------------------------------------------------
   function clearTargetAndIssueNewOrder()
