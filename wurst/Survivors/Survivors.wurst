@@ -16,16 +16,17 @@ import UnitExtensions
 import SurvivorJobs
 import Spawning
 import Notifications
-import RegisterEvents
 import PlayerSpawnPointProviders
 import Jobs
 import CreateUnitJob
 import World
+import Time
 
 constant real SURVIVOR_SPAWN_TELEPORT_THRESHOLD_SQ = 4000.0*4000.0
 
 group g_tempGroup = CreateGroup()
 WeightedSet<SurvivorJobType> g_weightedSurvivorJobSet
+timer g_survivorSpawnTimer
 
 // ============================================================================
 public class SurvivorUtility
@@ -197,16 +198,17 @@ public function unit.isRescuableSurvivor() returns bool
   return this.isUnrescuedSurvivor()
 
 // ============================================================================
-function onUnitKilled()
-  let dyingUnit = GetDyingUnit()
-  if (dyingUnit.isSurvivor())
-    doAfter(SURVIVORS_RESPAWN_INTERVAL_RANGE.getRandom(), () -> SurvivorUtility.trySpawnSurvivorForPlayer(dyingUnit.getOwner()))
+function trySpawnSurvivorsForAllPlayers()
+  for p in g_PlayingHumanPlayers
+    SurvivorUtility.trySpawnSurvivorForPlayer(p)
 
 // ============================================================================
-function onConstructFinished()
-  let constructedUnit = GetConstructedStructure()
-  if (constructedUnit.isHeadquarters())
-    SurvivorUtility.trySpawnSurvivorForPlayer(constructedUnit.getOwner())
+function onDayStart()
+  g_survivorSpawnTimer.startPeriodic(10.0, function trySpawnSurvivorsForAllPlayers)
+
+// ============================================================================
+function onNightStart()
+  g_survivorSpawnTimer.pause()
 
 // ============================================================================
 init
@@ -220,9 +222,7 @@ init
     // ..add(SurvivorJobType.Acolyte, 1)
     // ..add(SurvivorJobType.Engineer, 1)
 
-  doPeriodically(10.0) (CallbackPeriodic cb) ->
-    for p in g_PlayingHumanPlayers
-      SurvivorUtility.trySpawnSurvivorForPlayer(p)
+  g_survivorSpawnTimer = CreateTimer()
 
-  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_DEATH, function onUnitKilled)
-  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_CONSTRUCT_FINISH, function onConstructFinished)
+  registerDayEvent(function onDayStart)
+  registerNightEvent(function onNightStart)
