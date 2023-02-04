@@ -14,6 +14,12 @@ import HumanPlayers
 import GameInstance
 import ProjectConstants
 import DirectorDebugger
+import HumanPlayerComponent
+import FX
+import Notifications
+import Icons
+import ColorUtility
+import PlayerProperties
 
 SpawnUndeadUnitDirector array g_zombieDirectors
 SpawnUndeadUnitDirector array g_eliteDirectors
@@ -67,11 +73,34 @@ function onNightStart()
 function onTimeOfSpawnsEnd()
 
   for p in g_PlayingHumanPlayers
-  //{
     g_zombieDirectors[p.getId()].disable()
     g_eliteDirectors[p.getId()].disable()
     g_bossDirectors[p.getId()].disable()
-  //}
+
+// ============================================================================
+function onDayStart()
+
+  for p in g_PlayingHumanPlayers
+    let playerDiff = g_GameInstance.getPlayerDifficulty(p)
+    let goldReward = calculateWaveGoldReward(g_GameInstance.getNight(), playerDiff)
+    if (goldReward > 0)
+      rewardGold(p, goldReward)
+
+// ============================================================================
+function rewardGold(player p, int goldReward)
+  p.addGold(goldReward)
+
+  let humanPlayerComp = p.getHumanPlayerComponent()
+  if (humanPlayerComp != null)
+    let baseOrHero = humanPlayerComp.getHeadquartersOrHero()
+    if (baseOrHero != null)
+      FX.createGainedGoldTag(baseOrHero.getPos(), goldReward, p)
+      FX.createGainedGoldEffect(baseOrHero.getPos(), p)
+
+  new Notification()
+  ..setMessage("Night Survived: +{0} gold".format(goldReward.toString().gold()))
+  ..setIconPath(Icons.bTNChestOfGold)
+  ..show(p)
 
 // ============================================================================
 init
@@ -127,41 +156,46 @@ init
     for p in g_PlayingHumanPlayers
     //{
       let playerDifficulty = g_GameInstance.getPlayerDifficulty(p)
+      let goldDropAmountProp = p.getProperty(PlayerProperty.GOLD_DROP_AMOUNT)
 
-      let zombieCreditsOnActivation = Pow(playerDifficulty + 1, 2.675)
+      let zombieCreditsOnActivation = 10 * Pow(playerDifficulty + 1, 2.275)
 
       let zombieDirector = new SpawnUndeadUnitDirector(p.getId().toString() + ":Basic", p)
+      zombieDirector.setCreditMultiplier(playerDifficulty)
       zombieDirector.setCreditsOnActivation(zombieCreditsOnActivation)
       zombieDirector.setIntervalBetweenWaves(rangeReal(3.0, 10.0))
       zombieDirector.setIntervalDuringWaves(rangeReal(0.1, 1.0))
       zombieDirector.setSpawnsPerGoldDrop(context -> 20)
-      zombieDirector.setGoldDropAmount(context -> 1)
+      zombieDirector.setGoldDropAmount(context -> goldDropAmountProp.getIntValue(1))
       zombieDirector.setMaxSpawnCount(context -> UNLIMITED)
       zombieDirector.setMaxAliveCount(context -> 10)
       zombieDirector.setDeck(g_zombieDeck)
       g_zombieDirectors[p.getId()] = zombieDirector
       
-      let eliteCreditsOnActivation = 2 * Pow(playerDifficulty + 1, 2.675)
+      let eliteCreditsOnActivation = 10 * Pow(playerDifficulty + 1, 2.275)
+      let eliteMaxAliveCount = 1 + max(playerDifficulty.floor() + 1, 1)
 
       let eliteDirector = new SpawnUndeadUnitDirector(p.getId().toString() + ":Elite", p)
+      eliteDirector.setCreditMultiplier(playerDifficulty)
       eliteDirector.setCreditsOnActivation(eliteCreditsOnActivation)
       eliteDirector.setIntervalBetweenWaves(rangeReal(3.0, 10.0))
       eliteDirector.setIntervalDuringWaves(rangeReal(0.1, 1.0))
-      eliteDirector.setSpawnsPerGoldDrop(context -> calculateSpawnsPerGoldDropForElites(context))
-      eliteDirector.setGoldDropAmount(context -> calculateGoldDropAmountForElites(context))
-      eliteDirector.setMaxSpawnCount(context -> calculateMaxSpawnCountForElites(context))
-      eliteDirector.setMaxAliveCount(context -> calculateMaxAliveCountForElites(context))
+      eliteDirector.setSpawnsPerGoldDrop(context -> eliteMaxAliveCount)
+      eliteDirector.setGoldDropAmount(context -> goldDropAmountProp.getIntValue(1))
+      eliteDirector.setMaxSpawnCount(context -> eliteMaxAliveCount * 3)
+      eliteDirector.setMaxAliveCount(context -> eliteMaxAliveCount)
       eliteDirector.setDeck(g_eliteDecks.get(0))
       g_eliteDirectors[p.getId()] = eliteDirector
       
-      let bossCreditsOnActivation = 100 + Pow(playerDifficulty + 1, 4.65)
+      let bossCreditsOnActivation = 70 + 12 * Pow(playerDifficulty + 1, 3)
 
       let bossDirector = new SpawnUndeadUnitDirector(p.getId().toString() + ":Boss", p)
+      bossDirector.setCreditMultiplier(playerDifficulty)
       bossDirector.setCreditsOnActivation(bossCreditsOnActivation)
       bossDirector.setIntervalBetweenWaves(rangeReal(3.0, 10.0))
       bossDirector.setIntervalDuringWaves(rangeReal(0.1, 1.0))
       bossDirector.setSpawnsPerGoldDrop(context -> 1)
-      bossDirector.setGoldDropAmount(context -> GOLD_PER_BOSS)
+      bossDirector.setGoldDropAmount(context -> goldDropAmountProp.getIntValue(GOLD_PER_BOSS))
       bossDirector.setMaxSpawnCount(context -> max(playerDifficulty.floor(), 1))
       bossDirector.setMaxAliveCount(context -> max(playerDifficulty.floor(), 1))
       bossDirector.setDeck(g_bossDecks.get(0))
@@ -175,4 +209,5 @@ init
   //}
 
   registerNightEvent(function onNightStart)
+  registerDayEvent(function onDayStart)
   registerTimeOfDayEvent(TIME_OF_SPAWNS_END, function onTimeOfSpawnsEnd)
