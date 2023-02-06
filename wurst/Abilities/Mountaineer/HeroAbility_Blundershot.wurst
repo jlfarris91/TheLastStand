@@ -5,13 +5,12 @@ import RealExtensions
 import SmartValue
 import DamageEvent
 import Range
-import Action
-import Func
 import Icons
 import HeroAbilities
-import ArcProjectile
 import SoundUtils
 import TlsAbilityIds
+import ECS
+import Missile
 
 constant rangeReal ABIL_DAMAGE_DISTANCE_SCALE = rangeReal(1.0, 0.5)
 
@@ -70,34 +69,50 @@ public class BlundershotComponent extends HeroAbilityComponent
     return Blundershot.getTooltipNormalExtended(effectiveAbilityLevel, learnedAbilityLevel)
 
   // --------------------------------------------------------------------------
-  override protected function onCastPoint(int _abilityId, vec2 target)
+  override protected function onCast(int _abilityId)
 
+    let target = EventData.getSpellTargetPos().withZ(60.0)
     let ownerUnit = getOwnerUnit()
     let ownerPlayer = ownerUnit.getOwner()
 
     let distance = ownerUnit.getAbility(Blundershot.ABILITY_ID).getField(ABILITY_RLF_CAST_RANGE, ownerUnit.getAbilityLevel(Blundershot.ABILITY_ID))
 
-    let startPos = ownerUnit.getPos()
+    let startPos = ownerUnit.getPos().withZ(60.0)
     let endPos = startPos + (target - startPos).norm() * distance
     let baseDamage = ownerUnit.getBaseDamage(0)
     let finalDamage = baseDamage * damageScale01.getValue()
 
-    Func2<ArcProjectile, unit, bool> unitFilter = (as, u) ->
-      return u.isAlive() and u.isEnemyOf(ownerPlayer)
+    ECS.createEntity() (ECEntity entity) ->
+    //{
+      let transformComp = entity.addComponentAs<ECTransform>(ECTransform.typeId)
+      transformComp.getTransform().setWorldPosition(startPos)
 
-    Action2<ArcProjectile, unit> callback = (as, u) ->
-      DamageEvent.setNextDamageFromCode()
-      DamageEvent.setNextDamageId(Blundershot.ABILITY_ID)
-      DamageEvent.setNextDamageElement(DAMAGE_ELEMENT_ATTACK)
-      let scale = ABIL_DAMAGE_DISTANCE_SCALE.lerp(parameterize(startPos, endPos, u.getPos()))
-      ownerUnit.damageTarget(u, finalDamage * scale, true, true, ATTACK_TYPE_CHAOS)
+      let effectComp = entity.addComponentAs<ECMissileEffect>(ECMissileEffect.typeId)
+      effectComp.setEffect(addEffect("Abilities\\Spells\\NightElf\\FanOfKnives\\FanOfKnivesMissile.mdl", startPos))
 
-    let fx = addEffect("Abilities\\Spells\\NightElf\\FanOfKnives\\FanOfKnivesMissile.mdl", startPos)
-    ..setOrientation(startPos.angleTo(endPos).radians, 0.0, 0.0)
+      let missile = entity.addComponentAs<ECMissile>(ECMissile.typeId)
+      missile.m_owner = ownerUnit
+      missile.m_startPos = startPos
+      missile.m_targetPos = endPos
+      missile.m_speed = 1000
 
-    new ArcProjectile(ownerUnit, fx, startPos, endPos, 64.0, 128.0, 1000, 0.05, unitFilter, callback)
+      let lineDamage = entity.addComponentAs<ECMissileLineDamage>(ECMissileLineDamage.typeId)
+      lineDamage.m_startSize = 64
+      lineDamage.m_endSize = 256
+      lineDamage.m_ignoreMissileTarget = false
 
-    g_attackSound.playOnPoint(startPos.toVec3())
+      lineDamage.setTargetFilter() (unit target) ->
+        return target.isAlive() and target.isEnemyOf(ownerPlayer)
+
+      lineDamage.setDamageCallback() (unit target) ->
+        DamageEvent.setNextDamageFromCode()
+        DamageEvent.setNextDamageId(Blundershot.ABILITY_ID)
+        DamageEvent.setNextDamageElement(DAMAGE_ELEMENT_ATTACK)
+        let scale = ABIL_DAMAGE_DISTANCE_SCALE.lerp(parameterize(startPos.toVec2(), endPos.toVec2(), target.getPos()))
+        ownerUnit.damageTarget(target, finalDamage * scale, true, true, ATTACK_TYPE_PIERCE)
+    //}
+
+    g_attackSound.playOnPoint(startPos)
 
 // ============================================================================
 public function IUnitMetadata.getBlundershotComponent() returns BlundershotComponent

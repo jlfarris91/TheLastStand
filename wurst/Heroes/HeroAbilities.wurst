@@ -103,8 +103,6 @@ public abstract class HeroAbilityComponent extends UnitComponent
     m_abilityId = abilityId
     m_abilityLearnId = abilityLearnId
 
-    registerAbilityEvents(abilityId, abilityLearnId)
-
     abilityLevel.onValueChanged().registerDispatched(this) () ->
       // Log.info("Ability level: " + abilityLevel.getIntValue().toString())
       updateAbilityState()
@@ -135,11 +133,15 @@ public abstract class HeroAbilityComponent extends UnitComponent
     skip
 
   // --------------------------------------------------------------------------
-  protected function onCastTarget(int _abilityId, unit _target)
+  protected function onChannel(int _abilityIdS)
     skip
 
   // --------------------------------------------------------------------------
-  protected function onCastPoint(int _abilityId, vec2 _target)
+  protected function onFinishCast(int _abilityId)
+    skip
+
+  // --------------------------------------------------------------------------
+  protected function onEndCast(int _abilityId)
     skip
 
   // --------------------------------------------------------------------------
@@ -185,27 +187,27 @@ public abstract class HeroAbilityComponent extends UnitComponent
   // --------------------------------------------------------------------------
   protected function registerAbilityEvents(vararg int abilityIds)
     for abilityId in abilityIds
-      if (not g_abilityIdToComponentTypeMap.has(abilityId))
-        g_abilityIdToComponentTypeMap.put(abilityId, this.typeId)
-        EventListener.onPointCast(abilityId, (unit caster, vec2 target) -> onHeroAbilityCastPoint(caster, target, this.typeId))
-        EventListener.onTargetCast(abilityId, (unit caster, unit target) -> onHeroAbilityCastTarget(caster, target, this.typeId))
-        EventListener.onCast(abilityId, (unit caster) -> onHeroAbilityCast(caster, this.typeId))
+      g_abilityIdToComponentTypeMap.put(abilityId, this.typeId)
+
+// ============================================================================
+function IUnitMetadata.getHeroAbilityComponent(int abilityId) returns HeroAbilityComponent
+  if (not g_abilityIdToComponentTypeMap.has(abilityId))
+    return null
+  let componentTypeId = g_abilityIdToComponentTypeMap.get(abilityId)
+  if (componentTypeId == 0)
+    return null
+  return this.getComponent(componentTypeId) castTo HeroAbilityComponent
 
 // ============================================================================
 function onUnitLearnedSkill()
   let learnedSkill = GetLearnedSkill()
-
-  if (not g_abilityIdToComponentTypeMap.has(learnedSkill))
-    return
-
-  let componentTypeId = g_abilityIdToComponentTypeMap.get(learnedSkill)
-
   let learningUnit = GetLearningUnit()
-  let comp = learningUnit.getComponent(componentTypeId) castTo HeroAbilityComponent
-  if (comp == null or not comp.getEnabled())
+
+  let abilityComp = learningUnit.getMetadata().getHeroAbilityComponent(learnedSkill)
+  if (abilityComp == null or not abilityComp.getEnabled())
     return
 
-  comp.onUnitLearnedSkill()
+  abilityComp.onUnitLearnedSkill()
 
 // ============================================================================
 function onHeroReviveFinish()
@@ -224,18 +226,6 @@ function onHeroReviveFinish()
 // ============================================================================
 public function registerHeroAbilityComponent(int componentTypeId)
   g_allHeroAbilityComponentTypeIds.add(componentTypeId)
-
-// ============================================================================
-function onHeroAbilityCastTarget(unit caster, unit target, int componentTypeId)
-  let comp = caster.getComponent(componentTypeId) castTo HeroAbilityComponent
-  if (comp != null and comp.getEnabled())
-    comp.onCastTarget(GetSpellAbilityId(), target)
-
-// ============================================================================
-function onHeroAbilityCastPoint(unit caster, vec2 target, int componentTypeId)
-  let comp = caster.getComponent(componentTypeId) castTo HeroAbilityComponent
-  if (comp != null and comp.getEnabled())
-    comp.onCastPoint(GetSpellAbilityId(), target)
 
 // ============================================================================
 function onHeroAbilityCast(unit caster, int componentTypeId)
@@ -321,6 +311,55 @@ public function HeroLearnAbilityDefinition.setupHeroAbilityGroup(HeroAbilityGrou
       error("Invalid argument heroAbilityGroup " + (heroAbilityGroup castTo int).toString())
 
 // ============================================================================
+function onSpellCast()
+  let castingUnit = GetSpellAbilityUnit()
+  let abilityId = GetSpellAbilityId()
+
+  let abilityComp = castingUnit.getMetadata().getHeroAbilityComponent(abilityId)
+  if (abilityComp == null or not abilityComp.getEnabled())
+    return
+
+  abilityComp.onCast(abilityId)
+
+// ============================================================================
+function onSpellChannel()
+  let castingUnit = GetSpellAbilityUnit()
+  let abilityId = GetSpellAbilityId()
+
+  let abilityComp = castingUnit.getMetadata().getHeroAbilityComponent(abilityId)
+  if (abilityComp == null or not abilityComp.getEnabled())
+    return
+
+  abilityComp.onChannel(abilityId)
+
+// ============================================================================
+function onSpellEndCast()
+  let castingUnit = GetSpellAbilityUnit()
+  let abilityId = GetSpellAbilityId()
+
+  let abilityComp = castingUnit.getMetadata().getHeroAbilityComponent(abilityId)
+  if (abilityComp == null or not abilityComp.getEnabled())
+    return
+
+  abilityComp.onEndCast(abilityId)
+
+// ============================================================================
+function onSpellFinish()
+  let castingUnit = GetSpellAbilityUnit()
+  let abilityId = GetSpellAbilityId()
+
+  let abilityComp = castingUnit.getMetadata().getHeroAbilityComponent(abilityId)
+  if (abilityComp == null or not abilityComp.getEnabled())
+    return
+
+  abilityComp.onFinishCast(abilityId)
+
+// ============================================================================
 init
   registerPlayerUnitEvent(EVENT_PLAYER_HERO_SKILL, function onUnitLearnedSkill)
   registerPlayerUnitEvent(EVENT_PLAYER_HERO_REVIVE_FINISH, function onHeroReviveFinish)
+
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_SPELL_CHANNEL, function onSpellChannel)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_SPELL_CAST, function onSpellCast)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_SPELL_ENDCAST, function onSpellEndCast)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_SPELL_FINISH, function onSpellFinish)
