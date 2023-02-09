@@ -1,7 +1,55 @@
 package Damage
+import GroupUtils
 
 public constant DAMAGE_EVENT_PRIO_START     = 0 // Abort damage at this priority
 public constant DAMAGE_EVENT_PRIO_RELATIVE  = 1 // Apply relative changes (multiplication and division)
 public constant DAMAGE_EVENT_PRIO_ABSOLUTE  = 2 // Apply absolute changes (addition and subtraction)
 public constant DAMAGE_EVENT_PRIO_SHIELD    = 4 // Apply reduction from "shield" effects
 public constant DAMAGE_EVENT_PRIO_FINAL     = 5 // Final damage (won't be changed at this stage)
+
+// ============================================================================
+public class DamageArea
+
+  bool attack = false
+  bool ranged = false
+
+  real areaFull = 25
+  real areaMedium = 100
+  real areaSmall = 200
+
+  real damageFactorFull = 1.0
+  real damageFactorMedium = 0.4
+  real damageFactorSmall = 0.1
+
+  boolexpr targetFilter = null
+
+  attacktype attackType = ATTACK_TYPE_CHAOS
+  damagetype damageType = DAMAGE_TYPE_UNIVERSAL
+  weapontype weaponType = WEAPON_TYPE_WHOKNOWS
+
+  // ----------------------------------------------------------------------------
+  function damage(unit owner, vec2 pos, real damage)
+
+    let g = getGroup()
+    g.enumUnitsInRange(pos, max(areaFull, areaMedium, areaSmall), targetFilter)
+
+    let areaFullSq = areaFull*areaFull
+    let areaMedSq = areaMedium*areaMedium
+    let areaSmallSq = areaSmall*areaSmall
+
+    for u from g
+    //{
+      let distSq = u.getPos().distanceToSq(pos)
+      var dmg = 0.0
+
+      if (distSq < areaFullSq)
+        dmg = damage * damageFactorFull
+      else if (distSq < areaMedSq)
+        dmg = damage * damageFactorMedium
+      else if (distSq < areaSmallSq)
+        dmg = damage * damageFactorSmall
+
+      owner.damageTarget(u, dmg, attack, ranged, attackType, damageType, weaponType)
+    //}
+
+    g.release()
