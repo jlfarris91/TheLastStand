@@ -12,6 +12,8 @@ import TlsAbilityIds
 import RealtimeUpdate
 import ECS
 import Missile
+import Damage
+import StandardTextTags
 
 constant int ATTACK_ANIMATION_INDEX = 3
 constant rangeReal ABIL_DAMAGE_DISTANCE_SCALE = rangeReal(1.0, 0.5)
@@ -22,6 +24,7 @@ constant group g_tempGroup = CreateGroup()
 class FocusedShot
   static constant int ABILITY_ID = TlsAbilityIds.Hero.lineshot
   static constant int ABILITY_LEARN_ID = TlsAbilityIds.Hero.lineshot_learn
+  static constant int SPILL_DAMAGE_ID = 'FSSD'
 
   // --------------------------------------------------------------------------
   static function getDamageScalar01(int effectiveAbilityLevel) returns real
@@ -116,7 +119,7 @@ public class FocusedShotComponent extends HeroAbilityComponent implements IRealt
       return
 
     let ownerUnit = getOwnerUnit()
-    // let ownerPlayer = ownerUnit.getOwner()
+    let ownerPlayer = ownerUnit.getOwner()
     let targetUnitCached = m_targetUnit
 
     ownerUnit.setAnimation(ATTACK_ANIMATION_INDEX)
@@ -127,7 +130,7 @@ public class FocusedShotComponent extends HeroAbilityComponent implements IRealt
 
     let baseDamage = ownerUnit.getBaseDamage(0)
     let finalDamage = baseDamage * damageScale01.getValue()
-    // let spillDamage = finalDamage * 0.25
+    let spillDamage = finalDamage * 0.25
 
     ECS.createEntity() (ECEntity entity) ->
     //{
@@ -147,24 +150,24 @@ public class FocusedShotComponent extends HeroAbilityComponent implements IRealt
         DamageEvent.setNextDamageElement(DAMAGE_ELEMENT_ATTACK)
         ownerUnit.damageTarget(targetUnitCached, finalDamage, true, true, ATTACK_TYPE_PIERCE)
 
-      // Only deal area damage when attacking ground units
-      // if (targetUnitCached.getFlyHeight() < 60)
-      // //{
-      //   let lineDamage = entity.addComponentAs<ECMissileAreaDamage>(ECMissileAreaDamage.typeId)
-      //   lineDamage.m_damage = spillDamage
-      //   lineDamage.m_startSize = 64
-      //   lineDamage.m_endSize = 64
-      //   lineDamage.m_ignoreMissileTarget = true
+      // Only deal area damage when targetting ground units
+      if (targetUnitCached.getFlyHeight() < 60)
+      //{
+        let lineDamage = entity.addComponentAs<ECMissileAreaDamage>(ECMissileAreaDamage.typeId)
+        lineDamage.m_damage = spillDamage
+        lineDamage.m_startSize = 64
+        lineDamage.m_endSize = 64
+        lineDamage.m_ignoreMissileTarget = true
 
-      //   lineDamage.setTargetFilter() (unit target) ->
-      //     return target.isAlive() and target.isEnemyOf(ownerPlayer)
+        lineDamage.setTargetFilter() (unit target) ->
+          return target.isAlive() and target.isEnemyOf(ownerPlayer)
 
-      //   lineDamage.setDamageCallback() (unit target) ->
-      //     DamageEvent.setNextDamageFromCode()
-      //     DamageEvent.setNextDamageId(FocusedShot.ABILITY_ID)
-      //     DamageEvent.setNextDamageElement(DAMAGE_ELEMENT_ATTACK)
-      //     ownerUnit.damageTarget(target, spillDamage, false, false, ATTACK_TYPE_PIERCE)
-      // //}
+        lineDamage.setDamageCallback() (unit target) ->
+          DamageEvent.setNextDamageFromCode()
+          DamageEvent.setNextDamageId(FocusedShot.SPILL_DAMAGE_ID)
+          DamageEvent.setNextDamageElement(DAMAGE_ELEMENT_ATTACK)
+          ownerUnit.damageTarget(target, spillDamage, false, false, ATTACK_TYPE_PIERCE)
+      //}
     //}
 
   // ----------------------------------------------------------------------------
@@ -227,3 +230,10 @@ public function IUnitMetadata.getOrAddFocusedShotComponent() returns FocusedShot
 init
   registerHeroAbilityComponentType(FocusedShotComponent.typeId, FocusedShot.ABILITY_ID)
   registerHeroAbilityComponentType(FocusedShotComponent.typeId, FocusedShot.ABILITY_LEARN_ID)
+
+  // Show crit text tag when enemy is hit by focused shot
+  DamageEvent.addListener(DAMAGE_EVENT_PRIO_FINAL) -> 
+    if (DamageEvent.getType() == DamageType.CODE and
+        DamageEvent.getId() == FocusedShot.ABILITY_ID and
+        DamageEvent.getAmount() > 0)
+      createCriticalStrikeTextTag(DamageEvent.getTarget(), DamageEvent.getAmount().floor())
