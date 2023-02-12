@@ -15,7 +15,7 @@ import Math
 import LinkedList
 import RealtimeUnitComponent
 import HashMap
-import TimerUtils
+import ClosureTimers
 import Orders
 import ColorUtility
 import RegisterEvents
@@ -30,12 +30,12 @@ import TlsAbilityIds
 import HashList
 import SoundUtils
 import Optional
-import ClosureTimers
 import GroupUtils
 import IProgress
 import Command
 import GameInstance
 import Jobs
+import TimerUtils
 
 // Buildings
 public constant int UNIT_ID_LOOTABLE_BARN = 'h01H'
@@ -461,6 +461,8 @@ public class LootableComponent extends UnitComponent
     let operation = getOwner().getOrAddLootOperationComponent()
     operation.start(looter, scaledSearchDuration, lootCount)
 
+    // Log.info("Looting started")
+
   // --------------------------------------------------------------------------
   protected function onLootingFinished(unit lootingUnit)
     if (m_lootingUnit == null)
@@ -477,6 +479,8 @@ public class LootableComponent extends UnitComponent
 
     m_lootingUnit.setAbilityCooldown(ABILITY_ID_SEARCH, 0, 0.0)
     m_lootingUnit = null
+
+    // Log.info("Looting finished")
 
   // --------------------------------------------------------------------------
   protected function onLootingCanceled(unit lootingUnit)    
@@ -497,6 +501,8 @@ public class LootableComponent extends UnitComponent
 
     // reset state so it can be looted again
     m_lootingUnit = null
+
+    // Log.info("Looting canceled")
 
   // --------------------------------------------------------------------------
   private function makeUnlootable()
@@ -697,18 +703,15 @@ public class LootOperationComponent extends RealtimeUnitComponent
   private Notification m_notification
   private real m_duration
   private timer m_timer
+  private CallbackCounted m_awardTimer
   private int m_secondsElapsed
   private real m_manaCost
   private bool m_isRunning
   private vec2 m_looterPos
 
-  private Vector<timer> m_lootTimers = new Vector<timer>(MAX_LOOT_COUNT)
-
   // --------------------------------------------------------------------------
   construct(IUnitMetadata owner)
     super(owner)
-    
-    m_timer = getTimer()
 
     m_worldProgressBar = new WorldProgressBar()
     ..setHeight(128.0)
@@ -720,6 +723,10 @@ public class LootOperationComponent extends RealtimeUnitComponent
     if (m_timer != null)
       m_timer.release()
       m_timer = null
+
+    if (m_awardTimer != null)
+      destroy m_awardTimer
+      m_awardTimer = null
     
     if (m_worldProgressBar != null)
       destroy m_worldProgressBar
@@ -733,12 +740,6 @@ public class LootOperationComponent extends RealtimeUnitComponent
     if (m_progress != null)
       destroy m_progress
       m_progress = null
-
-    if (m_lootTimers != null)
-      for t in m_lootTimers
-        if (t != null)
-          t.release()
-      destroy m_lootTimers
 
   // --------------------------------------------------------------------------
   override function onEnabled()
@@ -786,7 +787,7 @@ public class LootOperationComponent extends RealtimeUnitComponent
     if (m_secondsElapsed != secondsElapsed)
       m_secondsElapsed = secondsElapsed
       m_lootingUnit.addMana(-m_manaCost)
-      if (m_lootingUnit.getMana() == 0)
+      if (m_lootingUnit.getMana() <= 0)
         FX.createOutOfManaTag(m_lootingUnit.getPos(), m_lootingUnit.getOwner())
         cancel()
 
@@ -799,20 +800,22 @@ public class LootOperationComponent extends RealtimeUnitComponent
     m_lootingUnit = looter
     m_duration = duration * lootCount
 
+    m_timer = getTimer()
+    m_timer.start(m_duration, null)
+
     // Avoid implicit capture of 'this' by caching the result of m_lootableUnit
     let lootableUnitCached = getOwnerUnit()
 
-    m_lootTimers.resize(lootCount)
-    let timeBetweenLoot = m_duration / lootCount
-    for i = 1 to lootCount
-      let lootTimer = getTimer()..doManual(timeBetweenLoot * i, true, () -> onAwardLoot(lootableUnitCached, i - 1))
-      m_lootTimers.add(lootTimer)
+    m_awardTimer = doPeriodicallyCounted(duration, lootCount) (cb) ->
+      onAwardLoot(lootableUnitCached)
+      if (cb.isLast())
+        // Let the CallbackCounted clean up the award timer
+        m_awardTimer = null
+        cleanup()
     
     let lootingPlayer = looter.getOwner()
     let cameraPos = getOwnerUnit().getPos()
     m_looterPos = looter.getPos()
-
-    m_timer.doManual(m_duration, true, () -> onOperationFinished(lootableUnitCached))
 
     m_progress = new Progress()
     m_progress.report("Looting {0}...".format(getOwnerUnit().getName()))
@@ -846,41 +849,22 @@ public class LootOperationComponent extends RealtimeUnitComponent
     if (lootable != null)
       lootable.onLootingCanceled(m_lootingUnit)
     cleanup()
-  
-  // --------------------------------------------------------------------------
-  private static function onOperationFinished(unit lootable)
-    let metadata = lootable.getMetadata()
-    if (metadata == null)
-      return
-    let operation = metadata.getLootOperationComponent()
-    if (operation == null or operation.getIsRunning() == false)
-      return
-    operation.onOperationFinished()
-
-  // --------------------------------------------------------------------------
-  private function onOperationFinished()
-    cleanup()
 
   // ----------------------------------------------------------------------------
-  private static function onAwardLoot(unit lootable, int index)
+  private static function onAwardLoot(unit lootable)
     let metadata = lootable.getMetadata()
     if (metadata == null)
       return
     let operation = metadata.getLootOperationComponent()
     if (operation == null or operation.getIsRunning() == false)
       return
-    operation.onAwardLoot(index)
+    operation.onAwardLoot()
 
   // --------------------------------------------------------------------------
-  private function onAwardLoot(int index)
+  private function onAwardLoot()
     let lootable = getOwner().getLootableComponent()
     if (lootable != null)
       lootable.awardLoot(m_lootingUnit)
-
-    let lootTimer = m_lootTimers.get(index)
-    if (lootTimer != null)
-      lootTimer.release()
-      m_lootTimers.set(index, null)
 
   // --------------------------------------------------------------------------
   private function cleanup()
@@ -892,7 +876,14 @@ public class LootOperationComponent extends RealtimeUnitComponent
     g_looterToOperationMap.remove(m_lootingUnit)
     m_lootingUnit = null
 
-    m_timer.pause()
+    if (m_timer != null)
+      m_timer.release()
+      m_timer = null
+
+    if (m_awardTimer != null)
+      destroy m_awardTimer
+      m_awardTimer = null
+
     m_worldProgressBar.fadeOut()
     
     if (m_notification != null)
@@ -903,11 +894,6 @@ public class LootOperationComponent extends RealtimeUnitComponent
     if (m_progress != null)
       destroy m_progress
       m_progress = null
-
-    for t in m_lootTimers
-      if (t != null)
-        t.release()
-    m_lootTimers.clear()
 
     this.unregisterForRealtimeUpdate()
 
@@ -967,7 +953,7 @@ function prepareSearchSpell(unit lootingUnit, real searchDuration)
     lootingUnit.setAbilityLevel(ABILITY_ID_SEARCH, lvl)
 
 // ============================================================================
-function onSpellChannel()
+function onSpellCast()
   if (GetSpellAbilityId() != ABILITY_ID_SEARCH)
     return
 
@@ -1000,14 +986,21 @@ function onSpellChannel()
   var scaledSearchDuration = getUnitSearchDuration(lootingUnit, lootable.getSearchDurationPerLoot())
   scaledSearchDuration = max(scaledSearchDuration, 0.1)
 
-  let manaRemainingAfterSearch = calculateManaRemainingAfterLootOperation(lootingUnit, scaledSearchDuration)
-  if (manaRemainingAfterSearch < 0)
+  let startingMana = lootingUnit.getMana()
+  let manaRegenPerSecond = lootingUnit.getField(UNIT_RF_MANA_REGENERATION)
+  let manaCostPerSecond = getUnitSearchManaCostPerSecond(lootingUnit)
+
+  let maxPossibleLootCount = calculateMaxPossibleLootCount(startingMana, manaRegenPerSecond, manaCostPerSecond, scaledSearchDuration)
+  if (maxPossibleLootCount <= 0)
   //{
     lootingUnit.issueImmediateOrderById(Orders.stop)
     lootingUnit.resetAbilityCooldown(TlsAbilityIds.search)
-    let manaNeeded = (lootingUnit.getMana() + manaRemainingAfterSearch.abs()).floor()
-    displayMessageToPlayer(lootingPlayer, "Failed To Search".colorize(Colors.red) + " You need {0} mana to loot this structure.".format(manaNeeded.toString()))
+
+    let manaRequired = calculateManaRequiredToLoot(manaRegenPerSecond, manaCostPerSecond, scaledSearchDuration)
+    
+    displayMessageToPlayer(lootingPlayer, "Failed To Search".colorize(Colors.red) + " You need {0} mana to loot this structure.".format(manaRequired.toString()))
     TlsSounds.errorSoundDef.playForPlayer(lootingPlayer)
+    
     if (getRealTimeSeconds() - g_notEnoughManaLastPlayedTime[lootingPlayer.getId()] > 2)
       g_notEnoughManaLastPlayedTime[lootingPlayer.getId()] = getRealTimeSeconds()
       doAfter(0.5, () -> g_notEnoughManaSoundDef.playForPlayer(lootingPlayer))
@@ -1032,8 +1025,7 @@ function onSpellChannel()
   //}
   else
   //{
-    let lootCountPossible = max(1, (manaRemainingAfterSearch / scaledSearchDuration).floor())
-    let lootCountActual = clamp(lootCountPossible, 0, lootable.getLootCount())
+    let lootCountActual = clamp(maxPossibleLootCount, 0, lootable.getLootCount())
     // Log.info("unit is starting to loot {0} times".format(lootCountActual.toString()))
     prepareSearchSpell(lootingUnit, lootableUnit, lootCountActual)
     lootable.startLooting(lootingUnit, lootCountActual)
@@ -1194,18 +1186,19 @@ public function getUnitSearchManaCostPerSecond(unit looter) returns real
   return manaCostPerSecond
 
 // ============================================================================
-public function canUnitSearchForDuration(unit looter, real duration) returns bool
-  return calculateManaRemainingAfterLootOperation(looter, duration) > 0
+public function calculateManaRequiredToLoot(real manaRegenPerSecond, real manaCostPerSecond, real duration) returns int
+  let totalManaRegened = (manaRegenPerSecond * duration).floor()
+  let totalManaDrained = (manaCostPerSecond * duration).round()
+  return (totalManaRegened - totalManaDrained).abs()
 
 // ============================================================================
-public function calculateManaRemainingAfterLootOperation(unit looter, real duration) returns int
-  let manaCostPerSecond = getUnitSearchManaCostPerSecond(looter)
-  let startingMana = looter.getMana()
-  let manaRegenPerSecond = looter.getField(UNIT_RF_MANA_REGENERATION)
-  let totalManaRegened = manaRegenPerSecond * duration
-  let totalManaDrained = manaCostPerSecond * duration
-  let manaAfterRegen = startingMana + totalManaRegened
-  return (manaAfterRegen - totalManaDrained).floor()
+function calculateMaxPossibleLootCount(real startingMana, real manaRegenPerSecond, real manaCostPerSecond, real duration) returns int
+  let totalManaRegened = (manaRegenPerSecond * duration).floor()
+  let totalManaDrained = (manaCostPerSecond * duration).round()
+  let totalManaCost = totalManaRegened - totalManaDrained
+  if (totalManaCost >= 0)
+    return INT_MAX
+  return (startingMana / totalManaCost.abs()).floor()
 
 // ============================================================================
 init
@@ -1254,7 +1247,7 @@ init
 
   g_activeOperations = new LinkedList<LootOperationComponent>()
   
-  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_SPELL_CHANNEL, function onSpellChannel)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_SPELL_CAST, function onSpellCast)
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_SPELL_ENDCAST, function onSpellEndCast)
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ISSUED_UNIT_ORDER, function onUnitIssuedUnitOrder)
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ISSUED_ORDER, function onUnitIssuedImmediateOrPointOrder)
@@ -1271,4 +1264,13 @@ init
     g_lootFinishedSound[i].volume = 100
     g_lootFinishedSound[i].pitch += i * 0.1
 
-  
+// ============================================================================
+@test function asdf()
+
+  let startingMana = 500.0
+
+  let maxLoot = calculateMaxPossibleLootCount(startingMana, 2, 10, 10)
+  // Log.info(maxLoot.toString())
+
+  let manaReq = calculateManaRequiredToLoot(2, 10, 10)
+  // Log.info(manaReq.toString())
