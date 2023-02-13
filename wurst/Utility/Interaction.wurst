@@ -1,0 +1,212 @@
+package Interaction
+import RealtimeUnitComponent
+import WorldProgressBar
+import Notifications
+import ClosureTimers
+import IProgress
+import Math
+import FX
+import Icons
+import HashMap
+import Runnable
+import ErrorHandling
+import RegisterEvents
+
+constant real INTERACTOR_STANDING_POS_THRESHOLD_SQ = 64.0 * 64.0
+int g_interactionIdGen = 0
+HashMap<unit, Interaction> g_unitToOperationMap = new HashMap<unit, Interaction>()
+
+// ============================================================================
+public class Interaction extends Runnable implements IRealtimeListener
+  private int m_id = -1
+  private unit m_interactingUnit = null
+  private WorldProgressBar m_worldProgressBar = null
+  private Progress m_progress = null
+  private Notification m_notification = null
+  private real m_duration = 0
+  private CallbackSingle m_timer = null
+  private int m_secondsElapsed = 0
+  private real m_manaCost = 0
+  private vec2 m_startPos = ZERO2
+
+  // ----------------------------------------------------------------------------
+  construct()
+
+    m_id = g_interactionIdGen
+    g_interactionIdGen++
+
+    m_worldProgressBar = new WorldProgressBar()
+    ..setHeight(128.0)
+    ..setScale(16.0)
+
+  // --------------------------------------------------------------------------
+  ondestroy
+
+    if (m_timer != null)
+      destroy m_timer
+      m_timer = null
+    
+    if (m_worldProgressBar != null)
+      destroy m_worldProgressBar
+      m_worldProgressBar = null
+
+    if (m_notification != null)
+      m_notification.close()
+      m_notification.release()
+      m_notification = null
+
+    if (m_progress != null)
+      destroy m_progress
+      m_progress = null
+
+  // ----------------------------------------------------------------------------
+  function getId() returns int
+    return m_id
+
+  // --------------------------------------------------------------------------
+  function getTimeRemaining() returns real
+    return m_timer != null ? m_timer.getRemainingSeconds() : 0.0
+
+  // ----------------------------------------------------------------------------
+  function getInteractingUnit() returns unit
+    return m_interactingUnit
+  
+  // ----------------------------------------------------------------------------
+  function setInteractingUnit(unit value)
+    m_interactingUnit = value
+
+  // ----------------------------------------------------------------------------
+  function getDuration() returns real
+    return m_duration
+  
+  // ----------------------------------------------------------------------------
+  function setDuration(real value)
+    m_duration = value
+
+  // ----------------------------------------------------------------------------
+  function getManaCost() returns real
+    return m_manaCost
+  
+  // ----------------------------------------------------------------------------
+  function setManaCost(real value)
+    m_manaCost = value
+
+  // --------------------------------------------------------------------------
+  override function realtimeUpdate(real dt)
+
+    if (not isRunning())
+      return
+
+    // Catch any edge-case order that would cause the interacting unit to move while still looting
+    if (m_interactingUnit.getPos().distanceToSq(m_startPos) > INTERACTOR_STANDING_POS_THRESHOLD_SQ)
+      cancel()
+      return
+    
+    let percentage01 = parameterize01(m_duration, 0.0, m_timer.getRemainingSeconds())
+    m_progress.report(percentage01)
+    raiseProgressChangedEvent()
+
+    if (m_worldProgressBar != null)
+      m_worldProgressBar.setPercentageNow(percentage01)
+
+    // Remove mana per second
+    let secondsElapsed = m_timer.getElapsedSeconds().floor()
+    if (m_secondsElapsed != secondsElapsed)
+    //{
+      m_secondsElapsed = secondsElapsed
+
+      if (m_manaCost > 0)
+        m_interactingUnit.addMana(-m_manaCost)
+        if (m_interactingUnit.getMana() <= 0)
+          FX.createOutOfManaTag(m_interactingUnit.getPos(), m_interactingUnit.getOwner())
+          cancel()
+    //}
+
+  // --------------------------------------------------------------------------
+  override function onStarted()
+
+    if (m_interactingUnit == null)
+      error("Interacting unit is null")
+
+    m_timer = doAfter(m_duration) () ->
+      m_timer = null
+      complete()
+
+    m_startPos = m_interactingUnit.getPos()
+
+    m_progress = new Progress()
+
+    m_worldProgressBar
+    ..setPos(m_startPos)
+    ..setSpeed(1.0 / (m_duration != 0.0 ? m_duration : 1.0))
+    ..fadeIn()
+
+    m_notification = createNotification()..acquire()
+
+    g_unitToOperationMap.put(m_interactingUnit, this)
+
+    this.registerForRealtimeUpdate(RealtimeUpdatePriority.Fast)
+
+  // ----------------------------------------------------------------------------
+  override protected function onCompleted()
+    super.onCompleted()
+    cleanup()
+
+  // --------------------------------------------------------------------------
+  protected function cleanup()
+    m_duration = 0.
+    m_manaCost = 0
+    m_secondsElapsed = 0
+
+    g_unitToOperationMap.remove(m_interactingUnit)
+    m_interactingUnit = null
+
+    // Let the CallbackSingle destroy itself
+    // or, destroyed manually when operation is canceled
+    if (m_timer != null)
+      destroy m_timer
+      m_timer = null
+
+    m_worldProgressBar.fadeOut()
+    
+    if (m_notification != null)
+      m_notification.close()
+      m_notification.release()
+      m_notification = null
+
+    if (m_progress != null)
+      destroy m_progress
+      m_progress = null
+
+    this.unregisterForRealtimeUpdate()
+
+  // ----------------------------------------------------------------------------
+  override function getProgress() returns real
+    return m_progress != null ? m_progress.getProgress() : 0.0
+
+  // ----------------------------------------------------------------------------
+  protected function createNotification() returns Notification
+    return new Notification(m_duration)
+    ..setProgress(m_progress)
+    ..setIconPath(Icons.bTNTelescope)
+    ..setMessage("Interacting...")
+    ..setCanClose(false)
+    ..show(m_interactingUnit.getOwner())
+
+  // ----------------------------------------------------------------------------
+  static function getInteraction(unit interactingUnit) returns Interaction
+    return g_unitToOperationMap.get(interactingUnit)
+
+// ============================================================================
+function onUnitIssuedImmediateOrPointOrder()
+  let orderedUnit = GetOrderedUnit()
+  let interaction = Interaction.getInteraction(orderedUnit)
+  if (interaction == null)
+    return
+  Log.info("issued immediate or point order cancels interaction")
+  interaction.cancel()
+
+// ============================================================================
+init
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ISSUED_ORDER, function onUnitIssuedImmediateOrPointOrder)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ISSUED_POINT_ORDER, function onUnitIssuedImmediateOrPointOrder)
