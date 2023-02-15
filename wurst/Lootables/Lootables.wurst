@@ -112,7 +112,7 @@ int array g_notEnoughManaLastPlayedTime
 
 HashList<LootDirector> g_lootDirectors = new HashList<LootDirector>()
 int g_lootDirectorsGen = 0
-UpdateLootDirectorsJob g_lootDirectorJob = new UpdateLootDirectorsJob()..acquire()
+public UpdateLootDirectorsJob g_lootDirectorJob = new UpdateLootDirectorsJob()..acquire()
 
 Thread g_lootThread = new Thread("loot")
 ..setEnabled(true)
@@ -235,12 +235,51 @@ public class LootDirector extends Director
     if (credits == 0)
       return
 
-    // Then loop through each loot reward and try to upgrade its tier using remaining credits.
+    // Loop through each loot reward and try to upgrade its tier using remaining credits.
     // Upgrade in reverse order so that the better loot is at the end of the loot operation.
     // Stop after making a full loop without upgrading any cards.
+
+    // let lootCardCount = m_lootable.getLootCount()
+    // let startIndex = GetRandomInt(0, lootCardCount - 1)
+    // var index = startIndex
+    // var upgradedCard = false
+
+    // while (true)
+    // //{
+    //   let drawnCard = m_lootable.getLoot(index)
+
+    //   let card = drawnCard.card castTo TieredCard
+    //   let currTier = drawnCard.tier
+    //   let nextTier = currTier + 1
+    //   let currTierCost = drawnCard.cost
+
+    //   if (card != null and nextTier < card.getTierCount())
+    //     let nextTierCost = card.getCost(nextTier)
+    //     let costToUpgrade = nextTierCost - currTierCost
+    //     if (credits > costToUpgrade)
+    //       drawnCard.tier = nextTier
+    //       drawnCard.cost = nextTierCost
+    //       credits -= costToUpgrade
+    //       upgradedCard = true
+
+    //   index = wrap(index - 1, 0, lootCardCount - 1)
+
+    //   // Completed a full loop and wrapped around 
+    //   if (index == startIndex)
+    //     // Break if we didn't upgrade a single card
+    //     if (not upgradedCard)
+    //       break
+    //     upgradedCard = false
+    // //}
+
+    // Try to upgrade a random card in the lootable's hand
+    // If the card at the index is null or already at max tier then try to
+    // upgrade the next card in the hand in reverse order.
+
     let lootCardCount = m_lootable.getLootCount()
-    var index = lootCardCount - 1
-    var upgradedCard = false
+    let startIndex = GetRandomInt(0, lootCardCount - 1)
+    var index = startIndex
+
     while (true)
     //{
       let drawnCard = m_lootable.getLoot(index)
@@ -250,22 +289,20 @@ public class LootDirector extends Director
       let nextTier = currTier + 1
       let currTierCost = drawnCard.cost
 
-      if (card != null and nextTier < card.getTierCount())
+      let isValidCard = card != null and nextTier < card.getTierCount()
+      if (isValidCard)
         let nextTierCost = card.getCost(nextTier)
         let costToUpgrade = nextTierCost - currTierCost
         if (credits > costToUpgrade)
           drawnCard.tier = nextTier
           drawnCard.cost = nextTierCost
           credits -= costToUpgrade
-          upgradedCard = true
 
       index = wrap(index - 1, 0, lootCardCount - 1)
 
       // Completed a full loop and wrapped around 
-      if (index == lootCardCount - 1)
-        if (not upgradedCard)
-          break
-        upgradedCard = false
+      if (index == startIndex or isValidCard)
+        break
     //}
 
     setCredits(credits)
@@ -274,15 +311,19 @@ public class LootDirector extends Director
   protected function onDayStart()
     generateCredits()
 
-    let deck = getDeck()
-    let mostExpensiveCard = deck.getMostExpensiveCard()
-    let credits = getCredits()
+    if (m_lootable.getLootCount() < m_lootable.getMaxLootCount())
+    //{
+      let deck = getDeck()
+      let leastExpensiveCard = deck.getLeastExpensiveCard()
+      let credits = getCredits()
 
-    // Make sure the lootable has enough credits for at least the first tier of each card
-    if (credits < mostExpensiveCard.getCost())
-      setCredits(mostExpensiveCard.getCost().toReal())
-
+      // Make sure the lootable has enough credits for at least one card
+      if (credits < leastExpensiveCard.getCost())
+        setCredits(leastExpensiveCard.getCost().toReal())
+    //}
+    
     drawLootCards(1)
+
     tryUpgradeLootCards()
 
 // ----------------------------------------------------------------------------

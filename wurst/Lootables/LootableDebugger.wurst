@@ -13,6 +13,7 @@ import LootGoldCard
 import LootSurvivorCard
 import LootUndeadCard
 import RealExtensions
+import StringBuilder
 
 constant int MAX_TIER_COUNT = 4
 
@@ -103,7 +104,15 @@ class LootableDebugger extends DebuggerRealtimeUpdateFrame
     int survivorCountMax = 0
     int undeadCountMax = 0
 
+    int totalLootCount = 0
+    int totalLootCapacity = 0
+
+    real totalCredits = 0.0
+
     for lootable in g_lootableUnits
+      totalLootCount += lootable.getLootCount()
+      totalLootCapacity += lootable.getMaxLootCount()
+      totalCredits += lootable.getDirector().getCredits()
       for i = 0 to lootable.getLootCount() - 1
         let loot = lootable.getLoot(i)
         switch (loot.card.typeId)
@@ -129,49 +138,51 @@ class LootableDebugger extends DebuggerRealtimeUpdateFrame
     real array[MAX_TIER_COUNT] survivorPerc
     real array[MAX_TIER_COUNT] undeadPerc
 
-    frame.setOrAddText("")
+    frame.setOrAddText("Loot: {0}/{1}".format(totalLootCount.toString(), totalLootCapacity.toString()))
+    frame.addText("Update Job: " + g_lootDirectorJob.getDebuggerStateString())
+
+    let avgCredits = totalCredits / max(1, g_lootableUnits.size())
+    frame.addText("Credits: t:{0} a:{1}".format(totalCredits.toString(), avgCredits.toString()))
 
     for i = 0 to MAX_TIER_COUNT-1
-      lumberPerc[i] = lumberCount[i] / (lumberCountMax == 0 ? 1 : lumberCountMax)
-      itemPerc[i] = itemCount[i] / (itemCountMax == 0 ? 1 : itemCountMax)
-      goldPerc[i] = goldCount[i] / (goldCountMax == 0 ? 1 : goldCountMax)
-      survivorPerc[i] = survivorCount[i] / (survivorCountMax == 0 ? 1 : survivorCountMax)
-      undeadPerc[i] = undeadCount[i] / (undeadCountMax == 0 ? 1 : undeadCountMax)
+      lumberPerc[i] = lumberCount[i] / max(1, lumberCountMax)
+      itemPerc[i] = itemCount[i] / max(1, itemCountMax)
+      goldPerc[i] = goldCount[i] / max(1, goldCountMax)
+      survivorPerc[i] = survivorCount[i] / max(1, survivorCountMax)
+      undeadPerc[i] = undeadCount[i] / max(1, undeadCountMax)
 
-    frame.addText("L:{0} t0:{1} ({2}) t1:{3} ({4}) t2:{5} ({6}) t3:{7} ({8})".format(
-      lumberCountMax.toString(),
-      lumberCount[0].toString(), lumberPerc[0].toPercentageString01(),
-      lumberCount[1].toString(), lumberPerc[1].toPercentageString01(),
-      lumberCount[2].toString(), lumberPerc[2].toPercentageString01(),
-      lumberCount[3].toString(), lumberPerc[3].toPercentageString01()))
+    let sb = new StringBuilder()
 
-    frame.addText("G:{0} t0:{1} ({2}) t1:{3} ({4}) t2:{5} ({6})".format(
-      goldCountMax.toString(),
-      goldCount[0].toString(), goldPerc[0].toPercentageString01(),
-      goldCount[1].toString(), goldPerc[1].toPercentageString01(),
-      goldCount[2].toString(), goldPerc[2].toPercentageString01()))
+    for i = 0 to LootLumberCard.TIER_COUNT - 1
+      sb.append("t{0}:{1} ({2}) ".format(i.toString(), lumberCount[i].toString(), lumberPerc[i].toPercentageString01()))
+    let lumberCountPerc = lumberCountMax / max(1, totalLootCount)
+    frame.addText("L:{0} ({1}) {2}".format(lumberCountMax.toString(), lumberCountPerc.toPercentageString01(), sb.toString()))
 
-    frame.addText("I:{0} t0:{1} ({2}) t1:{3} ({4}) t2:{5} ({6}) t3:{7} ({8})".format(
-      itemCountMax.toString(),
-      itemCount[0].toString(), itemPerc[0].toPercentageString01(),
-      itemCount[1].toString(), itemPerc[1].toPercentageString01(),
-      itemCount[2].toString(), itemPerc[2].toPercentageString01(),
-      itemCount[3].toString(), itemPerc[3].toPercentageString01()))
+    sb.reset()
+    for i = 0 to LootGoldCard.TIER_COUNT - 1
+      sb.append("t{0}:{1} ({2}) ".format(i.toString(), goldCount[i].toString(), goldPerc[i].toPercentageString01()))
+    let goldCountPerc = lumberCountMax / max(1, totalLootCount)
+    frame.addText("G:{0} {1}".format(goldCountMax.toString(), goldCountPerc.toPercentageString01(), sb.toString()))
 
-    frame.addText("S:{0} t0:{1} ({2}) t1:{3} ({4}) t2:{5} ({6}) t3:{7} ({8})".format(
-      survivorCountMax.toString(),
-      survivorCount[0].toString(), survivorPerc[0].toPercentageString01(),
-      survivorCount[1].toString(), survivorPerc[1].toPercentageString01(),
-      survivorCount[2].toString(), survivorPerc[2].toPercentageString01(),
-      survivorCount[3].toString(), survivorPerc[3].toPercentageString01()))
+    sb.reset()
+    for i = 0 to LootItemCard.TIER_COUNT - 1
+      sb.append("t{0}:{1} ({2}) ".format(i.toString(), itemCount[i].toString(), itemPerc[i].toPercentageString01()))
+    let itemCountPerc = lumberCountMax / max(1, totalLootCount)
+    frame.addText("I:{0} {1}".format(itemCountMax.toString(), itemCountPerc.toPercentageString01(), sb.toString()))
 
-    frame.addText("U:{0} t0:{1} ({2}) t1:{3} ({4}) t2:{5} ({6})".format(
-      undeadCountMax.toString(),
-      undeadCount[0].toString(), undeadPerc[0].toPercentageString01(),
-      undeadCount[1].toString(), undeadPerc[1].toPercentageString01(),
-      undeadCount[2].toString(), undeadPerc[2].toPercentageString01()))
-      
+    sb.reset()
+    for i = 0 to LootSurvivorCard.TIER_COUNT - 1
+      sb.append("t{0}:{1} ({2}) ".format(i.toString(), survivorCount[i].toString(), survivorPerc[i].toPercentageString01()))
+    let survivorCountPerc = lumberCountMax / max(1, totalLootCount)
+    frame.addText("S:{0} {1}".format(survivorCountMax.toString(), survivorCountPerc.toPercentageString01(), sb.toString()))
 
+    sb.reset()
+    for i = 0 to LootUndeadCard.TIER_COUNT - 1
+      sb.append("t{0}:{1} ({2}) ".format(i.toString(), undeadCount[i].toString(), undeadPerc[i].toPercentageString01()))
+    let undeadCountPerc = lumberCountMax / max(1, totalLootCount)
+    frame.addText("U:{0} {1}".format(undeadCountMax.toString(), undeadCountPerc.toPercentageString01(), sb.toString()))
+
+    destroy sb
 
 // ============================================================================
 init
