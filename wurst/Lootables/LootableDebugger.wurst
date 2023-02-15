@@ -7,6 +7,14 @@ import UnitMetadata
 import ColorUtility
 import Directors
 import Lootables
+import LootLumberCard
+import LootItemCard
+import LootGoldCard
+import LootSurvivorCard
+import LootUndeadCard
+import RealExtensions
+
+constant int MAX_TIER_COUNT = 4
 
 // ============================================================================
 class LootableDebugger extends DebuggerRealtimeUpdateFrame
@@ -28,17 +36,20 @@ class LootableDebugger extends DebuggerRealtimeUpdateFrame
 
     if (m_selectedUnit == null)
       frame.setText("Select a unit")
+      showTextWhenNoUnitIsSelected()
       return
 
     let metadata = m_selectedUnit.getMetadata() castTo UnitMetadata
 
     if (metadata == null)
       frame.setText("Selected unit has no metadata".colorize(Colors.red))
+      showTextWhenNoUnitIsSelected()
       return
 
     let lootableComp = metadata.getLootableComponent()
     if (lootableComp == null)
       frame.setText("Selected unit has no lootable component".colorize(Colors.red))
+      showTextWhenNoUnitIsSelected()
       return
 
     frame.setOrAddText("Selected unit: " + m_selectedUnit.getName())
@@ -75,6 +86,92 @@ class LootableDebugger extends DebuggerRealtimeUpdateFrame
       frame.addText("Running: " + lootOperation.isRunning().toString())
       frame.addText("Time remaining: " + lootOperation.getTimeRemaining().toString())
     //}
+
+  // ----------------------------------------------------------------------------
+  private function showTextWhenNoUnitIsSelected()
+    let frame = getFrameHandle()
+
+    int array[MAX_TIER_COUNT] lumberCount
+    int array[MAX_TIER_COUNT] itemCount
+    int array[MAX_TIER_COUNT] goldCount
+    int array[MAX_TIER_COUNT] survivorCount
+    int array[MAX_TIER_COUNT] undeadCount
+
+    int lumberCountMax = 0
+    int itemCountMax = 0
+    int goldCountMax = 0
+    int survivorCountMax = 0
+    int undeadCountMax = 0
+
+    for lootable in g_lootableUnits
+      for i = 0 to lootable.getLootCount() - 1
+        let loot = lootable.getLoot(i)
+        switch (loot.card.typeId)
+          case LootLumberCard.typeId
+            lumberCount[loot.tier]++
+            lumberCountMax++
+          case LootItemCard.typeId
+            itemCount[loot.tier]++
+            itemCountMax++
+          case LootGoldCard.typeId
+            goldCount[loot.tier]++
+            goldCountMax++
+          case LootSurvivorCard.typeId
+            survivorCount[loot.tier]++
+            survivorCountMax++
+          case LootUndeadCard.typeId
+            undeadCount[loot.tier]++
+            undeadCountMax++
+
+    real array[MAX_TIER_COUNT] lumberPerc
+    real array[MAX_TIER_COUNT] itemPerc
+    real array[MAX_TIER_COUNT] goldPerc
+    real array[MAX_TIER_COUNT] survivorPerc
+    real array[MAX_TIER_COUNT] undeadPerc
+
+    frame.setOrAddText("")
+
+    for i = 0 to MAX_TIER_COUNT-1
+      lumberPerc[i] = lumberCount[i] / (lumberCountMax == 0 ? 1 : lumberCountMax)
+      itemPerc[i] = itemCount[i] / (itemCountMax == 0 ? 1 : itemCountMax)
+      goldPerc[i] = goldCount[i] / (goldCountMax == 0 ? 1 : goldCountMax)
+      survivorPerc[i] = survivorCount[i] / (survivorCountMax == 0 ? 1 : survivorCountMax)
+      undeadPerc[i] = undeadCount[i] / (undeadCountMax == 0 ? 1 : undeadCountMax)
+
+    frame.addText("L:{0} t0:{1} ({2}) t1:{3} ({4}) t2:{5} ({6}) t3:{7} ({8})".format(
+      lumberCountMax.toString(),
+      lumberCount[0].toString(), lumberPerc[0].toPercentageString01(),
+      lumberCount[1].toString(), lumberPerc[1].toPercentageString01(),
+      lumberCount[2].toString(), lumberPerc[2].toPercentageString01(),
+      lumberCount[3].toString(), lumberPerc[3].toPercentageString01()))
+
+    frame.addText("G:{0} t0:{1} ({2}) t1:{3} ({4}) t2:{5} ({6})".format(
+      goldCountMax.toString(),
+      goldCount[0].toString(), goldPerc[0].toPercentageString01(),
+      goldCount[1].toString(), goldPerc[1].toPercentageString01(),
+      goldCount[2].toString(), goldPerc[2].toPercentageString01()))
+
+    frame.addText("I:{0} t0:{1} ({2}) t1:{3} ({4}) t2:{5} ({6}) t3:{7} ({8})".format(
+      itemCountMax.toString(),
+      itemCount[0].toString(), itemPerc[0].toPercentageString01(),
+      itemCount[1].toString(), itemPerc[1].toPercentageString01(),
+      itemCount[2].toString(), itemPerc[2].toPercentageString01(),
+      itemCount[3].toString(), itemPerc[3].toPercentageString01()))
+
+    frame.addText("S:{0} t0:{1} ({2}) t1:{3} ({4}) t2:{5} ({6}) t3:{7} ({8})".format(
+      survivorCountMax.toString(),
+      survivorCount[0].toString(), survivorPerc[0].toPercentageString01(),
+      survivorCount[1].toString(), survivorPerc[1].toPercentageString01(),
+      survivorCount[2].toString(), survivorPerc[2].toPercentageString01(),
+      survivorCount[3].toString(), survivorPerc[3].toPercentageString01()))
+
+    frame.addText("U:{0} t0:{1} ({2}) t1:{3} ({4}) t2:{5} ({6})".format(
+      undeadCountMax.toString(),
+      undeadCount[0].toString(), undeadPerc[0].toPercentageString01(),
+      undeadCount[1].toString(), undeadPerc[1].toPercentageString01(),
+      undeadCount[2].toString(), undeadPerc[2].toPercentageString01()))
+      
+
 
 // ============================================================================
 init
