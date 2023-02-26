@@ -4,22 +4,17 @@ import Range
 import Jobs
 import Deck
 import Action
-import HashMap
 import GameConstants
 import CancellationToken
 import ErrorHandling
-import GroupUtils
 import LinkedList
-import Events
-import RegisterEvents
 import Func
 import IsEnabled
-import GroupExtensions
+import UnitAdmin
 
 constant real TOO_CHEAP_COEFF = 6
 
 LinkedList<Director> g_directors = new LinkedList<Director>()
-HashMap<unit, Admin> g_unitToAdminMap
 
 Thread s_directorWorkerThread = new Thread("director")
   ..setTickInterval(0.3)
@@ -86,102 +81,6 @@ public abstract class TieredCard extends Card
     return new CardInstance(this, selectedTier, selectedCost)
 
 // ============================================================================
-public class Admin
-  private string m_id
-  private group m_ownedUnits = getGroup()
-  private int m_totalRegisteredUnits = 0
-
-  private Event2<Admin, unit> m_onUnitRegistered
-  private Event2<Admin, unit> m_onUnitUnregistered
-
-  // --------------------------------------------------------------------------
-  construct(string id)
-    m_id = id
-
-  // --------------------------------------------------------------------------
-  ondestroy
-
-    while not m_ownedUnits.isEmpty()
-      unregisterOwnedUnit(m_ownedUnits.getFirst())
-
-    m_ownedUnits.release()
-
-    if (m_onUnitRegistered != null)
-      destroy m_onUnitRegistered
-      m_onUnitRegistered = null
-
-    if (m_onUnitUnregistered != null)
-      destroy m_onUnitUnregistered
-      m_onUnitUnregistered = null
-
-  // ----------------------------------------------------------------------------
-  function getAliveCount() returns int
-    return m_ownedUnits.size()
-
-  // ----------------------------------------------------------------------------
-  function getTotalRegistered() returns int
-    return m_totalRegisteredUnits
-
-  // --------------------------------------------------------------------------
-  function getOwnedUnits() returns group
-    return m_ownedUnits
-
-  // --------------------------------------------------------------------------
-  function onUnitRegistered() returns IEvent2<Admin, unit>
-    if (m_onUnitRegistered == null)
-      m_onUnitRegistered = new Event2<Admin, unit>()
-    return m_onUnitRegistered
-
-  // --------------------------------------------------------------------------
-  function onUnitUnregistered() returns IEvent2<Admin, unit>
-    if (m_onUnitUnregistered == null)
-      m_onUnitUnregistered = new Event2<Admin, unit>()
-    return m_onUnitUnregistered
-
-  // --------------------------------------------------------------------------
-  function registerOwnedUnit(unit _unit)
-
-    let existingAdmin = g_unitToAdminMap.get(_unit)
-    if (existingAdmin != null and existingAdmin != this)
-      error("Unit belongs to a different admin")
-      return
-
-    if (existingAdmin == this)
-      return
-
-    m_totalRegisteredUnits++
-    g_unitToAdminMap.put(_unit, this)
-    m_ownedUnits.addUnit(_unit)
-
-    if (m_onUnitRegistered != null)
-      m_onUnitRegistered.call(this, _unit)
-
-  // --------------------------------------------------------------------------
-  function unregisterOwnedUnit(unit _unit)
-
-    let existingAdmin = g_unitToAdminMap.get(_unit)
-    if (existingAdmin == null)
-      return
-
-    if (existingAdmin != this)
-      error("Unit belongs to a different admin")
-      return
-    
-    g_unitToAdminMap.remove(_unit)
-    m_ownedUnits.removeUnit(_unit)
-
-    if (m_onUnitUnregistered != null)
-      m_onUnitUnregistered.call(this, _unit)
-
-  // ----------------------------------------------------------------------------
-  function reset()
-    m_totalRegisteredUnits = 0
-
-  // --------------------------------------------------------------------------
-  protected function onOwnedUnitKilled(unit dyingUnit)
-    unregisterOwnedUnit(dyingUnit)
-
-// ============================================================================
 public class PerSecondCreditGenerator
   private Director m_director
   private CallbackPeriodic m_creditGeneratorTimer
@@ -215,7 +114,7 @@ public abstract class Director
   private real m_creditMultiplier = 1.0
   private CancellationToken m_ct
   private Thread m_workerThread
-  private Admin m_admin
+  private UnitAdmin m_admin
   private bool m_destroyWhenOutOfCredits = false
   private bool m_resetCreditsOnActivation = true
 
@@ -227,7 +126,7 @@ public abstract class Director
 
     m_workerThread = s_directorWorkerThread
 
-    m_admin = new Admin(name)
+    m_admin = new UnitAdmin(name)
 
     s_directorIdGen++
     m_id = s_directorIdGen
@@ -278,7 +177,7 @@ public abstract class Director
     return m_workerThread
 
   // --------------------------------------------------------------------------
-  function getAdmin() returns Admin
+  function getAdmin() returns UnitAdmin
     return m_admin
 
   // --------------------------------------------------------------------------
@@ -669,18 +568,6 @@ class ContinuousDirectorJob extends Job
     return true
 
 // ============================================================================
-function onUnitDeath()
-  let dyingUnit = GetDyingUnit()
-  if (not g_unitToAdminMap.has(dyingUnit))
-    return
-  let director = g_unitToAdminMap.get(dyingUnit)
-  director.onOwnedUnitKilled(dyingUnit)
-
-// ============================================================================
-init
-  g_unitToAdminMap = new HashMap<unit, Admin>()
-  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_DEATH, function onUnitDeath)
-
 @test function asdf()
 
   let baseCost = 10

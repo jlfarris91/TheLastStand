@@ -20,6 +20,15 @@ import Notifications
 import Icons
 import ColorUtility
 import PlayerProperties
+import Elites
+import MinimapIconComponent
+import Frame
+import WrapPanel
+import RealtimeUpdate
+import HashMap
+import LoadToc
+import StandardTooltip
+import UnitAdmin
 
 SpawnUndeadUnitDirector array g_zombieDirectors
 SpawnUndeadUnitDirector array g_eliteDirectors
@@ -32,6 +41,8 @@ Vector<SpawnCard> g_bossCards = new Vector<SpawnCard>(8)
 Deck g_zombieDeck
 Vector<Deck> g_eliteDecks = new Vector<Deck>(TOTAL_NIGHTS)
 Vector<Deck> g_bossDecks = new Vector<Deck>(4)
+
+RemainingUnitsFrame array g_remainingUnitsFrames
 
 real TIME_OF_SPAWNS_END = TIME_OF_DAY - 3.0 // stop spawning 3 hours before the day starts
 
@@ -71,11 +82,34 @@ function onNightStart()
 
 // ============================================================================
 function onTimeOfSpawnsEnd()
-
   for p in g_PlayingHumanPlayers
-    g_zombieDirectors[p.getId()].disable()
-    g_eliteDirectors[p.getId()].disable()
-    g_bossDirectors[p.getId()].disable()
+    disableSpawnDirectors(p)
+    revealRemainingUnits(p)
+
+// ============================================================================
+function disableSpawnDirectors(player p)
+  g_zombieDirectors[p.getId()].disable()
+  g_eliteDirectors[p.getId()].disable()
+  g_bossDirectors[p.getId()].disable()
+
+// ============================================================================
+function revealRemainingUnits(player p)
+  revealRemainingUnits(g_eliteDirectors[p.getId()].getAdmin(), p)
+  revealRemainingUnits(g_bossDirectors[p.getId()].getAdmin(), p)
+
+// ============================================================================
+function revealRemainingUnits(UnitAdmin admin, player targetPlayer)
+
+  // Show minimap icons for whatever units are left
+  for u in admin.getOwnedUnits()
+  //{
+    if (u.isAlive() and u.getMinimapIconComponent() == null)
+      let iconPath = getMinimapIconPath(u.getTypeId())
+      if (iconPath != null)
+        let iconComp = u.getOrAddMinimapIconComponent()
+        iconComp.update(iconPath, getMinimapIconColor(u.getTypeId()))
+        iconComp.showOnlyFor(targetPlayer)
+  //}
 
 // ============================================================================
 function onDayStart()
@@ -103,7 +137,144 @@ function rewardGold(player p, int goldReward)
   ..show(p)
 
 // ============================================================================
+class RemainingUnitsFrame extends WrapPanel implements IRealtimeListener
+  private Vector<EnemyUnitInfoFrame> m_infoFrames = new Vector<EnemyUnitInfoFrame>()
+  private IterableMap<int, int> m_unitInfo = new IterableMap<int, int>()
+
+  // ----------------------------------------------------------------------------
+  construct()
+    super(createFrame("EnemyUnitInfoFrameContainer"))
+
+  // ----------------------------------------------------------------------------
+  ondestroy
+    destroy m_unitInfo
+    m_unitInfo = null
+
+    destroy m_infoFrames
+    m_infoFrames = null
+
+  // ----------------------------------------------------------------------------
+  override function onVisibilityChanged()
+    super.onVisibilityChanged()
+
+    this.unregisterForRealtimeUpdate()
+    if (isVisible())
+      this.registerForRealtimeUpdate(RealtimeUpdatePriority.Background)
+      realtimeUpdate(0.0)
+
+  // ----------------------------------------------------------------------------
+  override function realtimeUpdate(real _dt)
+
+    var infoFrameIndex = 0
+
+    var totalUnitCount = 0
+    
+    let ownerPlayer = getPlayer()
+    if (ownerPlayer != null)
+    //{
+
+      m_unitInfo.flush()
+
+      let zombieAdmin = g_zombieDirectors[ownerPlayer.getId()].getAdmin()
+      for u in zombieAdmin.getOwnedUnits()
+        if (u.isAlive())
+          let unitTypeId = u.getTypeId()
+          m_unitInfo.put(unitTypeId, m_unitInfo.get(unitTypeId) + 1)
+
+      let eliteAdmin = g_eliteDirectors[ownerPlayer.getId()].getAdmin()
+      for u in eliteAdmin.getOwnedUnits()
+        if (u.isAlive())
+          let unitTypeId = u.getTypeId()
+          m_unitInfo.put(unitTypeId, m_unitInfo.get(unitTypeId) + 1)
+
+      let bossAdmin = g_bossDirectors[ownerPlayer.getId()].getAdmin()
+      for u in bossAdmin.getOwnedUnits()
+        if (u.isAlive())
+          let unitTypeId = u.getTypeId()
+          m_unitInfo.put(unitTypeId, m_unitInfo.get(unitTypeId) + 1)
+
+      for unitTypeId in m_unitInfo
+      //{
+        let count = m_unitInfo.get(unitTypeId)
+        getOrAddInfoFrame(infoFrameIndex)
+        ..setRemaining(count)
+        ..setIconPath(BlzGetAbilityIcon(unitTypeId))
+        ..setTooltip(BlzGetAbilityTooltip(unitTypeId, 1), BlzGetAbilityExtendedTooltip(unitTypeId, 1))
+        ..setTier(getTier(unitTypeId))
+        ..show()
+        infoFrameIndex++
+        totalUnitCount += count
+      //}
+
+    //}
+
+    // Hide the rest of the unused frames
+    for i = infoFrameIndex to m_infoFrames.size() - 1
+      let infoFrame = m_infoFrames.get(i)
+      infoFrame.hide()
+
+    invalidateArrange()
+
+  // ----------------------------------------------------------------------------
+  private function getOrAddInfoFrame(int index) returns EnemyUnitInfoFrame
+    if (index < m_infoFrames.size())
+      return m_infoFrames.get(index)
+    let infoFrame = new EnemyUnitInfoFrame()
+    addChild(infoFrame)
+    m_infoFrames.add(infoFrame)
+    return infoFrame
+
+// ============================================================================
+class EnemyUnitInfoFrame extends Frame
+  private framehandle array[3] m_backdrop
+  private framehandle m_iconFrame
+  private framehandle m_textFrame
+  private framehandle m_hoverFrame
+  private StandardTooltip m_tooltip
+
+  // ----------------------------------------------------------------------------
+  construct()
+    super(createFrame("EnemyUnitInfoFrame"))
+    m_iconFrame = getFrame("IconFrame")
+    m_textFrame = getFrame("TextFrame")
+    m_hoverFrame = getFrame("HoverFrame")
+
+    m_backdrop[0] = getFrame("BackdropTier1")
+    m_backdrop[1] = getFrame("BackdropTier2")
+    m_backdrop[2] = getFrame("BackdropTier3")
+    
+    m_tooltip = StandardTooltip.get()
+    m_hoverFrame.setTooltip(m_tooltip.getTooltipFrame())
+
+  // ----------------------------------------------------------------------------
+  ondestroy
+    m_hoverFrame.setTooltip(null)
+    m_tooltip.release()
+
+  // ----------------------------------------------------------------------------
+  function setIconPath(string iconPath)
+    if (m_iconFrame != null)
+      m_iconFrame.setTexture(iconPath, 0, true)
+
+  // ----------------------------------------------------------------------------
+  function setRemaining(int remaining)
+    if (m_textFrame != null)
+      m_textFrame.setText(remaining.toString())
+
+  // ----------------------------------------------------------------------------
+  function setTooltip(string tooltip, string tooltipExtended)
+    if (m_tooltip != null)
+      m_tooltip.setTooltip(tooltip, tooltipExtended)
+
+  // ----------------------------------------------------------------------------
+  function setTier(int tier)
+    for i = 0 to 2
+      if (m_backdrop[i] != null)
+        m_backdrop[i].setVisible(i == tier)
+
+// ============================================================================
 init
+  ensureTocIsLoaded()
 
   // Normal cards
   g_normalCards.add(SpawnCards.zombies)
@@ -200,6 +371,11 @@ init
       bossDirector.setMaxAliveCount(context -> max(playerDifficulty.floor(), 1))
       bossDirector.setDeck(g_bossDecks.get(0))
       g_bossDirectors[p.getId()] = bossDirector
+
+      g_remainingUnitsFrames[p.getId()] = new RemainingUnitsFrame()
+      ..setPlayer(p)
+      ..setAbsArea(FRAMEPOINT_TOP, SCREEN_TOPLEFT + vec2(0.2, -0.03), vec2(0.21, 0.105))
+      ..showOnly(p)
     //}
 
     if (DEV_ENVIRONMENT)
