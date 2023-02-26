@@ -1,0 +1,201 @@
+package CallToArms
+import TlsAbilityIds
+import RegisterEvents
+import Orders
+import GroupUtils
+import SurvivorComponent
+import SurvivorJobs
+import TlsUnitIds
+import UnitMetadata
+import WorkstationComponent
+import GroupExtensions
+import Icons
+import ChannelAbilityPreset
+import ClosureTimers
+import ColorUtility
+
+// ============================================================================
+function callToArms(unit orderedUnit)
+
+  let allUnits = getGroup()
+  allUnits.enumUnitsOfPlayer(orderedUnit.getOwner(), null)
+
+  let joblessSurvivors = getGroup()
+  let towers = getGroup()
+
+  var rallyPos = orderedUnit.getRallyPoint()
+
+  let rallyUnit = orderedUnit.getRallyUnit()
+  if (rallyUnit != null)
+    rallyPos = rallyUnit.getPos()
+
+  let rallyDestructable = orderedUnit.getRallyDestructable()
+  if (rallyDestructable != null)
+    rallyPos = rallyDestructable.getPos()
+
+  for u in allUnits
+  //{
+    let survivorComp = u.getSurvivorComponent()
+    if (survivorComp != null)
+    //{
+      let assignedJob = survivorComp.getAssignedJob()
+      if (assignedJob.isCombatJob())
+        survivorComp.activateJob(assignedJob)
+      else if (assignedJob == SurvivorJobType.None and not u.isHidden())
+        joblessSurvivors.addUnit(u)
+    //}
+
+    if (u.isTower())
+    //{
+      let metadata = u.getMetadata()
+      if (metadata != null)
+        let comp = metadata.getWorkstationComponent()
+        if (comp != null and not comp.isFull())
+          towers.addUnit(u)
+    //}
+  //}
+
+  // Fill guard towers and cannon towers first
+  if (not joblessSurvivors.isEmpty())
+    for u in towers
+      if (u.isGuardTower() or u.isCannonTower())
+        fillTower(u, joblessSurvivors)
+
+  // Fill scout towers last
+  if (not joblessSurvivors.isEmpty())
+    for u in towers
+      if (u.isScoutTower())
+        fillTower(u, joblessSurvivors)
+
+  towers.release()
+  joblessSurvivors.release()
+
+  // Order combat survivors to move to the rally pos
+  // Use null timer because switching jobs is delayed
+  nullTimer() () ->
+  //{
+    allUnits.enumUnitsOfPlayer(orderedUnit.getOwner(), null)
+
+    for u in allUnits
+    //{
+      let survivorComp = u.getSurvivorComponent()
+      if (survivorComp != null and survivorComp.getActiveJob().isCombatJob())
+      //{
+        if (rallyUnit != null and rallyUnit.isAlive())
+          u.issueTargetOrderById(OrderIds.move, rallyUnit)
+        else if (rallyDestructable != null and rallyDestructable.isAliveTrick())
+          u.issueTargetOrderById(OrderIds.move, rallyDestructable)
+        else
+          u.issuePointOrderById(OrderIds.move, rallyPos)
+      //}
+    //}
+
+    allUnits.release()
+  //}
+
+// ============================================================================
+function backToWork(player p)
+
+  let allUnits = getGroup()
+  allUnits.enumUnitsOfPlayer(p, null)
+
+  let towers = getGroup()
+
+  for u in allUnits
+  //{
+    let survivorComp = u.getSurvivorComponent()
+    if (survivorComp != null)
+    //{
+      let activeJob = survivorComp.getActiveJob()
+      if (activeJob.isCombatJob())
+        survivorComp.activateJob(SurvivorJobType.None)
+    //}
+
+    if (u.isTower())
+      towers.addUnit(u)
+  //}
+
+  for u in towers
+    emptyTower(u)
+
+  towers.release()
+  allUnits.release()
+
+// ============================================================================
+function fillTower(unit tower, group joblessSurvivors)
+
+  if (joblessSurvivors.isEmpty())
+    return
+
+  let closestSurvivor = joblessSurvivors.getClosestUnit(tower.getPos(), 1000.0)
+  if (closestSurvivor == null)
+    return
+
+  joblessSurvivors.removeUnit(closestSurvivor)
+
+  // Order the unit to move to the tower
+  closestSurvivor.issuePointOrderById(OrderIds.move, tower.getPos())
+  
+  // Then effectively right-click it
+  TryLoadUnitOperation.tryLoadUnit(tower, closestSurvivor)
+
+// ============================================================================
+function emptyTower(unit tower)
+
+  let workstation = tower.getMetadata().getWorkstationComponent()
+  if (workstation != null)
+    workstation.unloadAllUnits()
+
+// ============================================================================
+function onUnitIssuedOrder()
+
+  if (GetIssuedOrderId() == OrderIds.townbellon)
+    callToArms(GetOrderedUnit())
+
+  if (GetIssuedOrderId() == OrderIds.townbelloff)
+    backToWork(GetOrderedUnit().getOwner())
+
+// ============================================================================
+@compiletime function createObjects()
+
+  new ChannelAbilityPreset(TlsAbilityIds.callToArms, 1, true)
+    ..setIconNormal(Icons.bTNCallToArms)
+    ..presetCastRange(lvl -> 1000)
+    ..presetTargetsAllowed(lvl -> "")
+    ..presetTargetTypes(Targettype.NONE)
+    ..presetDisableOtherAbilities(lvl -> false)
+    ..presetOption(Option.VISIBLE, true)
+    ..presetManaCost(lvl -> 0)
+    ..presetCooldown(lvl -> 1.0)
+    ..setName("Call to Arms")
+    ..setHotkeyNormal("C")
+    ..presetBaseOrderID(lvl -> "townbellon")
+    ..setOrderStringUseTurnOn("townbellon")
+    ..setEffectSound("TownHallCallToArms")
+    ..setButtonPositionNormalX(1)
+    ..setButtonPositionNormalY(2)
+    ..presetTooltipNormal(lvl -> "Call to Arms")
+    ..presetTooltipNormalExtended(lvl -> "Calls all nearby Survivors to action. They activate their job, if it is a combat job, or enter a nearby workstation, if it is a tower.|n|n{0}".format("Combat Survivors are ordered to move to the Headquarter's target Rally Point.".gold()))
+
+  new ChannelAbilityPreset(TlsAbilityIds.backToWork, 1, true)
+    ..setIconNormal(Icons.bTNBacktoWork)
+    ..presetCastRange(lvl -> 1000)
+    ..presetTargetsAllowed(lvl -> "")
+    ..presetTargetTypes(Targettype.NONE)
+    ..presetDisableOtherAbilities(lvl -> false)
+    ..presetOption(Option.VISIBLE, true)
+    ..presetManaCost(lvl -> 0)
+    ..presetCooldown(lvl -> 1.0)
+    ..setName("Back to Work")
+    ..setHotkeyNormal("W")
+    ..presetBaseOrderID(lvl -> "townbelloff")
+    ..setOrderStringUseTurnOn("townbelloff")
+    ..setButtonPositionNormalX(2)
+    ..setButtonPositionNormalY(2)
+    ..presetTooltipNormal(lvl -> "Back to Work")
+    ..presetTooltipNormalExtended(lvl -> "Calls all nearby Survivors to stand down. They will deactivate their combat jobs and exit any towers.")
+
+// ============================================================================
+init
+
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ISSUED_ORDER, function onUnitIssuedOrder)

@@ -18,6 +18,13 @@ import BuffObjEditing
 import UnitPropertiesComponent
 import HashMap
 import RealtimeUnitComponent
+import ClosureTimers
+
+constant real   WORKSTATION_LOAD_UNIT_RANGE = 80.0
+constant real   WORKSTATION_LOAD_UNIT_RANGE_SQ = WORKSTATION_LOAD_UNIT_RANGE * WORKSTATION_LOAD_UNIT_RANGE
+constant real   WORKSTATION_LOAD_UNIT_OP_TIMEOUT = 15.0
+constant string WORKSTATION_ORDER_LOAD = "load"
+constant string WORKSTATION_ORDER_UNLOAD = "unload"
 
 constant SoundDefinition g_loadingSoundDef = new SoundDefinition(Sounds.loading, false, true)
 
@@ -128,6 +135,10 @@ public class WorkstationComponent extends UnitComponent
   // --------------------------------------------------------------------------
   function getMaxUnits() returns int
     return m_maxUnits
+
+  // ----------------------------------------------------------------------------
+  function isFull() returns boolean
+    return getLoadedUnitCount() == getMaxUnits()
 
   // --------------------------------------------------------------------------
   function addAllowedUnitType(int unitTypeId)
@@ -489,6 +500,87 @@ public class AbilityInactiveWorkstationIconDefinition extends AbilityDefinition
     setTooltipNormal(1, "Workstation {0}".format("Unoperated".colorize(Colors.gray)))
 
 // ============================================================================
+public class TryLoadUnitOperation
+  private static HashMap<unit, TryLoadUnitOperation> g_unitToOperationMap = new HashMap<unit, TryLoadUnitOperation>() 
+
+  private unit m_workstation = null
+  private unit m_unitToLoad = null
+  private CallbackSingle m_destroyTimer = null
+  private CallbackPeriodic m_periodicTimer = null
+
+  // ----------------------------------------------------------------------------
+  construct(unit workstation, unit unitToLoad)
+    m_workstation = workstation
+    m_unitToLoad = unitToLoad
+
+    g_unitToOperationMap.put(m_workstation, this)
+
+    m_destroyTimer = doAfter(WORKSTATION_LOAD_UNIT_OP_TIMEOUT) () ->
+      m_destroyTimer = null // let callback destroy itself
+      destroy this
+
+    m_periodicTimer = doPeriodically(1.0) (CallbackPeriodic cb) ->
+      if (issueLoadUnitOrder(m_workstation, m_unitToLoad))
+        destroy this
+
+    // Log.info("[TLUO] " + workstation.getName() + " op started -> " + unitToLoad.getName())
+
+  // ----------------------------------------------------------------------------
+  ondestroy
+
+    if (m_destroyTimer != null)
+      destroy m_destroyTimer
+      m_destroyTimer = null
+
+    if (m_periodicTimer != null)
+      destroy m_periodicTimer
+      m_periodicTimer = null
+
+    g_unitToOperationMap.remove(m_workstation)
+
+    // Log.info("[TLUO] " + m_workstation.getName() + " op destroyed -> " + m_unitToLoad.getName())
+
+  // ----------------------------------------------------------------------------
+  static function tryLoadUnit(unit workstation, unit unitToLoad)
+    
+    let metadata = workstation.getMetadata()
+    if (metadata == null)
+      return
+
+    let comp = metadata.getWorkstationComponent()
+    if (comp == null or comp.isFull())
+      return
+
+    let op = g_unitToOperationMap.get(workstation)
+    if (op != null)
+      // Log.info("[TLUO] " + workstation.getName() + " existing op found -> " + op.m_unitToLoad.getName())
+      destroy op
+
+    // unit is already in range
+    if (workstation.getPos().distanceToSq(unitToLoad.getPos()) <= WORKSTATION_LOAD_UNIT_RANGE_SQ)
+      // Log.info("[TLUO] " + workstation.getName() + " target is close enough -> " + unitToLoad.getName())
+      if (issueLoadUnitOrder(workstation, unitToLoad))
+        return
+
+    new TryLoadUnitOperation(workstation, unitToLoad)
+
+  // ----------------------------------------------------------------------------
+  private static function issueLoadUnitOrder(unit workstation, unit u) returns bool
+
+    let metadata = workstation.getMetadata()
+    if (metadata == null)
+      return true
+
+    let comp = metadata.getWorkstationComponent()
+    if (comp == null or comp.isFull())
+      return true
+
+    let success = workstation.issueTargetOrder(WORKSTATION_ORDER_LOAD, u)
+    // if (not success)
+      // Log.info("[TLUO] " + workstation.getName() + " failed to issue load unit order -> " + u.getName())
+    return success
+
+// ============================================================================
 function onLoadUnitAbilCast(unit caster, unit target)
 
   let metadata = caster.getMetadata()
@@ -565,12 +657,12 @@ function onUnitUpgradeCanceled()
     ..setItemAbility(false)
     ..presetTargetTypes(Targettype.UNIT)
     ..removeChannelProperties(true, true)
-    ..presetBaseOrderID((lvl) -> "load")
+    ..presetBaseOrderID((lvl) -> WORKSTATION_ORDER_LOAD)
     ..setIconNormal(Icons.bTNLoad)
     ..setName("Load Operator")
     ..setTooltipNormal(1, "Load Operator")
     ..setTooltipNormalExtended(1, "Loads a target survivor to operate this workstation.")
-    ..presetCastRange((int lvl) -> 80.0)
+    ..presetCastRange((int lvl) -> WORKSTATION_LOAD_UNIT_RANGE)
     ..presetTargetsAllowed((int lvl) -> "ground,friend,vulnerable,invulnerable")
     ..setButtonPositionNormalX(1)
     ..setButtonPositionNormalY(2)
@@ -581,12 +673,12 @@ function onUnitUpgradeCanceled()
     ..setItemAbility(false)
     ..presetTargetTypes(Targettype.NONE)
     ..removeChannelProperties(true, true)
-    ..presetBaseOrderID((lvl) -> "unload")
+    ..presetBaseOrderID((lvl) -> WORKSTATION_ORDER_UNLOAD)
     ..setIconNormal(Icons.bTNUnLoad)
     ..setName("Dismiss Operators")
     ..setTooltipNormal(1, "Dismiss Operators")
     ..setTooltipNormalExtended(1, "Dismiss the survivors operating this workstation.")
-    ..presetCastRange((int lvl) -> 80.0)
+    ..presetCastRange((int lvl) -> WORKSTATION_LOAD_UNIT_RANGE)
     ..presetTargetsAllowed((int lvl) -> "")
     ..setButtonPositionNormalX(2)
     ..setButtonPositionNormalY(2)
