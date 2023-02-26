@@ -5,8 +5,19 @@ import GrantXpOnDeathComponent
 import SmartValue
 import PlayerProperties
 import Elites
+import UnitExtensions
+import GameConstants
 
 HeroExperienceComponent array g_heroExperienceComponents
+
+group g_enumUnitIsAlliedHero_Group = CreateGroup()
+player g_enumUnitIsAlliedHero_Player = null
+boolexpr g_enumUnitIsAlliedHero_Filter = Condition(function g_enumUnitIsAlliedHero)
+
+// ============================================================================
+function g_enumUnitIsAlliedHero() returns bool
+  let enumUnit = GetEnumUnit()
+  return enumUnit.isHero() and enumUnit.isAlive() and enumUnit.isAllyOf(g_enumUnitIsAlliedHero_Player) 
 
 // ============================================================================
 public class HeroExperienceComponent extends UnitComponent
@@ -51,7 +62,20 @@ public class HeroExperienceComponent extends UnitComponent
 
   // --------------------------------------------------------------------------
   function onUnitKilled(unit killedUnit)
-    getOwnerUnit().addXp(getXpValueForKilledUnit(killedUnit), true)
+
+    let ownerUnit = getOwnerUnit()
+    let xp = getXpValueForKilledUnit(killedUnit)
+    let shareXp = (xp * HERO_XP_SHARE_SCALE).floor()
+
+    ownerUnit.addXp(xp, true)
+
+    g_enumUnitIsAlliedHero_Player = ownerUnit.getOwner()
+    g_enumUnitIsAlliedHero_Group.enumUnitsInRange(ownerUnit.getPos(), HERO_XP_SHARE_RANGE, g_enumUnitIsAlliedHero_Filter)
+    g_enumUnitIsAlliedHero_Player = null
+
+    for alliedHero in g_enumUnitIsAlliedHero_Group
+      if (alliedHero != ownerUnit)
+        alliedHero.addXp(shareXp, true)
 
   // --------------------------------------------------------------------------
   function getXpValueForKilledUnit(unit killedUnit) returns int
