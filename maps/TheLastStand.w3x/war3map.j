@@ -512,11 +512,7 @@ function CreateBuildingsForPlayer20 takes nothing returns nothing
     set u = BlzCreateUnitWithSkin( p, 'h017', -11021.1, -8848.5, 61.344, 'h017' )
     set u = BlzCreateUnitWithSkin( p, 'h017', 2169.5, -3543.8, 212.820, 'h017' )
     set u = BlzCreateUnitWithSkin( p, 'h017', -236.5, -2720.7, 268.946, 'h017' )
-    set u = BlzCreateUnitWithSkin( p, 'nwgt', -6208.0, -5568.0, 270.000, 'nwgt' )
     set u = BlzCreateUnitWithSkin( p, 'h017', 248.4, -2318.9, 90.000, 'h017' )
-    set u = BlzCreateUnitWithSkin( p, 'nwgt', 6144.0, -8512.0, 270.000, 'nwgt' )
-    set u = BlzCreateUnitWithSkin( p, 'nwgt', -7104.0, 7104.0, 270.000, 'nwgt' )
-    set u = BlzCreateUnitWithSkin( p, 'nwgt', 6720.0, 7744.0, 270.000, 'nwgt' )
     set u = BlzCreateUnitWithSkin( p, 'h017', 3321.5, -1651.8, 90.000, 'h017' )
 endfunction
 
@@ -825,6 +821,20 @@ function CreateUnitsForPlayer20 takes nothing returns nothing
 endfunction
 
 //===========================================================================
+function CreateNeutralPassiveBuildings takes nothing returns nothing
+    local player p = Player(PLAYER_NEUTRAL_PASSIVE)
+    local unit u
+    local integer unitID
+    local trigger t
+    local real life
+
+    set u = BlzCreateUnitWithSkin( p, 'nwgt', -6208.0, -5568.0, 270.000, 'nwgt' )
+    set u = BlzCreateUnitWithSkin( p, 'nwgt', 6144.0, -8512.0, 270.000, 'nwgt' )
+    set u = BlzCreateUnitWithSkin( p, 'nwgt', -7104.0, 7104.0, 270.000, 'nwgt' )
+    set u = BlzCreateUnitWithSkin( p, 'nwgt', 6720.0, 7744.0, 270.000, 'nwgt' )
+endfunction
+
+//===========================================================================
 function CreateNeutralPassive takes nothing returns nothing
     local player p = Player(PLAYER_NEUTRAL_PASSIVE)
     local unit u
@@ -917,6 +927,7 @@ endfunction
 
 //===========================================================================
 function CreateAllUnits takes nothing returns nothing
+    call CreateNeutralPassiveBuildings(  )
     call CreatePlayerBuildings(  )
     call CreateNeutralPassive(  )
     call CreatePlayerUnits(  )
