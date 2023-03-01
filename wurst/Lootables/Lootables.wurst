@@ -394,7 +394,8 @@ public class LootableComponent extends UnitComponent
   private int m_maxLootCount = 1
   private LinkedList<CardInstance> m_lootCards = new LinkedList<CardInstance>()
   private LootOperation m_lootOperation = null
-  private texttag m_lootCountTag
+  private ubersplat m_ubersplat
+  private string m_ubersplatName
 
   // --------------------------------------------------------------------------
   construct(IUnitMetadata owner)
@@ -409,8 +410,6 @@ public class LootableComponent extends UnitComponent
     g_lootableUnits.add(this)
 
     m_lootOperation = new LootOperation()
-
-    m_lootCountTag = CreateTextTag()..setVisibility(false)
 
   // --------------------------------------------------------------------------
   ondestroy
@@ -429,17 +428,27 @@ public class LootableComponent extends UnitComponent
       destroy m_lootOperation
       m_lootOperation = null
 
-    m_lootCountTag.destr()
-    m_lootCountTag = null
+  // ----------------------------------------------------------------------------
+  function getUbersplatName() returns string
+    return m_ubersplatName
+  
+  // ----------------------------------------------------------------------------
+  function setUbersplatName(string value)
+    m_ubersplatName = value
 
   // --------------------------------------------------------------------------
   override function onEnabled()
     super.onEnabled()
-    getOwnerUnit().setOwner(PLAYER_LOOTABLES, true)
+    
+    let ownerUnit = getOwnerUnit()
+
+    ownerUnit.setOwner(PLAYER_LOOTABLES, true)
     m_director.enable()
 
-    m_lootCountTag.setPos(getOwnerUnit().getPos().withZ(60))
-    updateTexttag()
+    if (m_ubersplatName != null)
+      m_ubersplat = CreateUbersplat(ownerUnit.getX(), ownerUnit.getY(), m_ubersplatName, 255, 255, 255, 255, false, true)
+      SetUbersplatRenderAlways(m_ubersplat, true)
+      ShowUbersplat(m_ubersplat, true)
 
     if (m_lootCards.isEmpty())
       makeUnlootable()
@@ -450,6 +459,12 @@ public class LootableComponent extends UnitComponent
   override function onDisabled()
     super.onDisabled()
     m_director.disable()
+
+    if (m_ubersplat != null)
+      SetUbersplatRenderAlways(m_ubersplat, false)
+      FinishUbersplat(m_ubersplat)
+      DestroyUbersplat(m_ubersplat)
+      m_ubersplat = null
 
   // --------------------------------------------------------------------------
   function canLoot() returns bool
@@ -496,7 +511,6 @@ public class LootableComponent extends UnitComponent
     m_lootCards.insertSorted(lootCardInstance, g_cardInstanceComparator)
     if (m_lootCards.size() == 1)
       makeLootable()
-    updateTexttag()
 
   // ----------------------------------------------------------------------------
   function hasLoot() returns bool
@@ -596,12 +610,18 @@ public class LootableComponent extends UnitComponent
     getOwnerUnit().setVertexColor(LOOTED_COLOR)
     UnitRemoveType(getOwnerUnit(), UNIT_TYPE_ANCIENT)
 
+    if (m_ubersplat != null)
+      SetUbersplatRenderAlways(m_ubersplat, true)
+
   // --------------------------------------------------------------------------
   private function makeLootable()
     getOwnerUnit().addAbility(ABILITY_ID_LOOTABLE)
     getOwnerUnit().setVertexColor(LOOTABLE_COLOR)
     // Makes the unit targettable by the search ability
     UnitAddType(getOwnerUnit(), UNIT_TYPE_ANCIENT)
+
+    if (m_ubersplat != null)
+      SetUbersplatRenderAlways(m_ubersplat, false)
 
   // --------------------------------------------------------------------------
   function showLootRewardNotification(player _player, LootRewardNotification notification)
@@ -639,8 +659,6 @@ public class LootableComponent extends UnitComponent
 
     destroy lootCardInstance
 
-    updateTexttag()
-
     if (m_destroyOnLoot)
       getOwnerUnit().remove()
       return
@@ -652,11 +670,6 @@ public class LootableComponent extends UnitComponent
     if (lootCard.getCancelLootOperationOnActivate() and m_lootOperation != null)
       // Delay to avoid tricky double free of LootOperation.m_awardTimer
       nullTimer(() -> m_lootOperation.interrupt())
-  
-  // --------------------------------------------------------------------------
-  private function updateTexttag()
-    m_lootCountTag.setText(m_lootCards.size().toString(), 10.0)
-    m_lootCountTag.setVisibility(hasLoot())
 
   // // --------------------------------------------------------------------------
   // protected function giveRewards(unit lootingUnit)
