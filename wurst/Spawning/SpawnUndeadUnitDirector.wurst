@@ -26,6 +26,7 @@ import UnitModifiers
 import WaveGeneratorCommon
 import PlayerSpawnPointProviders
 import Observable
+import RealExtensions
 
 // Register units with the Admin using this key. Any unit registered using this key
 // will contribute to the spawn director's max alive and total spawned counters.
@@ -318,6 +319,7 @@ public class SpawnUndeadUnitDirector extends ContinuousDirector
   private int m_goldDrops
   private SpawnContext m_context
   private PerSecondCreditGenerator m_creditGenerator
+  private int array[MAX_ELITE_TIER] m_spawnedTierCounts
 
   private Func1<SpawnContext, int> m_maxSpawnCount
   private Func1<SpawnContext, int> m_maxAliveCount
@@ -334,6 +336,9 @@ public class SpawnUndeadUnitDirector extends ContinuousDirector
     m_targetPlayer = targetPlayer  
     m_context = new SpawnContext().acquire()
     m_creditGenerator = new PerSecondCreditGenerator(this)
+
+    for i = 0 to MAX_ELITE_TIER - 1
+      m_spawnedTierCounts[i] = 0
 
   // --------------------------------------------------------------------------
   ondestroy
@@ -443,6 +448,9 @@ public class SpawnUndeadUnitDirector extends ContinuousDirector
     if (m_creditGenerator != null)
       m_creditGenerator.enable()
 
+    for i = 0 to MAX_ELITE_TIER - 1
+      m_spawnedTierCounts[i] = 0
+
     m_goldAvailable = 0
     m_spawnsPerGoldDropCounter = 0 
     m_playerDifficulty = m_targetPlayer.getHumanPlayerComponentRequired().getDifficulty()
@@ -501,6 +509,8 @@ public class SpawnUndeadUnitDirector extends ContinuousDirector
     let spawnDef = spawnCard.getSpawnDefinition()
 
     m_context.setTier(card.tier)
+
+    m_spawnedTierCounts[card.tier]++
 
     var spawnPointProvider = getSpawnPointProvider()
     if (spawnPointProvider == null)
@@ -632,12 +642,25 @@ public class SpawnUndeadUnitDirector extends ContinuousDirector
 
     super.writeDebugString(output)
 
+    var totalSpawnCount = 0
+    for i = 0 to MAX_ELITE_TIER - 1
+      totalSpawnCount += m_spawnedTierCounts[i]
+
+    var tierCountsString = "Tiers Spawned: "
+
+    for i = 0 to MAX_ELITE_TIER - 1
+      tierCountsString += "{0}: {1} ({2}%) ".format(
+        i.toString(),
+        m_spawnedTierCounts[i].toString(),
+        (m_spawnedTierCounts[i] / totalSpawnCount).toPercentageString01())
+
+    output.call(tierCountsString)
+
     if (m_context != null)
     //{
       output.call("Player Diff: " + m_playerDifficulty.toString())
       output.call("Diff Coeff: " + m_context.getDifficultyCoeff().toString())
       output.call("Last Tier: " + m_context.getTier().toString())
-
 
       output.call("Normal Stats: lvl:{0} hp:{1} armor:{2} dmg:{3}".format(
         g_zombieMeleeModifiers.getLevel(m_context, 1.0).toString(),
@@ -651,13 +674,6 @@ public class SpawnUndeadUnitDirector extends ContinuousDirector
         g_eliteMeleeModifiers.getHealth(m_context, 1.0).toString(),
         g_eliteMeleeModifiers.getArmor(m_context, 1.0).toString(),
         g_eliteMeleeModifiers.getAttack1DamageRange(m_context, 1.0).toString()
-      ))
-
-      output.call("Elite HP: {0}*{1}*{2}={3}".format(
-        g_eliteMeleeModifiers.baseHealth.toString(),
-        m_context.getDifficultyCoeff().toString(),
-        ELITE_TIER_HEALTH_MULTIPLIER[m_context.getTier()].toString(),
-        g_eliteMeleeModifiers.getHealth(m_context, 1.0).toString()
       ))
     //}
     
