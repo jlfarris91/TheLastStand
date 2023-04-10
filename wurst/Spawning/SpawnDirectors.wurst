@@ -29,6 +29,9 @@ import HashMap
 import LoadToc
 import StandardTooltip
 import UnitAdmin
+import Events
+
+bool g_enableAutoKillEnemies = false
 
 SpawnUndeadUnitDirector array g_zombieDirectors
 SpawnUndeadUnitDirector array g_eliteDirectors
@@ -324,6 +327,21 @@ init
   g_zombieDeck.addCategory("Zombies", 1.0)
   ..addCard(SpawnCards.zombies)
 
+  let zombieKillTimerRange = rangeReal(10.0, 20.0)
+  let eliteKillTimerRange = rangeReal(15.0, 30.0)
+  let bossKillTimerRange = rangeReal(45.0, 60.0)
+
+  Event2Callback<UnitAdmin, unit> onUnitSpawned = (UnitAdmin admin, unit u) -> 
+    if (g_enableAutoKillEnemies)
+      real killTime
+      if (u.isBoss())
+        killTime = bossKillTimerRange.getRandom()
+      else if (u.isElite())
+        killTime = eliteKillTimerRange.getRandom()
+      else
+        killTime = zombieKillTimerRange.getRandom()
+      doAfter(killTime, () -> u.kill())
+
   nullTimer() () ->
   //{
 
@@ -344,6 +362,7 @@ init
       zombieDirector.setMaxSpawnCount(context -> UNLIMITED)
       zombieDirector.setMaxAliveCount(context -> 10)
       zombieDirector.setDeck(g_zombieDeck)
+      zombieDirector.getAdmin().onUnitRegistered().register(onUnitSpawned)
       g_zombieDirectors[p.getId()] = zombieDirector
       
       let eliteCreditsOnActivation = 10 * Pow(playerDifficulty + 1, 2.275)
@@ -359,6 +378,7 @@ init
       eliteDirector.setMaxSpawnCount(context -> eliteMaxAliveCount * 3)
       eliteDirector.setMaxAliveCount(context -> eliteMaxAliveCount)
       eliteDirector.setDeck(g_eliteDecks.get(0))
+      eliteDirector.getAdmin().onUnitRegistered().register(onUnitSpawned)
       g_eliteDirectors[p.getId()] = eliteDirector
       
       let bossCreditsOnActivation = 70 + 12 * Pow(playerDifficulty + 1, 3)
@@ -373,6 +393,7 @@ init
       bossDirector.setMaxSpawnCount(context -> max(playerDifficulty.floor(), 1))
       bossDirector.setMaxAliveCount(context -> max(playerDifficulty.floor(), 1))
       bossDirector.setDeck(g_bossDecks.get(0))
+      bossDirector.getAdmin().onUnitRegistered().register(onUnitSpawned)
       g_bossDirectors[p.getId()] = bossDirector
 
       g_remainingUnitsFrames[p.getId()] = new RemainingUnitsFrame()

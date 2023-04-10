@@ -9,55 +9,96 @@
 #define USE_REAL_TIME
 
 static float[] ELITE_TIER_VALUE_MULTIPLIER = { 1.0f, 6f, 36f };
+static float[] ELITE_TIER_HEALTH_MULTIPLIER = { 1f, 1.5f, 3f };
 const float TOO_CHEAP_COEFF = 6;
 static Random g_random = new Random();
-static int NUMBER_OF_RUNS = 1000;
+static int NUMBER_OF_RUNS = 100;
 static float SECONDS_TOTAL = (240.0f - 60.0f) / 2.5f;
 static float TIME_SCALE = 1000.0f;
 const float SIXTY_FPS = 1.0f / 60.0f;
 const int DIFF_COUNT = 6;
+const int NIGHT_COUNT = 16;
 	
-int[,] tierSpawnCounts = new int[NUMBER_OF_RUNS, 3];
+int[,,] tierSpawnCounts = new int[NUMBER_OF_RUNS, NIGHT_COUNT, 3];
+
+enum RunType
+{
+	Zombies,
+	Elites,
+	Bosses
+}
 
 async void Main()
 {
-	void Run(int run, float playerDiff, float durationSeconds, float timeScale)
+	void Run(int run, float playerDiff, float durationSeconds, float timeScale, int night, RunType type)
 	{
 		var durationMilliseconds = (durationSeconds * 1000.0f) / timeScale;
 		var lastTime = 0.0f;
 
 		var card = new Card();
-		card.m_cost = 10;
 		card.m_tierCount = 3;
 		
+		switch (type)
+		{
+			case RunType.Zombies:
+				card.m_cost = 10;
+				break;
+			case RunType.Elites:
+				card.m_cost = 20;
+				break;
+			case RunType.Bosses:
+				card.m_cost = 100;
+				break;				
+		}
+
 		var deck = new Deck();
 		deck.m_cards.Add(card);
-		
-		//var night = 1;
-		//var nightsSurvived = 0;
-		//var daysSurvived = 1;
-		
-		var night = 16;
-		var nightsSurvived = 15;
-		var daysSurvived = 16;
+
+		var nightsSurvived = night;
+		var daysSurvived = night + 1;
 		
 		var gameProgressCoeff = (daysSurvived * 0.5f + nightsSurvived) * 0.5f;
 		var playerDiffCoeff = GetGeneralDifficultyCoeff(gameProgressCoeff, playerDiff);
-		var creditsOnActivation = 25 + ((float)Math.Floor(night / 5f) + 1) * 25.0f * playerDiffCoeff ;
 
 		var spawnDirector = new SpawnDirector();
 		spawnDirector.m_deck = deck;
 		spawnDirector.m_difficultyCoeff = playerDiffCoeff;
-		spawnDirector.m_creditsMultiplier = playerDiff + 1.0f;
-		spawnDirector.m_creditsOnActivation = creditsOnActivation;
 		spawnDirector.m_intervalBetweenWavesMin = 2.0f;
 		spawnDirector.m_intervalBetweenWavesMax = 5.0f;
 		spawnDirector.m_intervalDuringWavesMin = 0.1f;
 		spawnDirector.m_intervalDuringWavesMax = 1.0f;
-		spawnDirector.m_maxAliveCount = 10;
-		spawnDirector.m_maxSpawnCount = int.MaxValue;
-		spawnDirector.m_killTimerMin = (int)(10000.0f / timeScale);
-		spawnDirector.m_killTimerMax = (int)(20000.0f / timeScale);
+		
+		switch (type)
+		{
+			case RunType.Zombies:
+				spawnDirector.m_maxAliveCount = 10;
+				spawnDirector.m_maxSpawnCount = int.MaxValue;
+				spawnDirector.m_creditsMultiplier = playerDiff + 1.0f;
+				spawnDirector.m_creditsOnActivation = 25 + ((float)Math.Floor((night + 1) / 5f) + 1) * 25.0f * playerDiffCoeff;
+				spawnDirector.m_killTimerMin = (int)(10000.0f / timeScale);
+				spawnDirector.m_killTimerMax = (int)(20000.0f / timeScale);
+				break;
+			case RunType.Elites:
+				var eliteMaxAliveCount = 1 + (int)Math.Max(Math.Floor(playerDiff) + 1, 1);
+				spawnDirector.m_maxAliveCount = eliteMaxAliveCount;
+				spawnDirector.m_maxSpawnCount = eliteMaxAliveCount * 3;
+				spawnDirector.m_creditsMultiplier = playerDiff;
+				spawnDirector.m_creditsOnActivation = (int)(10 * Math.Pow(playerDiff + 1, 2.275f));
+				spawnDirector.m_killTimerMin = (int)(15000.0f / timeScale);
+				spawnDirector.m_killTimerMax = (int)(25000.0f / timeScale);
+				break;
+			case RunType.Bosses:
+				var bossMaxAliveCount = (int)Math.Max(Math.Floor(playerDiff), 1);
+				spawnDirector.m_maxAliveCount = bossMaxAliveCount;
+				spawnDirector.m_maxSpawnCount = bossMaxAliveCount;
+				spawnDirector.m_creditsMultiplier = playerDiff;
+				spawnDirector.m_creditsOnActivation = (int)(70 + 12 * Math.Pow(playerDiff + 1, 3));
+				spawnDirector.m_killTimerMin = (int)(30000.0f / timeScale);
+				spawnDirector.m_killTimerMax = (int)(60000.0f / timeScale);
+				break;				
+		}
+
+		
 		spawnDirector.Reset();
 		
 #if USE_REAL_TIME
@@ -93,7 +134,7 @@ async void Main()
 		for (var i = 0; i < 3; ++i)
 		{
 			var c = spawnDirector.m_tierSpawnedCounts[i];
-			tierSpawnCounts[run, i] = c;
+			tierSpawnCounts[run, night, i] = c;
 #if LOG_DETAILED
 			Console.WriteLine($"Run {run} - Tier {i}: {c} ({p * 100.0f}%)");
 #endif
@@ -101,44 +142,56 @@ async void Main()
 	
 	}
 	
-	var totalSpawnedByDiff = new int[DIFF_COUNT];
-	var totalSpawnedByTierByDiff = new int[DIFF_COUNT, 3];
+	var totalSpawnedByDiff = new int[3, DIFF_COUNT];
+	var totalSpawnedByTierByDiff = new int[3, DIFF_COUNT, 3];
 	
-	for (var d = 0; d < DIFF_COUNT; ++d)
-	//var d = 1;
+	for (var type = 0; type < 3; ++type)
+	//var type = 0;
 	{
-		var diff = d == 0 ? 0.5f : d;
-		
-		Console.WriteLine($"=== Difficulty: {diff} ===");
-		
-#if RUN_IN_PARALLEL	
-		var tasks = Enumerable.Range(0, NUMBER_OF_RUNS).Select(i => Task.Run(() => Run(i, diff, SECONDS_TOTAL, TIME_SCALE)));
-		await Task.WhenAll(tasks);
-#else
-		for (var i = 0; i < NUMBER_OF_RUNS; ++i)
+		for (var d = 0; d < DIFF_COUNT; ++d)
+		//var d = 1;
 		{
-			Run(i, diff, SECONDS_TOTAL, TIME_SCALE);
-		}
-#endif
-
-		for (int i = 0; i < NUMBER_OF_RUNS; ++i)
-		{
-			totalSpawnedByDiff[d] += tierSpawnCounts[i, 0];
-			totalSpawnedByTierByDiff[d, 0] += tierSpawnCounts[i, 0];
+			var diff = d == 0 ? 0.5f : d;
 			
-			totalSpawnedByDiff[d] += tierSpawnCounts[i, 1];
-			totalSpawnedByTierByDiff[d, 1] += tierSpawnCounts[i, 1];
+			Console.WriteLine($"=== Type: {(RunType)type} Difficulty: {diff} ===");
 			
-			totalSpawnedByDiff[d] += tierSpawnCounts[i, 2];
-			totalSpawnedByTierByDiff[d, 2] += tierSpawnCounts[i, 2];
-		}
+	#if RUN_IN_PARALLEL	
+			var tasks = Enumerable.Range(0, NUMBER_OF_RUNS).SelectMany(run => Enumerable.Range(0, NIGHT_COUNT).Select(night => Task.Run(() => Run(run, diff, SECONDS_TOTAL, TIME_SCALE, night, (RunType)type))));
+			await Task.WhenAll(tasks);
+	#else
+			for (var i = 0; i < NUMBER_OF_RUNS; ++i)
+			{
+				Run(i, diff, SECONDS_TOTAL, TIME_SCALE);
+			}
+	#endif
 
-		for (int i = 0; i < 3; ++i)
-		{
-			var avg = totalSpawnedByTierByDiff[d, i] / NUMBER_OF_RUNS;
-			var p = totalSpawnedByTierByDiff[d, i] / (float)totalSpawnedByDiff[d];
-			Console.WriteLine($"Final Tier {i}: {totalSpawnedByTierByDiff[d, i]} Avg: {avg} ({(int)Math.Round(p * 100)}%)");
+			for (int night = 0; night < NIGHT_COUNT; ++night)
+			{
+				for (int run = 0; run < NUMBER_OF_RUNS; ++run)
+				{
+					totalSpawnedByDiff[type, d] += tierSpawnCounts[run, night, 0];
+					totalSpawnedByTierByDiff[type, d, 0] += tierSpawnCounts[run, night, 0];
+					
+					totalSpawnedByDiff[type, d] += tierSpawnCounts[run, night, 1];
+					totalSpawnedByTierByDiff[type, d, 1] += tierSpawnCounts[run, night, 1];
+					
+					totalSpawnedByDiff[type, d] += tierSpawnCounts[run, night, 2];
+					totalSpawnedByTierByDiff[type, d, 2] += tierSpawnCounts[run, night, 2];
+				}
+			}
+
+			for (int i = 0; i < 3; ++i)
+			{
+				var avg = totalSpawnedByTierByDiff[type, d, i] / (float)NUMBER_OF_RUNS;
+				var p = totalSpawnedByTierByDiff[type, d, i] / (float)totalSpawnedByDiff[type ,d];
+				Console.WriteLine($"Final Tier {i}: {totalSpawnedByTierByDiff[type, d, i]} Avg: {avg} ({(int)(Math.Round(p * 100))}%) ({p * 100}%)");
+			}
 		}
+	}
+	
+	for (var type = 0; type < 3; ++type)
+	{
+		
 	}
 		
 	Console.WriteLine("done");
@@ -371,7 +424,7 @@ class SpawnDirector
 		m_aliveCount++;
 		m_spawnCount++;
 		
-		var killTime = m_random.Next(m_killTimerMin, m_killTimerMax);
+		var killTime = m_random.Next(m_killTimerMin, m_killTimerMax) * ELITE_TIER_HEALTH_MULTIPLIER[m_selectedCard.tier];
 		var killTimer = new System.Timers.Timer(killTime);
 		killTimer.AutoReset = false;
 		killTimer.Elapsed += (_, _) =>
