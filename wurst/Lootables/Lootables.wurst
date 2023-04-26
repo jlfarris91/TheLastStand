@@ -131,6 +131,8 @@ public abstract class LootCard extends TieredCard
 
   static unit s_looter
   static unit s_lootable
+  static bool s_luckyHorseshoe
+  static bool s_pendant
 
   // --------------------------------------------------------------------------
   construct(string id)
@@ -145,6 +147,14 @@ public abstract class LootCard extends TieredCard
     return s_lootable
 
   // --------------------------------------------------------------------------
+  static function getCausedByHorseshoe() returns bool
+    return s_luckyHorseshoe
+
+  // --------------------------------------------------------------------------
+  static function getAffectedByPendant() returns bool
+    return s_pendant
+
+  // --------------------------------------------------------------------------
   abstract function activateCard(int tier) returns bool
 
   // ----------------------------------------------------------------------------
@@ -154,6 +164,14 @@ public abstract class LootCard extends TieredCard
   // ----------------------------------------------------------------------------
   function getCancelLootOperationOnActivate() returns bool
     return false
+
+  // --------------------------------------------------------------------------
+  function getCanBeDrawnByLuckyHorseshoe() returns bool
+    return true
+
+  // --------------------------------------------------------------------------
+  function getCanBeAffectedByPendant() returns bool
+    return true
 
 // ============================================================================
 public class LootDirector extends Director
@@ -653,15 +671,10 @@ public class LootableComponent extends UnitComponent
       error("Invalid loot card")
       return
 
-    LootCard.s_lootable = getOwnerUnit()
-    LootCard.s_looter = lootingUnit
-
     let lootCard = lootCardInstance.card castTo LootCard
-    if (lootCard != null)
-      lootCard.activateCard(lootCardInstance.tier)
 
-    LootCard.s_lootable = null
-    LootCard.s_looter = null
+    if (lootCard != null)
+      activateLootCard(lootCardInstance, lootingUnit, false)
 
     // Award xp for looting
     let xpComp = lootingUnit.getHeroExperienceComponent()
@@ -670,6 +683,9 @@ public class LootableComponent extends UnitComponent
       xpComp.addXp(lootXpProp.getValue(), false)
 
     destroy lootCardInstance
+
+    doAfter(0.5) ->
+      tryAwardExtraLootFromLuckyHorseshoe(lootingUnit)
 
     if (m_destroyOnLoot)
       getOwnerUnit().remove()
@@ -683,72 +699,112 @@ public class LootableComponent extends UnitComponent
       // Delay to avoid tricky double free of LootOperation.m_awardTimer
       nullTimer(() -> m_lootOperation.interrupt())
 
-  // // --------------------------------------------------------------------------
-  // protected function giveRewards(unit lootingUnit)
-  //   m_lootRewardMultiplier = 1
-  //   let deckInstance = m_director.getDeck().createInstance()
-  //   giveRewardsWithChanceToRetrigger(deckInstance, lootingUnit, m_chanceToRetrigger01, true, false)
-  //   destroy deckInstance
+  // --------------------------------------------------------------------------
+  function tryAwardExtraLootFromLuckyHorseshoe(unit lootingUnit)
 
-  // // --------------------------------------------------------------------------
-  // private function giveRewardsWithChanceToRetrigger(
-  //   DeckInstance deckInstance,
-  //   unit lootingUnit,
-  //   real chanceToRetrigger01,
-  //   bool allowLuckyHorseshoe,
-  //   bool rewardDueToLuckyHorseshoe)
+    if (not lootingUnit.isAlive())
+      return
 
-  //   // No more rewards to give
-  //   if (deckInstance.isEmpty())
-  //     return
+    // Lucky Horseshoe item grants a small chance to immediately loot a second time
+    var chanceToRetriggerWithHoreshoe01 = 0.0
+    let metadata = lootingUnit.getMetadata()
+    if (metadata != null)
+      let comp = metadata.getUnitPropertiesComponent()
+      if (comp != null)
+        chanceToRetriggerWithHoreshoe01 = clamp01(chanceToRetriggerWithHoreshoe01 + comp.getPropertyValue(UnitProperty.LOOT_TWICE_CHANCE_01))
 
-  //   let ownerUnit = getOwnerUnit()
+    let roll = GetRandomReal(0, 1)
+    if (not passesChanceCheck(chanceToRetriggerWithHoreshoe01, roll))
+      return
 
-  //   m_dueToLuckyHorseshoe += rewardDueToLuckyHorseshoe ? 1 : 0
+    let deck = m_director.getDeck()
+    if (deck == null)
+      return
 
-  //   // Give the player their reward
-  //   LootCard card = null
-  //   while (not deckInstance.isEmpty())
-  //   //{
-  //     card = deckInstance.drawCard() castTo LootCard
+    let deckInstance = deck.createInstance()
 
-  //     if (card == null)
-  //       Log.debug("No reward registered for lootable")
-  //       break
+    // Keep drawing until we draw a card that can be awarded by the lucky horseshoe
+    LootCard drawnCard = null
+    while not deckInstance.isEmpty()
+      drawnCard = deckInstance.draw() castTo LootCard
+      if (drawnCard != null and drawnCard.getCanBeDrawnByLuckyHorseshoe())
+        break
 
-  //     if (card.giveReward(ownerUnit, lootingUnit))
-  //       break
-  //   //}
+    if (drawnCard == null)
+      return
 
-  //   m_dueToLuckyHorseshoe -= rewardDueToLuckyHorseshoe ? 1 : 0
-
-  //   // Some rewards necessarily must stop the retrigger loop
-  //   if (card == null or card.getStopsRetrigger())
-  //     return
-
-  //   var chanceToRetriggerWithHoreshoe01 = chanceToRetrigger01
-  //   var mutableLuckyHorseshoe = allowLuckyHorseshoe
-  //   var mutableRewardDueToLuckyHorseshoe = false
-
-  //   // Lucky Horseshoe item grants a small chance to immediately loot a second time
-  //   let metadata = lootingUnit.getMetadata()
-  //   if (metadata != null)
-  //     let comp = metadata.getUnitPropertiesComponent()
-  //     if (comp != null)
-  //       chanceToRetriggerWithHoreshoe01 = clamp01(chanceToRetriggerWithHoreshoe01 + comp.getPropertyValue(UnitProperty.LOOT_TWICE_CHANCE_01))
+    let lootCardInstance = drawnCard.getHighestAffordableTier(m_director.getCreditsOnActivation() + m_director.getCredits())
+    if (lootCardInstance == null)
+      return
     
-  //   let roll = GetRandomReal(0, 1)
-  //   if (not passesChanceCheck(chanceToRetriggerWithHoreshoe01, roll))
-  //     return
+    let lootCard = lootCardInstance.card castTo LootCard
+    if (lootCard != null and activateLootCard(lootCardInstance, lootingUnit, true))
+    //{
+      // The chance check would not have passed if it weren't for the effects of lucky horseshoe
+      displayMessageToPlayer(lootingUnit.getOwner(), "Lucky Horseshoe!".colorize(Colors.lightBlue) + " You found even more loot!")
 
-  //   // The chance check would not have passed if it weren't for the effects of lucky horseshoe
-  //   if (not passesChanceCheck(chanceToRetrigger01, roll))
-  //     displayMessageToPlayer(lootingUnit.getOwner(), "Lucky Horseshoe!".colorize(Colors.lightBlue) + " You found even more loot!")
-  //     mutableLuckyHorseshoe = false // Lucky horseshoe can only fire once
-  //     mutableRewardDueToLuckyHorseshoe = true
+      // Award xp for looting
+      let xpComp = lootingUnit.getHeroExperienceComponent()
+      let lootXpProp = lootingUnit.getOwner().getProperty(PlayerProperty.HERO_XP_PER_LOOT)
+      if (xpComp != null and lootXpProp != null)
+        xpComp.addXp(lootXpProp.getValue(), false)
+    //}
 
-  //   // Give the player another reward and give it another shot to retrigger
-  //   giveRewardsWithChanceToRetrigger(deckInstance, lootingUnit, chanceToRetrigger01 / 3.0, mutableLuckyHorseshoe, mutableRewardDueToLuckyHorseshoe)
+    destroy lootCardInstance
+
+  // --------------------------------------------------------------------------
+  private function activateLootCard(CardInstance lootCardInstance, unit lootingUnit, bool horsehoe) returns bool
+
+    let lootCard = lootCardInstance.card castTo LootCard
+    if (lootCard == null)
+      return false
+
+    let tier = lootCardInstance.tier + getPendantAdjustedCardTier(lootCardInstance, lootingUnit)
+
+    LootCard.s_lootable = getOwnerUnit()
+    LootCard.s_looter = lootingUnit
+    LootCard.s_luckyHorseshoe = horsehoe
+    LootCard.s_pendant = tier > lootCardInstance.tier
+
+    let activatedCard = lootCard.activateCard(tier)
+
+    LootCard.s_lootable = null
+    LootCard.s_looter = null
+    LootCard.s_luckyHorseshoe = false
+    LootCard.s_pendant = false
+
+    return activatedCard
+
+  // --------------------------------------------------------------------------
+  private function getPendantAdjustedCardTier(CardInstance lootCardInstance, unit lootingUnit) returns int
+
+    let lootCard = lootCardInstance.card castTo LootCard
+    if (lootCard == null or
+        not lootCard.getCanBeAffectedByPendant() or
+        lootCardInstance.tier == lootCard.getTierCount() - 1)
+      return 0
+
+    let metadata = lootingUnit.getMetadata()
+    if (metadata == null)
+      return 0
+
+    let comp = metadata.getUnitPropertiesComponent()
+    if (comp == null)
+      return 0
+
+    var chanceToIncreaseTier01 = lootingUnit.getOwner().getPropertyValue(PlayerProperty.LOOT_FIND_QUALITY)
+
+    // Pendant item grants a small chance to increase the tier of loot
+    chanceToIncreaseTier01 += comp.getPropertyValue(UnitProperty.LOOT_FIND_QUALITY)
+    
+    var tiersToAdd = chanceToIncreaseTier01.floor()
+    chanceToIncreaseTier01 -= chanceToIncreaseTier01.floor()
+
+    let roll = GetRandomReal(0, 1)
+    if (passesChanceCheck(chanceToIncreaseTier01, roll))
+      tiersToAdd++
+
+    return tiersToAdd
 
 // ============================================================================
 public function IUnitMetadata.getLootableComponent() returns LootableComponent
