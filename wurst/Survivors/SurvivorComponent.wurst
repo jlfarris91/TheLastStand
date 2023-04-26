@@ -18,40 +18,6 @@ import PlayerExtensions
 import ClosureTimers
 
 group g_temp = CreateGroup()
-trigger g_onSurvivorJobPreChange = CreateTrigger()
-trigger g_onSurvivorJobPostChange = CreateTrigger()
-unit g_jobChangingSurvivorPre
-unit g_jobChangingSurvivorPost
-
-// ============================================================================
-public function onSurvivorJobPreChanged(code func)
-  g_onSurvivorJobPreChange.addCondition(Condition(func))
-
-// ============================================================================
-public function onSurvivorJobPostChanged(code func)
-  g_onSurvivorJobPostChange.addCondition(Condition(func))
-
-// ============================================================================
-public function getJobChangingSurvivor_PreJobChange() returns unit
-  return g_jobChangingSurvivorPre
-
-// ============================================================================
-public function getJobChangingSurvivor_PostJobChange() returns unit
-  return g_jobChangingSurvivorPost
-
-// ============================================================================
-function raiseSurvivorJobPreChangeEvent(unit _unit)
-  g_jobChangingSurvivorPre = _unit
-  g_onSurvivorJobPreChange.evaluate()
-  g_jobChangingSurvivorPre = null
-
-// ============================================================================
-function raiseSurvivorJobPostChangeEvent(unit preUnit, unit postUnit)
-  g_jobChangingSurvivorPre = preUnit
-  g_jobChangingSurvivorPost = postUnit
-  g_onSurvivorJobPostChange.evaluate()
-  g_jobChangingSurvivorPre = null
-  g_jobChangingSurvivorPost = null
 
 // ============================================================================
 public class SurvivorComponent extends UnitComponent
@@ -233,7 +199,7 @@ public class SurvivorComponent extends UnitComponent
     if (m_activeJob != job)
       activateJobDirectly(job)
 
-    preReplaceUnit(ownerUnit)
+    preReplaceUnit()
 
     let title = jobDefinition.getTitle(unitTypeId)
     return replaceUnit(unitTypeId, title) != null
@@ -300,7 +266,7 @@ public class SurvivorComponent extends UnitComponent
     return activateJob(jobDefinition.getType())
 
   // --------------------------------------------------------------------------
-  private function preReplaceUnit(unit oldUnit)
+  private function preReplaceUnit()
 
     m_changingJobs = true
 
@@ -309,8 +275,6 @@ public class SurvivorComponent extends UnitComponent
 
     m_activeJobComponent = null
     m_activeJob = null
-
-    raiseSurvivorJobPreChangeEvent(oldUnit)
 
   // --------------------------------------------------------------------------
   private function replaceUnit(int replacementUnitId, string jobName) returns unit
@@ -324,11 +288,7 @@ public class SurvivorComponent extends UnitComponent
     return replacedUnit
 
   // --------------------------------------------------------------------------
-  private function postReplaceUnit(unit oldUnit, unit newUnit)
-
-    // We need to raise this no matter what, even if there is an error above, otherwise the job panel will get stuck
-    // waiting for the job change to end
-    raiseSurvivorJobPostChangeEvent(oldUnit, newUnit)
+  private function postReplaceUnit(unit newUnit)
 
     if (newUnit == null)
       return
@@ -351,8 +311,8 @@ public class SurvivorComponent extends UnitComponent
   // --------------------------------------------------------------------------
   override function onUnitChanged(unit oldUnit, unit newUnit)
 
-    if (oldUnit != null and newUnit != null)
-      postReplaceUnit(oldUnit, newUnit)
+    if (newUnit != null)
+      postReplaceUnit(newUnit)
 
   // --------------------------------------------------------------------------
   private function updateUnitProperName()
