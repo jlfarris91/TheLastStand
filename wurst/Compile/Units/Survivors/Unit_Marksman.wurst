@@ -3,7 +3,6 @@ import Abilities
 import TlsUnitDefinition
 import SurvivorUnitDefinition
 import TlsUnitDefinitionBuilder
-import ColorUtility
 import Range
 import TlsUpgradeIds
 import AbilityObjEditing
@@ -15,38 +14,55 @@ import ObjectIdGenerator
 import PlayerExtensions
 import RegisterEvents
 import HumanPlayers
+import ColorUtility
+import SurvivorJobComponent
+import UnitMetadata
+import SurvivorJobs
+import GroupUtils
+import Handle
+import UnitPropertiesComponent
+import Math
 
 public SurvivorUnitDefinition g_marksmanDefinition
+constant boolexpr g_filterUnitIsMarksman = Condition(function filterUnitIsMarksman)
 
 constant int STIMSHOT_BUFF_ID = compiletime(BUFF_ID_GEN.next())
 
 // ============================================================================
 function calculateCriticalStrikeChanceToCrit(int level) returns real
-  return 15.0 + (level - 1) + 0.5
+  return 0.10 + (level - 1) * 0.05
 
 // ============================================================================
 function calculateCriticalStrikeDamageMultiplier(int level) returns real
-  return 2.0 + (level - 1) + 0.05
+  return 2.0 + (level - 1) * 0.5
 
 // ============================================================================
-function calculateStunDamage(int level) returns real
-  return 300.0 * (level - 1) + 50.0
+function calculateCrippleMovementSpeedReduction01(int level) returns real
+  return lerp_hill01_clamped(0.5, 1.0, parameterize(1, 20, level), 1.25)
 
 // ============================================================================
-function calculateStunDuration(int level) returns real
-  return 2.0 + (level - 1) + 0.25
+function calculateCrippleAttackSpeedReduction01(int level) returns real
+  return lerp_hill01_clamped(0.25, 0.9, parameterize(1, 20, level), 1.25)
+
+// ============================================================================
+function calculateCrippleDamageReduction01(int level) returns real
+  return lerp_hill01_clamped(0.25, 0.9, parameterize(1, 20, level), 1.25)
+
+// ============================================================================
+function calculateCrippleDuration01(int level) returns real
+  return 12.5 + (level - 1) * 2.5
 
 // ============================================================================
 function calculateStimshotAttackSpeedIncrease(int level) returns real
-  return 0.3 + (level - 1) * 0.05
+  return lerp_hill01_clamped(0.1, 2.0, parameterize(1, 20, level), 1.25)
 
 // ============================================================================
 function calculateStimshotMovementSpeedIncrease(int level) returns real
-  return 0.2 + (level - 1) * 0.25
+  return lerp_hill01_clamped(0.2, 1.0, parameterize(1, 20, level), 1.25)
 
 // ============================================================================
 function calculateStimshotDuration(int level) returns real
-  return 15.0 + (level - 1) * 0.5
+  return 8.0 + (level - 1) * 2.0
 
 // ============================================================================
 @compiletime function createObjectDefinitions()
@@ -55,11 +71,11 @@ function calculateStimshotDuration(int level) returns real
     ..setNormalAbilities(commaList(
       TlsAbilityIds.inventory4Slots,
       TlsAbilityIds.marksmanCriticalStrike,
-      TlsAbilityIds.marksmanStun,
+      TlsAbilityIds.marksmanCripple,
       TlsAbilityIds.marksmanStimshot))
     ..setAcquisitionRange(1000.0)
     ..setAttack1CooldownTime(3)
-    ..setAttack1DamageRange(rangeInt(400, 440))
+    ..setAttack1DamageRange(rangeInt(140, 180))
     ..setAttack1AttackType(AttackType.Pierce)
     ..setAttack1ProjectileArt(Abilities.wardenMissile)
     ..setAttack1ProjectileHomingEnabled(false)
@@ -71,9 +87,9 @@ function calculateStimshotDuration(int level) returns real
     ..setArmorType(ArmorType.Medium)
     ..setDefenseUpgradeBonus(1)
     ..setSpeedBase(250)
-    ..setManaInitialAmount(100)
-    ..setManaMaximum(100)
-    ..setManaRegeneration(0.01)
+    ..setManaInitialAmount(0)
+    ..setManaMaximum(0)
+    ..setManaRegeneration(0.0)
     ..setUpgradesUsed(commaList(
       TlsUpgradeIds.survivorHpBonus,
       TlsUpgradeIds.leatherArmor,
@@ -81,58 +97,57 @@ function calculateStimshotDuration(int level) returns real
       TlsUpgradeIds.marksmanFurtherStudy))
     ..setName("Marksman")
     ..setCasterUpgradeNames("Initiate,Novice,Adept,Master")
-    ..setCasterUpgradeTips("- None,- Critical Strike,- Critical Strike|n- Stunning Blow,- Critical Strike|n- Stunning Blow|n- Stimshot")
+    ..setCasterUpgradeTips("- None,- Critical Strike,- Critical Strike|n- Cripple,- Critical Strike|n- Cripple|n- Stimshot")
     ..setCasterUpgradeArt("UI\\Widgets\\Console\\Human\\infocard-marksman.blp")
     ..addUnitClass(TlsUnitClassification.HUMAN)
     ..addUnitClass(TlsUnitClassification.RANGED)
-    ..build("The Marksman can hit targets at a long range and does extra damage to bosses.",
+    ..build("The Marksman can hit targets at a long range with high crit damage.",
       tooltipBuilder -> begin
         let properties = new TooltipItem("Properties: ")
-        ..addValue("+20% damage to elites".colorize(Colors.green))
-        ..addValue("+10% damage to bosses".colorize(Colors.green))
-        ..addValue("+25% crit chance".colorize(Colors.green))
-        ..addValue("+4x crit damage multiplier".colorize(Colors.green))
+        ..addValue("Increased crit hit chance".colorize(Colors.green))
+        ..addValue("Increased crit dmg multiplier".colorize(Colors.green))
+        ..addValue("Slow attack speed".colorize(Colors.red))
         tooltipBuilder.addItem(properties)
       end)
 
-  new AbilityDefinitionCriticalStrikecreep(TlsAbilityIds.marksmanCriticalStrike)
+  new AbilityDefinition(TlsAbilityIds.marksmanCriticalStrike, 'Ahan')
     ..setLevels(20)
+    ..setIconNormal(Icons.bTNCriticalStrike)
     ..setButtonPositionNormalX(0)
     ..setButtonPositionNormalY(2)
     ..setHotkeyNormal("Q")
     ..setRequirements(commaList(TlsUpgradeIds.marksmanNoviceTraining))
     ..setRequirementsLevels("1")
-    ..presetChancetoCriticalStrike(lvl -> calculateCriticalStrikeChanceToCrit(lvl))
-    ..presetChancetoEvade(lvl -> 0.0)
-    ..presetDamageBonus(lvl -> 0)
-    ..presetDamageMultiplier(lvl -> calculateCriticalStrikeDamageMultiplier(lvl))
-    ..presetNeverMiss(lvl -> false)
     ..presetTooltipNormal(lvl -> "Critical Strike [|cffffcc00Level {0}|r]".format(lvl.toString()))
     ..presetTooltipNormalExtended(lvl -> "Gives a {0} chance to do {1}x damage on an attack.".format(
-      calculateCriticalStrikeChanceToCrit(lvl).toPercentageString(),
+      calculateCriticalStrikeChanceToCrit(lvl).toPercentageString01(0),
       calculateCriticalStrikeDamageMultiplier(lvl).toString(1)))
 
-  new AbilityDefinitionThunderBoltCreep(TlsAbilityIds.marksmanStun)
+  new AbilityDefinitionCripple(TlsAbilityIds.marksmanCripple)
     ..setLevels(20)
-    ..setName("Stunning Blow")
+    ..setName("Cripple")
     ..setButtonPositionNormalX(1)
     ..setButtonPositionNormalY(2)
     ..setHotkeyNormal("W")
     ..setArtTarget("")
-    ..setHeroAbility(false)
     ..setRequirements(commaList(TlsUpgradeIds.marksmanNoviceTraining))
     ..setRequirementsLevels("2")
-    ..presetDamage(lvl -> calculateStunDamage(lvl))
+    ..presetAttackSpeedReduction(lvl -> calculateCrippleAttackSpeedReduction01(lvl))
+    ..presetDamageReduction(lvl -> calculateCrippleDamageReduction01(lvl))
+    ..presetMovementSpeedReduction(lvl -> calculateCrippleMovementSpeedReduction01(lvl))
     ..presetBuffs(lvl -> "BPSE")
     ..presetCastRange(lvl -> 800.0)
-    ..presetCooldown(lvl -> 10.0)
-    ..presetDurationHero(lvl -> calculateStunDuration(lvl) / 2.0)
-    ..presetDurationNormal(lvl -> calculateStunDuration(lvl))
+    ..presetCooldown(lvl -> 12.0)
+    ..presetManaCost(lvl -> 0)
+    ..presetDurationHero(lvl -> calculateCrippleDuration01(lvl) / 2.0)
+    ..presetDurationNormal(lvl -> calculateCrippleDuration01(lvl))
     ..presetTargetsAllowed(lvl -> "air,ground,organic,enemy,neutral")
-    ..presetTooltipNormal(lvl -> "Stunning Blow [|cffffcc00Level {0}|r]".format(lvl.toString()))
-    ..presetTooltipNormalExtended(lvl -> "Fire a shot that deals {0} to an enemy unit and stuns it for {1} seconds".format(
-      calculateStunDamage(lvl).toString(0),
-      calculateStunDuration(lvl).toString(1)))
+    ..presetTooltipNormal(lvl -> "Cripple [|cffffcc00Level {0}|r]".format(lvl.toString()))
+    ..presetTooltipNormalExtended(lvl -> "Reduces a target enemy's movement speed by {0}, attack rate by {1} and damage by {2}. Lasts {3} seconds".format(
+      calculateCrippleMovementSpeedReduction01(lvl).toPercentageString01(0),
+      calculateCrippleAttackSpeedReduction01(lvl).toPercentageString01(0),
+      calculateCrippleDamageReduction01(lvl).toPercentageString01(0),
+      calculateCrippleDuration01(lvl).toString(1)))
 
   new BuffDefinition(STIMSHOT_BUFF_ID, 'Bblo')
     ..setTooltipNormal("Stimshot")
@@ -157,14 +172,14 @@ function calculateStimshotDuration(int level) returns real
     ..presetScalingFactor(lvl -> 0.1)
     ..presetBuffs(lvl -> commaList(STIMSHOT_BUFF_ID))
     ..presetCastRange(lvl -> 600.0)
-    ..presetCooldown(lvl -> 15.0)
+    ..presetCooldown(lvl -> 20.0)
     ..presetDurationHero(lvl -> calculateStimshotDuration(lvl) / 2)
     ..presetDurationNormal(lvl -> calculateStimshotDuration(lvl) / 2)
     ..presetTargetsAllowed(lvl -> "air,friend,ground,neutral")
     ..presetTooltipNormal((int lvl) -> "Stimshot [|cffffcc00Level {0}|r]".format(lvl.toString()))
     ..presetTooltipNormalExtended((int lvl) -> "Increases a target friendly unit's attack rate by {0} and movement speed by {1} for {2} seconds.".format(
-      calculateStimshotAttackSpeedIncrease(lvl).toPercentageString01(),
-      calculateStimshotMovementSpeedIncrease(lvl).toPercentageString01(),
+      calculateStimshotAttackSpeedIncrease(lvl).toPercentageString01(1),
+      calculateStimshotMovementSpeedIncrease(lvl).toPercentageString01(1),
       calculateStimshotDuration(lvl).toString(1)))
     ..presetTooltipTurnOff(lvl ->"|cffc3dbffRight-click to activate auto-casting.|r")
     ..presetTooltipTurnOffExtended(lvl ->"|cffc3dbffRight-click to deactivate auto-casting.|r")
@@ -180,7 +195,7 @@ function calculateStimshotDuration(int level) returns real
 
     ..setName(2, "Marksman Adept Training")
     ..setTooltip(2, "Marksman Adept Training")
-    ..setTooltipExtended(2, "Increases Marksmen attack speed, attack damage and gives them the Stunning Blow ability.")
+    ..setTooltipExtended(2, "Increases Marksmen attack speed, attack damage and gives them the Cripple ability.")
     ..setIcon(2, Icons.bTNThoriumMelee)
     ..setRequirements(2, commaList(TlsUnitIds.headquarters2))
     
@@ -207,32 +222,32 @@ function calculateStimshotDuration(int level) returns real
 
     ..setName(1, "Marksman Further Study I")
     ..setTooltip(1, "Marksman Further Study I")
-    ..setTooltipExtended(1, "Further increases Marksmen attack damage and effectiveness of Critical Strike, Stunning Blow and Stimshot.")
+    ..setTooltipExtended(1, "Further increases Marksmen attack damage and effectiveness of Critical Strike, Cripple and Stimshot.")
     ..setIcon(1, Icons.bTNTome)
     ..setRequirements(1, commaList(TlsUpgradeIds.marksmanNoviceTraining))
     ..setRequirementsLevels(1, "3")
     
     ..setName(2, "Marksman Further Study II")
     ..setTooltip(2, "Marksman Further Study II")
-    ..setTooltipExtended(2, "Further increases Marksmen attack damage and effectiveness of Critical Strike, Stunning Blow and Stimshot.")
+    ..setTooltipExtended(2, "Further increases Marksmen attack damage and effectiveness of Critical Strike, Cripple and Stimshot.")
     ..setIcon(2, Icons.bTNTomeBrown)
     ..setRequirements(2, commaList(TlsUnitIds.headquarters4))
     
     ..setName(3, "Marksman Further Study III")
     ..setTooltip(3, "Marksman Further Study III")
-    ..setTooltipExtended(3, "Further increases Marksmen attack damage and effectiveness of Critical Strike, Stunning Blow and Stimshot.")
+    ..setTooltipExtended(3, "Further increases Marksmen attack damage and effectiveness of Critical Strike, Cripple and Stimshot.")
     ..setIcon(3, Icons.bTNTomeRed)
     ..setRequirements(3, "")
     
     ..setName(4, "Marksman Further Study IV")
     ..setTooltip(4, "Marksman Further Study IV")
-    ..setTooltipExtended(4, "Further increases Marksmen attack damage and effectiveness of Critical Strike, Stunning Blow and Stimshot.")
+    ..setTooltipExtended(4, "Further increases Marksmen attack damage and effectiveness of Critical Strike, Cripple and Stimshot.")
     ..setIcon(4, Icons.bTNSorceressAdept)
     ..setRequirements(4, commaList(TlsUnitIds.headquarters5))
     
     ..setName(5, "Marksman Further Study V")
     ..setTooltip(5, "Marksman Further Study V")
-    ..setTooltipExtended(5, "Further increases Marksmen attack damage and effectiveness of Critical Strike, Stunning Blow and Stimshot.")
+    ..setTooltipExtended(5, "Further increases Marksmen attack damage and effectiveness of Critical Strike, Cripple and Stimshot.")
     ..setIcon(5, Icons.bTNSorceressMaster)
     ..setRequirements(5, "")
     
@@ -244,26 +259,101 @@ function calculateStimshotDuration(int level) returns real
     ..setLumberCostIncrement(0)
     ..addEffectAttackDamageBonus(10, 10)
     ..addEffectAbilityLevelBonus(1, 1, TlsAbilityIds.marksmanCriticalStrike.toRawCode())
-    ..addEffectAbilityLevelBonus(1, 1, TlsAbilityIds.marksmanStun.toRawCode())
+    ..addEffectAbilityLevelBonus(1, 1, TlsAbilityIds.marksmanCripple.toRawCode())
     ..addEffectAbilityLevelBonus(1, 1, TlsAbilityIds.marksmanStimshot.toRawCode())
     ..setClass(UpgradeClass.NONE)
     ..setTimeBase(10)
     ..setTimeIncrement(5)
 
 // ============================================================================
+public class MarksmanJobComponent extends SurvivorJobComponent
+  private _handle m_critStrikeChance
+  private _handle m_critDmgMult
+
+  // --------------------------------------------------------------------------
+  construct(IUnitMetadata owner)
+    super(owner)
+
+  // --------------------------------------------------------------------------
+  override function getJobDefinition() returns SurvivorJobDefinition
+    return SurvivorJobs.marksman
+
+  // --------------------------------------------------------------------------
+  protected override function onEnabled()
+    super.onEnabled()
+    update(true)
+
+  // --------------------------------------------------------------------------
+  protected override function onDisabled()
+    super.onDisabled()
+    update(false)
+
+  // --------------------------------------------------------------------------
+  protected function update(bool addAffectors)
+
+    let ownerUnit = getOwnerUnit()
+    let owningPlayer = ownerUnit.getOwner()
+
+    let critChanceProp = ownerUnit.getProperty(UnitProperty.CRIT_CHANCE_01)
+    let critMultProp = ownerUnit.getProperty(UnitProperty.CRIT_DAMAGE_SCALAR)
+
+    if (m_critStrikeChance != INVALID_HANDLE)
+      critChanceProp.removeAffector(m_critStrikeChance)
+
+    if (m_critDmgMult != INVALID_HANDLE)
+      critMultProp.removeAffector(m_critDmgMult)
+
+    if (not addAffectors)
+      return
+
+    let level = min(owningPlayer.getTechResearchLevel(TlsUpgradeIds.marksmanNoviceTraining), 1) +
+                owningPlayer.getTechResearchLevel(TlsUpgradeIds.marksmanFurtherStudy)
+
+    if (level > 0)
+      m_critStrikeChance = critChanceProp.affectAdd(calculateCriticalStrikeChanceToCrit(level))
+
+    if (level > 1)
+      m_critDmgMult = critMultProp.affectAdd(calculateCriticalStrikeDamageMultiplier(level))
+
+// ============================================================================
+public function IUnitMetadata.getMarksmanJobComponent() returns MarksmanJobComponent
+  return this.getComponent(MarksmanJobComponent.typeId) castTo MarksmanJobComponent
+
+// ============================================================================
+public function IUnitMetadata.getOrAddMarksmanJobComponent() returns MarksmanJobComponent
+  var component = this.getMarksmanJobComponent()
+  if (component == null)
+    component = this.addComponent(new MarksmanJobComponent(this), false) castTo MarksmanJobComponent
+  return component
+
+// ============================================================================
+function filterUnitIsMarksman() returns bool
+  let filterUnit = GetFilterUnit()
+  return filterUnit.isAlive() and filterUnit.isMarksman()
+
+// ============================================================================
 public function onResearchFinished()
   let researchTypeId = GetResearched()
 
-  if (researchTypeId != TlsUpgradeIds.marksmanNoviceTraining)
+  if (researchTypeId != TlsUpgradeIds.marksmanNoviceTraining and
+      researchTypeId != TlsUpgradeIds.marksmanFurtherStudy)
     return
 
   let researchingUnit = GetResearchingUnit() 
   let owningPlayer = researchingUnit.getOwner()
   
-  if (owningPlayer.getTechResearchLevel(researchTypeId) < 3)
-    return
+  if (owningPlayer.getTechResearchLevel(researchTypeId) == 3)
+    owningPlayer.setTechAvailability(TlsUpgradeIds.marksmanFurtherStudy, true)
 
-  owningPlayer.setTechAvailability(TlsUpgradeIds.marksmanFurtherStudy, true)
+  let g = getGroup()
+  g.enumUnitsOfPlayer(owningPlayer, g_filterUnitIsMarksman)
+
+  for u in g
+    let marksmanJobComp = u.getMetadata().getMarksmanJobComponent()
+    if (marksmanJobComp != null)
+      marksmanJobComp.update(true)
+
+  g.release()
 
 // ============================================================================
 init
@@ -271,6 +361,9 @@ init
     createObjectDefinitions()
 
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_RESEARCH_FINISH, function onResearchFinished)
+
+  SurvivorJobComponent.registerSurvivorJobComponentGetter(SurvivorJobType.Marksman, MarksmanJobComponent.typeId)
+  SurvivorJobComponent.registerSurvivorJobComponentFactory(SurvivorJobType.Marksman, metadata -> metadata.getOrAddMarksmanJobComponent())
 
   for p in g_PlayingHumanPlayers
     p.setTechAvailability(TlsUpgradeIds.marksmanFurtherStudy, false)
