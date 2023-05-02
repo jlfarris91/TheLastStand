@@ -1,0 +1,318 @@
+// package Hordes
+// import MapEvents
+// import GroupUtils
+// import GameConstants
+// import Jobs
+// import Range
+// import UnitExtensions
+// import Time
+// import Bounds
+// import ClosureTimers
+// import UnitRecycler
+// import Orders
+// import CancellationToken
+// import WeightedSet
+// import LinkedList
+// import Spawning
+// // import TlsUnitIds
+// // import WaveSpawning
+// // import WaveGeneratorCommon
+// // import UnitModifiers
+// // import ObjEditingCommons
+// // import TieredUnitTypeProvider
+// // import Action
+// // import HashMap
+// // import Math
+
+// MapEvent g_hordesMapEvent
+
+// constant string HORDES_MAP_EVENT_ID = "world_hordes"
+
+// WeightedSet<int> array g_hordeUnitTypes
+
+// // ============================================================================
+// public class HordesMapEvent extends MapEvent
+//   protected group m_spawnedUnits
+//   protected LinkedList<group> m_hordes
+//   private CancellationToken m_ct
+//   private WeightedSet<int> m_unitTypes
+//   private rangeInt m_hordeCountRange = rangeInt(1)
+//   private rangeInt m_hordeSizeRange = rangeInt(1)
+
+//   // --------------------------------------------------------------------------
+//   construct()
+//     super(HORDES_MAP_EVENT_ID)
+//     m_spawnedUnits = getGroup()
+//     m_ct = new CancellationToken().acquire()
+//     m_unitTypes = new WeightedSet<int>()
+//     m_hordes = new LinkedList<group>()
+
+//   // --------------------------------------------------------------------------
+//   ondestroy
+//     cleanup()
+
+//     if (m_ct != null)
+//       m_ct.cancelAndRelease()
+//       m_ct = null
+
+//     if (m_spawnedUnits != null)
+//       m_spawnedUnits.release()
+//       m_spawnedUnits = null
+
+//     if (m_hordes != null)
+//       destroy m_hordes
+//       m_hordes = null
+
+//     if (m_unitTypes != null)
+//       destroy m_unitTypes
+//       m_unitTypes = null
+
+//   // --------------------------------------------------------------------------
+//   function addHordeUnitTypeId(int unitTypeId, real weight)
+//     m_unitTypes.add(unitTypeId, weight)
+
+//   // --------------------------------------------------------------------------
+//   function getRandomUnitTypeId() returns int
+//     return m_unitTypes.getRandom()
+
+//   // --------------------------------------------------------------------------
+//   function setHordeCountRange(rangeInt value)
+//     m_hordeCountRange = value
+
+//   // --------------------------------------------------------------------------
+//   function setHordeSizeRange(rangeInt value)
+//     m_hordeSizeRange = value
+
+//   // --------------------------------------------------------------------------
+//   override protected function onStarted()
+//     super.onStarted()
+
+//     let hordeCount = m_hordeCountRange.getRandom()
+//     for i = 0 to hordeCount - 1
+//       let hordeSize = m_hordeSizeRange.getRandom()
+//       MapEventInstance.unitThread.enqueue(m_ct, new HordeSpawnJob(this, hordeSize, i))
+
+//   // --------------------------------------------------------------------------
+//   override protected function onCompleted()
+//     super.onCompleted()
+//     cleanup()
+
+//   // --------------------------------------------------------------------------
+//   private function cleanup()
+
+//     if (m_ct != null)
+//       m_ct.cancelAndRelease()
+//       m_ct = null
+
+//     if (m_hordes != null)
+//       for hordeUnits in m_hordes
+//         banishUnitsAndReleaseGroup(hordeUnits)
+//       m_hordes.clear()
+
+//     banishUnitsAndReleaseGroup(m_spawnedUnits)
+//     m_spawnedUnits = null
+
+// // ============================================================================
+// class HordeSpawnJob extends Job
+//   private HordesMapEvent m_mapEvent
+//   private int m_id
+//   private ISpawnPointProvider m_spawnPointProvider
+//   private group m_spawnedUnits
+//   private int m_spawnCount
+//   private int m_spawned = 0
+
+//   // --------------------------------------------------------------------------
+//   construct (HordesMapEvent mapEvent, int spawnCount, int id)
+//     super(10.0)
+//     m_mapEvent = mapEvent
+//     m_spawnCount = spawnCount
+//     m_id = id
+//     m_spawnedUnits = getGroup()
+//     m_spawnPointProvider = getCachedHostileSpawnPointProvider()
+
+//   // --------------------------------------------------------------------------
+//   override function next() returns int
+
+//     let result = m_spawnPointProvider.getRandomSpawnPointInPlayableMap()
+//     if (not result.succeeded)
+//       return 0
+
+//     let unitTypeId = m_mapEvent.getRandomUnitTypeId()
+
+//     let spawnedUnit = spawnUnit(unitTypeId, result.spawnPoint)
+//     m_mapEvent.m_spawnedUnits.addUnit(spawnedUnit)
+//     m_spawnedUnits.addUnit(spawnedUnit)
+
+//     m_spawned++
+
+//     return 1
+  
+//   // --------------------------------------------------------------------------
+//   override function hasNext() returns bool
+//     return m_spawned < m_spawnCount
+
+//   // --------------------------------------------------------------------------
+//   override function complete()
+//     super.complete()
+
+//     if (getStatus() == JobStatus.SUCCEEDED)
+//       m_mapEvent.m_hordes.add(m_spawnedUnits)
+//       for u in m_spawnedUnits
+//         u.issuePointOrderById(Orders.attack, playableBounds.getRandomPoint())
+//     else
+//       banishUnitsAndReleaseGroup(m_spawnedUnits)
+//       m_spawnedUnits = null
+
+//   // --------------------------------------------------------------------------
+//   override function getDebuggerStateString() returns string
+//     return "Horde {0} {1}/{2}".format(m_id.toString(), m_spawned.toString(), NUMBER_DEER_PER_PLAYER.toString())
+
+// // ============================================================================
+// function spawnUnit(int unitTypeId, vec2 pos) returns unit
+//   let spawnedUnit = createUnitRecycled(PLAYER_UNDEAD, unitTypeId, pos, GetRandomDirectionDeg().asAngleDegrees())
+//   spawnedUnit.setInvulnerable(true)
+//   spawnedUnit.fadeIn()
+
+//   doAfter(UNIT_FADE_DURATION, () -> spawnedUnit.setInvulnerable(false))
+
+//   return spawnedUnit
+
+// // ============================================================================
+// function banishUnitsAndReleaseGroup(group units)
+  
+//   for u in units
+//     if (u.isAlive())
+//       u.setInvulnerable(true)
+//       u.issuePointOrder("move", playableBounds.getRandomPoint())
+//       u.fadeOut()
+
+//   doAfter(UNIT_FADE_DURATION, () -> stockOrRemoveUnitsAndReleaseGroup(units))
+
+// // ============================================================================
+// function stockOrRemoveUnitsAndReleaseGroup(group units)
+//   for u in units
+//     let recycler = u.getRecycler()
+//     if (recycler != null)
+//       if (not recycler.isUnitStocked(u))
+//         u.stock()
+//     else
+//       u.remove()
+//   units.release()
+
+// // ============================================================================
+// function onDayStart()
+
+//   if (g_hordesMapEvent != null)
+//     g_hordesMapEvent.start()
+
+// // ============================================================================
+// function onNightStart()
+  
+//   if (g_hordesMapEvent != null)
+//     g_hordesMapEvent.complete()
+
+// // ============================================================================
+// init
+
+//   MapEvent.registerMapEventFactory(HORDES_MAP_EVENT_ID, () -> new HordesMapEvent())
+//   g_hordesMapEvent = MapEvent.createMapEvent(HORDES_MAP_EVENT_ID)
+
+//   registerDayEvent(function onDayStart)
+//   registerNightEvent(function onNightStart)
+
+//   // Casual
+//   g_hordeUnitTypes[0] = new WeightedSet<int>()
+//     // ..add(TlsUnitIds.Undead.zomb)
+
+// // // ============================================================================
+// // class HordeSpawnDefinition
+// //   private Action2<unit, SpawnWaveContext> m_commonUnitModifier
+// //   private IterableMap<int, Action2<unit, SpawnWaveContext>> m_unitModifiers
+// //   private ISpawnWaveUnitTypeProvider m_unitTypeProvider
+
+// //   // --------------------------------------------------------------------------
+// //   construct()
+
+// //   // --------------------------------------------------------------------------
+// //   ondestroy
+
+// //     if (m_unitTypeProvider != null)
+// //       destroy m_unitTypeProvider
+// //       m_unitTypeProvider = null
+
+// //     if (m_commonUnitModifier != null)
+// //       m_commonUnitModifier.release()
+// //       m_commonUnitModifier = null
+
+// //     if (m_unitModifiers != null)
+// //       for unitTypeId in m_unitModifiers
+// //         m_unitModifiers.get(unitTypeId).release()
+// //       destroy m_unitModifiers
+// //       m_unitModifiers = null
+
+// //   // --------------------------------------------------------------------------
+// //   function setUnitTypeProvider(ISpawnWaveUnitTypeProvider unitTypeProvider)
+// //     m_unitTypeProvider = unitTypeProvider
+
+// //   // --------------------------------------------------------------------------
+// //   function getUnitTypeProvider() returns ISpawnWaveUnitTypeProvider
+// //     return m_unitTypeProvider
+
+// //   // --------------------------------------------------------------------------
+// //   function setCommonUnitModifier(Action2<unit, SpawnWaveContext> action)
+// //     action.acquire()
+// //     if (m_commonUnitModifier != null)
+// //       m_commonUnitModifier.release()
+// //     m_commonUnitModifier = action
+
+// //   // --------------------------------------------------------------------------
+// //   function getCommonUnitModifier() returns Action2<unit, SpawnWaveContext>
+// //     return m_commonUnitModifier
+
+// //   // --------------------------------------------------------------------------
+// //   function setUnitModifier(int unitTypeId, Action2<unit, SpawnWaveContext> action)
+// //     action.acquire()
+// //     if (m_unitModifiers == null)
+// //       m_unitModifiers = new IterableMap<int, Action2<unit, SpawnWaveContext>>()
+// //     let existing = m_unitModifiers.get(unitTypeId)
+// //     if (existing != null)
+// //       existing.release()
+// //     m_unitModifiers.put(unitTypeId, action)
+
+// //   // --------------------------------------------------------------------------
+// //   function getUnitModifier(int unitTypeId) returns Action2<unit, SpawnWaveContext>
+// //     if (m_unitModifiers == null)
+// //       return null
+// //     return m_unitModifiers.get(unitTypeId)
+
+// // // ============================================================================
+// // function createSpawnDef_Zombies() returns HordeSpawnDefinition
+// //   let def = new HordeSpawnDefinition()
+
+// //   let unitTypeProvider = new TieredUnitTypeProvider()
+// //   for i = 0 to MAX_ELITE_TIER-1
+// //     unitTypeProvider.setUnitType(i, TlsUnitIds.Undead.zombiesNight[i])
+// //   def.setUnitTypeProvider(unitTypeProvider)
+
+// //   def.setCommonUnitModifier() (unit u, ISpawnContext context) ->
+// //   //{
+// //     g_zombieMeleeModifiers.apply(context, u)
+// //     u.setMoveSpeed(lerp(120, 250, context.getGameProgress01()))
+// //   //}
+
+// //   def.setUnitModifier(TlsUnitIds.Undead.zombiesNight[0]) (unit u, ISpawnContext context) ->
+// //   //{
+// //     u.setDefenseType(ArmorType.Unarmored)
+// //   //}
+
+// //   def.setUnitModifier(TlsUnitIds.Undead.zombiesNight[1]) (unit u, ISpawnContext context) ->
+// //   //{
+// //     u.setDefenseType(ArmorType.Normal)
+// //   //}
+
+// //   def.setUnitModifier(TlsUnitIds.Undead.zombiesNight[2]) (unit u, ISpawnContext context) ->
+// //   //{
+// //     u.setDefenseType(ArmorType.Large)
+// //   //}
+
+// //   return def

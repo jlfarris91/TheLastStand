@@ -3,7 +3,6 @@ import ChatCommands
 import Godlike
 import ErrorHandling
 import GameInstance
-import Wave
 import GroupUtils
 import UnitMetadata
 import HumanPlayerComponent
@@ -17,7 +16,6 @@ import ObjectIds
 import HumanPlayers
 import UnitExtensions
 import ProjectConstants
-import PowerSourceComponent
 import PoweredComponent
 import Survivors
 import DevChatCommandHandler
@@ -39,15 +37,17 @@ import Notifications
 import Execute
 import PathChecker
 import Spawning
-import BuilderBuildMenus
-import UndeadTargetService
 import GameProperties
 import PlayerProperties
 import GameConstants
 import LootItemLibrary
+import SurvivorJobs
+import MapEvents
+import Transform
+import Reflection
+import PlayerSpawnPointProviders
 
 constant string COMMAND_GODLIKE = "godlike"
-constant string COMMAND_SPAWNONE = "spawnone"
 constant string COMMAND_DAY = "day"
 constant string COMMAND_NIGHT = "night"
 constant string COMMAND_SKIP_TO_DAY = "skipToDay"
@@ -105,17 +105,24 @@ constant string COMMAND_NOTIFYALL = "notifyAll"
 // constant string COMMAND_STARTKICKVOTE = "startKickVote"
 // constant string COMMAND_CASTKICKVOTE = "castKickVote"
 constant string COMMAND_SHARE_UNDEAD_UNITS = "shareUndeadUnits"
+constant string COMMAND_SPAWN_MAP_EVENT_TEMPLATE = "spawnMET"
+constant string COMMAND_DESTROY_LAST_MAP_EVENT_TEMPLATE = "destroyMET"
+constant string COMMAND_SPAWN_MAP_EVENT = "spawnME"
+constant string COMMAND_DESTROY_LAST_MAP_EVENT = "destroyME"
+constant string COMMAND_TYPENAME = "typename"
 
 constant string COMMAND_UTC = "utc"
 constant string COMMAND_UTS = "uts"
 constant string COMMAND_GCSM = "gcsm"
 constant string COMMAND_PATHCHECKER = "pathChecker"
 constant string COMMAND_SPAWNING = "spawning"
-constant string COMMAND_BLDMENU = "bldmenu"
 
 DevChatCommandHandler g_commandHandler
 fogmodifier array g_seeVisionModifiers
 group g_workingGroup = CreateGroup()
+
+MapEventInstance g_lastMapEventInstance
+MapEvent g_lastMapEvent
 
 // ============================================================================
 function getFirstWorkingGroupUnit(player p) returns unit
@@ -159,62 +166,6 @@ function godlike()
   else
     chatCommandPrintToPlayer(commandPlayer, "Enabled God Mode")
     enableGodMode()
-
-// ============================================================================
-function spawnone()
-  let command = getChatCommand()
-
-  let playerId = command.getArgument(0).getInt()
-  let dayNightWave = command.getArgument(1).getString().toLowerCase()
-  let waveId = command.getArgument(2).getInt()
-
-  var spawnWaveId = -1
-  let spawnWaveIdArg = command.getArgument(3)
-  if (spawnWaveIdArg != null)
-    spawnWaveId = spawnWaveIdArg.getInt()
-
-  let p = players[playerId]
-  if (p == null)
-    error("Found no player with id " + playerId.toString())
-
-  let playerWaves = g_GameInstance.getPlayerWaves(p)
-  if (playerWaves == null)
-    error("Player waves is null for player " + p.getName())
-    return
-
-  Wave wave = null
-
-  if (dayNightWave == "day")
-    wave = playerWaves.getDayWaves().getLatestWave(waveId)    
-  if dayNightWave == "night"
-    wave = playerWaves.getNightWaves().getLatestWave(waveId)
-
-  if (wave == null)
-    error("Found no wave at index " + waveId.toString())
-    return
-
-  let spawnWaves = wave.getSpawnWaves()
-  
-  if (spawnWaveId != -1)
-  // {
-    let spawnWave = spawnWaves.get(spawnWaveId)
-
-    if (spawnWave == null)
-      error("Found no spawn wave at index " + spawnWaveId.toString())
-      return
-
-    spawnWave.debugActivate()
-    chatCommandPrintToPlayer(p, "Activated {0} {1} spawn wave {2} once".format(dayNightWave, waveId.toString(), spawnWave.getDefinition().getName()))
-    return
-  // }
-
-  if (spawnWaves.isEmpty())
-    error("Wave {0} has no registered spawn waves ".format(waveId.toString()))
-    return
-
-  for spawnWave in spawnWaves
-    spawnWave.debugActivate()
-    chatCommandPrintToPlayer(p, "Activated {0} {1} spawn wave {2} once".format(dayNightWave, waveId.toString(), spawnWave.getDefinition().getName()))
 
 // ============================================================================
 function startNextDay()
@@ -330,7 +281,11 @@ function createUnitAtCameraPos()
   let commandPlayer = getChatCommandPlayer()
   let playerId = command.getArgument(0).getInt()
   let unitId = command.getArgument(1).getRawCode()
-  let count = command.getArgument(2).getInt()
+  let countArg = command.getArgument(2)
+
+  var count = 1
+  if countArg != null
+    count = countArg.getInt()
 
   let p = players[playerId]
   if (p == null)
@@ -343,8 +298,12 @@ function createUnitAtCameraPos()
     string unitName = null
     for i = 1 to count
       let u = createUnitTLS(p, unitId, cameraPosSyncd, GetRandomDirectionDeg().asAngleDegrees())
-      if (u != null and unitName == null)
-        unitName = u.getName()
+      if (u != null)
+        if (unitName == null)
+          unitName = u.getName()
+        let utc = u.getUndeadTargetingComponent()
+        if (utc != null)
+          utc.setIgnoreDOTFate(true)
     
     if (unitName != null)
       chatCommandPrintToPlayer(commandPlayer, "Created " + I2S(count) + " " + unitName)
@@ -364,11 +323,11 @@ function addMats()
 
   let playerMetadata = p.getHumanPlayerComponent()
   if (playerMetadata == null)
-    error("Can't give materials to player \"{0}\"".format(p.getName()))
+    error("Can't give lumber to player \"{0}\"".format(p.getName()))
     return
 
   playerMetadata.getOwnerPlayer().addLumber(matsCount)
-  chatCommandPrintToPlayer(commandPlayer, "Gave {0} materials to {1}".format(I2S(matsCount), p.getNameColored()))
+  chatCommandPrintToPlayer(commandPlayer, "Gave {0} lumber to {1}".format(I2S(matsCount), p.getNameColored()))
 
 // ============================================================================
 function skipToDay()
@@ -1002,24 +961,38 @@ function checkPath()
 function spawnSurvivor()
   let commandPlayer = getChatCommandPlayer()
   let targetPlayerId = getChatCommand().getArgument(0).getInt()
-  let count = getChatCommand().getArgument(1).getInt()
+  let countArg = getChatCommand().getArgument(1)
   let forceArg = getChatCommand().getArgument(2)
+  let jobArg = getChatCommand().getArgument(3)
 
   let targetPlayer = players[targetPlayerId]
   if (targetPlayer == null or not targetPlayer.isPlayingHumanPlayer())
     chatCommandPrintToPlayer(commandPlayer, "PLAYER must be the id of a playing human player")
     return
 
+  var count = 1
+  if (countArg != null)
+    count = countArg.getInt()
+
   var forceOp = false
   if (forceArg != null)
     forceOp = forceArg.getBool()
 
-  if (forceOp)
-    for i = 0 to count - 1
-      SurvivorUtility.spawnSurvivorUnitForPlayer(targetPlayer)
+  if (jobArg != null)
+    let job = jobArg.getString().toSurvivorJobType()
+    if (forceOp)
+      for i = 0 to count - 1
+        SurvivorUtility.spawnSurvivorUnitForPlayer(targetPlayer, job)
+    else
+      for i = 0 to count - 1
+        SurvivorUtility.trySpawnSurvivorForPlayer(targetPlayer, job)
   else
-    for i = 0 to count - 1
-      SurvivorUtility.trySpawnSurvivorForPlayer(targetPlayer)
+    if (forceOp)
+      for i = 0 to count - 1
+        SurvivorUtility.spawnSurvivorUnitForPlayer(targetPlayer)
+    else
+      for i = 0 to count - 1
+        SurvivorUtility.trySpawnSurvivorForPlayer(targetPlayer)
 
 // ============================================================================
 function selectAll()
@@ -1089,9 +1062,9 @@ function spawnPoints()
 
   switch (spawnerType)
     case "friendly"
-      spawnManager = getCachedFriendlySpawnPointProvider(targetPlayer) castTo GridCachedSpawnManager
+      spawnManager = getCachedFriendlySpawnPointProvider() castTo GridCachedSpawnManager
     case "hostile"
-      spawnManager = getCachedHostileSpawnPointProvider(targetPlayer) castTo GridCachedSpawnManager
+      spawnManager = getCachedHostileSpawnPointProvider() castTo GridCachedSpawnManager
     default
       chatCommandPrintToPlayer(commandPlayer, "Unknown spawn manager type")
       return
@@ -1456,6 +1429,92 @@ function shareUndeadUnits()
     SetPlayerAllianceStateBJ( PLAYER_UNDEAD, commandPlayer, bj_ALLIANCE_UNALLIED )
 
 // ============================================================================
+function spawnMapEventTemplate()
+  let command = getChatCommand()
+  let commandPlayer = getChatCommandPlayer()
+  let mapTemplateId = command.getArgument(0).getString()
+  let playerId = command.getArgument(1).getInt()
+  let angleArg = command.getArgument(2)
+
+  var angle = angle(0)
+  if (angleArg != null)
+    angle = angleArg.getReal().fromDeg()
+
+  let template = MapEventTemplate.getTemplate(mapTemplateId)
+  if (template == null)
+    chatCommandPrintToPlayer(commandPlayer, "No map template with id " + mapTemplateId)
+    return
+
+  g_lastMapEventInstance = template.createInstance()
+  g_lastMapEventInstance.setOwner(players[playerId])
+
+  let cameraPos = vec2(GetCameraTargetPositionX(), GetCameraTargetPositionY())
+
+  cameraPos.sync(commandPlayer) cameraPosSyncd ->
+  //{
+    g_lastMapEventInstance.getTransform()
+      ..setWorldPosition(cameraPosSyncd.toVec3())
+      ..setWorldYaw(angle)
+
+    g_lastMapEventInstance.spawn()
+
+    chatCommandPrintToPlayer(commandPlayer, "Created instance of " + mapTemplateId)
+  //}
+
+// ============================================================================
+function destroyLastMapEventInstance()
+  let commandPlayer = getChatCommandPlayer()
+
+  if (g_lastMapEventInstance != null)
+    chatCommandPrintToPlayer(commandPlayer, "Destroying instance of " + g_lastMapEventInstance.getTemplate().getId())
+    destroy g_lastMapEventInstance
+    g_lastMapEventInstance = null
+  else
+    chatCommandPrintToPlayer(commandPlayer, "Spawn a map event first")
+
+// ============================================================================
+function spawnMapEvent()
+  let command = getChatCommand()
+  let commandPlayer = getChatCommandPlayer()
+  let mapEventId = command.getArgument(0).getString()
+  let angleArg = command.getArgument(1)
+
+  var angle = angle(0)
+  if (angleArg != null)
+    angle = angleArg.getReal().fromDeg()
+
+  let template = MapEvent.createMapEvent(mapEventId)
+  if (template == null)
+    chatCommandPrintToPlayer(commandPlayer, "No map event with id " + mapEventId)
+    return
+
+  g_lastMapEvent = template
+
+  let cameraPos = vec2(GetCameraTargetPositionX(), GetCameraTargetPositionY())
+
+  cameraPos.sync(commandPlayer) cameraPosSyncd ->
+  //{    
+    g_lastMapEvent.getTransform()
+      ..setWorldPosition(cameraPosSyncd)
+      ..setWorldYaw(angle)
+
+    g_lastMapEvent.start()
+
+    chatCommandPrintToPlayer(commandPlayer, "Created instance of " + mapEventId)
+  //}
+
+// ============================================================================
+function destroyLastMapEvent()
+  let commandPlayer = getChatCommandPlayer()
+
+  if (g_lastMapEvent != null)
+    chatCommandPrintToPlayer(commandPlayer, "Destroying instance of " + g_lastMapEvent.getId())
+    destroy g_lastMapEvent
+    g_lastMapEvent = null
+  else
+    chatCommandPrintToPlayer(commandPlayer, "Spawn a map event first")
+
+// ============================================================================
 function utc()
   let command = getChatCommand()
   let commandPlayer = getChatCommandPlayer()
@@ -1536,32 +1595,17 @@ function spawning()
       chatCommandPrintToPlayer(commandPlayer, "Unknown op")
 
 // ============================================================================
-function bldmenu()
+function typename()
   let command = getChatCommand()
   let commandPlayer = getChatCommandPlayer()
-  let opStr = command.getArgument(0).getString()
+  let id = command.getArgument(0).getInt()
 
-  switch (opStr)
-    case "enable"
-      BLDMENU_ENABLED = true
-      chatCommandPrintToPlayer(commandPlayer, "Enabled BLDMENU")
-    case "disable"
-      BLDMENU_ENABLED = false
-      chatCommandPrintToPlayer(commandPlayer, "Disabled BLDMENU")
-    default
-      chatCommandPrintToPlayer(commandPlayer, "Unknown op")
-
+  chatCommandPrintToPlayer(commandPlayer, "{0} ({1])".format(typeIdToTypeName(id), id.toString()))
 
 // ============================================================================
 function registerDebugCommands1()
 
   g_commandHandler.registerCommandDefinition(COMMAND_GODLIKE, function godlike)
-
-  g_commandHandler.registerCommandDefinition(COMMAND_SPAWNONE, function spawnone)
-    ..addArgument(new ChatCommandArgument("PLAYER_ID", ChatCommandArgumentType.INT, false))
-    ..addArgument(new ChatCommandArgument("WAVE_TYPE", ChatCommandArgumentType.STRING, false)..setStringOptions("day", "night"))
-    ..addArgument(new ChatCommandArgument("WAVE_ID", ChatCommandArgumentType.INT, false))
-    ..addArgument(new ChatCommandArgument("SPAWN_WAVE_ID", ChatCommandArgumentType.INT, true))
 
   g_commandHandler.registerCommandDefinition(COMMAND_DAY, function startNextDay)
   g_commandHandler.registerCommandDefinition(COMMAND_NIGHT, function startNextNight)
@@ -1582,11 +1626,11 @@ function registerDebugCommands1()
   g_commandHandler.registerCommandDefinition(COMMAND_CREATE_UNIT, function createUnitAtCameraPos)
     ..addIntegerArgument("PLAYER_ID", false)
     ..addFourCCArgument("UNIT_ID", false)
-    ..addIntegerArgument("UNIT_COUNT", false)
+    ..addIntegerArgument("UNIT_COUNT", true)
 
   g_commandHandler.registerCommandDefinition(COMMAND_ADD_MATS, function addMats)
     ..addIntegerArgument("PLAYER_ID", false)
-    ..addIntegerArgument("MATERIALS_COUNT", false)
+    ..addIntegerArgument("lumber_COUNT", false)
 
   g_commandHandler.registerCommandDefinition(COMMAND_SKIP_TO_DAY, function skipToDay)
     ..addIntegerArgument("DAY_ID", false)
@@ -1686,6 +1730,8 @@ function registerDebugCommands1()
     ..setDescription("Sets which attacks are enabled for the selected units.")
     ..addArgument(new ChatCommandArgument("WEAPON_INDEX", ChatCommandArgumentType.INT, false)..setIntOptions(0, 1, 2, 3)..setDescription("0 - None, 1 - Attack 1, 2 - Attack 2, 3 - Both"))
 
+  g_commandHandler.registerCommandAlias(COMMAND_ATTACKSENABLED, "sae")
+
   g_commandHandler.registerCommandDefinition(COMMAND_LINK, function linkSelectedUnits)
     ..setDescription("Shows information about active unit recyclers")
 
@@ -1702,8 +1748,9 @@ function registerDebugCommands2()
   g_commandHandler.registerCommandDefinition(COMMAND_SPAWNSURVIVOR, function spawnSurvivor)
     ..setDescription("Tries to spawn one or more random survivors for a player")
     ..addIntegerArgument("PLAYER", false)
-    ..addIntegerArgument("COUNT", false)
+    ..addIntegerArgument("COUNT", true)
     ..addBoolArgument("FORCE", true)
+    ..addStringArgument("JOB", true)
 
   g_commandHandler.registerCommandDefinition(COMMAND_SELECTALL, function selectAll)
     ..setDescription("Selects all types of a unit")
@@ -1783,6 +1830,19 @@ function registerDebugCommands2()
   g_commandHandler.registerCommandDefinition(COMMAND_SHARE_UNDEAD_UNITS, function shareUndeadUnits)
     ..addBoolArgument("VALUE", false)
 
+  g_commandHandler.registerCommandDefinition(COMMAND_SPAWN_MAP_EVENT_TEMPLATE, function spawnMapEventTemplate)
+    ..addStringArgument("ID", false)
+    ..addIntegerArgument("PLAYER_ID", false)
+    ..addRealArgument("ANGLE", true)
+
+  g_commandHandler.registerCommandDefinition(COMMAND_DESTROY_LAST_MAP_EVENT_TEMPLATE, function destroyLastMapEventInstance)
+
+  g_commandHandler.registerCommandDefinition(COMMAND_SPAWN_MAP_EVENT, function spawnMapEvent)
+    ..addStringArgument("ID", false)
+    ..addRealArgument("ANGLE", true)
+
+  g_commandHandler.registerCommandDefinition(COMMAND_DESTROY_LAST_MAP_EVENT, function destroyLastMapEvent)
+
   g_commandHandler.registerCommandDefinition(COMMAND_UTC, function utc)
     ..addStringArgument("OP", false)
 
@@ -1798,8 +1858,8 @@ function registerDebugCommands2()
   g_commandHandler.registerCommandDefinition(COMMAND_SPAWNING, function spawning)
     ..addStringArgument("OP", false)
 
-  g_commandHandler.registerCommandDefinition(COMMAND_BLDMENU, function bldmenu)
-    ..addStringArgument("OP", false)
+  g_commandHandler.registerCommandDefinition(COMMAND_TYPENAME, function typename)
+    ..addIntegerArgument("TYPESID", false)
 
 // ============================================================================
 init
@@ -1812,3 +1872,4 @@ init
     execute(() -> registerDebugCommands1())
     execute(() -> registerDebugCommands2())
   //}
+  

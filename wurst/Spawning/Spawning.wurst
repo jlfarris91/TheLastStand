@@ -1,14 +1,13 @@
 package Spawning
-import public ISpawnPointProvider
-import public SpawnRegion
-import public SpawnRegionInit
-import public SpawnPointCollection
-import public PlayerSpawnPointProviders
-import public RandomSpawnPointProvider
-import LinkedList
-import ClosureTimers
-import RealTime
-import Trace
+import BuffObjEditing
+import RefObject
+import Action
+import GameConstants
+import Range
+import Bounds
+import ErrorHandling
+import UnitAdmin
+import UnitRecycler
 
 public bool SPAWNING_ENABLED = true
 
@@ -16,141 +15,319 @@ constant int SPAWNS_MAX_PER_TICK = 1
 constant int PROCESS_MAX_PER_TICK = 8 // 1 per player?
 constant real PROCESS_QUEUE_INTERVAL = 0.1
 
-// ============================================================================
-public class SpawnController
-  private static LinkedList<SpawnRequestBase> s_requestQueue = new LinkedList<SpawnRequestBase>()
-  private static CallbackPeriodic s_processQueueCallback = null
+constant int MAX_TIERS = 3
+constant int INVALID_UNIT_TYPE = -1
 
-  private static int s_spawnCount
-  private static int s_requestCompletedCount
-  private static int s_requestTimeoutCount
+public constant buffTuple g_goldCarrierBuff = compiletime(createDummyBuffObject("Gold Carrier", "This unit is carrying gold!", "ReplaceableTextures\\CommandButtons\\BTNMGExchange.blp", "Abilities\\Spells\\NightElf\\FaerieFire\\FaerieFireTarget.mdl", "chest"))
 
-  // --------------------------------------------------------------------------
-  static function enqueue(SpawnRequestBase request)
-    if (s_requestQueue.has(request))
-      return
-    s_requestQueue.add(request)
-    startProcessQueue()
-
-  // --------------------------------------------------------------------------
-  private static function startProcessQueue()
-    if (s_processQueueCallback == null)
-      s_processQueueCallback = doPeriodically(PROCESS_QUEUE_INTERVAL, cb -> processQueue())
-    
-  // --------------------------------------------------------------------------
-  private static function stopProcessQueue()
-    if (s_processQueueCallback != null)
-      destroy s_processQueueCallback
-      s_processQueueCallback = null
-
-  // --------------------------------------------------------------------------
-  static function remove(SpawnRequestBase request) returns bool
-    let removed = s_requestQueue.remove(request)
-    if (s_requestQueue.isEmpty())
-      stopProcessQueue()
-    return removed
-
-  // --------------------------------------------------------------------------
-  static function getSpawnCount() returns int
-    return s_spawnCount
-
-  // --------------------------------------------------------------------------
-  static function getNumberOfCompletedRequests() returns int
-    return s_requestCompletedCount
-
-  // --------------------------------------------------------------------------
-  static function getQueue() returns LinkedList<SpawnRequestBase>
-    return s_requestQueue
-
-  // --------------------------------------------------------------------------
-  private static function processQueue()
-
-    if (not SPAWNING_ENABLED)
-      return
-    
-    Trace.trace("Spawning.processQueue")
-
-    if (s_requestQueue.isEmpty())
-      stopProcessQueue()
-      return
-
-    let iter = s_requestQueue.staticItr()
-    iter.reset()
-    
-    var spawnCounter = 0
-    var processCounter = 0
-    while (spawnCounter < SPAWNS_MAX_PER_TICK and processCounter < PROCESS_MAX_PER_TICK)
-    //{
-
-      if (not iter.hasNext())
-        if (s_requestQueue.isEmpty())
-          break
-        iter.reset()
-
-      let request = iter.next()
-
-      if (request.hasNext())
-        processCounter++
-        let spawned = request.next()
-        if (spawned > 0)
-          s_spawnCount += spawned
-          spawnCounter += spawned
-
-      // Request is done spawning, close it out
-      if (not request.hasNext())
-        request.complete()
-        s_requestCompletedCount++
-        iter.remove()
-        request.close()
-
-      // Request timed out, this should probably never happen
-      else if (request.didTimeout())
-        s_requestTimeoutCount++
-        iter.remove()
-        request.close()
-
-      // Still has more to spawn move it to the back of the line
-      else if (iter.hasNext())
-        iter.remove()
-        s_requestQueue.add(request)
-
-    //}
-
-    iter.close()
-    
-    Trace.trace("Spawning.spawned", spawnCounter)
-    Trace.trace("Spawning.process", processCounter)
-
-    if (s_requestQueue.isEmpty())
-      stopProcessQueue()
+public tuple tierChances(real tier1, real tier2, real tier3)
 
 // ============================================================================
-public abstract class SpawnRequestBase
-  protected real m_timeout
-  protected int m_startTime
+public class UnitTypeCollection
+  private int array[12] m_unitTypes
+  private int m_size = 0
 
   // --------------------------------------------------------------------------
-  construct (real timeout)
-    m_timeout = timeout
-    m_startTime = getRealTimeSeconds()
+  function clear()
+    m_size = 0
 
   // --------------------------------------------------------------------------
-  function didTimeout() returns bool
-    return (getRealTimeSeconds() - m_startTime) > m_timeout
+  function add(int unitType)
+    m_unitTypes[m_size] = unitType
+    m_size++
 
   // --------------------------------------------------------------------------
-  abstract function next() returns int
+  function get(int index) returns int
+    return m_unitTypes[index]
 
   // --------------------------------------------------------------------------
-  abstract function hasNext() returns bool
+  function size() returns int
+    return m_size
+
+// ============================================================================
+public interface ITieredUnitTypeProvider
+  function getUnitTypes(SpawnContext context, int count, UnitTypeCollection output)
+
+// ============================================================================
+public class TieredUnitTypeProvider implements ITieredUnitTypeProvider
+  private int array[MAX_TIERS] m_unitTypes
 
   // --------------------------------------------------------------------------
-  abstract function getDebuggerStateString() returns string
+  construct()
+    for i = 0 to MAX_TIERS - 1
+      m_unitTypes[i] = INVALID_UNIT_TYPE
 
   // --------------------------------------------------------------------------
-  function complete()
-    skip
+  function setUnitType(int tier, int unitType)
+    m_unitTypes[tier] = unitType
+
+  // --------------------------------------------------------------------------
+  function getUnitType(int tier) returns int
+    return m_unitTypes[tier]
+
+  // --------------------------------------------------------------------------
+  override function getUnitTypes(SpawnContext context, int count, UnitTypeCollection output)    
+    let tier = context.getTier()
+    let unitTypeId = getUnitType(tier)
+    for i = 0 to count - 1
+      output.add(unitTypeId)
+
+// ============================================================================
+public class SpawnContext
+  private int m_tier = -1
+  private int m_groupId = -1
+  private unit m_targetUnit = null
+  private real m_difficultyCoeff = 1.0
+  private ISpawnDefinition m_spawnDefinition
+  private UnitAdmin m_admin = null
+
+  use RefObject
+
+  // --------------------------------------------------------------------------
+  construct()
+
+  // --------------------------------------------------------------------------
+  construct(SpawnContext other)
+    m_tier = other.m_tier
+    m_groupId = other.m_groupId
+    m_targetUnit = other.m_targetUnit
+    m_difficultyCoeff = other.m_difficultyCoeff
+    m_spawnDefinition = other.m_spawnDefinition
+    m_admin = other.m_admin
+
+  // --------------------------------------------------------------------------
+  function clone() returns SpawnContext
+    return new SpawnContext(this)
+
+  // --------------------------------------------------------------------------
+  function getDifficultyCoeff() returns real
+    return m_difficultyCoeff
+
+  // --------------------------------------------------------------------------
+  function setDifficultyCoeff(real value)
+    m_difficultyCoeff = value
+
+  // --------------------------------------------------------------------------
+  function getTier() returns int
+    return m_tier
+
+  // --------------------------------------------------------------------------
+  function setTier(int value)
+    m_tier = value
+  
+  // --------------------------------------------------------------------------
+  function getGroupId() returns int
+    return m_groupId
+  
+  // --------------------------------------------------------------------------
+  function setGroupId(int value)
+    m_groupId = value
+
+  // --------------------------------------------------------------------------
+  function getTargetUnit() returns unit
+    return m_targetUnit
+  
+  // --------------------------------------------------------------------------
+  function setTargetUnit(unit value)
+    m_targetUnit = value
+
+  // ----------------------------------------------------------------------------
+  function getSpawnDefinition() returns ISpawnDefinition
+    return m_spawnDefinition
+  
+  // ----------------------------------------------------------------------------
+  function setSpawnDefinition(ISpawnDefinition value)
+    m_spawnDefinition = value
+
+  // ----------------------------------------------------------------------------
+  function getAdmin() returns UnitAdmin
+    return m_admin
+  
+  // ----------------------------------------------------------------------------
+  function setAdmin(UnitAdmin value)
+    m_admin = value
+
+// ============================================================================
+public interface ISpawnDefinition
+  function setCommonUnitModifier(Action2<unit, SpawnContext> action)
+  function getCommonUnitModifier() returns Action2<unit, SpawnContext>
+  function setUnitModifier(int unitTypeId, Action2<unit, SpawnContext> action)
+  function getUnitModifier(int unitTypeId) returns Action2<unit, SpawnContext>
+
+// ============================================================================
+public enum SpawnRange
+  CLOSE
+  MID
+  FAR
+
+// ============================================================================
+public function SpawnRange.toRangeReal() returns rangeReal
+  switch (this)
+    case CLOSE
+      return SPAWN_RANGE_CLOSE
+    case MID
+      return SPAWN_RANGE_MID
+    case FAR
+      return SPAWN_RANGE_FAR
+
+// ============================================================================
+public function SpawnRange.toString() returns string
+  switch (this)
+    case CLOSE
+      return "Close"
+    case MID
+      return "Mid"
+    case FAR
+      return "Far"
+
+constant MAX_SPAWN_POINTS = 32
+
+// ============================================================================
+public class SpawnPointCollection
+  private vec2 array[MAX_SPAWN_POINTS] points
+  private int m_count
+
+  // --------------------------------------------------------------------------
+  construct()
+    m_count = 0
+
+  // --------------------------------------------------------------------------
+  function getCapacity() returns int
+    return MAX_SPAWN_POINTS
+
+  // --------------------------------------------------------------------------
+  function getCount() returns int
+    return m_count
+
+  // --------------------------------------------------------------------------
+  function isEmpty() returns bool
+    return m_count == 0
+
+  // --------------------------------------------------------------------------
+  function clear()
+    m_count = 0
+
+  // --------------------------------------------------------------------------
+  function getPoint(int index) returns vec2
+    if (index >= m_count)
+      error("Argument out of bounds: index")
+    return points[index]
+
+  // --------------------------------------------------------------------------
+  function pushPoint(vec2 point)
+    if (m_count == MAX_SPAWN_POINTS)
+      error("Too many spawn points")
+    points[m_count] = point
+    m_count++
+
+  // --------------------------------------------------------------------------
+  function popPoint() returns vec2
+    let point = peekPoint()
+    m_count--
+    return point
+
+  // --------------------------------------------------------------------------
+  function peekPoint() returns vec2
+    if (m_count == 0)
+      error("Collection is empty")
+    return points[m_count]
+
+  // --------------------------------------------------------------------------
+  function iterator() returns SpawnPointCollectionIterator
+    return new SpawnPointCollectionIterator(this)
+
+// ============================================================================
+public class SpawnPointCollectionIterator
+  private SpawnPointCollection m_collection
+  private int m_index
+
+  // --------------------------------------------------------------------------
+  construct(SpawnPointCollection collection)
+    m_collection = collection
+    m_index = 0
+
+  // --------------------------------------------------------------------------
+  function hasNext() returns bool
+    return m_index < m_collection.getCount()
+
+  // --------------------------------------------------------------------------
+  function next() returns vec2
+    let point = m_collection.getPoint(m_index)
+    m_index++
+    return point
 
   // --------------------------------------------------------------------------
   function close()
     destroy this
+
+// ============================================================================
+public tuple spawnPointResult(bool succeeded, vec2 spawnPoint)
+public tuple spawnPointsResult(bool succeeded, SpawnPointCollection spawnPoints)
+
+// ============================================================================
+public abstract class  SpawnPointProvider
+  use RefObject
+  abstract function getRandomSpawnPointInRange(vec2 pos, rangeReal range) returns spawnPointResult
+  abstract function getRandomSpawnPointsInRange(vec2 pos, rangeReal range, int count) returns spawnPointsResult
+  abstract function getRandomSpawnPointInRect(bounds bounds) returns spawnPointResult
+  abstract function getRandomSpawnPointsInRect(bounds bounds, int count) returns spawnPointsResult
+
+// ============================================================================
+public function SpawnPointProvider.getRandomSpawnPointInPlayableMap() returns spawnPointResult
+  return this.getRandomSpawnPointInRect(bounds(playableMin, playableMax))
+
+// ============================================================================
+public class SingleSpawnPointProvider extends SpawnPointProvider
+  private vec2 m_spawnPoint
+
+  // ----------------------------------------------------------------------------
+  construct(vec2 spawnPoint)
+    m_spawnPoint = spawnPoint
+
+  // ----------------------------------------------------------------------------
+  override function getRandomSpawnPointInRange(vec2 pos, rangeReal range) returns spawnPointResult
+    return spawnPointResult(true, m_spawnPoint)
+
+  // ----------------------------------------------------------------------------
+  override function getRandomSpawnPointsInRange(vec2 pos, rangeReal range, int count) returns spawnPointsResult
+    let spawnPointCollection = new SpawnPointCollection()
+    for i = 0 to count - 1
+      spawnPointCollection.pushPoint(m_spawnPoint)
+    return spawnPointsResult(true, spawnPointCollection)
+
+  // ----------------------------------------------------------------------------
+  override function getRandomSpawnPointInRect(bounds bounds) returns spawnPointResult
+    return spawnPointResult(true, m_spawnPoint)
+
+  // ----------------------------------------------------------------------------
+  override function getRandomSpawnPointsInRect(bounds bounds, int count) returns spawnPointsResult
+    let spawnPointCollection = new SpawnPointCollection()
+    for i = 0 to count - 1
+      spawnPointCollection.pushPoint(m_spawnPoint)
+    return spawnPointsResult(true, spawnPointCollection)
+
+// ============================================================================
+public abstract class TargetProvider
+  use RefObject
+  // ----------------------------------------------------------------------------
+  abstract function getTargetUnit(SpawnContext context) returns unit
+
+// ============================================================================
+public class SingleTargetProvider extends TargetProvider
+  private unit m_target
+
+  // ----------------------------------------------------------------------------
+  construct(unit target)
+    m_target = target
+
+  // ----------------------------------------------------------------------------
+  override function getTargetUnit(SpawnContext context) returns unit
+    return m_target
+  
+// ============================================================================
+init
+
+  onUnitStocked() () ->
+    let stockedUnit = getLastStockedUnit()
+    stockedUnit.removeAbility(g_goldCarrierBuff.abilId)
+    stockedUnit.removeAbility(g_goldCarrierBuff.buffId)

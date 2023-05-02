@@ -2,16 +2,26 @@ package Unit_CampFire
 import TlsBuildingDefinition
 import ColorUtility
 import Doodads
-import Ability_IgniteCampFire
 import BuildingUndeadTarget
 import TlsUpgradeIds
+import AbilityObjEditing
+import BuffObjEditing
+import TlsBuffIds
+import StringBuilder
+import GameConstants
 
-public constant int CAMP_FIRE_MANA_MAX = 180
-public constant int CAMP_FIRE_MANA_COST_PER_SECOND = 1
+public constant int CAMP_FIRE_2_MANA_MAX = 60
+public constant int CAMP_FIRE_2_MANA_COST_PER_SECOND = 1
+
+public constant real CAMPFIRE1_HP_REGEN_FLAT = 20.0
+public constant real CAMPFIRE1_MANA_REGEN_FLAT = 10.0
+public constant real CAMPFIRE1_AREA_OF_EFFECT = 500
+
+public constant real CAMPFIRE2_MANA_REGEN_FLAT = 20.0
+public constant real CAMPFIRE2_AREA_OF_EFFECT = 750
 
 public TlsBuildingDefinition g_campFireDefinition
 public TlsBuildingDefinition g_campFireBuildDefinition
-public TlsBuildingDefinition g_campFireOffDefinition
 public TlsBuildingDefinition g_campFire2Definition
 
 // ============================================================================
@@ -21,10 +31,8 @@ public class CampFireDefinition extends TlsBuildingDefinition
     this.makeBuildingUndeadTarget()
     setName("Camp Fire")
     setTooltipBasic("Build Camp Fire")
-    setTooltipExtended("Standing near the Camp Fire restores <{0},DataA1> health and <{1},DataA1> stamina per second.|n|nThe Camp Fire drains mana at a rate of {2} mana per second and is extinguished when its mana reaches zero.|n|n{3}".format(
-      TlsAbilityIds.campFireRestoreHealth.toRawCode(),
-      TlsAbilityIds.campFireRestoreStamina.toRawCode(),
-      CAMP_FIRE_MANA_COST_PER_SECOND.toString(),
+    setTooltipExtended("Standing near the Camp Fire restores <{0},DataA1> mana per second.|n|nThe Camp Fire can also be used to cook a variety of recipes with different bonus effects.|n|n{2}".format(
+      TlsAbilityIds.campFireRestoreMana1.toRawCode(),
       "Does not stack!".colorize(Colors.gold)))
     setHotkey("R")
     setRace(Race.Human)
@@ -46,19 +54,19 @@ public class CampFireDefinition extends TlsBuildingDefinition
     setPathingMap("PathTextures\\4x4Default.tga")
     setPlacementRequires("unbuildable,unwalkable")
     setUnitSoundSet("LavaSpawn")
-    setBuildTime(12)
+    setBuildTime(BUILD_TIME_BUILDING_SMALL)
+    setRepairTime(REPAIR_TIME_BUILDING_SMALL)
     setCanFlee(false)
     setHideMinimapDisplay(true)
     setHitPointsMaximumBase(50)
     setHitPointsRegenerationType("day")
-    setRepairTime(8)
     setUnitClassification("mechanical")
     setUpgradesTo("")
     setUpgradesUsed(commaList(TlsUpgradeIds.campDefense))
     setRequirements("")
     
-    setManaMaximum(CAMP_FIRE_MAX_DURATION)
-    setManaInitialAmount(CAMP_FIRE_MAX_DURATION)
+    setManaMaximum(0)
+    setManaInitialAmount(0)
     setManaRegeneration(0)
 
     setHitPointsMaximumBase(300)
@@ -66,42 +74,31 @@ public class CampFireDefinition extends TlsBuildingDefinition
     setDefenseUpgradeBonus(5)
 
     setGoldCost(0)
-    setMaterialCost(60)
+    setLumberCost(60)
     this.setCommonBuildingProperties()
 
 // ============================================================================
 @compiletime function createCampFire()
 
   g_campFireBuildDefinition = new CampFireDefinition(TlsUnitIds.campFireBuild)
-    ..setButtonPositionX(0)
-    ..setButtonPositionY(1)
+    ..setButtonPositionX(2)
+    ..setButtonPositionY(0)
     ..setSightRadiusDay(400)
     ..setSightRadiusNight(400)
-    ..setNormalAbilities(commaList(TlsAbilityIds.campFireIgniteSelf, TlsAbilityIds.buildingInventory, TlsAbilityIds.recycle))
-    ..setUpgradesTo(commaList(TlsUnitIds.campFireOff, TlsUnitIds.campFire2))
+    ..setNormalAbilities(commaList(TlsAbilityIds.buildingInventory, TlsAbilityIds.recycle))
+    ..setUpgradesTo(commaList(TlsUnitIds.campFire2))
+    ..setManaInitialAmount(0)
+    ..setManaMaximum(0)
 
   g_campFireDefinition = new CampFireDefinition(TlsUnitIds.campFire)
     ..setSightRadiusDay(400)
     ..setSightRadiusNight(400)
-    ..setNormalAbilities(commaList(TlsAbilityIds.campFireIgniteSelf, TlsAbilityIds.buildingInventory, TlsAbilityIds.recycle))
+    ..setNormalAbilities(commaList(TlsAbilityIds.buildingInventory, TlsAbilityIds.recycle))
     ..setButtonPositionX(0)
     ..setButtonPositionY(-11)
-    ..setUpgradesTo(commaList(TlsUnitIds.campFireOff, TlsUnitIds.campFire2))
+    ..setUpgradesTo(commaList(TlsUnitIds.campFire2))
     ..setGoldCost(0)
-    ..setMaterialCost(0)
-    ..setBuildTime(1)
-
-  g_campFireOffDefinition = new CampFireDefinition(TlsUnitIds.campFireOff)
-    ..setName("Extinguished Camp Fire")
-    ..setModelFile(Doodads.firePitTrashed)
-    ..setSightRadiusDay(0)
-    ..setSightRadiusNight(0)
-    ..setNormalAbilities(commaList(TlsAbilityIds.campFireIgniteSelf, TlsAbilityIds.buildingInventory, TlsAbilityIds.recycle))
-    ..setButtonPositionX(0)
-    ..setButtonPositionY(-11)
-    ..setUpgradesTo(commaList(TlsUnitIds.campFire, TlsUnitIds.campFire2))
-    ..setGoldCost(0)
-    ..setMaterialCost(0)
+    ..setLumberCost(0)
     ..setBuildTime(1)
 
   g_campFire2Definition = new CampFireDefinition(TlsUnitIds.campFire2)
@@ -112,10 +109,92 @@ public class CampFireDefinition extends TlsBuildingDefinition
     ..setNormalAbilities(commaList(TlsAbilityIds.buildingInventory, TlsAbilityIds.recycle))
     ..setButtonPositionX(0)
     ..setButtonPositionY(-11)
-    ..setUpgradesTo(commaList(TlsUnitIds.campFire, TlsUnitIds.campFireOff))
+    ..setUpgradesTo(commaList(TlsUnitIds.campFire))
     ..setGoldCost(0)
-    ..setMaterialCost(0)
+    ..setLumberCost(0)
     ..setBuildTime(1)
+    ..setManaMaximum(CAMP_FIRE_2_MANA_MAX)
+
+  new BuffDefinition(TlsBuffIds.campFireRestore, 'BHab')
+    ..setTooltipNormal("Camp Fire")
+    ..setTooltipNormalExtended(1, "Standing near a camp fire restores mana.")
+    ..setIcon("ReplaceableTextures\\CommandButtons\\PASFirePit.blp")
+
+  let campFire1Tooltip = new StringBuilder()
+  campFire1Tooltip.appendLine("Standing near the Camp Fire restores {0} mana per second.".format(CAMPFIRE1_MANA_REGEN_FLAT.toString()))
+  campFire1Tooltip.appendLine()
+  campFire1Tooltip.appendLine("Place items into the Camp Fire's inventory to reveal recipes that can be cooked. Cooking a recipe alters the auras of the Camp Fire for {0} seconds.".format(CAMP_FIRE_2_MANA_MAX.toString().gold()))
+  campFire1Tooltip.appendLine()
+  campFire1Tooltip.appendLine("Camp Fire auras do not stack!".red())
+
+  new AbilityDefinitionAuraBrilliancecreep(TlsAbilityIds.campFireRestoreMana1)
+    ..setName("Restoring Mana")
+    ..setEditorSuffix("(Camp Fire)")
+    ..setTargetAttachmentPoint("origin")
+    ..presetManaRegenerationIncrease((int lvl) -> CAMPFIRE1_MANA_REGEN_FLAT)
+    ..presetPercentBonus((int lvl) -> false)
+    ..setTargetsAllowed(1, "organic,player,allies")
+    ..presetIcon("ReplaceableTextures\\CommandButtons\\PASFirePit.blp")
+    ..presetTooltipNormal((int lvl) -> "Camp Fire")
+    ..presetTooltipNormalExtended((int lvl) -> campFire1Tooltip.toStringAndDestroy())
+    ..presetBuffs((int lvl) -> commaList(TlsBuffIds.campFireRestore))
+    ..presetAreaofEffect((int lvl) -> CAMPFIRE1_AREA_OF_EFFECT)
+
+  new AbilityDefinitionAuraRegenerationHealingWard(TlsAbilityIds.campFireRestoreHealth1)
+    ..setName("Camp Fire Health Regen +30")
+    ..setButtonPositionNormalX(0)
+    ..setButtonPositionNormalY(0)
+    ..setIconNormal("ReplaceableTextures\\PassiveButtons\\PASBTNStatUp.blp")
+    ..setAmountofHitPointsRegenerated(1, 30.0)
+    ..setPercentage(1, false)
+    ..setTargetsAllowed(1, "self,organic,player,allies")
+    ..presetAreaofEffect((int lvl) -> CAMPFIRE2_AREA_OF_EFFECT)
+    ..setArtTarget("Abilities\\Spells\\Human\\Brilliance\\Brilliance.mdl")
+    ..setTargetAttachmentPoint("origin")
+    ..setTooltipNormal(1, "Health Regen +30")
+    ..setTooltipNormal(1, "Regenerates 30 health per second to nearby allies")
+
+  let campFire2Tooltip = new StringBuilder()
+  campFire2Tooltip.appendLine("Standing near the Cooking Camp Fire restores {0} mana per second.".format(CAMPFIRE2_MANA_REGEN_FLAT.toString()))
+  campFire2Tooltip.appendLine()
+  campFire2Tooltip.appendLine("The effects of the aura of the Cooking Camp Fire depends on which recipe is being cooked. Aura radius is increased by 50% while cooking.")
+  campFire2Tooltip.appendLine()
+  campFire2Tooltip.appendLine("Camp Fire auras do not stack!".red())
+
+  new AbilityDefinitionAuraBrilliancecreep(TlsAbilityIds.campFireRestoreMana2)
+    ..setName("Resoring Mana")
+    ..setEditorSuffix("(Camp Fire 2)")
+    ..setTargetAttachmentPoint("origin")
+    ..presetManaRegenerationIncrease((int lvl) -> CAMPFIRE2_MANA_REGEN_FLAT)
+    ..presetPercentBonus((int lvl) -> false)
+    ..setTargetsAllowed(1, "organic,player,allies")
+    ..presetIcon("ReplaceableTextures\\CommandButtons\\PASFirePit.blp")
+    ..presetTooltipNormal((int lvl) -> "Cooking Camp Fire")
+    ..presetTooltipNormalExtended((int lvl) -> campFire2Tooltip.toStringAndDestroy())
+    ..presetBuffs((int lvl) -> commaList(TlsBuffIds.campFireRestore))
+    ..presetAreaofEffect((int lvl) -> CAMPFIRE2_AREA_OF_EFFECT)
+
+  new BuffDefinition(TlsBuffIds.campFireAttackBonus1, 'BOac')
+    ..setTooltipNormal("Camp Fire Damage Bonus")
+    ..setTooltipNormalExtended(1, "Standing near a cooking camp fire is granting bonus damage.")
+    ..setIcon("ReplaceableTextures\\CommandButtons\\PASFirePit.blp")
+
+  new AbilityDefinitionAuraCommandCreep(TlsAbilityIds.campFireAttackBonus1)
+    ..setName("Camp Fire Bonus Damage +20%")
+    ..setButtonPositionNormalX(0)
+    ..setButtonPositionNormalY(0)
+    ..setIconNormal("ReplaceableTextures\\PassiveButtons\\PASBTNStatUp.blp")
+    ..setAttackDamageIncrease(1, 0.2)
+    ..setFlatBonus(1, false)
+    ..setMeleeBonus(1, true)
+    ..setRangedBonus(1, true)
+    ..setTargetsAllowed(1, "self,organic,player,allies")
+    ..setBuffs(1, commaList(TlsBuffIds.campFireAttackBonus1))
+    ..presetAreaofEffect((int lvl) -> CAMPFIRE2_AREA_OF_EFFECT)
+    ..setArtTarget("Abilities\\Spells\\Orc\\WarDrums\\DrumsCasterHeal.mdl")
+    ..setTargetAttachmentPoint("origin")
+    ..setTooltipNormal(1, "Bonus Damage +10%")
+    ..setTooltipNormal(1, "Increases damage of nearby allies by 20%")
     
 // ============================================================================
 init

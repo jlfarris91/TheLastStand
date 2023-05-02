@@ -1,0 +1,1032 @@
+package MapEvents
+import Transform
+import HashMap
+import Quaternion
+import TerrainUtils
+import Vector
+import Preload
+import GroupUtils
+import LinkedList
+import ClosureTimers
+import Predicate
+import TlsMapEventIds
+import Runnable
+import Func
+import Jobs
+import UnitRecycler
+import UnitExtensions
+import ErrorHandling
+import Bounds
+import CancellationToken
+import ObjectIds
+import DestructableUtility
+import Events
+import Lootables
+
+import initlater MapEventsInit
+
+HashMap<string, Func<MapEventTemplate>> g_mapEventTemplateFactories = new HashMap<string, Func<MapEventTemplate>>()
+HashMap<string, Func<MapEvent>> g_mapEventFactories = new HashMap<string, Func<MapEvent>>()
+LinkedList<MapEventTemplate> g_mapEventTemplates = new LinkedList<MapEventTemplate>()
+LinkedList<MapEventInstance> g_mapEventInstances = new LinkedList<MapEventInstance>()
+LinkedList<MapEvent> g_mapEvents = new LinkedList<MapEvent>()
+LinkedList<MapEvent> g_runningMapEvents = new LinkedList<MapEvent>()
+boolexpr g_filterUnitIsLootable = Condition(function filterUnitIsLootable)
+
+// ============================================================================
+public class MapEventTemplate
+
+  private string m_id
+  private IterableMap<int, Vector<UnitSpawner>> m_unitSpawnersByTypeId = new IterableMap<int, Vector<UnitSpawner>>()
+  private Vector<UnitSpawner> m_unitSpawners
+  private Vector<DestructableSpawner> m_destructableSpawners
+  private Vector<MapEventAreaCleanerSpawner> m_areaCleaners
+  private Vector<MapEventTileSpawner> m_tileSpawners
+  private int m_instanceCounter
+
+  // --------------------------------------------------------------------------
+  construct(string id)
+    m_id = id
+    m_unitSpawners = new Vector<UnitSpawner>()
+    m_destructableSpawners = new Vector<DestructableSpawner>()
+    m_areaCleaners = new Vector<MapEventAreaCleanerSpawner>()
+    m_tileSpawners = new Vector<MapEventTileSpawner>()
+
+    g_mapEventTemplates.add(this)
+
+  // --------------------------------------------------------------------------
+  ondestroy
+
+    g_mapEventTemplates.remove(this)
+    
+    for spawner in m_unitSpawners
+      destroy spawner
+    destroy m_unitSpawners
+    m_unitSpawners = null
+    
+    for spawner in m_destructableSpawners
+      destroy spawner
+    destroy m_destructableSpawners
+    m_destructableSpawners = null
+    
+    for spawner in m_tileSpawners
+      destroy spawner
+    destroy m_tileSpawners
+    m_tileSpawners = null
+
+    for key in m_unitSpawnersByTypeId
+      destroy m_unitSpawnersByTypeId.get(key)
+    destroy m_unitSpawnersByTypeId
+    m_unitSpawnersByTypeId = null
+
+  // --------------------------------------------------------------------------
+  static function getTemplate(string id) returns MapEventTemplate
+    for met in g_mapEventTemplates
+      if (met.m_id == id)
+        return met
+    return null
+
+  // --------------------------------------------------------------------------
+  static function createMapEventTemplate(string id) returns MapEventTemplate
+    let factory = g_mapEventTemplateFactories.get(id)
+    return factory != null ? factory.call() : new MapEventTemplate(id)
+
+  // --------------------------------------------------------------------------
+  static function registerMapEventTemplateFactory(string id, Func<MapEventTemplate> factory)
+    g_mapEventTemplateFactories.put(id, factory.acquire())
+
+  // --------------------------------------------------------------------------
+  function getId() returns string
+    return m_id
+
+  // --------------------------------------------------------------------------
+  function registerUnitSpawner(int unitTypeId, vec2 localPos, angle localYaw) returns UnitSpawner
+
+    if (unitTypeId == TlsMapEventIds.areaCleaner128)
+      registerAreaCleaner(128.0, localPos)
+      return null
+
+    if (unitTypeId == TlsMapEventIds.areaCleaner256)
+      registerAreaCleaner(256.0, localPos)
+      return null
+
+    if (unitTypeId == TlsMapEventIds.areaCleaner384)
+      registerAreaCleaner(384.0, localPos)
+      return null
+
+    if (unitTypeId == TlsMapEventIds.areaCleaner512)
+      registerAreaCleaner(512.0, localPos)
+      return null
+
+    let unitSpawner = new UnitSpawner(unitTypeId)
+    unitSpawner.getTransform()
+      ..setLocalPosition(localPos)
+      ..setLocalRotation(eulerToQuat(localYaw.radians(), 0.0, 0.0))
+
+    var unitSpawners = m_unitSpawnersByTypeId.get(unitTypeId)
+    if (unitSpawners == null)
+      unitSpawners = new Vector<UnitSpawner>()
+      m_unitSpawnersByTypeId.put(unitTypeId, unitSpawners)
+
+    unitSpawners.add(unitSpawner)
+
+    m_unitSpawners.add(unitSpawner)
+
+    // Add to preloader so we don't get a hitch when spawning the map event
+    Preload.registerUnitTypeId(unitTypeId)
+
+    return unitSpawner
+
+  // --------------------------------------------------------------------------
+  function registerDestSpawner(int destructableTypeId, int variation, vec3 localPos, angle localYaw, real localScale)
+
+    let spawner = new DestructableSpawner(destructableTypeId, variation)
+    spawner.getTransform()
+      ..setLocalPosition(localPos)
+      ..setLocalRotation(eulerToQuat(localYaw.radians(), 0.0, 0.0))
+      ..setLocalScale(localScale)
+
+    m_destructableSpawners.add(spawner)
+    
+    // Add to preloader so we don't get a hitch when spawning the map event
+    Preload.registerDestructableTypeId(destructableTypeId, variation)
+
+  // --------------------------------------------------------------------------
+  function registerAreaCleaner(real radius, vec2 localPos)
+    let cleaner = new MapEventAreaCleanerSpawner(radius)
+    cleaner.getTransform().setLocalPosition(localPos.toVec3())
+    m_areaCleaners.add(cleaner)
+
+  // --------------------------------------------------------------------------
+  function registerTileSpawner(int tilesetId, int variation, int localTileCornerX, int localTileCornerY)
+    let localPos = vec3(localTileCornerX * 128.0, localTileCornerY * 128.0, 0.0)
+
+    let spawner = new MapEventTileSpawner(tilesetId, variation)
+    spawner.getTransform().setLocalPosition(localPos)
+
+    m_tileSpawners.add(spawner)
+
+  // --------------------------------------------------------------------------
+  function getUnitSpawnerCount() returns int
+    return m_unitSpawners.size()
+
+  // --------------------------------------------------------------------------
+  function getUnitSpawner(int index) returns UnitSpawner
+    return m_unitSpawners.get(index)
+
+  // --------------------------------------------------------------------------
+  function getUnitSpawnerByTypeIdCount(int unitTypeId) returns int
+    let unitSpawners = m_unitSpawnersByTypeId.get(unitTypeId)
+    return unitSpawners != null ? unitSpawners.size() : 0
+
+  // --------------------------------------------------------------------------
+  function getUnitSpawnerByTypeId(int unitTypeId, int index) returns UnitSpawner
+    let unitSpawners = m_unitSpawnersByTypeId.get(unitTypeId)
+    return unitSpawners != null ? unitSpawners.get(index) : null
+
+  // --------------------------------------------------------------------------
+  function getDestSpawnerCount() returns int
+    return m_destructableSpawners.size()
+
+  // --------------------------------------------------------------------------
+  function getDestSpawner(int index) returns DestructableSpawner
+    return m_destructableSpawners.get(index)
+
+  // --------------------------------------------------------------------------
+  function getAreaCleanerCount() returns int
+    return m_areaCleaners.size()
+
+  // --------------------------------------------------------------------------
+  function getAreaCleaner(int index) returns MapEventAreaCleanerSpawner
+    return m_areaCleaners.get(index)
+
+  // --------------------------------------------------------------------------
+  function getTileSpawnerCount() returns int
+    return m_tileSpawners.size()
+
+  // --------------------------------------------------------------------------
+  function getTileSpawner(int index) returns MapEventTileSpawner
+    return m_tileSpawners.get(index)
+
+  // --------------------------------------------------------------------------
+  function createInstance() returns MapEventInstance
+    m_instanceCounter++
+    return new MapEventInstance(this, m_instanceCounter)
+
+// ============================================================================
+public class MapEventInstance extends WorldObject
+
+  static Thread cleanerThread = new Thread("me_clnr")
+    ..setMaxWorkPerTick(1)
+    ..setEnabled(true)
+
+  static Thread unitThread = new Thread("me_unit")
+    ..setTickInterval(0.3)
+    ..setMaxWorkPerTick(1)
+    ..setEnabled(true)
+    ..setDependsOnThread(cleanerThread)
+
+  static Thread destThread = new Thread("me_dest")
+    ..setMaxWorkPerTick(1)
+    ..setEnabled(true)
+    ..setDependsOnThread(unitThread)
+
+  static Thread tileThread = new Thread("me_tile")
+    ..setMaxWorkPerTick(1)
+    ..setEnabled(true)
+
+  private int m_instanceId = 0
+  private player m_owner = null
+  private MapEventTemplate m_template = null
+  private group m_spawnedUnits = null
+  private IterableMap<UnitSpawner, group> m_spawnerToSpawnedUnits = null
+  private HashMap<unit, UnitSpawner> m_spawnedUnitToSpawner = null
+  private Vector<destructable> m_spawnedDestructables = null
+  private Vector<MapEventAreaCleanerInstance> m_cleaners = null
+  private Vector<MapEventTileInstance> m_spawnedTiles = null
+  private Predicate<UnitSpawner> m_unitFilter = null
+  private Predicate<DestructableSpawner> m_destructableFilter = null
+  private CancellationToken m_ct
+
+  private Thread m_cleanerThread = cleanerThread
+  private Thread m_unitThread = unitThread
+  private Thread m_destThread = destThread
+  private Thread m_tileThread = tileThread
+
+  private Event2<UnitSpawner, unit> m_onUnitSpawned
+  private Event2<UnitSpawner, unit> m_onUnitUnspawned
+
+  // --------------------------------------------------------------------------
+  construct(MapEventTemplate template, int instanceId)
+    m_template = template
+    m_instanceId = instanceId
+    m_ct = new CancellationToken().acquire()
+
+    g_mapEventInstances.add(this)
+
+  // --------------------------------------------------------------------------
+  ondestroy
+
+    g_mapEventInstances.remove(this)
+    
+    m_ct.cancelAndRelease()
+    m_ct = null
+
+    unspawnAll()
+
+    if (m_destructableFilter != null)
+      m_destructableFilter.release()
+      m_destructableFilter = null
+
+    if (m_unitFilter != null)
+      m_unitFilter.release()
+      m_unitFilter = null
+
+    if (m_onUnitSpawned != null)
+      destroy m_onUnitSpawned
+      m_onUnitSpawned = null
+
+    if (m_onUnitUnspawned != null)
+      destroy m_onUnitUnspawned
+      m_onUnitUnspawned = null
+
+  // --------------------------------------------------------------------------
+  function getInstanceId() returns int
+    return m_instanceId
+
+  // --------------------------------------------------------------------------
+  function getTemplate() returns MapEventTemplate
+    return m_template
+
+  // --------------------------------------------------------------------------
+  function setUnitFilter(Predicate<UnitSpawner> filter)
+    if (m_unitFilter != null)
+      m_unitFilter.release()
+    m_unitFilter = filter.acquire()
+
+  // --------------------------------------------------------------------------
+  function setDestructableFilter(Predicate<DestructableSpawner> filter)
+    if (m_destructableFilter != null)
+      m_destructableFilter.release()
+    m_destructableFilter = filter.acquire()
+
+  // --------------------------------------------------------------------------
+  function setOwner(player owner)
+    m_owner = owner
+
+  // --------------------------------------------------------------------------
+  function getOwner() returns player
+    return m_owner
+
+  // --------------------------------------------------------------------------
+  function getSpawnedUnits() returns group
+    return m_spawnedUnits
+
+  // --------------------------------------------------------------------------
+  function getUnitSpawnThread() returns Thread
+    return m_unitThread
+
+  // --------------------------------------------------------------------------
+  function setUnitSpawnThread(Thread value)
+    m_unitThread = value
+
+  // --------------------------------------------------------------------------
+  function getDestSpawnThread() returns Thread
+    return m_destThread
+
+  // --------------------------------------------------------------------------
+  function setDestSpawnThread(Thread value)
+    m_destThread = value
+
+  // --------------------------------------------------------------------------
+  function getTileSpawnThread() returns Thread
+    return m_tileThread
+
+  // --------------------------------------------------------------------------
+  function setTileSpawnThread(Thread value)
+    m_tileThread = value
+
+  // --------------------------------------------------------------------------
+  function getCleanerSpawnThread() returns Thread
+    return m_cleanerThread
+
+  // --------------------------------------------------------------------------
+  function setCleanerSpawnThread(Thread value)
+    m_cleanerThread = value
+
+  // --------------------------------------------------------------------------
+  function spawn()
+    spawnCleaners()
+    spawnTiles()
+    if (m_owner != null)
+      spawnUnits(m_owner)
+    spawnDestructables()
+
+  // --------------------------------------------------------------------------
+  function spawnUnitNow(UnitSpawner spawner, player owner) returns unit
+    if (m_spawnedUnits == null)
+      m_spawnedUnits = getGroup()
+
+    let spawnedUnit = spawner.spawn(owner, m_transform)
+    if (spawnedUnit != null)
+    //{
+      m_spawnedUnits.addUnit(spawnedUnit)
+
+      if (m_spawnerToSpawnedUnits == null)
+        m_spawnerToSpawnedUnits = new IterableMap<UnitSpawner, group>()
+
+      var spawnedUnitsBySpawner = m_spawnerToSpawnedUnits.get(spawner)
+      if (spawnedUnitsBySpawner == null)
+        spawnedUnitsBySpawner = getGroup()
+        m_spawnerToSpawnedUnits.put(spawner, spawnedUnitsBySpawner)
+
+      spawnedUnitsBySpawner.addUnit(spawnedUnit)
+
+      if (m_spawnedUnitToSpawner == null)
+        m_spawnedUnitToSpawner = new HashMap<unit, UnitSpawner>()
+
+      m_spawnedUnitToSpawner.put(spawnedUnit, spawner)
+
+      if (m_onUnitSpawned != null)
+        m_onUnitSpawned.call(spawner, spawnedUnit)
+    //}
+
+    return spawnedUnit
+
+  // --------------------------------------------------------------------------
+  function spawnUnitNow(UnitSpawner spawner, player owner, int unitTypeIdOverride) returns unit
+    if (m_spawnedUnits == null)
+      m_spawnedUnits = getGroup()
+
+    let spawnedUnit = spawner.spawn(owner, unitTypeIdOverride, m_transform)
+    if (spawnedUnit != null)
+      m_spawnedUnits.addUnit(spawnedUnit)
+
+    return spawnedUnit
+
+  // --------------------------------------------------------------------------
+  function spawnUnit(UnitSpawner spawner, player owner) returns FuncJob<unit>
+    let jobId = createJobId("spawnUnit+"+spawner.getUnitTypeId().toRawCode())
+    return m_unitThread.invokeFunc(jobId, m_ct, () -> spawnUnitNow(spawner, owner))
+
+  // --------------------------------------------------------------------------
+  function spawnUnit(UnitSpawner spawner, player owner, int unitTypeIdOverride) returns FuncJob<unit>
+    let jobId = createJobId("spawnUnit+"+unitTypeIdOverride.toRawCode())
+    return m_unitThread.invokeFunc(jobId, m_ct, () -> spawnUnitNow(spawner, owner, unitTypeIdOverride))
+
+  // --------------------------------------------------------------------------
+  function spawnUnits(player owner) returns Job
+    let unitSpawnerCount = m_template.getUnitSpawnerCount()
+    let jobId = createJobId("spawnUnits+"+unitSpawnerCount.toString())
+    return m_unitThread.repeat(jobId, m_ct, unitSpawnerCount) (integer i) ->
+    //{
+      let spawner = m_template.getUnitSpawner(i)
+      if (m_unitFilter == null or m_unitFilter.call(spawner))
+        spawnUnitNow(spawner, owner)
+    //}
+
+  // --------------------------------------------------------------------------
+  function spawnUnits(player owner, int spawnerUnitTypeId, int unitTypeIdOverride) returns Job
+    let unitSpawnerCount = m_template.getUnitSpawnerByTypeIdCount(spawnerUnitTypeId)
+    let jobId = createJobId("spawnUnits+"+unitTypeIdOverride.toRawCode()+"+"+unitSpawnerCount.toString())
+    return m_unitThread.repeat(jobId, m_ct, unitSpawnerCount) (integer i) ->
+    //{
+      let spawner = m_template.getUnitSpawnerByTypeId(spawnerUnitTypeId, i)
+      if (m_unitFilter == null or m_unitFilter.call(spawner))
+        spawnUnitNow(spawner, owner, unitTypeIdOverride)
+    //}
+
+  // --------------------------------------------------------------------------
+  function unspawnUnitNow(unit spawnedUnit)
+    
+    let spawner = m_spawnedUnitToSpawner.get(spawnedUnit)
+    if (spawner == null)
+      error("Unit is not registered with map event instance")
+
+    let spawnedUnits = m_spawnerToSpawnedUnits.get(spawner)
+    if (spawnedUnits == null)
+      error("No spawned unit group for unit spawner")
+
+    if (m_onUnitUnspawned != null)
+      m_onUnitUnspawned.call(spawner, spawnedUnit)
+
+    unspawnUnitNowStatic(
+      m_spawnedUnits,
+      m_spawnerToSpawnedUnits,
+      m_spawnedUnitToSpawner,
+      spawner,
+      spawnedUnits,
+      spawnedUnit)
+
+  // --------------------------------------------------------------------------
+  function unspawnUnit(unit spawnedUnit) returns Job
+    let jobId = createJobId("unspawnUnit+"+spawnedUnit.getTypeId().toRawCode())
+    return m_unitThread.invoke(jobId, m_ct, () -> unspawnUnitNow(spawnedUnit))
+
+  // --------------------------------------------------------------------------
+  function unspawnUnits() returns Job
+
+    if (m_spawnedUnits == null)
+      return Job.succeeded
+
+    let whenAllJob = new WhenAllJob()
+
+    let spawnerToSpawnedUnits = m_spawnerToSpawnedUnits
+    m_spawnerToSpawnedUnits = null
+
+    let spawnedUnitToSpawner = m_spawnedUnitToSpawner
+    m_spawnedUnitToSpawner = null
+    
+    let allSpawnedUnits = m_spawnedUnits
+    m_spawnedUnits = null
+
+    for spawner in spawnerToSpawnedUnits
+    //{
+      let spawnedUnitsBySpawner = spawnerToSpawnedUnits.get(spawner)
+      for spawnedUnit in spawnedUnitsBySpawner
+      //{
+        let jobId = createJobId("unspawnUnit+"+spawnedUnit.getTypeId().toRawCode())
+        let unspawnUnitJob = m_unitThread.invoke(jobId) () ->
+        //{
+          if (m_onUnitUnspawned != null)
+            m_onUnitUnspawned.call(spawner, spawnedUnit)
+          unspawnUnitNowStatic(allSpawnedUnits, spawnerToSpawnedUnits, spawnedUnitToSpawner, spawner, spawnedUnitsBySpawner, spawnedUnit)
+        //}
+        whenAllJob.addJob(unspawnUnitJob)
+      //}
+    //}
+
+    m_unitThread.enqueue(whenAllJob)
+
+    return whenAllJob
+
+  // --------------------------------------------------------------------------
+  function onUnitSpawned() returns IEvent2<UnitSpawner, unit>
+    if (m_onUnitSpawned == null)
+      m_onUnitSpawned = new Event2<UnitSpawner, unit>()
+    return m_onUnitSpawned
+
+  // --------------------------------------------------------------------------
+  function onUnitUnspawned() returns IEvent2<UnitSpawner, unit>
+    if (m_onUnitUnspawned == null)
+      m_onUnitUnspawned = new Event2<UnitSpawner, unit>()
+    return m_onUnitUnspawned
+
+  // --------------------------------------------------------------------------
+  private static function unspawnUnitNowStatic(
+    group spawnedUnits,
+    IterableMap<UnitSpawner, group> spawnerToSpawnedUnits,
+    HashMap<unit, UnitSpawner> spawnedUnitToSpawner,
+    UnitSpawner spawner,
+    group spawnedUnitsBySpawner,
+    unit spawnedUnit)
+    
+    spawner.unspawnUnit(spawnedUnit)
+    
+    spawnedUnits.removeUnit(spawnedUnit)
+    
+    spawnedUnitsBySpawner.removeUnit(spawnedUnit)
+    if (spawnedUnitsBySpawner.isEmpty())
+      spawnedUnitsBySpawner.release()
+      spawnerToSpawnedUnits.remove(spawner)
+
+    spawnedUnitToSpawner.remove(spawnedUnit)
+
+  // --------------------------------------------------------------------------
+  function spawnDestructableNow(DestructableSpawner spawner) returns destructable
+    if (m_spawnedDestructables == null)
+      m_spawnedDestructables = new Vector<destructable>()
+
+    let spawnedDest = spawner.spawn(m_transform)
+    if (spawnedDest != null)
+      m_spawnedDestructables.add(spawnedDest)
+
+    return spawnedDest
+
+  // --------------------------------------------------------------------------
+  function spawnDestructable(DestructableSpawner spawner) returns FuncJob<destructable>
+    let jobId = createJobId("spawnDest+"+spawner.getDestructableTypeId().toRawCode())
+    return m_destThread.invokeFunc(jobId, m_ct, () -> spawnDestructableNow(spawner))
+  
+  // --------------------------------------------------------------------------
+  function spawnDestructables() returns Job
+    let destSpawnerCount = m_template.getDestSpawnerCount()
+    let jobId = createJobId("spawnDests+" + destSpawnerCount.toString())
+    return m_destThread.repeat(jobId, m_ct, destSpawnerCount) (integer i) ->
+    //{
+      if (m_spawnedDestructables == null)
+        m_spawnedDestructables = new Vector<destructable>(destSpawnerCount)
+
+      let spawner = m_template.getDestSpawner(i)
+      if (m_destructableFilter == null or m_destructableFilter.call(spawner))
+        spawnDestructableNow(spawner)
+    //}
+
+  // --------------------------------------------------------------------------
+  function unspawnDestructables() returns Job
+
+    if (m_spawnedDestructables == null)
+      return Job.succeeded
+
+    let spawnedDestructables = m_spawnedDestructables
+    m_spawnedDestructables = null
+
+    let job = m_destThread.repeatWhile(
+      createJobId("unspawnDests+" + spawnedDestructables.size().toString()),
+      (_) -> spawnedDestructables.pop().remove(),
+      () -> not spawnedDestructables.isEmpty())
+
+    job.onCompleted().register() (Job _) ->
+      destroy spawnedDestructables
+
+    return job
+  
+  // --------------------------------------------------------------------------
+  function spawnTileNow(MapEventTileSpawner spawner) returns MapEventTileInstance
+    if (m_spawnedTiles == null)
+      m_spawnedTiles = new Vector<MapEventTileInstance>()
+    
+    let spawnedTile = spawner.spawn(m_transform)
+    if (spawnedTile != null)
+      m_spawnedTiles.add(spawnedTile)
+    
+    return spawnedTile
+  
+  // --------------------------------------------------------------------------
+  function spawnTile(MapEventTileSpawner spawner) returns FuncJob<MapEventTileInstance>
+    return m_tileThread.invokeFunc(createJobId("spawnTile"), m_ct, () -> spawnTileNow(spawner))
+
+  // --------------------------------------------------------------------------
+  function spawnTiles() returns Job
+    let tileSpawnerCount = m_template.getTileSpawnerCount()
+    let jobId = createJobId("spawnTiles+" + tileSpawnerCount.toString())
+    return m_tileThread.repeat(jobId, m_ct, tileSpawnerCount) (integer i) ->
+    //{
+      if (m_spawnedTiles == null)
+        m_spawnedTiles = new Vector<MapEventTileInstance>(tileSpawnerCount)
+
+      let spawner = m_template.getTileSpawner(i)
+      spawnTileNow(spawner)
+    //}
+
+  // --------------------------------------------------------------------------
+  function unspawnTiles() returns Job
+
+    if (m_spawnedTiles == null)
+      return Job.succeeded
+
+    let spawnedTiles = m_spawnedTiles
+    m_spawnedTiles = null
+
+    let job = m_tileThread.repeatWhile(
+      createJobId("unspawnTiles+" + spawnedTiles.size().toString()),
+      (_) -> destroy spawnedTiles.pop(),
+      () -> not spawnedTiles.isEmpty())
+    
+    job.onCompleted().register() (Job _) ->
+      destroy spawnedTiles
+
+    return job
+
+  // --------------------------------------------------------------------------
+  function spawnCleanerNow(MapEventAreaCleanerSpawner spawner) returns MapEventAreaCleanerInstance
+    if (m_cleaners == null)
+      m_cleaners = new Vector<MapEventAreaCleanerInstance>()
+
+    let instance = spawner.spawn(m_transform)
+    if (instance != null)
+      m_cleaners.add(instance)
+
+    return instance
+
+  // --------------------------------------------------------------------------
+  function spawnCleaner(MapEventAreaCleanerSpawner spawner) returns FuncJob<MapEventAreaCleanerInstance>
+    return m_cleanerThread.invokeFunc(createJobId("spawnClnr"), m_ct, () -> spawnCleanerNow(spawner))
+
+  // --------------------------------------------------------------------------
+  function spawnCleaners() returns Job
+    let cleanerCount = m_template.getAreaCleanerCount()
+    let jobId = createJobId("spawnClnrs+"+cleanerCount.toString())
+    return m_cleanerThread.repeat(jobId, m_ct, cleanerCount) (integer i) ->
+    //{
+      if (m_cleaners == null)
+        m_cleaners = new Vector<MapEventAreaCleanerInstance>(cleanerCount)
+
+      let cleaner = m_template.getAreaCleaner(i)
+      spawnCleanerNow(cleaner)
+    //}
+
+  // --------------------------------------------------------------------------
+  function unspawnCleaners() returns Job
+
+    if (m_cleaners == null)
+      return Job.succeeded
+
+    let cleaners = m_cleaners
+    m_cleaners = null
+
+    let job = m_cleanerThread.repeatWhile(
+      createJobId("unspawnClnrs"+cleaners.size().toString()),
+      (_) -> destroy cleaners.pop(),
+      () -> not cleaners.isEmpty())
+    
+    job.onCompleted().register() (Job _) ->
+      destroy cleaners
+
+    return job
+
+  // --------------------------------------------------------------------------
+  function unspawnAll()
+    unspawnUnits()
+    unspawnDestructables()
+    unspawnTiles()
+    unspawnCleaners()
+
+  // --------------------------------------------------------------------------
+  private function createJobId(string id) returns string
+    return "{0}:{1}:{2}".format(m_template.getId(), m_instanceId.toString(), id)
+
+// ============================================================================
+public abstract class WorldObject
+  protected Transform m_transform = new Transform()
+
+  // ----------------------------------------------------------------------------
+  ondestroy
+    destroy m_transform
+    m_transform = null
+
+  // --------------------------------------------------------------------------
+  function getTransform() returns Transform
+    return m_transform
+
+// ============================================================================
+public class UnitSpawner extends WorldObject
+  private int m_unitTypeId
+  private real m_fadeInDuration
+  private real m_fadeOutDuration
+  private int m_fadeOutMove
+  private vec2 m_fadeOutMoveToPos
+  private bool m_useRecycler
+  private int m_userData
+
+  // --------------------------------------------------------------------------
+  construct(int unitTypeId)
+    m_unitTypeId = unitTypeId
+
+  // --------------------------------------------------------------------------
+  function getUserData() returns int
+    return m_userData
+  
+  // --------------------------------------------------------------------------
+  function setUserData(int value)
+    m_userData = value
+
+  // --------------------------------------------------------------------------
+  function getFadeInDuration() returns real
+    return m_fadeInDuration
+
+  // --------------------------------------------------------------------------
+  function setFadeInDuration(real value)
+    m_fadeInDuration = value
+
+  // --------------------------------------------------------------------------
+  function getFadeOutDuration() returns real
+    return m_fadeOutDuration
+
+  // --------------------------------------------------------------------------
+  function setFadeOutDuration(real value)
+    m_fadeOutDuration = value
+    m_fadeOutMove = 0
+
+  // --------------------------------------------------------------------------
+  function setFadeOutToPos(real duration, vec2 moveToPos)
+    m_fadeOutDuration = duration
+    m_fadeOutMove = 1
+    m_fadeOutMoveToPos = moveToPos
+
+  // --------------------------------------------------------------------------
+  function setFadeOutToRandomPos(real duration)
+    m_fadeOutDuration = duration
+    m_fadeOutMove = 2
+
+  // --------------------------------------------------------------------------
+  function getUseRecycler() returns bool
+    return m_useRecycler
+
+  // --------------------------------------------------------------------------
+  function setUseRecycler(bool value)
+    m_useRecycler = value
+
+  // --------------------------------------------------------------------------
+  function getUnitTypeId() returns int
+    return m_unitTypeId
+
+  // --------------------------------------------------------------------------
+  function spawn(player owner, Transform parentTransform) returns unit
+    m_transform.setParent(parentTransform)
+    let spawnedUnit = spawnUnit(owner, m_unitTypeId, m_transform)
+    m_transform.setParent(null)
+    return spawnedUnit
+
+  // --------------------------------------------------------------------------
+  function spawn(player owner, int unitTypeIdOverride, Transform parentTransform) returns unit
+    m_transform.setParent(parentTransform)
+    let spawnedUnit = spawnUnit(owner, unitTypeIdOverride, m_transform)
+    m_transform.setParent(null)
+    return spawnedUnit
+
+  // --------------------------------------------------------------------------
+  private function spawnUnit(player owner, int unitTypeId, Transform worldTransform) returns unit
+    let pos = worldTransform.getWorldPosition().toVec2()
+    let facingAngle = worldTransform.getWorldYaw()
+    
+    unit spawnedUnit
+    if (m_useRecycler)
+      spawnedUnit = createUnitRecycled(owner, unitTypeId, pos, facingAngle)
+    else
+      spawnedUnit = createUnit(owner, unitTypeId, pos, facingAngle)
+
+    if (m_fadeInDuration > 0.0)
+      spawnedUnit.setInvulnerable(true)
+      spawnedUnit.fadeIn(m_fadeInDuration)
+      doAfter(m_fadeInDuration, () -> spawnedUnit.setInvulnerable(false))
+
+    return spawnedUnit
+
+  // --------------------------------------------------------------------------
+  function unspawnUnit(unit spawnedUnit)
+
+    if (m_fadeOutDuration == 0.0 or not spawnedUnit.isAlive())
+      removeOrRecycleUnit(spawnedUnit)
+      return
+
+    spawnedUnit.setInvulnerable(true)
+    spawnedUnit.fadeOut()
+    
+    if (m_fadeOutMove == 1)
+      spawnedUnit.issuePointOrder("move", m_fadeOutMoveToPos)
+    else if (m_fadeOutMove == 2)
+      spawnedUnit.issuePointOrder("move", playableBounds.getRandomPoint())
+
+    doAfter(m_fadeOutDuration) () ->
+      removeOrRecycleUnit(spawnedUnit)
+      if (m_useRecycler)
+        if (not spawnedUnit.isStocked())
+          spawnedUnit.stock()
+      else
+        spawnedUnit.remove()
+
+  // --------------------------------------------------------------------------
+  private function removeOrRecycleUnit(unit spawnedUnit)
+    if (m_useRecycler)
+      if (spawnedUnit.isAlive() and not spawnedUnit.isStocked())
+        spawnedUnit.stock()
+    else
+      spawnedUnit.remove()
+
+// ============================================================================
+class DestructableSpawner extends WorldObject
+  private int m_destructableTypeId
+  private int m_variation
+
+  // --------------------------------------------------------------------------
+  construct(int destructableTypeId, int variation)
+    m_destructableTypeId = destructableTypeId
+    m_variation = variation
+
+  // --------------------------------------------------------------------------
+  function getDestructableTypeId() returns int
+    return m_destructableTypeId
+
+  // --------------------------------------------------------------------------
+  function getVariation() returns int
+    return m_variation
+
+  // --------------------------------------------------------------------------
+  function spawn(Transform parentTransform) returns destructable
+    m_transform.setParent(parentTransform)
+    let spawnedDest = createDestructable(m_destructableTypeId, m_variation, m_transform)
+    m_transform.setParent(null)
+    return spawnedDest
+
+// ============================================================================
+function filterUnitIsLootable() returns bool
+  let filterUnit = GetFilterUnit()
+  return filterUnit.isLootable()
+
+// ============================================================================
+class MapEventAreaCleanerSpawner extends WorldObject
+  private real m_radius
+
+  // --------------------------------------------------------------------------
+  construct(real radius)
+    m_radius = radius
+
+  // --------------------------------------------------------------------------
+  function getRadius() returns real
+    return m_radius
+
+  // --------------------------------------------------------------------------
+  function spawn(Transform parentTransform) returns MapEventAreaCleanerInstance
+    m_transform.setParent(parentTransform)
+    let instance =  new MapEventAreaCleanerInstance(m_radius)
+    instance.getTransform().copyWorldFrom(m_transform)
+    m_transform.setParent(null)
+    instance.redo()
+    return instance
+
+// ============================================================================
+class MapEventAreaCleanerInstance extends WorldObject
+  private real m_radius
+  private LinkedList<destructable> m_destructables
+  private group m_units
+
+  // --------------------------------------------------------------------------
+  construct(real radius)
+    m_radius = radius
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    undo()
+
+  // --------------------------------------------------------------------------
+  function redo()
+
+    m_destructables = new LinkedList<destructable>()
+
+    let worldPos = m_transform.getWorldPosition().toVec2()
+
+    enumDestructablesInCircle(worldPos, m_radius) (dest) ->
+      dest.show(false)
+      m_destructables.add(dest)
+
+    m_units = getGroup()
+    m_units.enumUnitsInRange(worldPos, m_radius, g_filterUnitIsLootable)
+    for u in m_units
+      u.hide()
+
+  // --------------------------------------------------------------------------
+  function undo()
+    if (m_destructables != null)
+      for dest in m_destructables
+        dest.show(true)
+      destroy m_destructables
+      m_destructables = null
+
+    if (m_units != null)
+      for u in m_units
+        u.show()
+      m_units.release()
+      m_units = null
+
+// ============================================================================
+class MapEventTileSpawner extends WorldObject
+  private int m_tilesetId
+  private int m_variation
+
+  // --------------------------------------------------------------------------
+  construct(int tilesetId, int variation)
+    m_tilesetId = tilesetId
+    m_variation = variation
+
+  // --------------------------------------------------------------------------
+  function getTilesetId() returns int
+    return m_tilesetId
+
+  // --------------------------------------------------------------------------
+  function getVariation() returns int
+    return m_variation
+
+  // --------------------------------------------------------------------------
+  function spawn(Transform parentTransform) returns MapEventTileInstance
+    m_transform.setParent(parentTransform)
+    let tile = m_transform.getWorldPosition().toVec2().getTile()
+    let tileInstance = new MapEventTileInstance(tile, m_tilesetId, m_variation)
+    m_transform.setParent(null)
+    tileInstance.redo()
+    return tileInstance
+
+// ============================================================================
+public class MapEventTileInstance
+  private tile m_tile
+  private int m_tilesetId
+  private int m_variation
+  private int m_prevTilesetId
+  private int m_prevVariation
+
+  // --------------------------------------------------------------------------
+  construct(tile tile, int tilesetId, int variation)
+    m_tile = tile
+    m_tilesetId = tilesetId
+    m_variation = variation
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    undo()
+
+  // --------------------------------------------------------------------------
+  function redo()
+    m_prevTilesetId = m_tile.getType()
+    m_prevVariation = m_tile.getVariance()
+    m_tile.setType(m_tilesetId, m_variation)
+
+  // --------------------------------------------------------------------------
+  function undo()
+    m_tile.setType(m_prevTilesetId, m_prevVariation)
+
+// ============================================================================
+public class MapEvent extends Runnable
+  private string m_id
+  private Transform m_transform
+
+  // --------------------------------------------------------------------------
+  construct(string id)
+    m_id = id
+    g_mapEvents.add(this)
+    m_transform = new Transform()
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    g_mapEvents.remove(this)
+
+    destroy m_transform
+    m_transform = null
+
+  // --------------------------------------------------------------------------
+  static function registerMapEventFactory(string id, Func<MapEvent> factory)
+    g_mapEventFactories.put(id, factory.acquire())
+
+  // --------------------------------------------------------------------------
+  static function createMapEvent(string id) returns MapEvent
+    let factory = g_mapEventFactories.get(id)
+    return factory != null ? factory.call() : null
+
+  // --------------------------------------------------------------------------
+  function getId() returns string
+    return m_id
+
+  // --------------------------------------------------------------------------
+  function getTransform() returns Transform
+    return m_transform
+
+  // --------------------------------------------------------------------------
+  override protected function onStarted()
+    g_runningMapEvents.add(this)
+  
+  // --------------------------------------------------------------------------
+  override protected function onPaused()
+    g_runningMapEvents.remove(this)
+  
+  // --------------------------------------------------------------------------
+  override protected function onResumed()
+    g_runningMapEvents.add(this)
+
+  // --------------------------------------------------------------------------
+  override protected function onCompleted()
+    g_runningMapEvents.remove(this)
+
+// ============================================================================
+init
+
+  // This comes from the generated MapEventsInit.wurst file
+  nullTimer(() -> registerMapEventTemplates())

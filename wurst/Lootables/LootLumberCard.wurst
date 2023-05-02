@@ -1,0 +1,67 @@
+package LootLumberCard
+import Lootables
+import FX
+import Notifications
+import TlsSounds
+import Icons
+import ColorUtility
+import UnitMetadata
+
+// ============================================================================
+public class LootLumberCard extends LootCard
+  static constant int TIER_COUNT = 10
+
+  private int m_baseAmount
+
+  // --------------------------------------------------------------------------
+  construct(string id, int baseAmount)
+    super(id)
+    m_baseAmount = baseAmount
+
+  // ----------------------------------------------------------------------------
+  function getBaseAmount() returns int
+    return m_baseAmount
+  
+  // ----------------------------------------------------------------------------
+  function setBaseAmount(int value)
+    m_baseAmount = value
+
+  // ----------------------------------------------------------------------------
+  override function getTierCount() returns int
+    return TIER_COUNT
+
+  // ----------------------------------------------------------------------------
+  override function getTierValueMultiplier(int tier) returns real
+    return 6.0 * tier.toReal() + 1
+
+  // --------------------------------------------------------------------------
+  override function activateCard(int tier) returns bool
+    
+    let lootable = getLootable()
+    let looter = getLooter()
+    
+    let owner = looter.getOwner()
+    let lootableComp = lootable.getMetadata().getLootableComponent()
+
+    var lumber = (m_baseAmount * Pow(1.5, tier.toReal())).floor()
+    let variance = (lumber * 0.2) / 2.0
+    lumber += GetRandomReal(-variance, variance).floor()
+
+    owner.addLumber(lumber)
+    
+    FX.createGainedLumberTag(looter.getPos(), lumber, owner)
+    FX.createGainedLumberEffect(looter.getPos(), owner)
+
+    let notification = new LootRewardNotification(
+      NotificationManager.nextNotificationId(),
+      owner,
+      looter.getPos(),
+      TlsSounds.getRandomFoundLumber())
+    ..setMessage("Found " + ("+" + lumber.toString() + " lumber").colorize(Colors.lumber))
+    ..setIconPath(Icons.bTNBundleOfLumber)
+    ..setDueToLuckyHorseshoe(getCausedByHorseshoe())
+    ..setAffectedByLuckyPendant(getAffectedByPendant())
+
+    lootableComp.showLootRewardNotification(owner, notification)
+
+    return true

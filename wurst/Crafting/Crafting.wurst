@@ -1,7 +1,7 @@
 package Crafting
 import ErrorHandling
 import Vector
-import UnitComponent
+import UnitMetadata
 import RegisterEvents
 import BuildItems
 import ItemBuildUnitDefinition
@@ -32,7 +32,7 @@ public class ItemRecipe
   private int m_goldCost = 0
   private int m_lumberCost = 0
   private int m_buildTime = 0
-  private string m_verb = null
+  private string m_tooltipBasic = null
 
   // ----------------------------------------------------------------------------
   construct(itemRecipeDefinition def)
@@ -62,12 +62,12 @@ public class ItemRecipe
     return m_definition.iconAbilTypeId
 
   // ----------------------------------------------------------------------------
-  function getVerb() returns string
-    return m_verb
+  function getTooltipBasic() returns string
+    return m_tooltipBasic
 
   // ----------------------------------------------------------------------------
-  function setVerb(string value)
-    m_verb = value
+  function setTooltipBasic(string value)
+    m_tooltipBasic = value
 
   // ----------------------------------------------------------------------------
   function getComponentCount() returns int
@@ -221,9 +221,11 @@ public class ItemRecipeBook
       
   // --------------------------------------------------------------------------
   private function compileRecipe(ItemRecipe recipe)
-    let verb = recipe.getVerb() != null ? recipe.getVerb() : m_defaultVerb
+    let tooltipBasic = recipe.getTooltipBasic() != null
+      ? recipe.getTooltipBasic()
+      : m_defaultVerb + " " + recipe.getItemDefinition().getName()
 
-    let itemBuildUnitDef = ItemBuildUnitDefinition.create(recipe.getItemDefinition(), recipe.getItemBuildUnitTypeId(), verb)
+    let itemBuildUnitDef = ItemBuildUnitDefinition.create(recipe.getItemDefinition(), recipe.getItemBuildUnitTypeId(), tooltipBasic)
       ..setGoldCost(recipe.getGoldCost())
       ..setLumberCost(recipe.getLumberCost())
       ..setBuildTime(recipe.getBuildTime())
@@ -267,6 +269,45 @@ class ItemRecipePartialIconAbilityDefinition extends AbilityDefinitionCriticalSt
     presetButtonPosNormal(0, 0)
     presetChancetoCriticalStrike(lvl -> 0.0)
     presetChancetoEvade(lvl -> 0.0)
+
+constant int MAX_COOKING_RECIPE_ABILITY_COUNT = 10
+
+// ============================================================================
+public class CookingRecipe extends ItemRecipe
+  private int array[MAX_COOKING_RECIPE_ABILITY_COUNT] m_abilityIds
+  private int m_abilityIdCount = 0
+
+  // ----------------------------------------------------------------------------
+  construct(itemRecipeDefinition def)
+    super(def)
+    for i = 0 to MAX_COOKING_RECIPE_ABILITY_COUNT-1
+      m_abilityIds[i] = 0
+
+  // ----------------------------------------------------------------------------
+  function addAbilityId(int abilityId)
+    m_abilityIds[m_abilityIdCount] = abilityId
+    m_abilityIdCount++
+
+  // ----------------------------------------------------------------------------
+  function getAbilityId(int index) returns int
+    return m_abilityIds[index]
+
+  // ----------------------------------------------------------------------------
+  function getAbilityIdCount() returns int
+    return m_abilityIdCount
+
+// ============================================================================
+public class CookingRecipeBook extends ItemRecipeBook
+
+  // ----------------------------------------------------------------------------
+  override function addRecipe(itemRecipeDefinition def) returns CookingRecipe
+    let itemRecipe = new CookingRecipe(def)
+    super.addRecipe(itemRecipe)
+    return itemRecipe
+
+  // ----------------------------------------------------------------------------
+  override function getRecipe(int id) returns CookingRecipe
+    return super.getRecipe(id) castTo CookingRecipe
 
 // ============================================================================
 public class CraftingComponent extends UnitComponent
@@ -391,7 +432,7 @@ function onUnitPickupItem()
   
   let comp = metadata.getCraftingComponent()
   if (comp != null and comp.getEnabled())
-    nullTimer(() -> comp.update())
+    comp.dispatchAfter(0.0, () -> comp.update())
 
 // ============================================================================
 function onUnitSell()

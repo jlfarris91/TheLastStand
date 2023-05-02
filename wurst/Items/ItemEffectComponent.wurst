@@ -1,12 +1,12 @@
 package ItemEffectComponent
-import UnitComponent
+import UnitMetadata
 import RegisterEvents
 import Unit2
 import HashMap
 import Func
-import Classification
 import ObjectIds
 import ErrorHandling
+import ItemClassification
 
 HashMap<int, Func1<unit, ItemEffectComponent>> g_itemIdToComponentFactoryMap = new HashMap<int, Func1<unit, ItemEffectComponent>>()
 
@@ -74,8 +74,7 @@ public abstract class ItemEffectComponent extends UnitComponent
     if (m_stacks == m_stacksWhenApplied)
       return
 
-    if (m_stacksWhenApplied != 0)
-      revert()
+    revert()
 
     if (m_stacks != 0)
       m_stacksWhenApplied = m_stacks
@@ -85,12 +84,11 @@ public abstract class ItemEffectComponent extends UnitComponent
   function revert()
     if (m_stacksWhenApplied == 0)
       return
-    let stacksToRevert = m_stacksWhenApplied
-    m_stacksWhenApplied = 0
-    onReverted(stacksToRevert)
+    onReverted()
 
   // --------------------------------------------------------------------------
   function onAcquiredItem(item _item)
+    
 
     let prevStacks = m_stacks
     updateStacks(null)
@@ -103,6 +101,7 @@ public abstract class ItemEffectComponent extends UnitComponent
 
   // --------------------------------------------------------------------------
   function onDroppedItem(item _item)
+    
     
     let prevStacks = m_stacks
     updateStacks(_item)
@@ -127,17 +126,25 @@ public abstract class ItemEffectComponent extends UnitComponent
   override function onEnabled()
     super.onEnabled()
 
+    if (m_mode == ACQUIRED)
+      let ownerUnit = getOwnerUnit()
+      for item i in ownerUnit.inventory()
+        onUnitAcquiredItem(ownerUnit, i)
+
   // --------------------------------------------------------------------------
   override function onDisabled()
     super.onDisabled()
+
     revert()
+    m_stacks = 0
+    m_stacksWhenApplied = 0
 
   // --------------------------------------------------------------------------
   protected function onApplied(int _stacks)
     skip
 
   // --------------------------------------------------------------------------
-  protected function onReverted(int _stacks)
+  protected function onReverted()
     skip
 
   // --------------------------------------------------------------------------
@@ -174,9 +181,7 @@ function getOrAddComponentForItem(unit _unit, item _item) returns ItemEffectComp
   return compTypeFunc.call(_unit)
 
 // ============================================================================
-function onUnitAcquiredItem()
-  let manipulatingUnit = GetManipulatingUnit()
-  let manipulatingItem = GetManipulatedItem()
+function onUnitAcquiredItem(unit manipulatingUnit, item manipulatingItem)
 
   if (not manipulatingItem.canBeUsedBy(manipulatingUnit))
     return
@@ -189,9 +194,11 @@ function onUnitAcquiredItem()
   Log.debug("Acquired item with {0} charges : {1} stacks".format(manipulatingItem.getCharges().toString(), comp.getStacks().toString()))
 
 // ============================================================================
-function onUnitDroppedItem()
-  let manipulatingUnit = GetManipulatingUnit()
-  let manipulatingItem = GetManipulatedItem()
+function onUnitAcquiredItem_()
+  onUnitAcquiredItem(GetManipulatingUnit(), GetManipulatedItem())
+
+// ============================================================================
+function onUnitDroppedItem(unit manipulatingUnit, item manipulatingItem)
 
   let comp = getComponentForItem(manipulatingUnit, manipulatingItem)
   if (comp == null)
@@ -199,6 +206,10 @@ function onUnitDroppedItem()
 
   comp.onDroppedItem(manipulatingItem)
   Log.debug("Dropped item with {0} charges : {1} stacks remaining".format(manipulatingItem.getCharges().toString(), comp.getStacks().toString()))
+
+// ============================================================================
+function onUnitDroppedItem_()
+  onUnitDroppedItem(GetManipulatingUnit(), GetManipulatedItem())
 
 // ============================================================================
 function onUnitUsedItem()
@@ -226,7 +237,7 @@ function onUnitKilled()
 
 // ============================================================================
 init
-  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_PICKUP_ITEM, function onUnitAcquiredItem)
-  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_DROP_ITEM, function onUnitDroppedItem)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_PICKUP_ITEM, function onUnitAcquiredItem_)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_DROP_ITEM, function onUnitDroppedItem_)
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_USE_ITEM, function onUnitUsedItem)
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_DEATH, function onUnitKilled)

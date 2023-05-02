@@ -1,0 +1,239 @@
+package WolvesDen
+import MapEvents
+import Deck
+import SpawnUndeadUnitDirector
+import SpawnDefinitionTags
+import Spawning
+import GameConstants
+import WaveGeneratorCommon
+import UnitModifiers
+import ObjectIdGenerator
+import Directors
+import SpawnUnitJob
+import TlsUnitDefinition
+import UnitMetadata
+import UnitExtensions
+import GameInstance
+
+Deck g_wolvesDenDeck
+
+int array[3] g_wolfIds = [
+  compiletime(UNIT_ID_GEN.next()),
+  compiletime(UNIT_ID_GEN.next()),
+  compiletime(UNIT_ID_GEN.next())
+]
+
+// ============================================================================
+public class WolvesDenMapEvent extends MapEvent
+  private MapEventTemplate m_template
+  private MapEventInstance m_instance
+  private ContinuousDirector m_director
+  private int m_maxAliveCount = 1
+  private SpawnPointProvider m_spawnPointProvider
+
+  // ----------------------------------------------------------------------------
+  construct()
+    super("WolvesDen")
+    m_template = MapEventTemplate.getTemplate("WolvesDen")
+
+  // ----------------------------------------------------------------------------
+  ondestroy
+
+    if (m_spawnPointProvider != null)
+      destroy m_spawnPointProvider
+      m_spawnPointProvider = null
+  
+    if (m_instance != null)
+      destroy m_instance
+      m_instance = null
+
+  // ----------------------------------------------------------------------------
+  function getMaxAliveCount() returns int
+    return m_maxAliveCount
+  
+  // ----------------------------------------------------------------------------
+  function setMaxAliveCount(int value)
+    m_maxAliveCount = value
+
+  // --------------------------------------------------------------------------
+  override protected function onStarted()
+    super.onStarted()
+
+    let mapEventTransform = getTransform()
+
+    m_spawnPointProvider = new SingleSpawnPointProvider(mapEventTransform.getWorldPosition().toVec2())
+    
+    m_director = new WolvesDenDirector(getId())
+    ..setDeck(g_wolvesDenDeck)
+    ..setSpawnPointProvider(m_spawnPointProvider)
+    ..setMaxAliveCount(m_maxAliveCount)
+    ..setEnabled(true)
+
+    m_instance = m_template.createInstance()
+    ..setOwner(PLAYER_UNDEAD)
+
+    m_instance.getTransform()
+      ..setWorldPosition(mapEventTransform.getWorldPosition())
+
+    m_instance.spawnCleaners()
+    m_instance.spawnDestructables()
+    m_instance.spawnTiles()
+
+// ============================================================================
+class WolvesDenDirector extends ContinuousDirector
+  private SpawnContext m_context
+  private SpawnPointProvider m_spawnPointProvider
+  private int m_maxAliveCount = 1
+
+  // ----------------------------------------------------------------------------
+  construct(string id)
+    super(id)
+    m_context = new SpawnContext().acquire()
+
+  // ----------------------------------------------------------------------------
+  ondestroy
+
+    if (m_spawnPointProvider != null)
+      m_spawnPointProvider.release()
+      m_spawnPointProvider = null
+
+    if (m_context != null)
+      m_context.release()
+      m_context = null
+
+  // ----------------------------------------------------------------------------
+  function getSpawnPointProvider() returns SpawnPointProvider
+    return m_spawnPointProvider
+  
+  // ----------------------------------------------------------------------------
+  function setSpawnPointProvider(SpawnPointProvider value)
+    value.acquire()
+    if (m_spawnPointProvider != null)
+      m_spawnPointProvider.release()
+    m_spawnPointProvider = value
+
+  // ----------------------------------------------------------------------------
+  function getMaxAliveCount() returns int
+    return m_maxAliveCount
+  
+  // ----------------------------------------------------------------------------
+  function setMaxAliveCount(int value)
+    m_maxAliveCount = value
+
+  // --------------------------------------------------------------------------
+  override protected function getDifficultyCoefficient() returns real
+    return g_GameInstance.getWorldDifficultyCoeff()
+
+  // --------------------------------------------------------------------------
+  override function drawCard() returns CardInstance
+
+    let deck = getDeck()
+    if (deck == null)
+      return null
+
+    let selectedCard = deck.drawCard() castTo SpawnCard
+    if (selectedCard == null)
+      return null
+
+    let credits = getCredits()
+    return selectedCard.getHighestAffordableTier(credits)
+
+  // --------------------------------------------------------------------------
+  override function activateCard(CardInstance card) returns bool
+  
+    let spawnCard = card.card castTo SpawnCard
+    let spawnDef = spawnCard.getSpawnDefinition()
+
+    m_context.setDifficultyCoeff(getDifficultyCoefficient())
+    m_context.setTier(card.tier)
+
+    let context = m_context.clone()
+
+    let config = new SpawnUnitJobConfig()
+    ..setTierSelector(context -> card.tier)
+    ..setTierSelectionMode(TierSelectionMode.Group)
+    ..setUnitTypeProvider(spawnDef.getUnitTypeProvider())
+    ..setSpawnPointProvider(m_spawnPointProvider)
+    ..setTargetProvider(null)
+    ..setGroupSize(spawnDef.getGroupSize(context))
+    ..setMaxSpawnCount(spawnDef.getMaxSpawnCount(context))
+    ..setMaxAliveCount(m_maxAliveCount)
+    ..setSpawnRange(spawnDef.getSpawnRange().toRangeReal())
+    ..setWaitForFullGroup(spawnDef.getWaitForFullSpawnGroup())
+    ..setPrepareUnitFunc((job, spawnedUnit) -> prepareUnit(context, spawnDef, spawnedUnit))
+    ..setUseRecycler(spawnDef.getUseUnitRecycler())
+
+    let spawnJob = new SpawnUnitJob(spawnDef.getId(), PLAYER_UNDEAD, config)
+    ..setCancellationToken(getCancellationToken())
+    ..setContext(context)
+
+    spawnJob.onUnitSpawned().register() (SpawnUnitJob job, unit spawnedUnit) ->
+      onUnitSpawned(spawnedUnit)
+
+    getWorkerThread().enqueue(spawnJob)
+
+    return true
+
+  // --------------------------------------------------------------------------
+  private function prepareUnit(SpawnContext context, SpawnDefinition spawnDef, unit spawnedUnit) returns bool
+
+    let unitMetadata = spawnedUnit.getMetadata()
+    if (unitMetadata == null)
+      Log.error("[WolvesDenDirector.prepareUnit] : Unit has no metadata! : {0} ({1} : {2})".format(
+        spawnedUnit.getName(),
+        spawnedUnit.getTypeId().toString(),
+        UnitId2StringBJ(spawnedUnit.getTypeId())))
+      return false
+
+    let commonUnitModifier = spawnDef.getCommonUnitModifier()
+    if (commonUnitModifier != null)
+      commonUnitModifier.call(spawnedUnit, context)
+
+    let unitModifier = spawnDef.getUnitModifier(spawnedUnit.getTypeId())
+    if (unitModifier != null)
+      unitModifier.call(spawnedUnit, context)
+    
+    let unitDef = getUnitDefinition(spawnedUnit.getTypeId())
+    if (unitDef != null)
+      spawnedUnit.fadeIn(unitDef.getVertexColor())
+    else
+      spawnedUnit.fadeIn()
+
+    return true
+
+  // --------------------------------------------------------------------------
+  private function onUnitSpawned(unit spawnedUnit)
+    getAdmin().registerOwnedUnit(spawnedUnit)
+
+// ============================================================================
+function createSpawnDefinition_Wolves() returns SpawnDefinition
+
+  let def = new SpawnDefinition("Wolves")
+  ..setTags(SpawnDefinitionTags.melee, SpawnDefinitionTags.normal)
+  ..setSpawnRange(SpawnRange.MID)
+
+  let unitTypeProvider = new TieredUnitTypeProvider()
+  for i = 0 to MAX_ELITE_TIER-1
+    unitTypeProvider.setUnitType(i, g_wolfIds[i])
+  def.setUnitTypeProvider(unitTypeProvider)
+
+  def.setCommonUnitModifier() (unit u, SpawnContext context) ->
+    g_eliteMeleeModifiers.apply(context, u)
+    u.setDefenseType(ArmorType.Medium)
+
+  return def
+
+// ============================================================================
+@compiletime function createObjectDefinitions()
+
+  new TlsUnitDefinition(g_wolfIds[0], UnitIds.timberwolf)
+  new TlsUnitDefinition(g_wolfIds[1], UnitIds.giantwolf)
+  new TlsUnitDefinition(g_wolfIds[2], UnitIds.direwolf)
+
+// ============================================================================
+init
+  MapEvent.registerMapEventFactory("WolvesDen", () -> new WolvesDenMapEvent())
+
+  g_wolvesDenDeck = new Deck()
+  g_wolvesDenDeck.addDefaultCategory()
+  ..addCard(new SpawnCard(createSpawnDefinition_Wolves())..setCost(10)..setWeight(1.0))

@@ -1,7 +1,6 @@
 package Survivors
 import TlsUnitIds
 import HumanPlayerComponent
-import UnitMetadata
 import WeightedSet
 import DisplayTextToPlayer
 import Orders
@@ -15,146 +14,52 @@ import Range
 import HumanPlayers
 import UnitExtensions
 import SurvivorJobs
-import SurvivorComponent
-import PlayerExtensions
-import Math
-import GameInstance
 import Spawning
 import Notifications
+import PlayerSpawnPointProviders
+import Jobs
+import CreateUnitJob
+import World
+import Time
 
 constant real SURVIVOR_SPAWN_TELEPORT_THRESHOLD_SQ = 4000.0*4000.0
 
 group g_tempGroup = CreateGroup()
 WeightedSet<SurvivorJobType> g_weightedSurvivorJobSet
+timer g_survivorSpawnTimer
 
 // ============================================================================
 public class SurvivorUtility
-    
-  // --------------------------------------------------------------------------
-  static function orderSelectedUnitsToActivateJob(player owner, SurvivorJobType job)
-
-    let selectedUnits = owner.getSelectedUnits()
-
-    for u in selectedUnits
-    //{
-      if (owner.controlsUnit(u))
-      //{
-        let survivor = u.getSurvivorComponent()
-        if (survivor != null and survivor.canActivateJob(job))
-        //{
-          survivor.activateJob(job)
-        //}
-      //}
-    //}
-
-    destroy selectedUnits
 
   // --------------------------------------------------------------------------
-  static function orderSelectedUnitsToUnlearnJob(player owner, SurvivorJobType job)
-
-    let selectedUnits = owner.getSelectedUnits()
-
-    for u in selectedUnits
-    //{
-      if (owner.controlsUnit(u))
-      //{
-        let survivor = u.getSurvivorComponent()
-        if (survivor != null)
-          survivor.unassignJob(job)
-      //}
-    //}
-  
-    destroy selectedUnits
-    
-  // --------------------------------------------------------------------------
-  private static SurvivorComponent array[12] g_selectedSurvivorComps
+  static function spawnSurvivorUnitForPlayer(player _player)
+    let job = g_weightedSurvivorJobSet.getRandom()
+    spawnSurvivorUnitForPlayer(_player, job)
 
   // --------------------------------------------------------------------------
-  static function orderSelectedUnitsToToggleActivateJob(player owner)
-
-    let selectedUnits = owner.getSelectedUnits()
-
-    // Only switch to the last active job if everyone is already jobless
-    var switchToLastActiveJob = true
-
-    var i = 0
-    for u in selectedUnits
-    //{
-      if (owner.controlsUnit(u))
-      //{
-        let survivor = u.getSurvivorComponent()
-        g_selectedSurvivorComps[i] = survivor
-        if (survivor != null and survivor.getActiveJob() != SurvivorJobType.None)
-          switchToLastActiveJob = false
-      //}
-    //}
-
-    i = 0
-    for u in selectedUnits
-    //{
-      if (owner.controlsUnit(u))
-      //{
-        let survivor = g_selectedSurvivorComps[i]
-        if (survivor != null)
-        //{
-          var job = SurvivorJobType.None
-
-          if (switchToLastActiveJob)
-            let lastActiveJob = survivor.getLastActiveJob()
-            if (lastActiveJob != null and survivor.canActivateJob(lastActiveJob))
-              job = lastActiveJob
-
-          if (survivor.canActivateJob(job))
-            survivor.activateJob(job)
-        //}
-      //}
-    //}
-
-    destroy selectedUnits
-
-  // --------------------------------------------------------------------------
-  static function spawnSurvivorWithRandomJob(player forPlayer, vec2 pos) returns unit
-    return spawnSurvivorWithRandomJob(forPlayer, pos, g_weightedSurvivorJobSet)
-
-  // --------------------------------------------------------------------------
-  static function spawnSurvivorWithRandomJob(player forPlayer, vec2 pos, WeightedSet<SurvivorJobType> jobSet) returns unit
-
-    let jobDef = SurvivorJobs.getJobDefinition(jobSet.getRandom())
-
-    let survivor = createUnitTLS(forPlayer, jobDef.getInitialUnitType(), pos, GetRandomDirectionDeg().asAngleDegrees())
-
-    // Scale survivor level with game progress
-    let gameProgress01 = clamp01(g_GameInstance.getGameProgress01())
-    let survivorLevel = SURVIVORS_SPAWN_LEVEL_RANGE.lerp(gameProgress01).floor()
-    if (survivorLevel > 1)
-      survivor.setLevel(survivorLevel, false)
-
-    return survivor
-
-  // --------------------------------------------------------------------------
-  static function spawnSurvivorUnitForPlayer(player _player) returns unit
+  static function spawnSurvivorUnitForPlayer(player _player, SurvivorJobType job) returns bool
 
     if (_player == null)
       argumentNullError("_player")
-      return null
+      return false
 
     let playerMetadata = _player.getMetadata()
     if (playerMetadata == null)
       Log.debug("[spawnSurvivorUnitForPlayer] Player {0} has no metadata")
-      return null
+      return false
 
     if (playerMetadata.getHasLostGame())
       Log.debug("[spawnSurvivorUnitForPlayer] Player {0} has lost the game")
-      return null
+      return false
 
     if (not _player.isIngame())
       Log.debug("[spawnSurvivorUnitForPlayer] Player {0} has left the game")
-      return null
+      return false
 
     let playerHumanComp = playerMetadata.getHumanPlayerComponent()
     if (playerHumanComp == null)
       Log.debug("[spawnSurvivorUnitForPlayer] Player {0} has no human player component")
-      return null
+      return false
 
     let spawnPointResult = getSpawnPoint(_player)
 
@@ -169,47 +74,70 @@ public class SurvivorUtility
     if (not spawnPointResult.succeeded or spawnPoint.distanceToSq(campCenter) > SURVIVOR_SPAWN_TELEPORT_THRESHOLD_SQ)
       spawnPoint = campCenter
 
-    let survivor = spawnSurvivorWithRandomJob(_player, spawnPoint, g_weightedSurvivorJobSet)
+    let jobDef = SurvivorJobs.getJobDefinition(job)
 
-    survivor.issuePointOrderById(OrderIds.move, playerHumanComp.getCampCenter())
-    
-    let job = SurvivorJobs.getJobDefinitionForUnitType(survivor.getTypeId())
+    let createUnitJob = World.createUnit(
+      _player,
+      jobDef.getInitialUnitType(),
+      spawnPoint,
+      GetRandomDirectionDeg().asAngleDegrees())
 
-    let message = "{0} {1} has joined your camp!".format(
-      job.getTitle(survivor.getTypeId()).colorize(Colors.gold),
-      survivor.getProperName())
+    createUnitJob.onCompleted().register() (Job job) ->
+    //{
+      let survivor = (job castTo CreateUnitJob).getLastCreatedUnit()
 
-    notifyPlayer(_player, message, survivor.getIconPath()) () ->
-      GetTriggerPlayer().selectSingle(survivor)
-      if (GetTriggerPlayer() == localPlayer)
-        PanCameraToForPlayer(localPlayer, survivor.getX(), survivor.getY())
+      survivor.issuePointOrderById(OrderIds.move, playerHumanComp.getCampCenter())
 
-    AddIndicator(survivor, 0, 255, 0, 255)
+      let message = "{0} {1} has joined your camp!".format(
+        jobDef.getTitle(survivor.getTypeId()).colorize(Colors.gold),
+        survivor.getProperName())
 
-    // Fade the survivor in over time
-    survivor.fadeIn(color(150, 150, 150))
+      notifyPlayer(_player, message, survivor.getIconPath()) () ->
+        GetTriggerPlayer().selectSingle(survivor)
+        if (GetTriggerPlayer() == localPlayer)
+          PanCameraToForPlayer(localPlayer, survivor.getX(), survivor.getY())
 
-    return survivor
+      AddIndicator(survivor, 0, 255, 0, 255)
+
+      // Fade the survivor in over time
+      survivor.fadeIn(color(150, 150, 150))
+    //}
+
+    return true
 
   // --------------------------------------------------------------------------
   static function trySpawnSurvivorForPlayer(player _player)
     if (not _player.isPlayingHumanPlayer())
       return
-    let availableSurvivors = _player.getCurrentSupply()
+
+    if (_player.getHumanPlayerComponent().getHeadquarters() == null)
+      return
+
     let currentSurvivors = countNumberOfSurvivorsOwnedByPlayer(_player)
-    Log.debug("[trySpawnSurvivorForPlayer] Player {0} has room for {1} Survivor(s) and has {2} Survivor(s)".format(_player.getName(), availableSurvivors.toString(), currentSurvivors.toString()))
+    let availableSurvivors = _player.getMaxSupply()
+    // Log.debug("[trySpawnSurvivorForPlayer] Player {0} has room for {1} Survivor(s) and has {2} Survivor(s)".format(_player.getName(), availableSurvivors.toString(), currentSurvivors.toString()))
+    
     if (availableSurvivors > currentSurvivors)
       spawnSurvivorUnitForPlayer(_player)
 
   // --------------------------------------------------------------------------
+  static function trySpawnSurvivorForPlayer(player _player, SurvivorJobType job)
+    if (not _player.isPlayingHumanPlayer())
+      return
+
+    if (_player.getHumanPlayerComponent().getHeadquarters() == null)
+      return
+
+    let currentSurvivors = countNumberOfSurvivorsOwnedByPlayer(_player)
+    let availableSurvivors = _player.getMaxSupply()
+    // Log.debug("[trySpawnSurvivorForPlayer] Player {0} has room for {1} Survivor(s) and has {2} Survivor(s)".format(_player.getName(), availableSurvivors.toString(), currentSurvivors.toString()))
+    
+    if (availableSurvivors > currentSurvivors)
+      spawnSurvivorUnitForPlayer(_player, job)
+
+  // --------------------------------------------------------------------------
   static function countNumberOfSurvivorsOwnedByPlayer(player _player) returns int
-    g_tempGroup.clear()
-    g_tempGroup.enumUnitsOfPlayer(_player, null)
-    var count = 0
-    for _unit from g_tempGroup
-      if (_unit.isAlive() and _unit.isSurvivor())
-        count++
-    return count
+    return _player.getCurrentSupply()
 
   // --------------------------------------------------------------------------
   static function owningPlayerBanishSurvivor(unit targetUnit)
@@ -270,6 +198,19 @@ public function unit.isRescuableSurvivor() returns bool
   return this.isUnrescuedSurvivor()
 
 // ============================================================================
+function trySpawnSurvivorsForAllPlayers()
+  for p in g_PlayingHumanPlayers
+    SurvivorUtility.trySpawnSurvivorForPlayer(p)
+
+// ============================================================================
+function onDayStart()
+  g_survivorSpawnTimer.startPeriodic(10.0, function trySpawnSurvivorsForAllPlayers)
+
+// ============================================================================
+function onNightStart()
+  g_survivorSpawnTimer.pause()
+
+// ============================================================================
 init
   g_weightedSurvivorJobSet = new WeightedSet<SurvivorJobType>()
     ..add(SurvivorJobType.None, 50)
@@ -278,5 +219,9 @@ init
     // ..add(SurvivorJobType.Spearman, 1)
     // ..add(SurvivorJobType.Medic, 1)
     // ..add(SurvivorJobType.Marksman, 1)
-    // ..add(SurvivorJobType.Acolyte, 1)
     // ..add(SurvivorJobType.Engineer, 1)
+
+  g_survivorSpawnTimer = CreateTimer()
+
+  registerDayEvent(function onDayStart)
+  registerNightEvent(function onNightStart)

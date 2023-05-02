@@ -4,8 +4,12 @@ import Range
 
 public constant int         GRACE_PERIOD_END_DAY = 2
 
+public constant real        BUILDING_RECYCLE_SCALAR = 0.75
+public constant real        BUILDING_RECYCLE_BROKEN_SCALAR = 0.25
 public constant real        BUILDING_REPAIR_GOLD_SCALAR = 0.0
 public constant real        BUILDING_REPAIR_LUMBER_SCALAR = 0.0
+public constant real        BUILDING_REPAIR_BROKEN_GOLD_SCALAR = 0.0
+public constant real        BUILDING_REPAIR_BROKEN_LUMBER_SCALAR = 0.5
 
 public constant real        GAME_SPEED_DAY = 80.0
 public constant real        GAME_SPEED_NIGHT = 120.0
@@ -19,6 +23,7 @@ public constant real        METERS_TO_WORLD = 1.0 / WORLD_TO_METERS
 public constant int         MAX_PLAYER_COUNT = 8
 public constant player      PLAYER_UNDEAD = players[8]
 public constant player      PLAYER_VILLAGERS = players[10]
+public constant player      PLAYER_RAIDERS = players[11]
 public constant player      PLAYER_LOOTABLES = players[20]
 public constant player      PLAYER_SPECTATOR = players[21]
 public constant player      PLAYER_ENVIRONMENT = players[PLAYER_NEUTRAL_PASSIVE]
@@ -26,17 +31,13 @@ public constant player      PLAYER_ENVIRONMENT = players[PLAYER_NEUTRAL_PASSIVE]
 public constant real        TIME_OF_DAY_INITIAL = 5.5
 public constant real        TOD_SCALE_INITIAL = 1.0
 
-//                                                   1      2      3      4      5      6      7      8      9     10     11     12     13     14     15     16
-public constant real array  TOD_DAY_SCALARS   = [  0.5, 0.875,  1.25,  1.25,  1.25,  1.25,  1.25,  1.25,  1.25,  1.25,  1.25,  1.25,  1.25,  1.25,  1.25,  1.25]
+//                                                   0      1      2      3      4      5      6      7      8      9     10     11     12     13     14     15
+public constant real array  TOD_DAY_SCALARS   = [  0.5, 0.875,  1.25,  1.25,  0.75,  1.25,  1.25,  1.25,  1.25,  0.75,  1.25,  1.25,  1.25,  1.25,  0.75,  1.25]
 public constant real array  TOD_NIGHT_SCALARS = [  2.5,   2.5,   2.5,   2.5,   2.5,   2.5,   2.5,   2.5,   2.5,   2.5,   2.5,   2.5,   2.5,   2.5,   2.5,   2.5]
 
-//                                           [Casual][Normal][  Hard][Insane][ Apoc1 ][ Apoc2 ]
-public constant real array  TIER_1_CHANCES = [  1.00,   0.95,   0.75,   0.50,   0.25,    0.15 ]
-public constant real array  TIER_2_CHANCES = [  0.00,   0.05,   0.20,   0.35,   0.50,    0.35 ]
-public constant real array  TIER_3_CHANCES = [  0.00,   0.00,   0.05,   0.15,   0.25,    0.50 ]
-public constant int         NUM_TIER_CHANCES = 6
-
 public constant real        UNDEAD_SPAWN_TEST_RADIUS = 800.0
+
+public constant int         PLAYER_STARTING_FOOD_CAP = 5
 
 public constant real        SURVIVORS_RESCUE_RANGE = 512.0
 public constant rangeReal   SURVIVORS_SPAWN_RANGE = rangeReal(3000.0, 6000.0)
@@ -45,17 +46,25 @@ public constant real        SURVIVORS_RESPAWN_INTERVAL = 30.0
 public constant rangeReal   SURVIVORS_RESPAWN_INTERVAL_RANGE = rangeReal(30.0, 60.0)
 public constant rangeReal   SURVIVORS_RESPAWN_BANISHED_INTERVAL_RANGE = rangeReal(60.0, 120.0)
 public constant rangeInt    SURVIVORS_SPAWN_LEVEL_RANGE = rangeInt(1, 6)
+public constant real        SURVIVOR_ACQUISITION_RANGE = 600
 
 public constant real        NORMAL_LUMBER_REWARD_SCALE = 1.0
 public constant real        ELITE_LUMBER_REWARD_SCALE = 1.5
 
 public constant rangeInt    MATERIALS_ITEM_REWARD = rangeInt(3, 9)
-
-public constant rangeInt    BUNDLEWOOD_ITEM_REWARD = rangeInt(8, 12)
+public constant rangeInt    BUNDLEWOOD_ITEM_REWARD = rangeInt(20, 60)
 
 // The number of days a lootable is disabled after being looted
-public constant rangeInt    LOOTABLES_DEFAULT_COOLDOWN_RANGE = rangeInt(1, 2)
-public constant rangeInt    LOOTABLES_NEARCAMP_COOLDOWN_RANGE = rangeInt(2, 3)
+public constant int         LOOTABLES_DEFAULT_COOLDOWN = 1
+public constant int         LOOTABLES_NEARCAMP_COOLDOWN = 3
+
+public constant rangeReal   LOOTABLES_CREDIT_MULTIPLIER_SMALL      = rangeReal(0.8, 1.2)
+public constant rangeReal   LOOTABLES_CREDIT_MULTIPLIER_MED        = rangeReal(0.8, 1.2)
+public constant rangeReal   LOOTABLES_CREDIT_MULTIPLIER_LARGE      = rangeReal(0.8, 1.2)
+
+public constant rangeReal   LOOTABLES_CREDITS_PER_ACTIVATION_SMALL = rangeReal(0, 20)
+public constant rangeReal   LOOTABLES_CREDITS_PER_ACTIVATION_MED   = rangeReal(10, 30)
+public constant rangeReal   LOOTABLES_CREDITS_PER_ACTIVATION_LARGE = rangeReal(20, 40)
 
 public constant real        DAY_TIME_DOT_INTERVAL = 1.0
 public constant real        DAY_TIME_DOT_PERCENT = 0.05
@@ -69,6 +78,9 @@ public constant int         COIN_REWARD_MEDIUM = 3
 public constant int         COIN_REWARD_LARGE = 5
 public constant int         COIN_REWARD_EPIC = 10
 
+public constant real        HERO_XP_SHARE_RANGE = 1000.0
+public constant real        HERO_XP_SHARE_SCALE = 0.25
+
 public constant int         MELEE_UNIT_ATTACK_RANGE = 64
 public constant int         RANGED_UNIT_ATTACK_RANGE = 400
 public constant real        ELITE_SIGHT_RANGE = RANGED_UNIT_ATTACK_RANGE * 2.0
@@ -76,17 +88,44 @@ public constant real        ELITE_DAMAGE_SCALAR = 0.75
 public constant int         MAX_ELITE_TIER = 3
 public constant real        ELITE_ATTACK_COOLDOWN_SCALAR = 2.0 / 3.0
 
-public constant int         STRUCTURE_SMALL_SIGHT_RANGE_DAY = 0//300
-public constant int         STRUCTURE_SMALL_SIGHT_RANGE_NIGHT = 0//100
-public constant int         STRUCTURE_MEDIUM_SIGHT_RANGE_DAY = 0//450
-public constant int         STRUCTURE_MEDIUM_SIGHT_RANGE_NIGHT = 0//250
-public constant int         STRUCTURE_LARGE_SIGHT_RANGE_DAY = 0//600
-public constant int         STRUCTURE_LARGE_SIGHT_RANGE_NIGHT = 0//400
+public constant real array[MAX_ELITE_TIER] ELITE_TIER_VALUE_MULTIPLIER  = [1, 6, 36]
+public constant real array[MAX_ELITE_TIER] ELITE_TIER_HEALTH_MULTIPLIER = [1, 1.5, 3]
+public constant real array[MAX_ELITE_TIER] ELITE_TIER_DAMAGE_MULTIPLIER = [1, 1.5, 3]
+public constant real array[MAX_ELITE_TIER] ELITE_TIER_ARMOR_MULTIPLIER  = [1, 1, 1]
+
+public constant real        ENEMY_LEVEL_SCALING_COEFFICIENT = 1.0
+public constant real        ENEMY_HEALTH_SCALING_COEFFICIENT = 1.5
+public constant real        ENEMY_DAMAGE_SCALING_COEFFICIENT = 3.0
+public constant real        ENEMY_ARMOR_SCALING_COEFFICIENT = 0.4
+
+public constant int         STRUCTURE_SMALL_SIGHT_RANGE_DAY = 256
+public constant int         STRUCTURE_SMALL_SIGHT_RANGE_NIGHT = 256
+public constant int         STRUCTURE_MEDIUM_SIGHT_RANGE_DAY = 382
+public constant int         STRUCTURE_MEDIUM_SIGHT_RANGE_NIGHT = 382
+public constant int         STRUCTURE_LARGE_SIGHT_RANGE_DAY = 512
+public constant int         STRUCTURE_LARGE_SIGHT_RANGE_NIGHT = 512
+
+public constant int         BUILD_TIME_BUILDING_SMALL = 10
+public constant int         BUILD_TIME_BUILDING_MEDIUM = 15
+public constant int         BUILD_TIME_BUILDING_LARGE = 20
+public constant int         BUILD_TIME_BUILDING_WALL = 20
+public constant int         BUILD_TIME_ITEM = 10
+
+public constant int         REPAIR_TIME_BUILDING_SMALL = 5
+public constant int         REPAIR_TIME_BUILDING_MEDIUM = 10
+public constant int         REPAIR_TIME_BUILDING_LARGE = 15
+public constant int         REPAIR_TIME_BUILDING_WALL = 10
+
+public constant string      BUILDING_MEDIUM_PATH_MAP = "PathTextures\\4x4SimpleSolid.tga"
+public constant string      BUILDING_LARGE_PATH_MAP = "PathTextures\\6x6SimpleSolid.tga"
+public constant string      BUILDING_TOWER_PATH_MAP = "PathTextures\\4x4SimpleSolid.tga"
 
 public constant int         SIGHT_RANGE_ORGANIC_DAY = 1000
 public constant int         SIGHT_RANGE_ORGANIC_NIGHT = 500
 
 public constant real        HERO_RESPAWN_INVULNERABLE_DURATION = 10.0
+
+public constant real        BROKEN_BUILDING_REPAIR_STUN_DURATION = 3.0
 
 public constant rangeReal   SPAWN_RANGE_CLOSE = rangeReal(0.0, 1024.0)
 public constant rangeReal   SPAWN_RANGE_MID = rangeReal(1024.0, 2048.0)
@@ -100,6 +139,7 @@ public constant real        CAMERA_FARZ = 10000
 
 public constant int         NUMBER_DEER_PER_PLAYER = 3
 
+public constant int         SURVIVOR_BASE_HP = 500
 public constant int         SURVIVOR_HP_BONUS_SHELTER_1 = 50
 public constant int         SURVIVOR_HP_BONUS_SHELTER_2 = 100
 public constant int         SURVIVOR_HP_BONUS_SHELTER_3 = 200
@@ -123,6 +163,9 @@ public constant int           BOSS_WAVE_TOTAL_SCALAR = 1 + 2 + 3
 public constant int           TRADE_LUMBER_GOLD_COST = 1
 public constant int           TRADE_GOLD_LUMBER_COST = 500
 
+public constant rangeInt      FROG_SPAWN_COUNT_RANGE = rangeInt(6, 12)
+public constant rangeInt      CHICKEN_SPAWN_COUNT_RANGE = rangeInt(6, 12)
+
 public constant int         DIFFICULTY_COUNT = 6
 
 public constant real        DIFFICULTY_CASUAL   = 0.5
@@ -131,8 +174,6 @@ public constant real        DIFFICULTY_HARD     = 2.0
 public constant real        DIFFICULTY_INSANE   = 3.0
 public constant real        DIFFICULTY_APOC_I   = 4.0
 public constant real        DIFFICULTY_APOC_II  = 5.0
-
-public constant real        DIFFICULTY_START_RANDOM_WAVES  = DIFFICULTY_INSANE
 
 public constant real array[6] DIFFICULTIES = [
   DIFFICULTY_CASUAL,
@@ -143,7 +184,7 @@ public constant real array[6] DIFFICULTIES = [
   DIFFICULTY_APOC_II
 ]
 
-public constant string array[DIFFICULTY_COUNT]  DIFFICULTY_NAMES = [ "Casual", "Normal", "Hard", "Insane", "Apocalypse I", "Apocalypse II"]
+public constant string array[DIFFICULTY_COUNT]  DIFFICULTY_NAMES = [ "Casual", "Easy", "Hard", "Insane", "Apocalypse I", "Apocalypse II"]
 
 public constant colorA array[DIFFICULTY_COUNT]  DIFFICULTY_COLORS = [
   fromHexString("FF809e74"),
@@ -155,8 +196,8 @@ public constant colorA array[DIFFICULTY_COUNT]  DIFFICULTY_COLORS = [
 ]
 
 public constant string array[DIFFICULTY_COUNT]  DIFFICULTY_DESCRIPTIONS = [
-  "Take it easy while learning the game",
-  "Play the game the way it was intended to be played",
+  "Take it even easier while learning the game",
+  "For players new to the game",
   "For players looking for a challenge",
   "For hardcore players and experienced cooperators",
   "For those who may have a screw loose",

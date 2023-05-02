@@ -1,0 +1,413 @@
+package SpawnDirectors
+import Directors
+import ClosureTimers
+import Range
+import WaveGeneratorCommon
+import Math
+import Time
+import Deck
+import SpawnCards
+import SpawnUndeadUnitDirector
+import Vector
+import GameConstants
+import HumanPlayers
+import GameInstance
+import ProjectConstants
+import DirectorDebugger
+import HumanPlayerComponent
+import FX
+import Notifications
+import Icons
+import ColorUtility
+import PlayerProperties
+import Elites
+import MinimapIconComponent
+import Frame
+import WrapPanel
+import RealtimeUpdate
+import HashMap
+import LoadToc
+import StandardTooltip
+import UnitAdmin
+import Events
+
+bool g_enableAutoKillEnemies = false
+
+SpawnUndeadUnitDirector array g_zombieDirectors
+SpawnUndeadUnitDirector array g_eliteDirectors
+SpawnUndeadUnitDirector array g_bossDirectors
+
+Vector<SpawnCard> g_normalCards = new Vector<SpawnCard>(4)
+Vector<SpawnCard> g_eliteCards = new Vector<SpawnCard>(16)
+Vector<SpawnCard> g_bossCards = new Vector<SpawnCard>(8)
+
+Deck g_zombieDeck
+Vector<Deck> g_eliteDecks = new Vector<Deck>(TOTAL_NIGHTS)
+Vector<Deck> g_bossDecks = new Vector<Deck>(4)
+
+RemainingUnitsFrame array g_remainingUnitsFrames
+
+real TIME_OF_SPAWNS_END = TIME_OF_DAY - 3.0 // stop spawning 3 hours before the day starts
+
+// ============================================================================
+function onNightStart()
+
+  for p in g_PlayingHumanPlayers
+  //{
+    let night = g_GameInstance.getNight()
+    let diff = g_GameInstance.getPlayerDifficultyCoeff(p)
+    let creditsOnActivation = 25 + ((night / 5).floor() + 1) * 25.0 * diff
+
+    g_zombieDirectors[p.getId()]
+    ..setCreditsOnActivation(creditsOnActivation)
+    ..enable()
+
+    if (night > 1)
+    //{
+      if (night == 16)
+        g_bossDirectors[p.getId()]
+        ..setDeck(g_bossDecks.get(3))
+        ..setCreditsOnActivation(creditsOnActivation)
+        ..enable()
+      else if (night mod 5 == 0)
+        g_bossDirectors[p.getId()]
+        ..setDeck(g_bossDecks.get((night / 5).floor() - 1))
+        ..setCreditsOnActivation(creditsOnActivation)
+        ..enable()
+      else
+        g_eliteDirectors[p.getId()]
+        ..setDeck(g_eliteDecks.get(night - 2))
+        ..setCreditsOnActivation(creditsOnActivation)
+        ..enable()
+    //}
+  //}
+
+
+// ============================================================================
+function onTimeOfSpawnsEnd()
+  for p in g_PlayingHumanPlayers
+    disableSpawnDirectors(p)
+    revealRemainingUnits(p)
+
+// ============================================================================
+function disableSpawnDirectors(player p)
+  g_zombieDirectors[p.getId()].disable()
+  g_eliteDirectors[p.getId()].disable()
+  g_bossDirectors[p.getId()].disable()
+
+// ============================================================================
+function revealRemainingUnits(player p)
+  revealRemainingUnits(g_eliteDirectors[p.getId()].getAdmin(), p)
+  revealRemainingUnits(g_bossDirectors[p.getId()].getAdmin(), p)
+
+// ============================================================================
+function revealRemainingUnits(UnitAdmin admin, player targetPlayer)
+
+  // Show minimap icons for whatever units are left
+  for u in admin.getOwnedUnits()
+  //{
+    if (u.isAlive() and u.getMinimapIconComponent() == null)
+      let iconPath = getMinimapIconPath(u.getTypeId())
+      if (iconPath != null)
+        let iconComp = u.getOrAddMinimapIconComponent()
+        iconComp.update(iconPath, getMinimapIconColor(u.getTypeId()))
+        iconComp.showOnlyFor(targetPlayer)
+  //}
+
+// ============================================================================
+function onDayStart()
+
+  for p in g_PlayingHumanPlayers
+    let playerDiff = g_GameInstance.getPlayerDifficulty(p)
+    let goldReward = calculateWaveGoldReward(g_GameInstance.getNight(), playerDiff)
+    if (goldReward > 0)
+      rewardGold(p, goldReward)
+
+// ============================================================================
+function rewardGold(player p, int goldReward)
+  p.addGold(goldReward)
+
+  let humanPlayerComp = p.getHumanPlayerComponent()
+  if (humanPlayerComp != null)
+    let baseOrHero = humanPlayerComp.getHeadquartersOrHero()
+    if (baseOrHero != null)
+      FX.createGainedGoldTag(baseOrHero.getPos(), goldReward, p)
+      FX.createGainedGoldEffect(baseOrHero.getPos(), p)
+
+  new Notification()
+  ..setMessage("Night Survived: " + "+{0} gold".format(goldReward.toString()).gold())
+  ..setIconPath(Icons.bTNChestOfGold)
+  ..show(p)
+
+// ============================================================================
+class RemainingUnitsFrame extends WrapPanel implements IRealtimeListener
+  private Vector<EnemyUnitInfoFrame> m_infoFrames = new Vector<EnemyUnitInfoFrame>()
+  private IterableMap<int, int> m_unitInfo = new IterableMap<int, int>()
+
+  // ----------------------------------------------------------------------------
+  construct()
+    super(createFrame("EnemyUnitInfoFrameContainer"))
+
+  // ----------------------------------------------------------------------------
+  ondestroy
+    destroy m_unitInfo
+    m_unitInfo = null
+
+    destroy m_infoFrames
+    m_infoFrames = null
+
+  // ----------------------------------------------------------------------------
+  override function onVisibilityChanged()
+    super.onVisibilityChanged()
+
+    this.unregisterForRealtimeUpdate()
+    if (isVisible())
+      this.registerForRealtimeUpdate(RealtimeUpdatePriority.Background)
+      realtimeUpdate(0.0)
+
+  // ----------------------------------------------------------------------------
+  override function realtimeUpdate(real _dt)
+
+    var infoFrameIndex = 0
+
+    var totalUnitCount = 0
+    
+    let ownerPlayer = getPlayer()
+    if (ownerPlayer != null)
+    //{
+
+      m_unitInfo.flush()
+
+      let zombieAdmin = g_zombieDirectors[ownerPlayer.getId()].getAdmin()
+      for u in zombieAdmin.getOwnedUnits()
+        if (u.isAlive())
+          let unitTypeId = u.getTypeId()
+          m_unitInfo.put(unitTypeId, m_unitInfo.get(unitTypeId) + 1)
+
+      let eliteAdmin = g_eliteDirectors[ownerPlayer.getId()].getAdmin()
+      for u in eliteAdmin.getOwnedUnits()
+        if (u.isAlive())
+          let unitTypeId = u.getTypeId()
+          m_unitInfo.put(unitTypeId, m_unitInfo.get(unitTypeId) + 1)
+
+      let bossAdmin = g_bossDirectors[ownerPlayer.getId()].getAdmin()
+      for u in bossAdmin.getOwnedUnits()
+        if (u.isAlive())
+          let unitTypeId = u.getTypeId()
+          m_unitInfo.put(unitTypeId, m_unitInfo.get(unitTypeId) + 1)
+
+      for unitTypeId in m_unitInfo
+      //{
+        let count = m_unitInfo.get(unitTypeId)
+        getOrAddInfoFrame(infoFrameIndex)
+        ..setRemaining(count)
+        ..setIconPath(BlzGetAbilityIcon(unitTypeId))
+        ..setTooltip(BlzGetAbilityTooltip(unitTypeId, 1), BlzGetAbilityExtendedTooltip(unitTypeId, 1))
+        ..setTier(getTier(unitTypeId))
+        ..show()
+        infoFrameIndex++
+        totalUnitCount += count
+      //}
+
+    //}
+
+    // Hide the rest of the unused frames
+    for i = infoFrameIndex to m_infoFrames.size() - 1
+      let infoFrame = m_infoFrames.get(i)
+      infoFrame.hide()
+
+    invalidateArrange()
+
+  // ----------------------------------------------------------------------------
+  private function getOrAddInfoFrame(int index) returns EnemyUnitInfoFrame
+    if (index < m_infoFrames.size())
+      return m_infoFrames.get(index)
+    let infoFrame = new EnemyUnitInfoFrame()
+    addChild(infoFrame)
+    m_infoFrames.add(infoFrame)
+    return infoFrame
+
+// ============================================================================
+class EnemyUnitInfoFrame extends Frame
+  private framehandle array[3] m_borders
+  private framehandle m_iconFrame
+  private framehandle m_textFrame
+  private framehandle m_hoverFrame
+  private StandardTooltip m_tooltip
+
+  // ----------------------------------------------------------------------------
+  construct()
+    super(createFrame("EnemyUnitInfoFrame"))
+    m_iconFrame = getFrame("IconFrame")
+    m_textFrame = getFrame("TextFrame")
+    m_hoverFrame = getFrame("HoverFrame")
+
+    m_borders[0] = getFrame("BorderTier0")
+    m_borders[1] = getFrame("BorderTier1")
+    m_borders[2] = getFrame("BorderTier2")
+    
+    m_tooltip = StandardTooltip.get()
+    m_hoverFrame.setTooltip(m_tooltip.getTooltipFrame())
+
+    // Hide all border frames initially
+    setTier(-1)
+
+  // ----------------------------------------------------------------------------
+  ondestroy
+    m_hoverFrame.setTooltip(null)
+    m_tooltip.release()
+
+  // ----------------------------------------------------------------------------
+  function setIconPath(string iconPath)
+    if (m_iconFrame != null)
+      m_iconFrame.setTexture(iconPath, 0, true)
+
+  // ----------------------------------------------------------------------------
+  function setRemaining(int remaining)
+    if (m_textFrame != null)
+      m_textFrame.setText(remaining.toString())
+
+  // ----------------------------------------------------------------------------
+  function setTooltip(string tooltip, string tooltipExtended)
+    if (m_tooltip != null)
+      m_tooltip.setTooltip(tooltip, tooltipExtended)
+
+  // ----------------------------------------------------------------------------
+  function setTier(int tier)
+    for i = 0 to 2
+      if (m_borders[i] != null)
+        m_borders[i].setVisible(i == tier)
+
+// ============================================================================
+init
+  ensureTocIsLoaded()
+
+  // Normal cards
+  g_normalCards.add(SpawnCards.zombies)
+
+  // Elite cards
+  g_eliteCards.add(SpawnCards.skeletonArchers)
+  g_eliteCards.add(SpawnCards.necromancers)
+  g_eliteCards.add(SpawnCards.crows)
+  g_eliteCards.add(SpawnCards.crows) // Boss
+  g_eliteCards.add(SpawnCards.cultists)
+  g_eliteCards.add(SpawnCards.orcSkeletons)
+  g_eliteCards.add(SpawnCards.tombstones)
+  g_eliteCards.add(SpawnCards.gargoyles)
+  g_eliteCards.add(SpawnCards.gargoyles) // Boss
+  g_eliteCards.add(SpawnCards.ghosts)
+  g_eliteCards.add(SpawnCards.meatWagons)
+  g_eliteCards.add(SpawnCards.raiders)
+  g_eliteCards.add(SpawnCards.wyrms)
+  g_eliteCards.add(SpawnCards.wyrms) // Boss
+  g_eliteCards.add(SpawnCards.wyrms) // Boss
+
+  for i = 0 to TOTAL_NIGHTS - 2
+  //{
+    let deck = new Deck()
+    let elites = deck.addCategory("Elites", 1.0)
+    elites.addCard(g_eliteCards.get(i))
+    g_eliteDecks.add(deck)
+  //}
+
+  g_bossCards.add(SpawnCards.abominations)
+  g_bossCards.add(SpawnCards.cryptFiends)
+  g_bossCards.add(SpawnCards.forgottenOne)
+  g_bossCards.add(SpawnCards.archimonde)
+
+  for i = 0 to 3
+  //{
+    let deck = new Deck()
+    deck.addCategory("Boss", 1.0)
+    ..addCard(g_bossCards.get(i))
+    g_bossDecks.add(deck)
+  //}
+
+  g_zombieDeck = new Deck()
+  g_zombieDeck.addCategory("Zombies", 1.0)
+  ..addCard(SpawnCards.zombies)
+
+  let zombieKillTimerRange = rangeReal(10.0, 20.0)
+  let eliteKillTimerRange = rangeReal(15.0, 30.0)
+  let bossKillTimerRange = rangeReal(45.0, 60.0)
+
+  Event2Callback<UnitAdmin, unit> onUnitSpawned = (UnitAdmin admin, unit u) -> 
+    if (g_enableAutoKillEnemies)
+      real killTime
+      if (u.isBoss())
+        killTime = bossKillTimerRange.getRandom()
+      else if (u.isElite())
+        killTime = eliteKillTimerRange.getRandom()
+      else
+        killTime = zombieKillTimerRange.getRandom()
+      doAfter(killTime, () -> u.kill())
+
+  nullTimer() () ->
+  //{
+
+    for p in g_PlayingHumanPlayers
+    //{
+      let playerDifficulty = g_GameInstance.getPlayerDifficulty(p)
+      let goldDropAmountProp = p.getProperty(PlayerProperty.GOLD_DROP_AMOUNT)
+
+      let zombieCreditsOnActivation = 10 * Pow(playerDifficulty + 1, 2.275)
+
+      let zombieDirector = new SpawnUndeadUnitDirector(p.getId().toString() + ":Basic", p)
+      zombieDirector.setCreditMultiplier(playerDifficulty + 1)
+      zombieDirector.setCreditsOnActivation(zombieCreditsOnActivation)
+      zombieDirector.setIntervalBetweenWaves(rangeReal(2.0, 5.0))
+      zombieDirector.setIntervalDuringWaves(rangeReal(0.1, 1.0))
+      zombieDirector.setSpawnsPerGoldDrop(context -> 25)
+      zombieDirector.setGoldDropAmount(context -> goldDropAmountProp.getIntValue(1))
+      zombieDirector.setMaxSpawnCount(context -> UNLIMITED)
+      zombieDirector.setMaxAliveCount(context -> 10)
+      zombieDirector.setDeck(g_zombieDeck)
+      zombieDirector.getAdmin().onUnitRegistered().register(onUnitSpawned)
+      g_zombieDirectors[p.getId()] = zombieDirector
+      
+      let eliteCreditsOnActivation = 10 * Pow(playerDifficulty + 1, 2.275)
+      let eliteMaxAliveCount = 1 + max(playerDifficulty.floor() + 1, 1)
+
+      let eliteDirector = new SpawnUndeadUnitDirector(p.getId().toString() + ":Elite", p)
+      eliteDirector.setCreditMultiplier(playerDifficulty)
+      eliteDirector.setCreditsOnActivation(eliteCreditsOnActivation)
+      eliteDirector.setIntervalBetweenWaves(rangeReal(3.0, 10.0))
+      eliteDirector.setIntervalDuringWaves(rangeReal(0.1, 1.0))
+      eliteDirector.setSpawnsPerGoldDrop(context -> eliteMaxAliveCount)
+      eliteDirector.setGoldDropAmount(context -> goldDropAmountProp.getIntValue(1))
+      eliteDirector.setMaxSpawnCount(context -> eliteMaxAliveCount * 3)
+      eliteDirector.setMaxAliveCount(context -> eliteMaxAliveCount)
+      eliteDirector.setDeck(g_eliteDecks.get(0))
+      eliteDirector.getAdmin().onUnitRegistered().register(onUnitSpawned)
+      g_eliteDirectors[p.getId()] = eliteDirector
+      
+      let bossCreditsOnActivation = 70 + 12 * Pow(playerDifficulty + 1, 3)
+
+      let bossDirector = new SpawnUndeadUnitDirector(p.getId().toString() + ":Boss", p)
+      bossDirector.setCreditMultiplier(playerDifficulty)
+      bossDirector.setCreditsOnActivation(bossCreditsOnActivation)
+      bossDirector.setIntervalBetweenWaves(rangeReal(3.0, 10.0))
+      bossDirector.setIntervalDuringWaves(rangeReal(0.1, 1.0))
+      bossDirector.setSpawnsPerGoldDrop(context -> 1)
+      bossDirector.setGoldDropAmount(context -> goldDropAmountProp.getIntValue(GOLD_PER_BOSS))
+      bossDirector.setMaxSpawnCount(context -> max(playerDifficulty.floor(), 1))
+      bossDirector.setMaxAliveCount(context -> max(playerDifficulty.floor(), 1))
+      bossDirector.setDeck(g_bossDecks.get(0))
+      bossDirector.getAdmin().onUnitRegistered().register(onUnitSpawned)
+      g_bossDirectors[p.getId()] = bossDirector
+
+      g_remainingUnitsFrames[p.getId()] = new RemainingUnitsFrame()
+      ..setPlayer(p)
+      ..setAbsArea(FRAMEPOINT_TOP, SCREEN_TOPLEFT + vec2(0.2, -0.03), vec2(0.21, 0.105))
+      ..showOnly(p)
+    //}
+
+    if (DEV_ENVIRONMENT)
+      DirectorDebugger.registerDirector(g_zombieDirectors[0])
+      DirectorDebugger.registerDirector(g_eliteDirectors[0])
+      DirectorDebugger.registerDirector(g_bossDirectors[0])
+  //}
+
+  registerNightEvent(function onNightStart)
+  registerDayEvent(function onDayStart)
+  registerTimeOfDayEvent(TIME_OF_SPAWNS_END, function onTimeOfSpawnsEnd)

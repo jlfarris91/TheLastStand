@@ -1,0 +1,129 @@
+package HeroAbility_Outdoorsman
+import ChannelAbilityPreset
+import RealExtensions
+import SmartValue
+import Range
+import HeroAbilities
+import TlsAbilityIds
+import SoundUtils
+import UnitPropertiesComponent
+import Handle
+import Math
+
+constant rangeReal ABIL_DAMAGE_DISTANCE_SCALE = rangeReal(1.0, 0.5)
+
+constant SoundDefinition g_attackSound = new SoundDefinition("units\\human\\rifleman\\riflemanattack1.flac", false, true)
+
+// ============================================================================
+class Outdoorsman
+
+  // --------------------------------------------------------------------------
+  static function getLootDurationScale01(int effectiveAbilityLevel) returns real
+    return clamp(0.1 + max(effectiveAbilityLevel - 1, 0) * 0.1, 0.1, 0.5)
+
+  // --------------------------------------------------------------------------
+  static function getTooltipNormal(int effectiveAbilityLevel, int learnedAbilityLevel) returns string
+    return "Outdoorsman - [{0}]".format("Level {0}".format(
+      effectiveAbilityLevel.toString()).colorizeTooltipForHeroAbility(effectiveAbilityLevel, learnedAbilityLevel))
+
+  // --------------------------------------------------------------------------
+  static function getTooltipNormalExtended(int effectiveAbilityLevel, int learnedAbilityLevel) returns string
+    return "This survivor is profficient at looting and loots {0} faster.".format(getLootDurationScale01(effectiveAbilityLevel).toPercentageString01().colorizeTooltipForHeroAbility(effectiveAbilityLevel, learnedAbilityLevel))
+
+// ============================================================================
+public class OutdoorsmanComponent extends HeroAbilityComponent
+
+  private _handle m_lootDurPropAffector = INVALID_HANDLE
+
+  // --------------------------------------------------------------------------
+  construct (IUnitMetadata owner)
+    super(owner, TlsAbilityIds.Hero.outdoorsman, TlsAbilityIds.Hero.outdoorsman_learn)
+
+  // --------------------------------------------------------------------------
+  override protected function onDisabled()
+    super.onDisabled()
+
+    if (m_lootDurPropAffector != INVALID_HANDLE)
+    //{
+      let lootDurationProp = getOwnerUnit().getProperty(UnitProperty.LOOT_DURATION_SCALE)
+      if (lootDurationProp != null)
+        lootDurationProp.removeAffector(m_lootDurPropAffector)
+        m_lootDurPropAffector = INVALID_HANDLE
+    //}
+
+  // --------------------------------------------------------------------------
+  override protected function updateAbilityState()
+    super.updateAbilityState()
+
+    let ownerUnit = getOwnerUnit()
+    
+    let abilityLevelAdjusted = abilityLevel.getIntValue()
+
+    let lootDurationProp = ownerUnit.getProperty(UnitProperty.LOOT_DURATION_SCALE)
+    if (lootDurationProp != null)
+    //{
+      if (m_lootDurPropAffector != INVALID_HANDLE)
+        lootDurationProp.removeAffector(m_lootDurPropAffector)
+        m_lootDurPropAffector = INVALID_HANDLE
+
+      if (abilityLevelAdjusted > 0)
+        let lootDurationScale = Outdoorsman.getLootDurationScale01(abilityLevelAdjusted)
+        m_lootDurPropAffector = lootDurationProp.affectSub(lootDurationScale)
+    //}
+
+  // --------------------------------------------------------------------------
+  protected override function getTooltipNormal(int effectiveAbilityLevel, int learnedAbilityLevel) returns string
+    return Outdoorsman.getTooltipNormal(effectiveAbilityLevel, learnedAbilityLevel)
+    
+  // --------------------------------------------------------------------------
+  protected override function getTooltipNormalExtended(int effectiveAbilityLevel, int learnedAbilityLevel) returns string
+    return Outdoorsman.getTooltipNormalExtended(effectiveAbilityLevel, learnedAbilityLevel)
+
+// ============================================================================
+public function IUnitMetadata.getOutdoorsmanComponent() returns OutdoorsmanComponent
+  return this.getComponent(OutdoorsmanComponent.typeId) castTo OutdoorsmanComponent
+
+// ============================================================================
+public function IUnitMetadata.getOrAddOutdoorsmanComponent() returns OutdoorsmanComponent
+  var component = this.getOutdoorsmanComponent()
+  if (component == null)
+    component = this.addComponent(new OutdoorsmanComponent(this)) castTo OutdoorsmanComponent
+  return component
+
+// ============================================================================
+public function unit.getOutdoorsmanComponent() returns OutdoorsmanComponent
+  let metadata = this.getMetadata()
+  return metadata != null ? metadata.getOutdoorsmanComponent() : null
+
+// ============================================================================
+public function unit.getOrAddOutdoorsmanComponent() returns OutdoorsmanComponent
+  let metadata = this.getMetadata()
+  return metadata != null ? metadata.getOrAddOutdoorsmanComponent() : null
+
+// ============================================================================
+@compiletime function createObjects()
+
+  new AbilityDefinition(TlsAbilityIds.Hero.outdoorsman, 'Ahan')
+    ..setLevels(10)
+    ..setupHeroAbilityGroup(HeroAbilityGroup.Q)
+    ..setName("Outdoorsman")
+    ..presetTooltipNormal(lvl -> Outdoorsman.getTooltipNormal(lvl, lvl))
+    ..presetTooltipNormalExtended(lvl -> Outdoorsman.getTooltipNormalExtended(lvl, lvl))
+    ..setIconNormal("ReplaceableTextures\\CommandButtons\\BTNOutdoorsman.blp")
+
+  new HeroLearnAbilityDefinition(TlsAbilityIds.Hero.outdoorsman_learn, 3)
+    ..setupHeroAbilityGroup(HeroAbilityGroup.Q, 0)
+    ..setName("Outdoorsman")
+    ..setTooltipLearn("Learn Outdoorsman - [|cFFFFCC00 Level %d|r]")
+    ..setTooltipLearnExtended("The Mountaineer can intuit the rewards of a lootable structure before looting it.|n|n|cFFFFCC00Level 1|r - Zombies|n|cFFFFCC00Level 2|r - Lumber|n|cFFFFCC00Level 3|r - Items".format(
+      Outdoorsman.getLootDurationScale01(1).toPercentageString01(),
+      Outdoorsman.getLootDurationScale01(2).toPercentageString01(),
+      Outdoorsman.getLootDurationScale01(3).toPercentageString01()))
+    ..setIconResearch("ReplaceableTextures\\CommandButtons\\BTNOutdoorsman.blp")
+    ..presetCooldown(lvl -> 0)
+    ..presetManaCost(lvl -> 0)
+
+// ============================================================================
+init
+  registerHeroAbilityComponentType(OutdoorsmanComponent.typeId, TlsAbilityIds.Hero.outdoorsman)
+  registerHeroAbilityComponentType(OutdoorsmanComponent.typeId, TlsAbilityIds.Hero.outdoorsman_learn)

@@ -23,12 +23,7 @@
 
     public class RegionMapper : IPipelineObject
     {
-        private const string ARCHIVE_TERRAIN_FILE_PATH = "war3map.wpm";
-        private const string ARCHIVE_REGION_PLACEMENT_FILE_PATH = "war3map.w3r";
-        private const string ARCHIVE_DOCUMENT_PLACEMENT_FILE_PATH = "war3map.doo";
         private const string SPAWN_REGION_NAME_PREFIX = "SPAWN_REGION_";
-        private const string ARCHIVE_DOCUMENT_DOODAD_DATA_FILE_PATH = @"Units\DestructableData.slk";
-        private const string ARCHIVE_DOCUMENT_DOODAD_METADATA_FILE_PATH = @"Units\DestructableMetaData.slk";
 
         private readonly ILogger m_logger;
         private readonly IReadOnlyFileSystem m_fileSystem;
@@ -36,7 +31,6 @@
         private readonly IImageProvider m_imageProvider;
         private readonly IAssetManager m_assetManager;
         private readonly IDataDeserializer<BinaryReader, PathMapFile> m_pathMapFileDeserializer;
-        private readonly DestructibleLibrary m_destructibleLibrary;
         private readonly string m_generatedScriptFile;
 
         public RegionMapper(ILogger logger,
@@ -45,7 +39,6 @@
                             IImageProvider imageProvider,
                             IAssetManager assetManager,
                             IDataDeserializer<BinaryReader, PathMapFile> pathMapFileDeserializer,
-                            DestructibleLibrary destructibleLibrary,
                             string generatedScriptFile)
         {
             m_logger = logger;
@@ -54,11 +47,10 @@
             m_imageProvider = imageProvider;
             m_assetManager = assetManager;
             m_pathMapFileDeserializer = pathMapFileDeserializer;
-            m_destructibleLibrary = destructibleLibrary;
             m_generatedScriptFile = generatedScriptFile;
         }
 
-        public bool WriteRegionsToArchive { get; private set; }
+        public bool WriteRegionsToArchive { get; set; }
 
         public void FindIslands(PathMap map)
         {
@@ -376,21 +368,20 @@
 
             try
             {
-                MapRegions mapRegions;
-                DoodadFile doodads;
+                RegionsFile mapRegions;
+                DoodadPlacementFile doodads;
                 PathMap pathMap;
-                CustomEntityFile customEntityFile;
 
-                using (MpqFileStream file = archive.OpenFile(ARCHIVE_TERRAIN_FILE_PATH))
+                using (MpqFileStream file = archive.OpenFile(MapFiles.PATHING_FILE_PATH))
                 using (var reader = new BinaryReader(file))
                 {
                     pathMap = m_pathMapFileDeserializer.Deserialize(reader).Map;
                 }
 
-                using (MpqFileStream file = archive.OpenFile(ARCHIVE_REGION_PLACEMENT_FILE_PATH))
+                using (MpqFileStream file = archive.OpenFile(MapFiles.REGION_PLACEMENT_FILE_PATH))
                 using (var reader = new BinaryReader(file))
                 {
-                    mapRegions = new MapRegionsBinaryDeserializer().Deserialize(reader);
+                    mapRegions = new RegionsFileBinaryDeserializer().Deserialize(reader);
                 }
 
                 Region[] oldSpawnRegions = mapRegions.Regions.Where(_ => _.Name.StartsWith(SPAWN_REGION_NAME_PREFIX)).ToArray();
@@ -399,32 +390,17 @@
                     mapRegions.Regions.Remove(oldSpawnRegion);
                 }
 
-                using (MpqFileStream file = archive.OpenFile(ARCHIVE_DOCUMENT_PLACEMENT_FILE_PATH))
+                using (MpqFileStream file = archive.OpenFile(MapFiles.DOODAD_PLACEMENTS_FILE_PATH))
                 using (var reader = new BinaryReader(file))
                 {
-                    doodads = new DoodadFileBinaryDeserializer().Deserialize(reader);
-                }
-
-                using (MpqFileStream file = archive.OpenFile("war3map.w3b"))
-                using (var reader = new BinaryReader(file))
-                {
-                    customEntityFile = new CustomEntityFileBinaryDeserializer(m_objectLibrary).Deserialize(reader);
-                }
-
-                foreach (CustomEntityDefinition entityDef in customEntityFile.OriginalEntries)
-                {
-                    DestructibleEntity entity = m_destructibleLibrary.GetEntity(entityDef.Id);
-                    foreach (CustomEntityMod mod in entityDef.Modifications)
-                    {
-                        entity.SetValue(mod.Id, mod.Index, mod.Value);
-                    }
+                    doodads = new DoodadPlacementFileBinaryDeserializer().Deserialize(reader);
                 }
 
                 UpdatePathingMap(doodads, pathMap);
 
                 m_logger.Log($"Removed {oldSpawnRegions.Length} existing spawn regions in map");
 
-                int maxId = mapRegions.Regions.Max(_ => _.Id) + 1;
+                int maxId = mapRegions.Regions.Any() ? mapRegions.Regions.Max(_ => _.Id) + 1 : 0;
 
                 m_logger.Log($"Generating new spawn regions...");
 
@@ -456,13 +432,13 @@
                     using (Stream file = File.Create(tempFileName))
                     using (var writer = new BinaryWriter(file))
                     {
-                        new MapRegionsBinarySerializer().Serialize(writer, mapRegions);
+                        new RegionsFileBinarySerializer().Serialize(writer, mapRegions);
                     }
 
                     m_logger.Log("Done serializing regions");
 
-                    m_logger.Log($"Replacing file {ARCHIVE_REGION_PLACEMENT_FILE_PATH} in mpq");
-                    archive.ReplaceFile(tempFileName, ARCHIVE_REGION_PLACEMENT_FILE_PATH);
+                    m_logger.Log($"Replacing file {MapFiles.REGION_PLACEMENT_FILE_PATH} in mpq");
+                    archive.ReplaceFile(tempFileName, MapFiles.REGION_PLACEMENT_FILE_PATH);
                 }
 
                 string generatedScriptFileContents = GenerateSpawnRegionsWurstScript(mapRegions);
@@ -479,9 +455,9 @@
             }
         }
 
-        private void UpdatePathingMap(DoodadFile doodads, PathMap pathMap)
+        private void UpdatePathingMap(DoodadPlacementFile doodads, PathMap pathMap)
         {
-            foreach (DoodadPlacement doodadPlacement in doodads.Placements.Placements)
+            foreach (DestructablePlacement doodadPlacement in doodads.Placements.Destructables)
             {
                 UpdatePathingMap(doodadPlacement, pathMap);
             }
@@ -492,21 +468,25 @@
             IReadOnlyEntityObject entity = m_objectLibrary.GetEntity(placement.Id);
             if (!(entity is IAffectsPathing affectsPathing))
             {
-                return;
-            }
-
-            if (entity is DoodadEntity)
-            {
-                return;
+                throw new Exception($"Failed to find entity of type {placement.Id}");
             }
 
             string pt = affectsPathing.PathingTexture;
 
+            if (string.IsNullOrEmpty(pt) || string.IsNullOrWhiteSpace(pt) || pt == "none" || pt == "_")
+                return;
+
             try
             {
-                m_assetManager.FindAsset(pt)
-                    .Map(assetRef => m_imageProvider.GetImage(assetRef))
-                    .Do(UpdatePathMap);
+                var assetRef = m_assetManager.FindAsset(pt);
+                if (!assetRef.IsValid)
+                {
+                    m_logger.Log($"Failed to update pathing map for placement {placement.Id} with pathing texture {pt}");
+                    return;
+                }
+
+                var image = m_imageProvider.GetImage(assetRef);
+                UpdatePathMap(image);
             }
             catch (Exception)
             {
@@ -550,7 +530,7 @@
                 }
                 else
                 {
-                    rotDeg = placement.Rotation * Mathf.Rad2Deg;
+                    rotDeg = placement.RotationInRadians * Mathf.Rad2Deg;
                 }
 
                 rotDeg = Mathf.WrapAngleDegrees((int)(rotDeg / 90.0f) * 90.0f + 90.0f);
@@ -631,7 +611,7 @@
             };
         }
 
-        private static string GenerateSpawnRegionsWurstScript(MapRegions regions)
+        private static string GenerateSpawnRegionsWurstScript(RegionsFile regions)
         {
             var sb = new StringBuilder();
 

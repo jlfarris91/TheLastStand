@@ -3,37 +3,35 @@ import RegisterEvents
 import TlsUnitIds
 import TlsAbilityIds
 import RealtimeUnitComponent
-import DisplayTextToPlayer
-import Ability_IgniteCampFire
-import ColorUtility
 import PersistActiveAbilityComponent
-import Orders
-import FX
 import Unit_CampFire
-import Ability_CampFireRestore
 import Crafting
 import Handle
+import FX
 
 constant string CAMPFIRE2_EFFECT_1 = "Environment\\LargeBuildingFire\\LargeBuildingFire1.mdl"
-constant string CAMPFIRE2_EFFECT_2 = "Abilities\\Spells\\Human\\Brilliance\\Brilliance.mdl"
+
+constant colorA CAMPFIRE1_RANGE_EFFECT_COLOR = colorA(255, 136, 0, 150)
+constant colorA CAMPFIRE2_RANGE_EFFECT_COLOR = colorA(0, 170, 255, 150)
 
 // ============================================================================
 public class CampFireComponent extends RealtimeUnitComponent
-  private PersistActiveAbilityComponent m_persistActiveAbilityComponent
   private effect m_campFire2Effect1
-  private effect m_campFire2Effect2
   private _handle m_onCraftedItemHandler = INVALID_HANDLE
-  private ItemRecipe m_cookingRecipe = null
+  private CookingRecipe m_cookingRecipe = null
+  
+  private effect m_rangeEffect = null
+  private real m_auraRadius = 0.0
+  private colorA m_rangeEffectColor = CAMPFIRE1_RANGE_EFFECT_COLOR
 
   // --------------------------------------------------------------------------
   construct(IUnitMetadata owner)
     super(owner)
-    m_persistActiveAbilityComponent = null
 
   // --------------------------------------------------------------------------
   override function onEnabled()
     super.onEnabled()
-    m_persistActiveAbilityComponent = getOwner().getOrAddPersistActiveAbilityComponent()
+
     this.registerForRealtimeUpdate(RealtimeUpdatePriority.Background)
     updateState()
 
@@ -50,65 +48,52 @@ public class CampFireComponent extends RealtimeUnitComponent
       craftingComponent.onCraftedItem().unregister(m_onCraftedItemHandler)
     m_onCraftedItemHandler = INVALID_HANDLE
 
-    m_cookingRecipe = null
+    hideRangeEffect()
 
   // --------------------------------------------------------------------------
   override function realtimeUpdate(real dt)
     let ownerUnit = getOwnerUnit()
     let ownerUnitId = ownerUnit.getTypeId()
 
-    switch (ownerUnitId)
-      case TlsUnitIds.campFire | TlsUnitIds.campFireBuild
-        updateCampFire()
-      case TlsUnitIds.campFire2
-        updateCampFire2()
-      case TlsUnitIds.campFireOff
-        updateCampFireOff()
+    if (ownerUnitId == TlsUnitIds.campFire2)
+      updateCampFire2()
 
   // --------------------------------------------------------------------------
   function onCraftItem(ItemRecipe recipe)
+    m_cookingRecipe = recipe castTo CookingRecipe
+
     // TODO: change effects depending on recipe
     convertToCampFire2()
-    m_cookingRecipe = recipe
-
-  // --------------------------------------------------------------------------
-  function updateCampFire()
-    let ownerUnit = getOwnerUnit()
-
-    automaticallyAddLumber()
-    
-    // lose mana per second
-    ownerUnit.subMana(CAMP_FIRE_MANA_COST_PER_SECOND.toReal())
-    
-    // when mana reaches 0 convert to camp fire off
-    if (ownerUnit.getMana() <= 0)
-      convertToCampFireOff()
-    
-  // --------------------------------------------------------------------------
-  function updateCampFireOff()
-    let ownerUnit = getOwnerUnit()
-
-    automaticallyAddLumber()
-    
-    // The off camp fire converts to a regular camp fire when any mana is restored
-    if (ownerUnit.getMana() > 0)
-      convertToCampFire()
 
   // --------------------------------------------------------------------------
   function updateCampFire2()
     let ownerUnit = getOwnerUnit()
 
     // lose mana per second
-    ownerUnit.subMana(CAMP_FIRE_MANA_COST_PER_SECOND * CAMPFIRE2_MANA_COST_SCALE)
-    
-    // The camp fire 2 converts back to a camp fire 1 with full mana when mana reaches 0
-    // Unless there is still raw meat to consume to keep at at camp fire 2
+    ownerUnit.subMana(CAMP_FIRE_2_MANA_COST_PER_SECOND.toReal())
+
     if (ownerUnit.getMana() <= 0)
       ownerUnit.setMana(ownerUnit.getMaxMana())
       convertToCampFire()
 
-      if (m_cookingRecipe != null)
-        getOwnerUnit().addItemById(m_cookingRecipe.getItemTypeId())
+  // --------------------------------------------------------------------------
+  protected function showRangeEffect()
+    if (m_rangeEffect == null)
+      let ownerUnit = getOwnerUnit()
+      m_rangeEffect = FX.createRangeEffect(ownerUnit.getPos(), m_auraRadius, m_rangeEffectColor, ownerUnit.getOwner())
+
+  // --------------------------------------------------------------------------
+  protected function updateRangeEffect()
+    if (m_rangeEffect != null)
+      hideRangeEffect()
+      showRangeEffect()
+
+  // --------------------------------------------------------------------------
+  protected function hideRangeEffect()
+    
+    if (m_rangeEffect != null)
+      m_rangeEffect.destr()
+      m_rangeEffect = null
 
   // --------------------------------------------------------------------------
   private function convertToCampFire()
@@ -116,7 +101,7 @@ public class CampFireComponent extends RealtimeUnitComponent
     let ownerUnitId = ownerUnit.getTypeId()
     if (ownerUnitId == TlsUnitIds.campFire)
       return
-    m_persistActiveAbilityComponent.setUpgradingUnit(true)
+
     ownerUnit.issueImmediateOrderById(TlsUnitIds.campFire)
 
     let craftingComponent = getOwner().getCraftingComponent()
@@ -124,25 +109,12 @@ public class CampFireComponent extends RealtimeUnitComponent
       craftingComponent.enable()
 
   // --------------------------------------------------------------------------
-  private function convertToCampFireOff()
-    let ownerUnit = getOwnerUnit()
-    let ownerUnitId = ownerUnit.getTypeId()
-    if (ownerUnitId == TlsUnitIds.campFireOff)
-      return
-    m_persistActiveAbilityComponent.setUpgradingUnit(true)
-    ownerUnit.issueImmediateOrderById(TlsUnitIds.campFireOff)
-
-    let craftingComponent = getOwner().getCraftingComponent()
-    if (craftingComponent != null)
-      craftingComponent.disable()
-
-  // --------------------------------------------------------------------------
   private function convertToCampFire2()
     let ownerUnit = getOwnerUnit()
     let ownerUnitId = ownerUnit.getTypeId()
     if (ownerUnitId == TlsUnitIds.campFire2)
       return
-    m_persistActiveAbilityComponent.setUpgradingUnit(true)
+
     ownerUnit.issueImmediateOrderById(TlsUnitIds.campFire2)
     ownerUnit.setMana(ownerUnit.getMaxMana())
 
@@ -151,61 +123,50 @@ public class CampFireComponent extends RealtimeUnitComponent
       craftingComponent.disable()
 
   // --------------------------------------------------------------------------
-  private function automaticallyAddLumber()
-    let ownerUnit = getOwnerUnit()
-
-    if (m_persistActiveAbilityComponent.getAbilityActiveState(TlsAbilityIds.campFireIgniteSelf) and
-        ownerUnit.getMana() < CAMP_FIRE_IGNITE_DURATION / 2)
-    //{
-      let owningPlayer = getOwnerUnit().getOwner()
-      if (owningPlayer.getLumber() < CAMP_FIRE_IGNITE_LUMBER_COST)
-        m_persistActiveAbilityComponent.issueAbilityDeactivationOrder(TlsAbilityIds.campFireIgniteSelf)
-      else
-        owningPlayer.subLumber(CAMP_FIRE_IGNITE_LUMBER_COST)
-        FX.createLostLumberTag(ownerUnit.getPos(), CAMP_FIRE_IGNITE_LUMBER_COST, owningPlayer)
-        addLumber()
-    //}
-
-  // --------------------------------------------------------------------------
   function updateState()
     let ownerUnit = getOwnerUnit()
     let ownerUnitId = ownerUnit.getTypeId()
 
     if (ownerUnitId == TlsUnitIds.campFire or ownerUnitId == TlsUnitIds.campFireBuild)
-      ownerUnit.addAbility(TlsAbilityIds.campFireRestoreHealth)
-      ownerUnit.addAbility(TlsAbilityIds.campFireRestoreStamina)
+      ownerUnit.addAbility(TlsAbilityIds.campFireRestoreMana1)
+      m_auraRadius = CAMPFIRE1_AREA_OF_EFFECT
+      m_rangeEffectColor = CAMPFIRE1_RANGE_EFFECT_COLOR
     else
-      ownerUnit.removeAbility(TlsAbilityIds.campFireRestoreHealth)
-      ownerUnit.removeAbility(TlsAbilityIds.campFireRestoreStamina)
+      ownerUnit.removeAbility(TlsAbilityIds.campFireRestoreMana1)
 
     if (ownerUnitId == TlsUnitIds.campFire2)
-      ownerUnit.addAbility(TlsAbilityIds.campFire2RestoreHealth)
-      ownerUnit.addAbility(TlsAbilityIds.campFire2RestoreStamina)
+    //{
+      ownerUnit.addAbility(TlsAbilityIds.campFireRestoreMana2)
+      m_auraRadius = CAMPFIRE2_AREA_OF_EFFECT
+      m_rangeEffectColor = CAMPFIRE2_RANGE_EFFECT_COLOR
       showCampFire2Effects()
+
+      if (m_cookingRecipe != null)
+        for i = 0 to m_cookingRecipe.getAbilityIdCount() - 1
+          ownerUnit.addAbility(m_cookingRecipe.getAbilityId(i))
+    //}
     else
-      ownerUnit.removeAbility(TlsAbilityIds.campFire2RestoreHealth)
-      ownerUnit.removeAbility(TlsAbilityIds.campFire2RestoreStamina)
+    //{
+      ownerUnit.removeAbility(TlsAbilityIds.campFireRestoreMana2)
       hideCampFire2Effects()
 
-  // --------------------------------------------------------------------------
-  protected function addLumber()
-    getOwnerUnit().addMana(CAMP_FIRE_IGNITE_DURATION.toReal())
+      if (m_cookingRecipe != null)
+        for i = 0 to m_cookingRecipe.getAbilityIdCount() - 1
+          ownerUnit.removeAbility(m_cookingRecipe.getAbilityId(i))
+    //}
+
+    updateRangeEffect()
 
   // --------------------------------------------------------------------------
   private function showCampFire2Effects()
     if (m_campFire2Effect1 == null)
-      m_campFire2Effect1 = AddSpecialEffect(CAMPFIRE2_EFFECT_1, getOwnerUnit().getX(), getOwnerUnit().getY())
-    if (m_campFire2Effect2 == null)
-      m_campFire2Effect2 = AddSpecialEffect(CAMPFIRE2_EFFECT_2, getOwnerUnit().getX(), getOwnerUnit().getY())
+      m_campFire2Effect1 = addEffect(CAMPFIRE2_EFFECT_1, getOwnerUnit().getPos())
 
   // --------------------------------------------------------------------------
   private function hideCampFire2Effects()
     if (m_campFire2Effect1 != null)
       m_campFire2Effect1.destr()
       m_campFire2Effect1 = null
-    if (m_campFire2Effect2 != null)
-      m_campFire2Effect2.destr()
-      m_campFire2Effect2 = null
 
 // ============================================================================
 public function IUnitMetadata.getCampFireComponent() returns CampFireComponent
@@ -225,47 +186,7 @@ function onUnitConstructFinished()
       constructedUnit.getTypeId() != TlsUnitIds.campFireBuild)
     return
 
-  constructedUnit.addAbility(TlsAbilityIds.campFireRestoreHealth)
-  constructedUnit.addAbility(TlsAbilityIds.campFireRestoreStamina)
-
-// ============================================================================
-function onIgniteFire()
-  let castingUnit = GetSpellAbilityUnit()
-  let targetUnit = GetSpellTargetUnit()
-  let abilId = GetSpellAbilityId()
-
-  if (abilId != TlsAbilityIds.campFireIgniteTarget)
-    return
-
-  let castingPlayer = castingUnit.getOwner()
-
-  if (not targetUnit.isCampFire())
-    displayMessageToPlayer(castingPlayer, "You can only ignite Camp Fires.".colorize(Colors.red))
-    return
-
-  if (castingPlayer.getLumber() < CAMP_FIRE_IGNITE_LUMBER_COST)
-    displayMessageToPlayer(castingPlayer, "Not enough lumber.".colorize(Colors.red))
-    return
-
-  castingPlayer.subLumber(CAMP_FIRE_IGNITE_LUMBER_COST)
-  FX.createLostLumberTag(castingUnit.getPos(), CAMP_FIRE_IGNITE_LUMBER_COST, castingPlayer)
-
-  let comp = targetUnit.getMetadataRequired().getCampFireComponent()
-  comp.addLumber()
-
-// ============================================================================
-function onUnitIssuedOrder()
-  let orderedUnit = GetOrderedUnit()
-  let orderId = GetIssuedOrderId()
-
-  if (orderId != OrderIds.immolation or not orderedUnit.isCampFire())
-    return
-
-  let owningPlayer = orderedUnit.getOwner()
-  if (owningPlayer.getLumber() < CAMP_FIRE_IGNITE_LUMBER_COST)
-    displayMessageToPlayer(owningPlayer, "Not enough lumber".colorize(Colors.red))
-    orderedUnit.issueImmediateOrderById(OrderIds.unimmolation)
-    return
+  constructedUnit.addAbility(TlsAbilityIds.campFireRestoreMana1)
 
 // ============================================================================
 function onUnitConstructed()
@@ -294,9 +215,27 @@ function onUnitUpgraded()
   ..setUpgradingUnit(false)
 
 // ============================================================================
+function onUnitSelected()
+  let selectedUnit = GetTriggerUnit()
+  if (not selectedUnit.isCampFire())
+    return
+  let comp = selectedUnit.getMetadata().getCampFireComponent()
+  if (comp != null)
+    comp.showRangeEffect()
+
+// ============================================================================
+function onUnitDeselected()
+  let selectedUnit = GetTriggerUnit()
+  if (not selectedUnit.isCampFire())
+    return
+  let comp = selectedUnit.getMetadata().getCampFireComponent()
+  if (comp != null)
+    comp.hideRangeEffect()
+
+// ============================================================================
 init
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_CONSTRUCT_FINISH, function onUnitConstructFinished)
-  registerSpellEffectEvent(TlsAbilityIds.campFireIgniteTarget, function onIgniteFire)
-  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ISSUED_ORDER, function onUnitIssuedOrder)
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_CONSTRUCT_FINISH, function onUnitConstructed)
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_UPGRADE_FINISH, function onUnitUpgraded)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_SELECTED, function onUnitSelected)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_DESELECTED, function onUnitDeselected)

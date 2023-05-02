@@ -3,27 +3,29 @@ import GameSettings
 import GameConstants
 import HumanPlayers
 import HumanPlayerComponent
-import Heroes
 import ClosureTimers
 import BaseUnitsRectProvider
 import Time
 import RandomWeatherPlayer
 import DisplayTextToPlayer
 import ColorUtility
-import Bases
-import Execute
-import ErrorHandling
 import PlayerSaveData
-
-import initlater PlayerWaves
-import initlater IWaveGenerator
-import initlater GameStatsMultiboard
-import initlater NightWaveGenerator
-import initlater DayWaveGenerator
 import Math
 import SmartValue
 import GameProperties
 import Dialog
+import GroupUtils
+import TlsUnitIds
+import ErrorHandling
+import UnitMetadata
+import Orders
+import TlsItemIds
+import InvulnerableComponent
+import Spawning
+import PlayerSetup
+import ItemType
+import PlayerSpawnPointProviders
+import Difficulties
 
 public GameInstance g_GameInstance = new GameInstance()
 
@@ -31,38 +33,54 @@ public GameInstance g_GameInstance = new GameInstance()
 public class GameInstance
   private bool m_gracePeriod
   private bool m_updateGracePeriod
-  private int m_day
-  private int m_night
-  private real m_gameDifficulty = 1.0
-  private PlayerWavesMap m_playerWaves
-  private IDayWaveGenerator m_staticDayWaveGenerator
-  private IDayWaveGenerator m_randomDayWaveGenerator
-  private INightWaveGenerator m_staticNightWaveGenerator
-  private INightWaveGenerator m_randomNightWaveGenerator
+  private int m_day = 0
+  private real m_averagePlayerDifficulty = 1.0
   private RandomWeatherPlayer m_weatherPlayer
   private time m_startTime
   private time m_endTime
   private bool m_hasStarted = false
+  private bool m_spawnPedestals = false
 
   // --------------------------------------------------------------------------
   ondestroy
     destroy m_weatherPlayer
 
   // --------------------------------------------------------------------------
+  function now() returns time
+    let tod = GetTimeOfDay()
+    return makeTime(m_day + (tod < TIME_OF_DAY ? 1 : 0), tod)
+
+  // --------------------------------------------------------------------------
   function getDay() returns int
-    return m_day
+    return max(m_day, 0)
+
+  // --------------------------------------------------------------------------
+  function getDaysSurvived() returns real
+    var days = m_day - 1.0
+    let thisMorning = makeTime(m_day, TIME_OF_DAY)
+    let tonight = makeTime(m_day, TIME_OF_NIGHT)
+    days += clamp01(now().parameterize(thisMorning, tonight))
+    return days
 
   // --------------------------------------------------------------------------
   function getNight() returns int
-    return m_night
+    return getDay()
 
   // --------------------------------------------------------------------------
-  function getDaysSurvived() returns int
-    return max(m_night - 1, 0)
+  function getNightsSurvived() returns real
+    var nights = m_day - 1.0
+    let lastNight = makeTime(m_day, TIME_OF_NIGHT)
+    let tomorrowMorning = makeTime(m_day + 1, TIME_OF_DAY)
+    nights += clamp01(now().parameterize(lastNight, tomorrowMorning))
+    return nights
 
   // --------------------------------------------------------------------------
-  function getNightsSurvived() returns int
-    return max(m_day - 1, 0)
+  function getBossesSurvived() returns int
+    return (getDay() / 5).floor()
+
+  // ----------------------------------------------------------------------------
+  function getTODScale() returns real
+    return g_GameProperties.getProperty(GameProperty.TOD_SCALE).getValue()
 
   // --------------------------------------------------------------------------
   function isGracePeriodActive() returns bool
@@ -77,11 +95,11 @@ public class GameInstance
     m_updateGracePeriod = value
 
   // --------------------------------------------------------------------------
-  function getGameDifficulty01() returns real
-    return m_gameDifficulty
+  function getWorldDifficulty() returns real
+    return m_averagePlayerDifficulty
 
   // --------------------------------------------------------------------------
-  function updateGameDifficulty()
+  function updateWorldDifficulty()
     int alivePlayerCount = 0
     real totalDifficulty = 0.0
     
@@ -94,40 +112,61 @@ public class GameInstance
         totalDifficulty += playerComp.getDifficulty()
     //}
 
-    m_gameDifficulty = alivePlayerCount != 0 ? totalDifficulty / alivePlayerCount : 1.0
+    m_averagePlayerDifficulty = alivePlayerCount != 0 ? totalDifficulty / alivePlayerCount : 1.0
 
     updatePlayerTierChances()
 
   // --------------------------------------------------------------------------
+  function getWorldDifficultyCoeff() returns real
+    return getGeneralDifficultyCoeff(getWorldDifficulty(), g_PlayingHumanPlayerCount)
+
+  // --------------------------------------------------------------------------
+  function getPlayerDifficulty(player p) returns real
+    return p.getHumanPlayerComponentRequired().getDifficulty()
+
+  // --------------------------------------------------------------------------
+  function getPlayerDifficultyCoeff(player p) returns real
+    let playerDifficulty = getPlayerDifficulty(p)
+    return getPlayerDifficultyCoeff(playerDifficulty)
+
+  // --------------------------------------------------------------------------
+  function getPlayerDifficultyCoeff(real playerDifficulty) returns real
+    return getGeneralDifficultyCoeff(playerDifficulty, 1)
+
+  // --------------------------------------------------------------------------
+  function getGameProgressCoeff() returns real
+    return (getDaysSurvived() * 0.5 + getNightsSurvived()) * 0.5
+
+  // --------------------------------------------------------------------------
+  function getGeneralDifficultyCoeff(real difficulty, int playerCount) returns real
+    return DifficultyScaling.getGeneralDifficultyCoeff(getGameProgressCoeff(), difficulty, playerCount)
+
+  // --------------------------------------------------------------------------
   private function updatePlayerTierChances()
-    for _player in g_PlayingHumanPlayers
-    //{
-      let metadata = _player.getMetadata()
-      if (metadata != null and _player.isIngame() and not metadata.getHasLostGame())
-      //{
-        let playerComp = metadata.getHumanPlayerComponent()
-        let waveDifficulty = playerComp.getDifficulty()
+    // for _player in g_PlayingHumanPlayers
+    // //{
+    //   let metadata = _player.getMetadata()
+    //   if (metadata != null and _player.isIngame() and not metadata.getHasLostGame())
+    //   //{
+    //     let playerComp = metadata.getHumanPlayerComponent()
+    //     let waveDifficulty = playerComp.getDifficulty()
         
-        let d = clamp(waveDifficulty.floor(), 0, NUM_TIER_CHANCES-1)
-        let d2 = clamp(d + 1, 0, NUM_TIER_CHANCES-1)
-        let t = waveDifficulty - d
+    //     let d = clamp(waveDifficulty.floor(), 0, NUM_TIER_CHANCES-1)
+    //     let d2 = clamp(d + 1, 0, NUM_TIER_CHANCES-1)
+    //     let t = waveDifficulty - d
 
-        playerComp.setTierWeight(0, lerp(TIER_1_CHANCES[d], TIER_1_CHANCES[d2], t))
-        playerComp.setTierWeight(1, lerp(TIER_2_CHANCES[d], TIER_2_CHANCES[d2], t))
-        playerComp.setTierWeight(2, lerp(TIER_3_CHANCES[d], TIER_3_CHANCES[d2], t))
-    //}
-
-  // --------------------------------------------------------------------------
-  function getWaves() returns PlayerWavesMap
-    return m_playerWaves
+    //     playerComp.setTierWeight(0, lerp(TIER_1_CHANCES[d], TIER_1_CHANCES[d2], t))
+    //     playerComp.setTierWeight(1, lerp(TIER_2_CHANCES[d], TIER_2_CHANCES[d2], t))
+    //     playerComp.setTierWeight(2, lerp(TIER_3_CHANCES[d], TIER_3_CHANCES[d2], t))
+    // //}
 
   // --------------------------------------------------------------------------
-  function getPlayerWaves(player p) returns PlayerWaves
-    return m_playerWaves.getOrCreatePlayerWaves(p)
+  function getGameProgress() returns real
+    return getDaysSurvived() + getNightsSurvived()
 
   // --------------------------------------------------------------------------
-  function getGameProgress01() returns real
-    return getGameTime().parameterize(m_startTime, m_endTime)
+  function getSpawnPedestals() returns bool
+    return m_spawnPedestals
 
   // --------------------------------------------------------------------------
   function startNextDay()
@@ -140,19 +179,16 @@ public class GameInstance
   // --------------------------------------------------------------------------
   function skipToDay(int day)
     m_day = day - 1
-    m_night = day - 1
     startNextDay()
 
   // --------------------------------------------------------------------------
   function skipToNight(int night)
     m_day = night
-    m_night = night - 1
     startNextNight()
 
   // --------------------------------------------------------------------------
-  function reset()    
+  function reset()
     m_day = 0
-    m_night = 0
     SetTimeOfDay(TIME_OF_DAY_INITIAL)
     g_GameProperties.setTODScale(TOD_SCALE_INITIAL)
 
@@ -160,6 +196,7 @@ public class GameInstance
   function start()
 
     m_updateGracePeriod = true
+    m_spawnPedestals = true
 
     g_GameProperties.setTODScale(0.0)
     SetTimeOfDay(TIME_OF_DAY - 0.5)
@@ -169,28 +206,14 @@ public class GameInstance
     m_startTime = makeTime(getGameTime().getDay(), TIME_OF_DAY.floor(), 0)
     m_endTime = m_startTime + makeTimespan(TOTAL_NIGHTS, 0, 0)
 
-    // These should move to a place that sets up the GameInstance
-    execute() () ->
-      m_staticDayWaveGenerator = new StaticDayWaveGenerator()
-      
-    execute() () ->
-      m_randomDayWaveGenerator = new RandomDayWaveGenerator()
-    
-    execute() () ->
-      m_staticNightWaveGenerator = new StaticNightWaveGenerator()
-      
-    execute() () ->
-      m_randomNightWaveGenerator = new RandomNightWaveGenerator()
-
     m_weatherPlayer = new RandomWeatherPlayer()
 
     m_weatherPlayer.start()
 
-    updateGameDifficulty()
+    updateWorldDifficulty()
 
     initializeGeneral()
     initializeAlliances()
-    initializeWaves()
 
     doAfter(1.0) ->
       postStart()
@@ -198,36 +221,14 @@ public class GameInstance
   // ----------------------------------------------------------------------------
   function onTODScaleValueChanged()
 
-
   // --------------------------------------------------------------------------
   function complete()
-
     m_weatherPlayer.stop()
-
-    destroy m_playerWaves
-    m_playerWaves = null
-
-    if (m_staticNightWaveGenerator != null)
-      destroy m_staticNightWaveGenerator
-      m_staticNightWaveGenerator = null
-
-    if (m_randomNightWaveGenerator != null)
-      destroy m_randomNightWaveGenerator
-      m_randomNightWaveGenerator = null
-
-    if (m_staticDayWaveGenerator != null)
-      destroy m_staticDayWaveGenerator
-      m_staticDayWaveGenerator = null
-
-    if (m_randomDayWaveGenerator != null)
-      destroy m_randomDayWaveGenerator
-      m_randomDayWaveGenerator = null
 
   // --------------------------------------------------------------------------
   private function postStart()
     for p in g_PlayingHumanPlayers
       initializePlayer(p)
-      showPlayerBases(p, 60.0)
 
   // --------------------------------------------------------------------------
   private function initializePlayer(player p)
@@ -238,7 +239,7 @@ public class GameInstance
     createVision(p, getBaseUnitsRect(), false)
 
     p.setGold(GameSettings.startingGold)
-    p.setLumber(GameSettings.startingMaterials)
+    p.setLumber(GameSettings.startingLumber)
 
     // Initialize camera settings
     SetCameraFieldForPlayer(p, CAMERA_FIELD_FARZ, CAMERA_FARZ, 0.0)
@@ -274,17 +275,13 @@ public class GameInstance
     if (m_updateGracePeriod)
       updateGracePeriod()
 
-    // Show the player's multiboards on day 1
-    if (m_day == 1)
-      showMultiboardsForPlayers()
-
     g_GameProperties.getProperty(GameProperty.TOD_SCALE).setBase(TOD_DAY_SCALARS[m_day - 1])
 
     // Start day waves for players
-    for p in g_PlayingHumanPlayers
-      let waves = m_playerWaves.getOrCreatePlayerWaves(p)
-      Log.debug("Starting day wave {0} for player {1}".format(m_day.toString(), p.getName()))
-      waves.getRunner().startDayWave(m_day)
+    // for p in g_PlayingHumanPlayers
+    //   let waves = m_playerWaves.getOrCreatePlayerWaves(p)
+    //   Log.debug("Starting day wave {0} for player {1}".format(m_day.toString(), p.getName()))
+    //   waves.getRunner().startDayWave(m_day)
 
     Log.debug("Day {0} started.".format(m_day.toString()))
 
@@ -305,32 +302,32 @@ public class GameInstance
     //}
 
   // --------------------------------------------------------------------------
-  function showMultiboardsForPlayers()
-    for _player in g_HumanPlayersInGame
-      showGameStatsMultiboard(_player)
-  
-    if (PLAYER_SPECTATOR.isPlayingHumanPlayer())
-      showGameStatsMultiboard(PLAYER_SPECTATOR)
-
-  // --------------------------------------------------------------------------
   function startNight()
 
     if (not m_hasStarted)
       return
 
-    m_night++
+    m_spawnPedestals = false
 
-    Log.debug("Starting night {0}...".format(m_night.toString()))
+    let temp = getGroup()
+    temp.enumUnitsOfType(TlsUnitIds.pedestal, null)
+    for u in temp
+      u.remove()
+    temp.release()
 
-    g_GameProperties.getProperty(GameProperty.TOD_SCALE).setBase(TOD_NIGHT_SCALARS[m_night - 1])
+    let night = getNight()
+
+    Log.debug("Starting night {0}...".format(night.toString()))
+
+    g_GameProperties.getProperty(GameProperty.TOD_SCALE).setBase(TOD_NIGHT_SCALARS[night - 1])
 
     // Start night waves for players
-    for p in g_PlayingHumanPlayers
-      let waves = m_playerWaves.getOrCreatePlayerWaves(p)
-      Log.debug("Starting night wave {0} for player {1}".format(m_night.toString(), p.getName()))
-      waves.getRunner().startNightWave(m_night)
+    // for p in g_PlayingHumanPlayers
+    //   let waves = m_playerWaves.getOrCreatePlayerWaves(p)
+    //   Log.debug("Starting night wave {0} for player {1}".format(m_night.toString(), p.getName()))
+    //   waves.getRunner().startNightWave(m_night)
 
-    Log.debug("Night {0} started.".format(m_night.toString()))
+    Log.debug("Night {0} started.".format(night.toString()))
 
   // --------------------------------------------------------------------------
   private function respawnDeadPlayers()
@@ -362,53 +359,6 @@ public class GameInstance
     // We control experience gain manually
     for p in g_HumanPlayers
       SetPlayerHandicapXPBJ(p, 0.00)
-
-  // --------------------------------------------------------------------------
-  private function initializeWaves()
-    m_playerWaves = new PlayerWavesMap()
-
-    Log.debug("Generating waves...")
-
-    for p in g_PlayingHumanPlayers
-      generateWavesForPlayer(p)
-
-    Log.debug("Done generating waves.")
-
-  // --------------------------------------------------------------------------
-  private function generateWavesForPlayer(player _player) returns bool
-    if (_player == null)
-      argumentNullError("_player")
-
-    let playerWaves = m_playerWaves.getOrCreatePlayerWaves(_player)
-    let playerDifficulty = _player.getHumanPlayerComponentRequired().getDifficulty()
-    let playerNightWaveGenerator = getNightWaveGenerator(playerDifficulty)
-    let playerDayWaveGenerator = getDayWaveGenerator(playerDifficulty)
-
-    execute() () ->
-      Log.debug("Generating night waves for player " + _player.getName() + " ...")
-      let nightWaves = playerWaves.getNightWaves()
-      playerNightWaveGenerator.generateWavesForPlayer(_player, nightWaves)
-
-    execute() () ->
-      Log.debug("Generating day waves for player " + _player.getName() + " ...")
-      let dayWaves = playerWaves.getDayWaves()
-      playerDayWaveGenerator.generateWavesForPlayer(_player, dayWaves)
-
-    return true
-
-  // --------------------------------------------------------------------------
-  private function getNightWaveGenerator(real difficulty) returns INightWaveGenerator
-    if (difficulty < DIFFICULTY_START_RANDOM_WAVES)
-      return m_staticNightWaveGenerator
-    else
-      return m_randomNightWaveGenerator
-
-  // --------------------------------------------------------------------------
-  private function getDayWaveGenerator(real difficulty) returns IDayWaveGenerator
-    if (difficulty < DIFFICULTY_START_RANDOM_WAVES)
-      return m_staticDayWaveGenerator
-    else
-      return m_randomDayWaveGenerator
 
   // --------------------------------------------------------------------------
   private function initializeAlliances()  
@@ -449,6 +399,70 @@ public class GameInstance
     SetPlayerAllianceStateBJ(PLAYER_SPECTATOR, PLAYER_LOOTABLES, bj_ALLIANCE_NEUTRAL )
     // Make lootables treat player as neutral
     SetPlayerAllianceStateBJ(PLAYER_LOOTABLES, PLAYER_SPECTATOR, bj_ALLIANCE_NEUTRAL )
+
+// ============================================================================
+public function spawnHeroForPlayer(player p, vec2 pos, bool firstTime) returns unit
+  let playerMetadata = p.getMetadata()
+  let playerComp = playerMetadata.getHumanPlayerComponent()
+
+  unit hero = playerComp.getHero()
+  let firstTimeSpawned = hero == null
+
+  // This is the first time the hero has been spawned for the player
+  // new hero metadata will be automatically generated
+  if (firstTimeSpawned)
+    hero = createUnitTLS(p, playerComp.getHeroTypeId(), pos, 270.0.asAngleDegrees())
+    PlayerSetup.getSetupForPlayer(p).setupHero(hero)
+  else
+    hero.revive(pos, false)
+
+  // Reset player's camera to look at new hero
+  if (not firstTime and p == localPlayer)
+    PanCameraToTimedForPlayer(p, pos.x, pos.y, 0)
+  
+  SelectUnitForPlayerSingle(hero, p)
+
+  // Set player name back to normal if they were deceased
+  playerMetadata.resetDisplayName()
+
+  // Give starting items
+  if (playerComp.getHeadquarters() == null)
+    ItemType.createItemForUnit(TlsItemIds.headquarters1, hero)
+
+  if (firstTimeSpawned)
+    ItemType.createItemForUnit(TlsItemIds.flintAndTinder, hero)
+
+  // Make hero invulnerable for a short period of time
+  if (not firstTime)
+    hero.makeInvulnerable(HERO_RESPAWN_INVULNERABLE_DURATION)
+
+  return hero
+
+// ============================================================================
+public function spawnInitialPlayerUnitsAtRandomPoint(player p, bool _firstTime)
+  let sp = getDynamicFriendlySpawnPointProvider(p).getRandomSpawnPointInPlayableMap()
+  if (not sp.succeeded)
+    error("Could not find a safe spawn point to spawn hero for player " + p.getName())
+    return
+
+  // let hero = spawnHeroForPlayer(p, sp.spawnPoint, firstTime)
+  
+  // Create survivors for the player to start with
+  // spawnInitialSurvivorsForPlayer(p, hero)
+
+  let wisp = createUnitTLS(p, TlsUnitIds.wisp, sp.spawnPoint, 270.0.asAngleDegrees())
+  SelectUnitForPlayerSingle(wisp, p)
+
+  // Reset player's camera to look at new hero
+  if (p == localPlayer)
+    PanCameraToTimedForPlayer(p, sp.spawnPoint.x, sp.spawnPoint.y, 0)
+
+// ============================================================================
+function spawnInitialSurvivorsForPlayer(player p, unit hero)
+  let pos = hero.getPos()
+  for i = 1 to GameSettings.startingSurvivors
+    let survivor = createUnitTLS(p, TlsUnitIds.Survivors.survivorMale, pos, GetRandomDirectionDeg().asAngleDegrees())
+    survivor.issueTargetOrderById(OrderIds.move, hero)
 
 // ============================================================================
 function onDayStart()

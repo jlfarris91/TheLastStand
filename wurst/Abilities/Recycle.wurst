@@ -1,32 +1,76 @@
 package Recycle
 import RegisterEvents
-import GameSettings
 import FX
 import TlsUnitDefinition
+import ChannelAbilityPreset
+import Icons
+import PlayerProperties
+import Math
+import GameConstants
 
 // ============================================================================
 function onRecycleCast()
-  let u = GetSpellAbilityUnit()
+  let recycledUnit = GetSpellAbilityUnit()
+  let recycleScale = recycledUnit.getOwner().getPropertyValue(PlayerProperty.RECYCLE_REFUND_SCALE_01) * BUILDING_RECYCLE_SCALAR
+  recycleUnit(recycledUnit, recycleScale)
+
+// ============================================================================
+function onRecycleBrokenCast()
+  let recycledUnit = GetSpellAbilityUnit()
+  let recycleScale = recycledUnit.getOwner().getPropertyValue(PlayerProperty.RECYCLE_REFUND_SCALE_01) * BUILDING_RECYCLE_BROKEN_SCALAR
+  recycleUnit(GetSpellAbilityUnit(), recycleScale)
+
+// ============================================================================
+function recycleUnit(unit u, real scale)
+  
   let owner = u.getOwner()
   let pos = u.getPos()
 
-  let goldCost = u.getRecycleGoldRewarded()
-  if (goldCost > 0)
-    let reward = R2I(I2R(goldCost) * GameSettings.structures_RecycleRewardPercentage)
-    FX.createFoundGoldEffect(pos, owner)
-    FX.createFoundGoldTag(pos, reward, owner)
-    owner.addGold(reward)
+  let clampedScale = clamp01(scale)
 
-  let lumberCost = u.getRecycleLumberRewarded()
-  if (lumberCost > 0)
-    let reward = R2I(I2R(lumberCost) * GameSettings.structures_RecycleRewardPercentage)
-    FX.createFoundMaterialsEffect(pos, owner)
-    FX.createFoundMaterialsTag(pos, reward, owner)
-    owner.addLumber(reward)
+  let goldReward = (u.getRecycleGoldRewarded() * clampedScale).floor()
+  if (goldReward > 0)
+    FX.createGainedGoldEffect(pos, owner)
+    FX.createGainedGoldTag(pos, goldReward, owner)
+    owner.addGold(goldReward)
+
+  let lumberReward = (u.getRecycleLumberRewarded() * clampedScale).floor()
+  if (lumberReward > 0)
+    FX.createGainedLumberEffect(pos, owner)
+    FX.createGainedLumberTag(pos, lumberReward, owner)
+    owner.addLumber(lumberReward)
   
   u.setAnimation("death")
   u.kill()
 
 // ============================================================================
+@compiletime function createAbility()
+
+  new ChannelAbilityPreset(TlsAbilityIds.recycle, 1, true)
+    ..setHeroAbility(false)
+    ..setItemAbility(false)
+    ..presetTargetTypes(Targettype.NONE)
+    ..removeChannelProperties(true, true)
+    ..setIconNormal(Icons.bTNPillage)
+    ..setName("Recycle")
+    ..setTooltipNormal(1, "Recycle")
+    ..setTooltipNormalExtended(1, "Recycle this structure and recover 75% of the resources used to construct it.")
+    ..setButtonPositionNormalX(3)
+    ..setButtonPositionNormalY(2)
+
+  new ChannelAbilityPreset(TlsAbilityIds.recycleBroken, 1, true)
+    ..setHeroAbility(false)
+    ..setItemAbility(false)
+    ..presetTargetTypes(Targettype.NONE)
+    ..removeChannelProperties(true, true)
+    ..setIconNormal(Icons.bTNPillage)
+    ..setName("Recycle Broken Structure")
+    ..setTooltipNormal(1, "Recycle Broken Structure")
+    ..setTooltipNormalExtended(1, "Recycle this broken structure and recover 25% of the resources used to construct it.")
+    ..setButtonPositionNormalX(3)
+    ..setButtonPositionNormalY(2)
+
+// ============================================================================
 init
   registerSpellEffectEvent(TlsAbilityIds.recycle, function onRecycleCast)
+  registerSpellEffectEvent(TlsAbilityIds.recycleBroken, function onRecycleBrokenCast)

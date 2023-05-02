@@ -1,0 +1,105 @@
+package Fear
+import RealtimeUnitComponent
+import Orders
+import Icons
+import BuffObjEditing
+
+@configurable constant real FEAR_MOVE_DISTANCE = 300.0
+@configurable constant real FEAR_MOVE_SPEED_SCALAR = 1.5
+
+constant buffTuple FEAR_BUFF = compiletime(createDummyBuffObject("Feared", "This unit is terrified!", Icons.bTNAvatarOff, "Abilities\\Spells\\Undead\\Curse\\CurseTarget.mdl", "overhead"))
+
+// ============================================================================
+public class FearComponent extends RealtimeUnitComponent
+  private unit m_source = null
+  private real m_duration = 0.0
+  private real m_timer = 0.0
+  private real m_originalMoveSpeed
+
+  // --------------------------------------------------------------------------
+  construct(IUnitMetadata owner)
+    super(owner)
+
+  // --------------------------------------------------------------------------
+  function start(unit source, real duration)
+    m_source = source
+    m_duration = duration
+    m_timer = duration
+    enable()
+
+  // --------------------------------------------------------------------------
+  function setDuration(real duration)
+    m_duration = duration
+    m_timer = m_duration
+
+  // --------------------------------------------------------------------------
+  override function onEnabled()
+    super.onEnabled()
+
+    m_timer = m_duration
+    m_originalMoveSpeed = getOwnerUnit().getMoveSpeed()
+
+    this.registerForRealtimeUpdate(RealtimeUpdatePriority.Background)
+
+    let ownerUnit = getOwnerUnit()
+    ownerUnit.setMoveSpeed(m_originalMoveSpeed * FEAR_MOVE_SPEED_SCALAR)
+    ownerUnit.addAbility(FEAR_BUFF.abilId)
+
+  // --------------------------------------------------------------------------
+  override function onDisabled()
+    super.onDisabled()
+
+    m_source = null
+    m_timer = 0
+
+    let ownerUnit = getOwnerUnit()
+    ownerUnit.setMoveSpeed(m_originalMoveSpeed)
+    ownerUnit.removeAbility(FEAR_BUFF.abilId)
+    ownerUnit.removeAbility(FEAR_BUFF.buffId)
+
+  // --------------------------------------------------------------------------
+  override function realtimeUpdate(real dt)
+
+    if (m_source == null or not m_source.isAlive())
+      disable()
+      return
+
+    m_timer -= dt
+    if (m_timer <= 0)
+      disable()
+      return
+
+    let owner = getOwnerUnit()
+    let pos = owner.getPos()
+
+    let angle = m_source.getPos().angleTo(pos)
+    let targetPos = pos + vec2(angle.cos(), angle.sin()) * FEAR_MOVE_DISTANCE
+
+    owner.issuePointOrderById(Orders.move, targetPos)
+
+// ============================================================================
+public function IUnitMetadata.getFearComponent() returns FearComponent
+  return this.getComponent(FearComponent.typeId) castTo FearComponent
+
+// ============================================================================
+public function IUnitMetadata.getOrAddFearComponent() returns FearComponent
+  var component = this.getFearComponent()
+  if (component == null)
+    component = this.addComponent(new FearComponent(this)) castTo FearComponent
+  return component
+
+// ============================================================================
+public function unit.getFearComponent() returns FearComponent
+  let metadata = this.getMetadata()
+  return metadata != null ? metadata.getFearComponent() : null
+
+// ============================================================================
+public function unit.getOrAddFearComponent() returns FearComponent
+  let metadata = this.getMetadata()
+  return metadata != null ? metadata.getOrAddFearComponent() : null
+
+// ============================================================================
+public function unit.fear(unit source, real duration)
+  let comp = this.getOrAddFearComponent()
+  if (comp != null)
+    comp.start(source, duration)

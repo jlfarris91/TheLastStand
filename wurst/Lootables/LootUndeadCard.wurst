@@ -1,0 +1,379 @@
+package LootUndeadCard
+import Lootables
+import SpawnUndeadUnitDirector
+import Observable
+import Directors
+import Spawning
+import HumanPlayerComponent
+import GameInstance
+import SpawnUnitJob
+import Math
+import GameConstants
+import UnitMetadata
+import GroupExtensions
+import UndeadTargetingComponent
+import TlsUnitDefinition
+import UnitExtensions
+import MinimapIconComponent
+import Action
+import WaveGeneratorCommon
+import Range
+import Deck
+import DirectorDebugger
+import ItemSet
+import ColorUtility
+import Icons
+import Notifications
+import SoundUtils
+
+SoundDefinition g_zombieSpawnSound
+
+// ============================================================================
+public class LootUndeadCard extends LootCard
+  static constant int TIER_COUNT = 4
+
+  private Deck array[TIER_COUNT] m_decks
+  private real array[TIER_COUNT] m_creditsOnActivation
+  private ItemSet array[TIER_COUNT] m_itemSets
+
+  // --------------------------------------------------------------------------
+  construct(string id)
+    super(id)
+    for i = 0 to TIER_COUNT-1
+      m_decks[i] = null
+      m_creditsOnActivation[i] = 0
+      m_itemSets[i] = null
+
+  // --------------------------------------------------------------------------
+  ondestroy
+  
+    for i = 0 to TIER_COUNT-1
+      if (m_decks[i] != null)
+        m_decks[i].release()
+        m_decks[i] = null
+
+  // ----------------------------------------------------------------------------
+  override function getDiscardOnActivate() returns bool
+    return true
+
+  // ----------------------------------------------------------------------------
+  override function getCancelLootOperationOnActivate() returns bool
+    return true
+
+  // --------------------------------------------------------------------------
+  override function getCanBeDrawnByLuckyHorseshoe() returns bool
+    return false
+
+  // --------------------------------------------------------------------------
+  override function getCanBeAffectedByPendant() returns bool
+    return false
+
+  // ----------------------------------------------------------------------------
+  function getDeck(int tier) returns Deck
+    return m_decks[tier]
+
+  // ----------------------------------------------------------------------------
+  function setDeck(int tier, Deck deck)
+    deck.acquire()
+    if (m_decks[tier] != null)
+      m_decks[tier].release()
+    m_decks[tier] = deck
+
+  // ----------------------------------------------------------------------------
+  function getItemSet(int tier) returns ItemSet
+    return m_itemSets[tier]
+
+  // ----------------------------------------------------------------------------
+  function setItemSet(int tier, ItemSet itemSet)
+    m_itemSets[tier] = itemSet
+
+  // ----------------------------------------------------------------------------
+  function getCreditsOnActivation(int tier) returns real
+    return m_creditsOnActivation[tier]
+
+  // ----------------------------------------------------------------------------
+  function setCreditsOnActivation(int tier, real credits)
+    m_creditsOnActivation[tier] = credits
+
+  // ----------------------------------------------------------------------------
+  override function getTierCount() returns int
+    return TIER_COUNT
+
+  // ----------------------------------------------------------------------------
+  override function getTierValueMultiplier(int tier) returns real
+    return 4.0 * tier.toReal() + 1
+
+  // --------------------------------------------------------------------------
+  override function activateCard(int tier) returns bool
+    
+    let lootable = getLootable()
+    let looter = getLooter()
+    let owner = looter.getOwner()
+
+    let lootableComp = lootable.getMetadata().getLootableComponent()
+
+    let spawnDirector = new LootUndeadSpawnDirector(getId(), looter, lootableComp.getSpawnPosition())
+    ..setDeck(getDeck(tier))
+    ..setCreditMultiplier(0.0)
+    ..setCreditsOnActivation(getCreditsOnActivation(tier))
+    ..setAlwaysDrawNewCard(true)
+    ..setDestroyWhenOutOfCredits(true)
+    ..setItemSet(m_itemSets[tier])
+
+    DirectorDebugger.registerDirector(spawnDirector)
+
+    spawnDirector
+    .onDestroy().register(_ -> DirectorDebugger.unregisterDirector(spawnDirector))
+    
+    spawnDirector.enable()
+
+    let notification = new LootRewardNotification(
+      NotificationManager.nextNotificationId(),
+      owner,
+      looter.getPos(),
+      g_zombieSpawnSound)
+    ..setMessage("Found " + "Zombies!".red())
+    ..setIconPath(Icons.bTNZombie)
+
+    lootableComp.showLootRewardNotification(owner, notification)
+
+    return true
+
+// ============================================================================
+public class LootUndeadSpawnDirector extends ContinuousDirector
+  private unit m_targetUnit
+  private player m_targetPlayer
+  private real m_playerDifficulty
+  private SpawnContext m_context
+  private TargetProvider m_targetProvider
+  private SpawnPointProvider m_spawnPointProvider
+  private vec2 m_spawnPos
+  private unit m_mostExpensiveSpawnedUnit = null
+  private int m_mostExpensiveCost = 0
+  private ItemSet m_itemSet = null
+
+  use Observable
+
+  // --------------------------------------------------------------------------
+  construct(string name, unit targetUnit, vec2 spawnPos)
+    super(name)
+    m_targetUnit = targetUnit
+    m_spawnPos = spawnPos
+    m_targetPlayer = m_targetUnit.getOwner()
+    m_context = new SpawnContext().acquire()
+    m_targetProvider = new SingleTargetProvider(targetUnit)..acquire()
+    m_spawnPointProvider = new SingleSpawnPointProvider(spawnPos)..acquire()
+
+  // --------------------------------------------------------------------------
+  ondestroy
+
+    if (m_targetProvider != null)
+      m_targetProvider.release()
+      m_targetProvider = null
+
+    if (m_spawnPointProvider != null)
+      m_spawnPointProvider.release()
+      m_spawnPointProvider = null
+
+    if (m_context != null)
+      m_context.release()
+      m_context = null
+
+  // ----------------------------------------------------------------------------
+  function getItemSet() returns ItemSet
+    return m_itemSet
+  
+  // ----------------------------------------------------------------------------
+  function setItemSet(ItemSet value)
+    m_itemSet = value
+
+  // --------------------------------------------------------------------------
+  override protected function onEnabled()
+    super.onEnabled()
+    m_playerDifficulty = m_targetPlayer.getHumanPlayerComponentRequired().getDifficulty()
+
+  // ----------------------------------------------------------------------------
+  override protected function onDisabled()
+    super.onDisabled()
+    rewardItem()
+
+  // ----------------------------------------------------------------------------
+  function rewardItem()
+
+    if (m_itemSet == null)
+      return
+
+    if (m_mostExpensiveSpawnedUnit != null)
+      m_itemSet.createRandomItemForUnit(m_mostExpensiveSpawnedUnit)
+      return
+
+    m_itemSet.createRandomItem(m_spawnPos)
+
+  // --------------------------------------------------------------------------
+  override protected function getDifficultyCoefficient() returns real
+    return g_GameInstance.getPlayerDifficultyCoeff(m_playerDifficulty)
+
+  // --------------------------------------------------------------------------
+  override function drawCard() returns CardInstance
+
+    let deck = getDeck()
+    if (deck == null)
+      return null
+
+    let selectedCard = deck.drawCard() castTo SpawnCard
+    if (selectedCard == null)
+      return null
+
+    let credits = getCredits()
+    return selectedCard.getHighestAffordableTier(credits)
+
+  // --------------------------------------------------------------------------
+  override function activateCard(CardInstance card) returns bool
+  
+    let spawnCard = card.card castTo SpawnCard
+    let spawnDef = spawnCard.getSpawnDefinition()
+
+    // update the spawn context
+    m_playerDifficulty = m_targetPlayer.getHumanPlayerComponentRequired().getDifficulty()
+
+    m_context.setDifficultyCoeff(getDifficultyCoefficient())
+    m_context.setTier(card.tier)
+
+    let context = m_context.clone()
+
+    let config = new SpawnUnitJobConfig()
+    ..setTierSelector(context -> card.tier)
+    ..setTierSelectionMode(TierSelectionMode.Group)
+    ..setUnitTypeProvider(spawnDef.getUnitTypeProvider())
+    ..setSpawnPointProvider(m_spawnPointProvider)
+    ..setTargetProvider(m_targetProvider)
+    ..setGroupSize(spawnDef.getGroupSize(context))
+    ..setMaxSpawnCount(spawnDef.getMaxSpawnCount(context))
+    ..setMaxAliveCount(UNLIMITED)
+    ..setSpawnRange(spawnDef.getSpawnRange().toRangeReal())
+    ..setWaitForFullGroup(spawnDef.getWaitForFullSpawnGroup())
+    ..setPrepareUnitFunc((job, spawnedUnit) -> prepareUnit(context, spawnDef, spawnedUnit))
+    ..setUseRecycler(spawnDef.getUseUnitRecycler())
+
+    let spawnJob = new SpawnUnitJob(spawnDef.getId(), PLAYER_UNDEAD, config)
+    ..setCancellationToken(getCancellationToken())
+    ..setContext(context)
+
+    spawnJob.onUnitSpawned().register() (SpawnUnitJob job, unit spawnedUnit) ->
+      onUnitSpawned(spawnedUnit, card)
+
+    spawnJob.onGroupSpawned().register() (SpawnUnitJob job, group spawnedUnits) ->
+      onGroupSpawned(context, spawnDef, spawnedUnits)
+
+    getWorkerThread().enqueue(spawnJob)
+
+    return true
+
+  // --------------------------------------------------------------------------
+  private function prepareUnit(SpawnContext context, SpawnDefinition spawnDef, unit spawnedUnit) returns bool
+
+    let unitMetadata = spawnedUnit.getMetadata()
+    if (unitMetadata == null)
+      Log.error("[LootUndeadSpawnDirector.prepareUnit] : Unit has no metadata! : {0} ({1} : {2})".format(
+        spawnedUnit.getName(),
+        spawnedUnit.getTypeId().toString(),
+        UnitId2StringBJ(spawnedUnit.getTypeId())))
+      return false
+
+    let commonUnitModifier = spawnDef.getCommonUnitModifier()
+    if (commonUnitModifier != null)
+      commonUnitModifier.call(spawnedUnit, context)
+
+    let unitModifier = spawnDef.getUnitModifier(spawnedUnit.getTypeId())
+    if (unitModifier != null)
+      unitModifier.call(spawnedUnit, context)
+
+    return true
+
+  // --------------------------------------------------------------------------
+  private function onUnitSpawned(unit spawnedUnit, CardInstance card)
+    getAdmin().registerOwnedUnit(spawnedUnit)
+
+    if (m_mostExpensiveSpawnedUnit == null or card.cost >= m_mostExpensiveCost)
+      m_mostExpensiveSpawnedUnit = spawnedUnit
+      m_mostExpensiveCost = card.cost
+
+  // --------------------------------------------------------------------------
+  private function onGroupSpawned(SpawnContext context, SpawnDefinition spawnDef, group spawnedUnits)
+
+    let firstUnit = spawnedUnits.getFirst()
+    if (firstUnit == null)
+      return
+
+    let targetUnit = context.getTargetUnit()
+    let targetPlayer = targetUnit.getOwner()
+
+    for spawnedUnit in spawnedUnits
+    //{
+      let unitMetadata = spawnedUnit.getMetadata()
+
+      let utc = unitMetadata.getUndeadTargetingComponent()
+      if (utc != null)
+        utc.setTargetUnit(targetUnit)
+
+      let unitDef = getUnitDefinition(spawnedUnit.getTypeId())
+      if (unitDef != null)
+        spawnedUnit.fadeIn(unitDef.getVertexColor())
+      else
+        spawnedUnit.fadeIn()
+
+      if (spawnDef.getMinimapIconPath() != null)
+        spawnedUnit.getOrAddMinimapIconComponent()
+        ..update(spawnDef.getMinimapIconPath(), spawnDef.getMinimapIconColor())
+        ..showOnlyFor(targetPlayer)
+    //}
+
+    if (localPlayer == targetPlayer and spawnDef.getPingOnGroupSpawn())
+      let color = spawnDef.getPingOnGroupSpawnColor()
+      PingMinimapEx(firstUnit.getX(), firstUnit.getY(), 3.0, color.red, color.green, color.blue, true)
+
+    let playSoundOnGroupSpawn = spawnDef.getPlaySoundOnGroupSpawn()
+    if (playSoundOnGroupSpawn != null)
+      playSoundOnGroupSpawn.playForPlayer(targetPlayer)
+
+  // --------------------------------------------------------------------------
+  override function writeDebugString(Action1<string> output)
+
+    output.acquire()
+
+    super.writeDebugString(output)
+
+    if (m_context != null)
+    //{
+      output.call("Player Diff: " + m_playerDifficulty.toString())
+      output.call("Diff Coeff: " + m_context.getDifficultyCoeff().toString())
+      output.call("Last Tier: " + m_context.getTier().toString())
+
+      output.call("Normal Stats: lvl:{0} hp:{1} armor:{2} dmg:{3}".format(
+        g_zombieMeleeModifiers.getLevel(m_context, 1.0).toString(),
+        g_zombieMeleeModifiers.getHealth(m_context, 1.0).toString(),
+        g_zombieMeleeModifiers.getArmor(m_context, 1.0).toString(),
+        g_zombieMeleeModifiers.getAttack1DamageRange(m_context, 1.0).toString()
+      ))
+
+      output.call("Elite Stats: lvl:{0} hp:{1} armor:{2} dmg:{3}".format(
+        g_eliteMeleeModifiers.getLevel(m_context, 1.0).toString(),
+        g_eliteMeleeModifiers.getHealth(m_context, 1.0).toString(),
+        g_eliteMeleeModifiers.getArmor(m_context, 1.0).toString(),
+        g_eliteMeleeModifiers.getAttack1DamageRange(m_context, 1.0).toString()
+      ))
+
+      output.call("Elite HP: {0}*{1}*{2}={3}".format(
+        g_eliteMeleeModifiers.baseHealth.toString(),
+        m_context.getDifficultyCoeff().toString(),
+        ELITE_TIER_HEALTH_MULTIPLIER[m_context.getTier()].toString(),
+        g_eliteMeleeModifiers.getHealth(m_context, 1.0).toString()
+      ))
+    //}
+    
+    output.release()
+
+// ============================================================================
+init
+  g_zombieSpawnSound = new SoundDefinition(Sounds.zombieDeath1, false, false)
+  g_zombieSpawnSound.volume = 32

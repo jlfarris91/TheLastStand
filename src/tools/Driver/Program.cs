@@ -1,33 +1,30 @@
-﻿namespace Driver
-{
-    using System.ComponentModel;
-    using System.Diagnostics;
-    using System.IO;
-    using System.Text;
-    using StormLibSharp;
-    using War3.Net.IO;
+﻿using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
 
+namespace Driver
+{
     class Program
     {
         static void Main(string[] args)
         {
-            string path1 = @"C:\Users\jlfar\OneDrive\Documents\Warcraft III\Maps\TheLastStand.w3x";
-            string path2 = @"C:\Users\jlfar\OneDrive\Documents\Warcraft III\Maps\TheLastStandv0.1.71.w3x";
-
-            DoWork(path1, "war3map.j");
-            DoWork(path2, "war3mapv0.1.71.j");
+            DoWork();
         }
 
-        private static void DoWork(string path, string outputPath)
+        private static void DoWork()
         {
-            using (var archive = new MpqArchive(path, FileAccess.Read))
-            using (MpqFileStream asd = archive.OpenFile("war3map.j"))
-            using (var reader = new BinaryReader(asd))
+
+            var eventMapTemplateDirs = Directory.EnumerateDirectories(@"D:\Projects\WarcraftIII\TheLastStand\maps\MapEventTemplates")
+                .Where(dir => Path.GetExtension(dir) == ".w3x")
+                .ToArray();
+
+
+            foreach (var mapEventTemplateMapDir in eventMapTemplateDirs)
             {
-                byte[] allBytes = reader.ReadAllBytes();
-                string content = Encoding.Default.GetString(allBytes);
-                File.WriteAllText(outputPath, content);
+                var mapEventTemplateMapDirInfo = new DirectoryInfo(mapEventTemplateMapDir);
             }
+
         }
     }
 }

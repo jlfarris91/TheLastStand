@@ -7,15 +7,12 @@ import SmartValue
 import ClosureEvents
 import ColorUtility
 import ChannelAbilityPreset
-import public UnitComponent
+import public UnitMetadata
 import HashList
 
 @configurable colorA HERO_ABILITY_COLOR = Colors.gold
 @configurable colorA HERO_ABILITY_OVER_LEVELED_COLOR = Colors.green
 
-TechAvailabilityGroup array[4] g_abilityGroup = [ new TechAvailabilityGroup(), new TechAvailabilityGroup(), new TechAvailabilityGroup(), new TechAvailabilityGroup() ]
-int array[4] g_abilityGroupDefault = [ 0, 0, 0, 0 ]
-HashMap<int, HeroAbilityGroup> g_abilIdToGroup = new HashMap<int, HeroAbilityGroup>()
 HashMap<int, int> g_abilityIdToComponentTypeMap = new HashMap<int, int>()
 HashList<int> g_allHeroAbilityComponentTypeIds = new HashList<int>()
 
@@ -34,52 +31,61 @@ function HeroAbilityGroup.toString() returns string
 // ============================================================================
 public class HeroAbilities
 
+  static HeroAbilities scout = new HeroAbilities()
+  static HeroAbilities mountaineer = new HeroAbilities()
+  static HeroAbilities captain = new HeroAbilities()
+  static HeroAbilities tinkerer = new HeroAbilities()
+
+  private TechAvailabilityGroup array[4] m_abilityGroup = [ new TechAvailabilityGroup(), new TechAvailabilityGroup(), new TechAvailabilityGroup(), new TechAvailabilityGroup() ]
+  private int array[4] m_abilityGroupDefault = [ 0, 0, 0, 0 ]
+  private HashMap<int, HeroAbilityGroup> m_abilIdToGroup = new HashMap<int, HeroAbilityGroup>()
+
   // --------------------------------------------------------------------------
   private construct()
     skip
 
   // --------------------------------------------------------------------------
-  static function hasAbility(int abilId) returns bool
-    return g_abilIdToGroup.has(abilId)
+  function hasAbility(int abilId) returns bool
+    return m_abilIdToGroup.has(abilId)
 
   // --------------------------------------------------------------------------
-  static function getHeroAbilityGroup(int abilId) returns HeroAbilityGroup
-    return g_abilIdToGroup.has(abilId) ? g_abilIdToGroup.get(abilId) : HeroAbilityGroup.UNKNOWN
+  function getHeroAbilityGroup(int abilId) returns HeroAbilityGroup
+    return m_abilIdToGroup.has(abilId) ? m_abilIdToGroup.get(abilId) : HeroAbilityGroup.UNKNOWN
 
   // --------------------------------------------------------------------------
-  static function setHeroAbilityGroup(int abilId, HeroAbilityGroup heroAbilityGroup)
+  function setHeroAbilityGroup(int abilId, HeroAbilityGroup heroAbilityGroup)
     setHeroAbilityGroup(abilId, heroAbilityGroup, false)
 
   // --------------------------------------------------------------------------
-  static function setHeroAbilityGroup(int abilId, HeroAbilityGroup heroAbilityGroup, bool isGroupDefault)
+  function setHeroAbilityGroup(int abilId, HeroAbilityGroup heroAbilityGroup, bool isGroupDefault)
     let existingHeroAbilityGroup = getHeroAbilityGroup(abilId)
     if (existingHeroAbilityGroup != UNKNOWN)
       error("Ability " + AbilityId2String(abilId) + " already registered with group " + existingHeroAbilityGroup.toString())
     if (heroAbilityGroup == UNKNOWN)
       error("Argument 'heroAbilityGroup' cannot be value 'UNKNOWN'")
-    g_abilIdToGroup.put(abilId, heroAbilityGroup)
-    g_abilityGroup[heroAbilityGroup castTo int].add(abilId)
+    m_abilIdToGroup.put(abilId, heroAbilityGroup)
+    m_abilityGroup[heroAbilityGroup castTo int].add(abilId)
     if (isGroupDefault)
-      g_abilityGroupDefault[heroAbilityGroup castTo int] = abilId
+      m_abilityGroupDefault[heroAbilityGroup castTo int] = abilId
 
   // --------------------------------------------------------------------------
-  static function getHeroAbilityGroupDefault(HeroAbilityGroup heroAbilityGroup) returns int
-    return g_abilityGroupDefault[heroAbilityGroup castTo int]
+  function getHeroAbilityGroupDefault(HeroAbilityGroup heroAbilityGroup) returns int
+    return m_abilityGroupDefault[heroAbilityGroup castTo int]
 
   // --------------------------------------------------------------------------
-  static function getHeroAbilitiesDefinitionString() returns string
+  function getHeroAbilitiesDefinitionString() returns string
     let list = new LinkedList<int>()
     for i = 0 to 3
-      for abilId in g_abilityGroup[i]
+      for abilId in m_abilityGroup[i]
         list.add(abilId)
     let result = list.joinBy((int i) -> i.toRawCode(), ",")
     destroy list
     return result
 
   // --------------------------------------------------------------------------
-  static function disableAllHeroAbilities(player _player)
+  function disableAllHeroAbilities(player _player)
     for i = 0 to 3
-      g_abilityGroup[i].disable(_player)
+      m_abilityGroup[i].disable(_player)
 
 // ============================================================================
 public abstract class HeroAbilityComponent extends UnitComponent
@@ -96,8 +102,6 @@ public abstract class HeroAbilityComponent extends UnitComponent
 
     m_abilityId = abilityId
     m_abilityLearnId = abilityLearnId
-
-    registerAbilityEvents(abilityId, abilityLearnId)
 
     abilityLevel.onValueChanged().registerDispatched(this) () ->
       // Log.info("Ability level: " + abilityLevel.getIntValue().toString())
@@ -129,11 +133,19 @@ public abstract class HeroAbilityComponent extends UnitComponent
     skip
 
   // --------------------------------------------------------------------------
-  protected function onCastTarget(int _abilityId, unit _target)
+  protected function onEffect(int _abilityId)
     skip
 
   // --------------------------------------------------------------------------
-  protected function onCastPoint(int _abilityId, vec2 _target)
+  protected function onChannel(int _abilityIdS)
+    skip
+
+  // --------------------------------------------------------------------------
+  protected function onFinishCast(int _abilityId)
+    skip
+
+  // --------------------------------------------------------------------------
+  protected function onEndCast(int _abilityId)
     skip
 
   // --------------------------------------------------------------------------
@@ -176,30 +188,32 @@ public abstract class HeroAbilityComponent extends UnitComponent
   // --------------------------------------------------------------------------
   protected abstract function getTooltipNormalExtended(int effectiveAbilityLevel, int learnedAbilityLevel) returns string
 
-  // --------------------------------------------------------------------------
-  protected function registerAbilityEvents(vararg int abilityIds)
-    for abilityId in abilityIds
-      if (not g_abilityIdToComponentTypeMap.has(abilityId))
-        g_abilityIdToComponentTypeMap.put(abilityId, this.typeId)
-        EventListener.onPointCast(abilityId, (unit caster, vec2 target) -> onHeroAbilityCastPoint(caster, target, this.typeId))
-        EventListener.onTargetCast(abilityId, (unit caster, unit target) -> onHeroAbilityCastTarget(caster, target, this.typeId))
-        EventListener.onCast(abilityId, (unit caster) -> onHeroAbilityCast(caster, this.typeId))
+// ============================================================================
+public function registerHeroAbilityComponentType(int componentTypeId, int abilityId)
+  if (g_abilityIdToComponentTypeMap.has(abilityId))
+    error("Hero ability id {0} already registered to {1}".format(abilityId.toRawCode(), componentTypeId.toString()))
+  g_abilityIdToComponentTypeMap.put(abilityId, componentTypeId)
+  g_allHeroAbilityComponentTypeIds.add(componentTypeId)
+
+// ============================================================================
+function IUnitMetadata.getHeroAbilityComponent(int abilityId) returns HeroAbilityComponent
+  if (not g_abilityIdToComponentTypeMap.has(abilityId))
+    return null
+  let componentTypeId = g_abilityIdToComponentTypeMap.get(abilityId)
+  if (componentTypeId == 0)
+    return null
+  return this.getComponent(componentTypeId) castTo HeroAbilityComponent
 
 // ============================================================================
 function onUnitLearnedSkill()
   let learnedSkill = GetLearnedSkill()
-
-  if (not g_abilityIdToComponentTypeMap.has(learnedSkill))
-    return
-
-  let componentTypeId = g_abilityIdToComponentTypeMap.get(learnedSkill)
-
   let learningUnit = GetLearningUnit()
-  let comp = learningUnit.getComponent(componentTypeId) castTo HeroAbilityComponent
-  if (comp == null or not comp.getEnabled())
+
+  let abilityComp = learningUnit.getMetadata().getHeroAbilityComponent(learnedSkill)
+  if (abilityComp == null or not abilityComp.getEnabled())
     return
 
-  comp.onUnitLearnedSkill()
+  abilityComp.onUnitLearnedSkill()
 
 // ============================================================================
 function onHeroReviveFinish()
@@ -214,22 +228,6 @@ function onHeroReviveFinish()
     let comp = metadata.getComponent(heroAbilityComponentTypeId) castTo HeroAbilityComponent
     if (comp != null)
       comp.updateAbilityState()
-
-// ============================================================================
-public function registerHeroAbilityComponent(int componentTypeId)
-  g_allHeroAbilityComponentTypeIds.add(componentTypeId)
-
-// ============================================================================
-function onHeroAbilityCastTarget(unit caster, unit target, int componentTypeId)
-  let comp = caster.getComponent(componentTypeId) castTo HeroAbilityComponent
-  if (comp != null and comp.getEnabled())
-    comp.onCastTarget(GetSpellAbilityId(), target)
-
-// ============================================================================
-function onHeroAbilityCastPoint(unit caster, vec2 target, int componentTypeId)
-  let comp = caster.getComponent(componentTypeId) castTo HeroAbilityComponent
-  if (comp != null and comp.getEnabled())
-    comp.onCastPoint(GetSpellAbilityId(), target)
 
 // ============================================================================
 function onHeroAbilityCast(unit caster, int componentTypeId)
@@ -289,7 +287,7 @@ public function AbilityDefinition.setupHeroAbilityGroup(HeroAbilityGroup heroAbi
       error("Invalid argument heroAbilityGroup " + (heroAbilityGroup castTo int).toString())
 
 // ============================================================================
-public function HeroLearnAbilityDefinition.setupHeroAbilityGroup(HeroAbilityGroup heroAbilityGroup)
+public function HeroLearnAbilityDefinition.setupHeroAbilityGroup(HeroAbilityGroup heroAbilityGroup, int row)
   this.setButtonPositionNormalX(0)
   this.setButtonPositionNormalY(-11)
   this.setHotkeyNormal("")
@@ -297,24 +295,85 @@ public function HeroLearnAbilityDefinition.setupHeroAbilityGroup(HeroAbilityGrou
   switch (heroAbilityGroup)
     case HeroAbilityGroup.Q
       this.setButtonPositionResearchX(0)
-      this.setButtonPositionResearchY(0)
+      this.setButtonPositionResearchY(row)
       this.setHotkeyLearn("Q")
     case HeroAbilityGroup.W
       this.setButtonPositionResearchX(1)
-      this.setButtonPositionResearchY(0)
+      this.setButtonPositionResearchY(row)
       this.setHotkeyLearn("W")
     case HeroAbilityGroup.E
       this.setButtonPositionResearchX(2)
-      this.setButtonPositionResearchY(0)
+      this.setButtonPositionResearchY(row)
       this.setHotkeyLearn("E")
     case HeroAbilityGroup.R
       this.setButtonPositionResearchX(3)
-      this.setButtonPositionResearchY(0)
+      this.setButtonPositionResearchY(row)
       this.setHotkeyLearn("R")
     default
       error("Invalid argument heroAbilityGroup " + (heroAbilityGroup castTo int).toString())
 
 // ============================================================================
+function onSpellCast()
+  let castingUnit = GetSpellAbilityUnit()
+  let abilityId = GetSpellAbilityId()
+
+  let abilityComp = castingUnit.getMetadata().getHeroAbilityComponent(abilityId)
+  if (abilityComp == null or not abilityComp.getEnabled())
+    return
+
+  abilityComp.onCast(abilityId)
+
+// ============================================================================
+function onSpellEffect()
+  let castingUnit = GetSpellAbilityUnit()
+  let abilityId = GetSpellAbilityId()
+
+  let abilityComp = castingUnit.getMetadata().getHeroAbilityComponent(abilityId)
+  if (abilityComp == null or not abilityComp.getEnabled())
+    return
+
+  abilityComp.onEffect(abilityId)
+
+// ============================================================================
+function onSpellChannel()
+  let castingUnit = GetSpellAbilityUnit()
+  let abilityId = GetSpellAbilityId()
+
+  let abilityComp = castingUnit.getMetadata().getHeroAbilityComponent(abilityId)
+  if (abilityComp == null or not abilityComp.getEnabled())
+    return
+
+  abilityComp.onChannel(abilityId)
+
+// ============================================================================
+function onSpellEndCast()
+  let castingUnit = GetSpellAbilityUnit()
+  let abilityId = GetSpellAbilityId()
+
+  let abilityComp = castingUnit.getMetadata().getHeroAbilityComponent(abilityId)
+  if (abilityComp == null or not abilityComp.getEnabled())
+    return
+
+  abilityComp.onEndCast(abilityId)
+
+// ============================================================================
+function onSpellFinish()
+  let castingUnit = GetSpellAbilityUnit()
+  let abilityId = GetSpellAbilityId()
+
+  let abilityComp = castingUnit.getMetadata().getHeroAbilityComponent(abilityId)
+  if (abilityComp == null or not abilityComp.getEnabled())
+    return
+
+  abilityComp.onFinishCast(abilityId)
+
+// ============================================================================
 init
   registerPlayerUnitEvent(EVENT_PLAYER_HERO_SKILL, function onUnitLearnedSkill)
   registerPlayerUnitEvent(EVENT_PLAYER_HERO_REVIVE_FINISH, function onHeroReviveFinish)
+
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_SPELL_CHANNEL, function onSpellChannel)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_SPELL_CAST, function onSpellCast)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_SPELL_EFFECT, function onSpellEffect)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_SPELL_ENDCAST, function onSpellEndCast)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_SPELL_FINISH, function onSpellFinish)

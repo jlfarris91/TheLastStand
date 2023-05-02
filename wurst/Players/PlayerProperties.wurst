@@ -17,11 +17,20 @@ public enum PlayerProperty
   SCOUT_TOWER_TARGETS
   SCOUT_TOWER_TARGET_DAMAGE_SCALAR_01
   SURVIVOR_HP_BONUS
-  ITEM_FIND_QUALITY
+  LOOT_FIND_QUALITY
+  LUMBERMILL_GATHER_COOLDOWN
+  LUMBERMILL_GATHER_AMOUNT
+  HERO_XP
+  HERO_XP_PER_LOOT
+  HERO_XP_PER_KILL
+  HERO_XP_PER_KILL_ELITE
+  HERO_XP_PER_KILL_BOSS
+  RECYCLE_REFUND_SCALE_01
+  GOLD_DROP_AMOUNT
   __COUNT
 
 // Must match number of items in PlayerProperties enum
-public constant int PLAYER_PROPERTY_COUNT = 7
+public constant int PLAYER_PROPERTY_COUNT = 16
 
 // ============================================================================
 tuple propertyMetadata(real defaultValue, bool triggersUpdate, string friendlyName, string shortName, Func1<real, string> stringifier)
@@ -29,6 +38,7 @@ Func1<real, string> g_toString = (real v) -> v.toString()
 Func1<real, string> g_toIntString = (real v) -> v.toInt().toString()
 Func1<real, string> g_toScalarString = (real v) -> v.toString() + "x"
 Func1<real, string> g_toPercentageString01 = (real v) -> v.toPercentageString01()
+Func1<real, string> g_toSecondsString = (real v) -> v.toString() + "s"
     
 // ============================================================================
 SmartValue array[24 * PLAYER_PROPERTY_COUNT] g_smartValues
@@ -39,13 +49,22 @@ public class PlayerProperties
   static constant int count = PLAYER_PROPERTY_COUNT
 
   protected static constant propertyMetadata array[count] PROPERTY_METADATA = [
-    /* LUMBER_REFUND_PERC               */  propertyMetadata(0.0, false,  "Lumber Refund",                          "lumber_refund",                    g_toPercentageString01.acquire()),
-    /* SPIKE_STUN_CHANCE                */  propertyMetadata(0.0, false,  "Spike Stun Chance",                      "spike_stun_chance",                g_toPercentageString01.acquire()),
-    /* SPIKE_STUN_DURATION              */  propertyMetadata(0.0, false,  "Spike Stun Duration",                    "spike_stun_dur",                   g_toString.acquire()),
-    /* SCOUT_TOWER_TARGETS              */  propertyMetadata(0.0, false,  "Scout Tower Targets",                    "scout_tower_targets",              g_toIntString.acquire()),
-    /* SCOUT_TOWER_TARGET_DAMAGE_SCALAR */  propertyMetadata(0.0, false,  "Scout Tower Target Bonus Damage Scale",  "scout_tower_target_damage_scalar", g_toPercentageString01.acquire()),
-    /* SURVIVOR_HP_BONUS                */  propertyMetadata(0.0, true,   "Survivor HP Bonus",                      "lifesteal",                        g_toIntString.acquire()),
-    /* ITEM_FIND_QUALITY                */  propertyMetadata(1.0, false,  "Item Find Quality",                      "item_find_quality",                g_toPercentageString01.acquire())
+    /* LUMBER_REFUND_PERC               */  propertyMetadata(0.0,   false,  "Lumber Refund",                          "lumber_refund",                    g_toPercentageString01.acquire()),
+    /* SPIKE_STUN_CHANCE                */  propertyMetadata(0.0,   false,  "Spike Stun Chance",                      "spike_stun_chance",                g_toPercentageString01.acquire()),
+    /* SPIKE_STUN_DURATION              */  propertyMetadata(0.0,   false,  "Spike Stun Duration",                    "spike_stun_dur",                   g_toString.acquire()),
+    /* SCOUT_TOWER_TARGETS              */  propertyMetadata(0.0,   false,  "Scout Tower Targets",                    "scout_tower_targets",              g_toIntString.acquire()),
+    /* SCOUT_TOWER_TARGET_DAMAGE_SCALAR */  propertyMetadata(0.0,   false,  "Scout Tower Target Bonus Damage Scale",  "scout_tower_target_damage_scalar", g_toPercentageString01.acquire()),
+    /* SURVIVOR_HP_BONUS                */  propertyMetadata(0.0,   true,   "Survivor HP Bonus",                      "survivor_hp_bonus",                g_toIntString.acquire()),
+    /* LOOT_FIND_QUALITY                */  propertyMetadata(0.0,   false,  "Loot Find Quality",                      "loot_quality",                     g_toPercentageString01.acquire()),
+    /* LUMBERMILL_GATHER_COOLDOWN       */  propertyMetadata(5.0,   false,  "Lumber Gather Cooldown",                 "lumber_gather_cooldown",           g_toSecondsString.acquire()),
+    /* LUMBERMILL_GATHER_AMOUNT         */  propertyMetadata(5.0,   false,  "Lumber Gather Amount",                   "lumber_gather_amount",             g_toIntString.acquire()),
+    /* HERO_XP                          */  propertyMetadata(1.0,   false,  "Hero XP",                                "hero_xp",                          g_toPercentageString01.acquire()),
+    /* HERO_XP_PER_LOOT                 */  propertyMetadata(5.0,   false,  "Hero XP Per Loot",                       "hero_xp_kill_loot",                g_toIntString.acquire()),
+    /* HERO_XP_PER_KILL                 */  propertyMetadata(4.0,   false,  "Hero XP Per Kill",                       "hero_xp_kill",                     g_toIntString.acquire()),
+    /* HERO_XP_PER_KILL_ELITE           */  propertyMetadata(10.0,  false,  "Hero XP Per Kill Elite",                 "hero_xp_kill_elite",               g_toIntString.acquire()),
+    /* HERO_XP_PER_KILL_BOSS            */  propertyMetadata(50.0,  false,  "Hero XP Per Kill Boss",                  "hero_xp_kill_boss",                g_toIntString.acquire()),
+    /* RECYCLE_REFUND_SCALE_01          */  propertyMetadata(1.0,   false,  "Recycle Refund Scale",                   "recycle_refund_scale",             g_toPercentageString01.acquire()),
+    /* GOLD_DROP_AMOUNT                 */  propertyMetadata(0.0,   false,  "Gold Drop Amount",                       "gold_drop_amount",                 g_toIntString.acquire())
   ]
 
   // --------------------------------------------------------------------------
@@ -93,8 +112,8 @@ public function player.getProperty(PlayerProperty property) returns SmartValue
   if (g_smartValues[propId] == null)
     g_smartValues[propId] = new SmartValue(PlayerProperties.getPropertyDefaultValue(property))
     if (PlayerProperties.PROPERTY_METADATA[propIndex].triggersUpdate)
-      g_smartValues[propId].onValueChanged().register(() -> update(this))
-      update(this)
+      g_smartValues[propId].onValueChanged().register(() -> update(this, property))
+      update(this, property)
   return g_smartValues[propId]
 
 // ============================================================================
@@ -110,14 +129,15 @@ public function player.getPropertyValueAsString(PlayerProperty property) returns
   return PlayerProperties.formatPropertyValue(property, this.getPropertyValue(property))
   
 // ============================================================================
-function update(player p)
+function update(player p, PlayerProperty property)
   
-  p.setTechResearchLevel(TlsUpgradeIds.survivorHpBonus, getSurvivorHPBonusResearchLevel(p))
+  if (property == PlayerProperty.SURVIVOR_HP_BONUS)
+    p.setTechResearchLevel(TlsUpgradeIds.survivorHpBonus, getSurvivorHPBonusResearchLevel(p))
 
 // ============================================================================
 function getSurvivorHPBonusResearchLevel(player p) returns int
   // This should match the increments defined in the TlsUpgradeIds.survivorHpBonus definition below
-  return (p.getPropertyValue(PlayerProperty.SURVIVOR_HP_BONUS) / 10).floor()
+  return (p.getPropertyIntValue(PlayerProperty.SURVIVOR_HP_BONUS) / 50).floor()
 
 // ============================================================================
 function onResearchFinished()
@@ -141,7 +161,7 @@ function onResearchFinished()
 @compiletime function createObjects()
 
   new TlsUpgradeDefinition(TlsUpgradeIds.survivorHpBonus, 100)
-    ..addEffectHitPointBonus(10, 10)
+    ..addEffectHitPointBonus(50, 50)
     ..setGoldCostBase(0)
     ..setGoldCostIncrement(0)
     ..setLumberCostBase(0)

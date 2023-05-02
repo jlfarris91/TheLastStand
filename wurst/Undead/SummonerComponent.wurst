@@ -1,21 +1,21 @@
 package SummonerComponent
-import UnitComponent
-import WaveSpawning
+import UnitMetadata
 import ErrorHandling
 import ObjectIds
 import UndeadTargetingComponent
 import RegisterEvents
+import Spawning
 
 // ============================================================================
 public class SummonerComponent extends UnitComponent
-  private SpawnWaveContext m_spawnedContext
+  private SpawnContext m_spawnContext
   private int array[3] m_summonerUnitTypes
   private int m_abilityId
 
   // --------------------------------------------------------------------------
   construct (IUnitMetadata owner)
     super(owner)
-    m_spawnedContext = null
+    m_spawnContext = null
     m_summonerUnitTypes[0] = 0
     m_summonerUnitTypes[1] = 0
     m_summonerUnitTypes[2] = 0
@@ -24,20 +24,20 @@ public class SummonerComponent extends UnitComponent
   // --------------------------------------------------------------------------
   ondestroy
 
-    if (m_spawnedContext != null)
-      destroy m_spawnedContext
-      m_spawnedContext = null
+    if (m_spawnContext != null)
+      destroy m_spawnContext
+      m_spawnContext = null
 
   // --------------------------------------------------------------------------
-  function getSpawnedContext() returns SpawnWaveContext
-    return m_spawnedContext
+  function getSpawnContext() returns SpawnContext
+    return m_spawnContext
 
   // --------------------------------------------------------------------------
-  function setSpawnedContext(SpawnWaveContext contextToClone)
-    if (m_spawnedContext != null)
-      destroy m_spawnedContext
-      m_spawnedContext = null
-    m_spawnedContext = contextToClone.clone()
+  function setSpawnedContext(SpawnContext contextToClone)
+    if (m_spawnContext != null)
+      destroy m_spawnContext
+      m_spawnContext = null
+    m_spawnContext = contextToClone.clone()
 
   // --------------------------------------------------------------------------
   function setSummonerUnitTypes(int tier1, int tier2, int tier3)
@@ -89,7 +89,6 @@ public function unit.getOrAddSummonerComponent() returns SummonerComponent
 // ============================================================================
 function onUnitSummoned()
   let summoner = GetSummoningUnit()
-  let summoned = GetSummonedUnit()
 
   let metadata = summoner.getMetadata()
   if (metadata == null)
@@ -99,19 +98,29 @@ function onUnitSummoned()
   if (comp == null)
     return
 
-  let spawnedContext = comp.getSpawnedContext()
-  if (spawnedContext == null)
+  let spawnContext = comp.getSpawnContext()
+  if (spawnContext == null)
     error("Summoner was spawned with no spawn context!")
     return
 
+  let summoned = GetSummonedUnit()
   let summonedTypeId = summoned.getTypeId()
 
-  let modifier = spawnedContext.definition.getUnitModifier(summoned.getTypeId())
-  if (modifier == null)
-    Log.error("No modifier for unit summoned of type " + summonedTypeId.toRawCode())
+  let definition = spawnContext.getSpawnDefinition()
+  if (definition == null)
+    error("No spawn definition exists for spawn context")
     return
 
-  modifier.call(summoned, spawnedContext)
+  let modifier = definition.getUnitModifier(summonedTypeId)
+  if (modifier == null)
+    error("No modifier for unit summoned of type " + summonedTypeId.toRawCode())
+    return
+
+  modifier.call(summoned, spawnContext)
+
+  let admin = spawnContext.getAdmin()
+  if (admin != null)
+    admin.registerOwnedUnit(summoned)
 
   let summonerUTC = metadata.getUndeadTargetingComponent()
   if (summonerUTC == null)

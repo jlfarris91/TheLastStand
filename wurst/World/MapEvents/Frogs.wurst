@@ -1,0 +1,133 @@
+package Frogs
+import MapEvents
+import GroupUtils
+import HumanPlayers
+import GameConstants
+import Math
+import Jobs
+import Range
+import HashList
+import UnitExtensions
+import CancellationToken
+import Time
+import RegisterEvents
+import ItemType
+import TlsItemIds
+import TlsUnitDefinition
+
+MapEvent g_frogsMapEvent
+
+constant string FROG_MAP_EVENT_ID = "world_frogs"
+
+// ============================================================================
+public class FrogsMapEvent extends MapEvent
+  private group m_spawnedFrogs = getGroup()
+  private MapEventTemplate m_mapEventTemplate
+  private MapEventInstance m_mapEventInstance
+  private CancellationToken m_ct
+
+  // --------------------------------------------------------------------------
+  construct()
+    super(FROG_MAP_EVENT_ID)
+    m_mapEventTemplate = MapEventTemplate.getTemplate(FROG_MAP_EVENT_ID)
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    m_spawnedFrogs.release()
+    m_spawnedFrogs = null
+
+    if (m_ct != null)
+      m_ct.cancelAndRelease()
+      m_ct = null
+
+  // --------------------------------------------------------------------------
+  override protected function onStarted()
+
+    m_ct = new CancellationToken()..acquire()
+
+    m_mapEventInstance = m_mapEventTemplate.createInstance()
+
+    let playerCountT = parameterize01(1, MAX_PLAYER_COUNT, g_PlayingHumanPlayerCount)
+    let frogSpawnCount = FROG_SPAWN_COUNT_RANGE.lerp(playerCountT).floor()
+
+    let unitSpawners = new HashList<UnitSpawner>()
+
+    for i = 0 to m_mapEventTemplate.getUnitSpawnerCount() - 1
+      let unitSpawner = m_mapEventTemplate.getUnitSpawner(i)
+      unitSpawners.add(unitSpawner)
+      
+    let spawnJob = m_mapEventInstance.getUnitSpawnThread().repeat("SpawnFrogs", m_ct, frogSpawnCount) (integer i) ->
+    //{
+      let randomIndex = GetRandomInt(0, unitSpawners.size() - 1)
+      let spawner = unitSpawners.get(randomIndex)
+      m_mapEventInstance.spawnUnitNow(spawner, PLAYER_ENVIRONMENT)
+      unitSpawners.removeAt(randomIndex)
+    //}
+
+    spawnJob.setCancellationToken(m_ct)
+    spawnJob.onCompleted().register() (Job job) ->
+      destroy unitSpawners
+
+  // --------------------------------------------------------------------------
+  override protected function onCompleted()
+    super.onCompleted()
+
+    if (m_ct != null)
+      m_ct.cancelAndRelease()
+      m_ct = null
+
+    if (m_mapEventInstance != null)
+      destroy m_mapEventInstance
+      m_mapEventInstance = null
+
+// ============================================================================
+function createsMapEventTemplate()
+
+  let mapEventTemplate = MapEventTemplate.createMapEventTemplate(FROG_MAP_EVENT_ID)
+
+  let frogSpawnerUnits = getGroup()
+  frogSpawnerUnits.enumUnitsOfType(TlsUnitIds.frogSpawner, null)
+
+  for frogSpawnerUnit in frogSpawnerUnits
+    mapEventTemplate.registerUnitSpawner(TlsUnitIds.frog, frogSpawnerUnit.getPos(), frogSpawnerUnit.getFacingAngle())
+      ..setUseRecycler(true)
+      ..setFadeInDuration(UNIT_FADE_DURATION)
+      ..setFadeOutToRandomPos(UNIT_FADE_DURATION)
+    frogSpawnerUnit.remove()
+
+  frogSpawnerUnits.release()
+
+// ============================================================================
+function onDayStart()
+
+  if (g_frogsMapEvent != null)
+    g_frogsMapEvent.start()
+
+// ============================================================================
+function onNightStart()
+  
+  if (g_frogsMapEvent != null)
+    g_frogsMapEvent.complete()
+
+// ============================================================================
+function onUnitKilled()
+  let dyingUnit = GetDyingUnit()
+  if (dyingUnit.getTypeId() == TlsUnitIds.frog)
+    ItemType.createItem(TlsItemIds.frog, dyingUnit.getPos())
+
+// ============================================================================
+@compiletime function createObjectDefinitions()
+  new TlsUnitDefinition(TlsUnitIds.frog, UnitIds.frog)
+
+// ============================================================================
+init
+  createObjectDefinitions()
+
+  createsMapEventTemplate()
+
+  MapEvent.registerMapEventFactory(FROG_MAP_EVENT_ID, () -> new FrogsMapEvent())
+  g_frogsMapEvent = MapEvent.createMapEvent(FROG_MAP_EVENT_ID)
+
+  registerDayEvent(function onDayStart)
+  registerNightEvent(function onNightStart)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_DEATH, function onUnitKilled)

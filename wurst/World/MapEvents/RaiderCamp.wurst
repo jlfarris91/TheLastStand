@@ -1,0 +1,745 @@
+package RaiderCamp
+import MapEvents
+import Transform
+import TlsMapEventIds
+import Unit_Walls
+import TlsUnitDefinition
+import Lootables
+import WeightedSet
+import Bases
+import LinkedList
+import LinkedListExtensions
+import CardinalUnitDefinition
+import ErrorHandling
+import Quaternion
+import ClosureTimers
+import GameConstants
+import Range
+import Unit_Gates
+import GroupUtils
+import HashMap
+import UnitMetadata
+import GateComponent
+import UnitExtensions
+
+constant real GATE_MIN_DIST_SQ = 256.0 * 256.0
+constant real BANDIT_SPAWN_DIST = 200.0
+constant boolexpr g_unitIsRaidersUnitFilter = Filter(function filterUnitIsRaidersUnit)
+constant boolexpr g_unitIsEnemyOfRaidersFilter = Filter(function filterUnitIsEnemyOfRaiders)
+
+LinkedList<Base> g_raiderCampBases = new LinkedList<Base>()
+LinkedList<Base> g_raiderCampBasesWorking = new LinkedList<Base>()
+
+constant int SPAWNER_ID_BOSS = 'boss'
+constant int SPAWNER_ID_NORMAL = 'nrml'
+constant int SPAWNER_ID_WORKER = 'wrkr'
+constant int SPAWNER_ID_LOOTABLE = 'loot'
+constant int SPAWNER_ID_CAMPFIRE = 'fire'
+constant int SPAWNER_ID_TOWER = 'towr'
+constant int SPAWNER_ID_WALL = 'wall'
+constant int SPAWNER_ID_GATE = 'gate'
+
+HashMap<trigger, RaiderCampMapEvent> g_triggerToMapEvent = new HashMap<trigger, RaiderCampMapEvent>()
+
+// ============================================================================
+public class RaiderCampMapEvent extends MapEvent
+  
+  private RaiderCampMapEventTemplate m_campTemplate = null
+  private MapEventInstance m_campInstance = null
+  
+  private MapEventTemplate m_decorationTemplate = null
+  private MapEventInstance m_decorationInstance = null
+
+  private MapEventTemplate m_entranceTemplate = null
+  private MapEventInstance array[4] m_entranceInstances
+
+  private group m_bosses = getGroup()
+  private group m_normals = getGroup()
+  private group m_workers = getGroup()
+  private group m_towers = getGroup()
+  private group m_lootables = getGroup()
+  private group m_walls = getGroup()
+  private group m_gates = getGroup()
+  private unit m_campFire = null
+
+  private region array[4] m_proximityRegion
+  private trigger array[4] m_proximityTrigger
+  private int array[4] m_proximityCount
+
+  // --------------------------------------------------------------------------
+  construct()
+    super("RaiderCamp")
+    m_decorationTemplate = MapEventTemplate.getTemplate("RaiderCamp")
+    m_entranceTemplate = MapEventTemplate.getTemplate("RaiderCampEntrance")
+
+  // --------------------------------------------------------------------------
+  ondestroy
+
+    cleanup()
+
+    m_bosses.release()
+    m_bosses = null
+
+    m_normals.release()
+    m_normals = null
+
+    m_workers.release()
+    m_workers = null
+
+    m_towers.release()
+    m_towers = null
+
+    m_lootables.release()
+    m_lootables = null
+
+    m_walls.release()
+    m_walls = null
+
+    m_gates.release()
+    m_gates = null
+
+  // --------------------------------------------------------------------------
+  override protected function onStarted()
+    super.onStarted()
+
+    if (g_raiderCampBasesWorking.isEmpty())
+      for _base in g_raiderCampBases
+        g_raiderCampBasesWorking.add(_base)
+
+    let raiderBase = g_raiderCampBasesWorking.getRandom()
+    g_raiderCampBasesWorking.remove(raiderBase)
+
+    spawnForBase(raiderBase)
+
+  // --------------------------------------------------------------------------
+  private function spawnForBase(Base raiderBase)
+
+    let raiderCampMapEventTemplateBuilder = new RaiderCampMapEventTemplateBuilder()
+    ..addCampFireUnitTypeId(TlsUnitIds.campFire, 1)
+    ..setGateHelper(g_gate1Helper)
+    ..setWallHelper(g_woodWallHelper)
+
+    ..setBossCountRange(rangeInt(1, 2))
+    ..addBossUnitTypeId(TlsUnitIds.Undead.fallenBanditLord[0], 1)
+
+    ..setRaiderCountRange(rangeInt(3, 6))
+    ..addBanditUnitTypeId(TlsUnitIds.Undead.fallenBandit[0], 3)
+    ..addBanditUnitTypeId(TlsUnitIds.Undead.fallenMarksman[0], 2)
+    ..addBanditUnitTypeId(TlsUnitIds.Undead.fallenWizard[0], 1)
+
+    ..setTowerCountRange(rangeInt(10, 10))
+    ..addTowerUnitTypeId(TlsUnitIds.guardTowers[0], 1)
+    ..addTowerUnitTypeId(TlsUnitIds.cannonTowers[0], 1)
+
+    ..setLootableCountRange(rangeInt(10, 10))
+    ..addLootableUnitTypeId(UNIT_ID_LOOTABLE_CAGE, 1)
+
+    ..setWorkerCountRange(rangeInt(1, 2))
+    ..addWorkerUnitTypeId(TlsUnitIds.Survivors.survivorMale, 1)
+    ..addWorkerUnitTypeId(TlsUnitIds.Survivors.builder, 1)
+
+    // Spawn units first since they are highest priority
+    // This template is in world space
+    m_campTemplate = raiderCampMapEventTemplateBuilder.build(raiderBase)
+    m_campInstance = m_campTemplate.createInstance()..setOwner(PLAYER_RAIDERS)
+    m_campInstance.onUnitSpawned().register((spawner, spawnedUnit) -> onUnitSpawned(spawner, spawnedUnit))
+    m_campInstance.onUnitUnspawned().register((spawner, spawnedUnit) -> onUnitUnspawned(spawner, spawnedUnit))
+    m_campInstance.spawn()
+
+    destroy raiderCampMapEventTemplateBuilder
+
+    // Spawn entrances
+    for i = 0 to m_campTemplate.getEntranceCount() - 1
+      let entranceWorldTransform = m_campTemplate.getEntranceWorldTransform(i)
+      let entranceInstance = m_entranceTemplate.createInstance()..setOwner(PLAYER_RAIDERS)
+      m_entranceInstances[i] = entranceInstance
+      entranceInstance.getTransform().copyWorldFrom(entranceWorldTransform)
+      entranceInstance.spawn()
+
+    // Spawn decorations last
+    m_decorationInstance = m_decorationTemplate.createInstance()..setOwner(PLAYER_RAIDERS)
+    m_decorationInstance.getTransform().copyWorldFrom(raiderBase.getTransform())
+    m_decorationInstance.spawn()
+
+    for i = 0 to m_campTemplate.getEntranceCount() - 1
+    //{
+      let entranceWorldTransform = m_campTemplate.getEntranceWorldTransform(i)
+
+      let regionLocalMin = vec2(-192, -192)
+      let regionLocalMax = vec2(192, 192)
+
+      let regionWorldMin = entranceWorldTransform.transformPoint(regionLocalMin)
+      let regionWorldMax = entranceWorldTransform.transformPoint(regionLocalMax)
+
+      let regionWorldMinAdjusted = vec2(min(regionWorldMin.x, regionWorldMax.x), min(regionWorldMin.y, regionWorldMax.y))
+      let regionWorldMaxAdjusted = vec2(max(regionWorldMin.x, regionWorldMax.x), max(regionWorldMin.y, regionWorldMax.y))
+
+      m_proximityRegion[i] = CreateRegion()
+      m_proximityRegion[i].addRect(Rect(regionWorldMinAdjusted.x, regionWorldMinAdjusted.y, regionWorldMaxAdjusted.x, regionWorldMaxAdjusted.y))
+
+      let proximityTrigger = CreateTrigger()
+      m_proximityTrigger[i] = proximityTrigger
+      g_triggerToMapEvent.put(proximityTrigger, this)
+
+      proximityTrigger.registerEnterRegion(m_proximityRegion[i], g_unitIsRaidersUnitFilter)
+      proximityTrigger.registerLeaveRegion(m_proximityRegion[i], g_unitIsRaidersUnitFilter)
+      proximityTrigger.addAction(function onEntranceProximityTriggeredStatic)
+    //}
+
+  // --------------------------------------------------------------------------
+  override protected function onCompleted()
+    super.onCompleted()
+    cleanup()
+
+  // --------------------------------------------------------------------------
+  private function cleanup()
+
+    for i = 0 to m_campTemplate.getEntranceCount() - 1
+    //{
+      if (m_entranceInstances[i] != null)
+        destroy m_entranceInstances[i]
+        m_entranceInstances[i] = null
+
+      if (m_proximityTrigger[i] != null)
+        g_triggerToMapEvent.remove(m_proximityTrigger[i])
+        m_proximityTrigger[i].destr()
+        m_proximityTrigger[i] = null
+
+      if (m_proximityRegion[i] != null)
+        m_proximityRegion[i].destr()
+        m_proximityRegion[i] = null
+    //}
+
+    if (m_campInstance != null)
+      destroy m_campInstance
+      m_campInstance = null
+
+    // A template is created every time
+    if (m_campTemplate != null)
+      destroy m_campTemplate
+      m_campTemplate = null
+
+    if (m_decorationInstance != null)
+      destroy m_decorationInstance
+      m_decorationInstance = null
+
+  // --------------------------------------------------------------------------
+  private function onUnitSpawned(UnitSpawner spawner, unit spawnedUnit)
+    switch (spawner.getUserData())
+      case SPAWNER_ID_BOSS
+        m_bosses.addUnit(spawnedUnit)
+      case SPAWNER_ID_NORMAL
+        m_normals.addUnit(spawnedUnit)
+      case SPAWNER_ID_WORKER
+        m_workers.addUnit(spawnedUnit)
+        onWorkerSpawned(spawnedUnit)
+      case SPAWNER_ID_LOOTABLE
+        m_lootables.addUnit(spawnedUnit)
+      case SPAWNER_ID_CAMPFIRE
+        m_campFire = spawnedUnit
+      case SPAWNER_ID_TOWER
+        m_towers.addUnit(spawnedUnit)
+      case SPAWNER_ID_WALL
+        m_walls.addUnit(spawnedUnit)
+      case SPAWNER_ID_GATE
+        m_gates.addUnit(spawnedUnit)
+      default
+        error("unexpected unit spawned : " + spawnedUnit.getTypeId().toRawCode())
+
+  // --------------------------------------------------------------------------
+  private function onWorkerSpawned(unit spawnedUnit)
+    spawnedUnit.issueImmediateOrder("repairon")
+
+  // --------------------------------------------------------------------------
+  private function onUnitUnspawned(UnitSpawner spawner, unit spawnedUnit)
+    switch (spawner.getUserData())
+      case SPAWNER_ID_BOSS
+        m_bosses.removeUnit(spawnedUnit)
+      case SPAWNER_ID_NORMAL
+        m_normals.removeUnit(spawnedUnit)
+      case SPAWNER_ID_WORKER
+        m_workers.removeUnit(spawnedUnit)
+      case SPAWNER_ID_LOOTABLE
+        m_lootables.removeUnit(spawnedUnit)
+      case SPAWNER_ID_CAMPFIRE
+        if (m_campFire == spawnedUnit)
+          m_campFire = null
+      case SPAWNER_ID_TOWER
+        m_towers.removeUnit(spawnedUnit)
+      case SPAWNER_ID_WALL
+        m_walls.removeUnit(spawnedUnit)
+      case SPAWNER_ID_GATE
+        m_gates.removeUnit(spawnedUnit)
+      default
+        error("unexpected unit unspawned : " + spawnedUnit.getTypeId().toRawCode())
+
+  // --------------------------------------------------------------------------
+  function onEntranceProximityTriggered(trigger triggeringTrigger)
+
+    var entranceIndex = -1
+    for i = 0 to m_campTemplate.getEntranceCount() - 1
+      if (m_proximityTrigger[i] == triggeringTrigger)
+        entranceIndex = i
+        break
+
+    if (entranceIndex == -1)
+      error("Unexpected proximity trigger")
+      return
+
+    var triggeringUnit = GetEnteringUnit()
+    if (triggeringUnit == null)
+      triggeringUnit = GetLeavingUnit()
+
+    // ignore workers
+    if (m_workers.contains(triggeringUnit))
+      return
+
+    bool open
+
+    let eventId = GetTriggerEventId()
+    if (eventId == EVENT_GAME_ENTER_REGION)
+      m_proximityCount[entranceIndex]++
+      open = true
+    else if (eventId == EVENT_GAME_LEAVE_REGION)
+      m_proximityCount[entranceIndex]--
+      open = false
+    else
+      return
+
+    let proximityCount = m_proximityCount[entranceIndex]
+
+    // The proximity count just changed:
+    // 0 - no more enemies nearby
+    // 1 - open for the first unit to enter the region
+    if (proximityCount < 2)
+    //{
+      let proximityRegion = m_proximityRegion[entranceIndex]
+      for gate in m_gates
+        if (gate.isInRegion(proximityRegion))
+          let metadata = gate.getMetadata()
+          let gateComp = metadata.getOrAddGateComponent()
+          if (gateComp != null)
+            if (open)
+              gateComp.openGate()
+            else
+              gateComp.closeGate()
+    //}
+
+// ============================================================================
+public function filterUnitIsRaidersUnit() returns bool
+  let filterUnit = GetFilterUnit()
+  return filterUnit.getOwner() == PLAYER_RAIDERS and not filterUnit.isBuilding() and filterUnit.isAlive()
+
+// ============================================================================
+public function filterUnitIsEnemyOfRaiders() returns bool
+  return GetFilterUnit().isEnemyOf(PLAYER_RAIDERS)
+
+// ============================================================================
+public function onEntranceProximityTriggeredStatic()
+  let triggeringTrigger = GetTriggeringTrigger()
+
+  let mapEvent = g_triggerToMapEvent.get(triggeringTrigger)
+  if (mapEvent == null)
+    return
+
+  mapEvent.onEntranceProximityTriggered(triggeringTrigger)
+
+// ============================================================================
+public class RaiderCampMapEventTemplate extends MapEventTemplate
+  protected Transform array[4] m_entrances
+  protected int m_entrancesCount = 0
+
+  // --------------------------------------------------------------------------
+  construct(string id)
+    super(id)
+
+  // --------------------------------------------------------------------------
+  ondestroy
+
+  // --------------------------------------------------------------------------
+  function getEntranceCount() returns int
+    return m_entrancesCount
+
+  // --------------------------------------------------------------------------
+  function getEntranceWorldTransform(int index) returns Transform
+    return m_entrances[index]
+
+// ============================================================================
+public class RaiderCampMapEventTemplateBuilder
+  
+  private rangeInt m_bossCountRange
+  private WeightedSet<int> m_bossUnitTypeIds = new WeightedSet<int>()
+  
+  private rangeInt m_normalCountRange
+  private WeightedSet<int> m_normalUnitTypeIds = new WeightedSet<int>()
+  
+  private rangeInt m_towerCountRange
+  private WeightedSet<int> m_towerUnitTypeIds = new WeightedSet<int>()
+  
+  private CardinalUnitDefinitionHelper m_gateHelper
+  private CardinalUnitDefinitionHelper m_wallHelper
+  
+  private rangeInt m_lootableCountRange
+  private WeightedSet<int> m_lootableUnitTypeIds = new WeightedSet<int>()
+  
+  private rangeInt m_workerCountRange
+  private WeightedSet<int> m_workerUnitTypeIds = new WeightedSet<int>()
+
+  private WeightedSet<int> m_campFireUnitTypeIds = new WeightedSet<int>()
+
+  // --------------------------------------------------------------------------
+  construct()
+    reset()
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    destroy m_bossUnitTypeIds
+    destroy m_normalUnitTypeIds
+    destroy m_towerUnitTypeIds
+    destroy m_lootableUnitTypeIds
+    destroy m_workerUnitTypeIds
+    destroy m_campFireUnitTypeIds
+
+  // --------------------------------------------------------------------------
+  function reset()
+
+    m_bossCountRange = rangeInt(1, 1)
+    m_bossUnitTypeIds.clear()
+
+    m_normalCountRange = rangeInt(3, 6)
+    m_normalUnitTypeIds.clear()
+
+    m_towerCountRange = rangeInt(1, 1)
+    m_towerUnitTypeIds.clear()
+    
+    m_lootableCountRange = rangeInt(1, 1)
+    m_lootableUnitTypeIds.clear()
+    
+    m_workerCountRange = rangeInt(1, 1)
+    m_workerUnitTypeIds.clear()
+
+    m_campFireUnitTypeIds.clear()
+
+  // --------------------------------------------------------------------------
+  function setRaiderCountRange(rangeInt value)
+    m_normalCountRange = value
+
+  // --------------------------------------------------------------------------
+  function addBanditUnitTypeId(int unitTypeId, real weight)
+    m_normalUnitTypeIds.add(unitTypeId, weight)
+  
+  // --------------------------------------------------------------------------
+  function setBossCountRange(rangeInt value)
+    m_bossCountRange = value
+
+  // --------------------------------------------------------------------------
+  function addBossUnitTypeId(int unitTypeId, real weight)
+    m_bossUnitTypeIds.add(unitTypeId, weight)
+
+  // --------------------------------------------------------------------------
+  function setTowerCountRange(rangeInt value)
+    m_towerCountRange = value
+
+  // --------------------------------------------------------------------------
+  function addTowerUnitTypeId(int unitTypeId, real weight)
+    m_towerUnitTypeIds.add(unitTypeId, weight)
+
+  // --------------------------------------------------------------------------
+  function setGateHelper(CardinalUnitDefinitionHelper value)
+    m_gateHelper = value
+
+  // --------------------------------------------------------------------------
+  function setWallHelper(CardinalUnitDefinitionHelper value)
+    m_wallHelper = value
+
+  // --------------------------------------------------------------------------
+  function setLootableCountRange(rangeInt value)
+    m_lootableCountRange = value
+
+  // --------------------------------------------------------------------------
+  function addLootableUnitTypeId(int unitTypeId, real weight)
+    m_lootableUnitTypeIds.add(unitTypeId, weight)
+
+  // --------------------------------------------------------------------------
+  function addCampFireUnitTypeId(int unitTypeId, real weight)
+    m_campFireUnitTypeIds.add(unitTypeId, weight)
+
+  // --------------------------------------------------------------------------
+  function setWorkerCountRange(rangeInt value)
+    m_workerCountRange = value
+
+  // --------------------------------------------------------------------------
+  function addWorkerUnitTypeId(int unitTypeId, real weight)
+    m_workerUnitTypeIds.add(unitTypeId, weight)
+
+  // --------------------------------------------------------------------------
+  function build(Base raiderBase) returns RaiderCampMapEventTemplate
+
+    let raiderBaseTransform = raiderBase.getTransform()
+
+    let mapEventTemplate = new RaiderCampMapEventTemplate(raiderBase.getId())
+
+    let gateAndWallSpawners = new LinkedList<UnitSpawner>()
+    let towerSpawners = new LinkedList<UnitSpawner>()
+    let lootableSpawners = new LinkedList<UnitSpawner>()
+
+    for i = 0 to raiderBase.getUnitSpawnerCount() - 1
+    //{
+      let unitSpawner = raiderBase.getUnitSpawner(i)
+      let unitSpawnerTypeId = unitSpawner.getUnitTypeId()
+      
+      if (unitSpawnerTypeId == TlsMapEventIds.building1x3 or
+          unitSpawnerTypeId == TlsMapEventIds.building3x1 or
+          unitSpawnerTypeId == TlsMapEventIds.building3x1Diag1 or
+          unitSpawnerTypeId == TlsMapEventIds.building3x1Diag2)
+        gateAndWallSpawners.add(unitSpawner)
+
+      if (unitSpawnerTypeId == TlsMapEventIds.building2x2_1)
+        towerSpawners.add(unitSpawner)
+
+      if (unitSpawnerTypeId == TlsMapEventIds.building2x2_2)
+        lootableSpawners.add(unitSpawner)
+    //}
+
+    if (gateAndWallSpawners.isEmpty())
+      destroy gateAndWallSpawners
+      destroy towerSpawners
+      destroy lootableSpawners
+      error("No gate found for raider camp")
+      return null
+
+    let numGates = (gateAndWallSpawners.size() / 2.0).floor()
+
+    let gateSpawners = new LinkedList<UnitSpawner>()
+
+    // Spawn gates
+    for unitSpawner in gateAndWallSpawners
+    //{
+      let spawnerWorldTransform = unitSpawner.getTransform()
+      let spawnerWorldPos = spawnerWorldTransform.getWorldPosition()
+
+      var isValidGateOption = gateSpawners.size() < numGates
+
+      if (isValidGateOption)
+      //{
+        for otherGate in gateSpawners
+        // {
+          let otherGateSpawnerWorldPos = otherGate.getTransform().getWorldPosition()
+          if (spawnerWorldPos.distanceToSq(otherGateSpawnerWorldPos) < GATE_MIN_DIST_SQ)
+            isValidGateOption = false
+            break
+        //}
+      //}
+
+      if (isValidGateOption)
+      //{        
+        let cardinalUnitAngle = TlsMapEventIds.getCardinalUnitAngle(unitSpawner.getUnitTypeId())
+        let gateUnitTypeId = m_gateHelper.getId(cardinalUnitAngle)
+
+        let gateSpawner = mapEventTemplate.registerUnitSpawner(
+          gateUnitTypeId,
+          spawnerWorldPos.toVec2(),
+          spawnerWorldTransform.getWorldYaw())
+          ..setUserData(SPAWNER_ID_GATE)
+
+        gateSpawners.add(gateSpawner)
+
+        let baseToUnit = (spawnerWorldTransform.getWorldPosition() - raiderBaseTransform.getWorldPosition()).norm().toVec2()
+        let forwardVector = getGateWallForwardVector(baseToUnit, unitSpawner.getUnitTypeId())
+
+        // register entrance
+        let entranceWorldTransform = new Transform(spawnerWorldPos, eulerToQuat(forwardVector.getAngle().radians(), 0, 0))
+        mapEventTemplate.m_entrances[mapEventTemplate.m_entrancesCount] = entranceWorldTransform
+        mapEventTemplate.m_entrancesCount++
+      //}
+      else
+      //{
+        let cardinalUnitAngle = TlsMapEventIds.getCardinalUnitAngle(unitSpawner.getUnitTypeId())
+        let wallUnitTypeId = m_wallHelper.getId(cardinalUnitAngle)
+        mapEventTemplate.registerUnitSpawner(
+          wallUnitTypeId,
+          spawnerWorldPos.toVec2(),
+          spawnerWorldTransform.getWorldYaw())
+          ..setUserData(SPAWNER_ID_WALL)
+      //}
+    //}
+
+    destroy gateSpawners
+
+    // Spawn towers
+    let towerMax = m_towerCountRange.getRandom()
+    if (towerMax > 0)
+    //{
+      var towerCount = 0
+      for unitSpawner in towerSpawners
+      //{
+        let spawnerWorldTransform = unitSpawner.getTransform()
+
+        let towerUnitTypeId = m_towerUnitTypeIds.getRandom()
+        mapEventTemplate.registerUnitSpawner(
+          towerUnitTypeId,
+          spawnerWorldTransform.getWorldPosition().toVec2(),
+          spawnerWorldTransform.getWorldYaw())
+          ..setUserData(SPAWNER_ID_TOWER)
+
+        towerCount++
+        if (towerCount == towerMax)
+          break
+      //}
+    //}
+
+    // Spawn lootable rewards
+    let lootablesMax = m_lootableCountRange.getRandom()
+    if (lootablesMax > 0)
+    //{
+      var lootablesCount = 0
+      for unitSpawner in lootableSpawners
+      //{
+        let spawnerWorldTransform = unitSpawner.getTransform()
+
+        let lootableUnitTypeId = m_lootableUnitTypeIds.getRandom()
+        mapEventTemplate.registerUnitSpawner(
+          lootableUnitTypeId, 
+          spawnerWorldTransform.getWorldPosition().toVec2(),
+          spawnerWorldTransform.getWorldYaw())
+          ..setUserData(SPAWNER_ID_LOOTABLE)
+
+        lootablesCount++
+        if (lootablesCount == lootablesMax)
+          break
+      //}
+    //}
+    
+    // Spawn camp fire in the center of the camp
+    if (not m_campFireUnitTypeIds.isEmpty())
+      let campFireUnitTypeId = m_campFireUnitTypeIds.getRandom()
+      mapEventTemplate.registerUnitSpawner(
+        campFireUnitTypeId,
+        raiderBaseTransform.getWorldPosition().toVec2(),
+        raiderBaseTransform.getWorldYaw())
+        ..setUserData(SPAWNER_ID_CAMPFIRE)
+
+    // Spawn bandits
+    var bossCount = m_bossCountRange.getRandom()
+    var normalCount = m_normalCountRange.getRandom()
+    var workerCount = m_workerCountRange.getRandom()
+    let totalCount = bossCount + normalCount
+
+    if (totalCount > 0)
+    //{
+      var banditSpawnPolarOffsetAngle = 0.0
+      let banditSpawnPolarOffsetAngleInc = PI2 / totalCount
+
+      while (bossCount > 0)
+      //{
+        let pos = vec2(Cos(banditSpawnPolarOffsetAngle), Sin(banditSpawnPolarOffsetAngle)) * BANDIT_SPAWN_DIST
+        let rot = eulerToQuat(banditSpawnPolarOffsetAngle + PI, 0, 0)
+        banditSpawnPolarOffsetAngle += banditSpawnPolarOffsetAngleInc
+
+        let transform = new Transform(pos, rot)
+        ..setParent(raiderBaseTransform)
+
+        let unitTypeId = m_bossUnitTypeIds.getRandom()
+        mapEventTemplate.registerUnitSpawner(
+          unitTypeId,
+          transform.getWorldPosition().toVec2(),
+          transform.getWorldYaw())
+          ..setUserData(SPAWNER_ID_BOSS)
+
+        destroy transform
+
+        bossCount--
+      //}
+
+      while normalCount > 0
+      //{
+        let pos = vec2(Cos(banditSpawnPolarOffsetAngle), Sin(banditSpawnPolarOffsetAngle)) * BANDIT_SPAWN_DIST
+        let rot = eulerToQuat(banditSpawnPolarOffsetAngle + PI, 0, 0)
+        banditSpawnPolarOffsetAngle += banditSpawnPolarOffsetAngleInc
+
+        let transform = new Transform(pos, rot)
+        ..setParent(raiderBaseTransform)
+
+        let unitTypeId = m_normalUnitTypeIds.getRandom()
+        mapEventTemplate.registerUnitSpawner(
+          unitTypeId,
+          transform.getWorldPosition().toVec2(),
+          transform.getWorldYaw())
+          ..setUserData(SPAWNER_ID_NORMAL)
+
+        destroy transform
+
+        normalCount--
+      //}
+
+      while workerCount > 0
+      //{
+        let pos = vec2(Cos(banditSpawnPolarOffsetAngle), Sin(banditSpawnPolarOffsetAngle)) * BANDIT_SPAWN_DIST
+        let rot = eulerToQuat(banditSpawnPolarOffsetAngle + PI, 0, 0)
+        banditSpawnPolarOffsetAngle += banditSpawnPolarOffsetAngleInc
+
+        let transform = new Transform(pos, rot)
+        ..setParent(raiderBaseTransform)
+
+        let unitTypeId = m_workerUnitTypeIds.getRandom()
+        mapEventTemplate.registerUnitSpawner(
+          unitTypeId,
+          transform.getWorldPosition().toVec2(),
+          transform.getWorldYaw())
+          ..setUserData(SPAWNER_ID_WORKER)
+
+        destroy transform
+
+        workerCount--
+      //}
+    //}
+
+    destroy gateAndWallSpawners
+    destroy towerSpawners
+    destroy lootableSpawners
+
+    return mapEventTemplate
+
+  // --------------------------------------------------------------------------
+  function getGateUnitTypeId(int mapEventUnitTypeId) returns int
+    let cardinalUnitAngle = TlsMapEventIds.getCardinalUnitAngle(mapEventUnitTypeId)
+    return m_gateHelper.getId(cardinalUnitAngle)
+
+  // --------------------------------------------------------------------------
+  function getWallUnitTypeId(int mapEventUnitTypeId) returns int
+    let cardinalUnitAngle = TlsMapEventIds.getCardinalUnitAngle(mapEventUnitTypeId)
+    return m_wallHelper.getId(cardinalUnitAngle)
+
+  // --------------------------------------------------------------------------
+  function getGateWallForwardVector(vec2 baseToUnit, int mapEventUnitTypeId) returns vec2
+    switch (mapEventUnitTypeId)
+      case TlsMapEventIds.building3x1
+        let d = baseToUnit.norm().dot(DOWN)
+        return (DOWN * d).norm()
+      case TlsMapEventIds.building1x3
+        let d = baseToUnit.norm().dot(RIGHT)
+        return (RIGHT * d).norm()
+      case TlsMapEventIds.building3x1Diag1
+        let nesw = vec2(-1.0, -1.0).norm()
+        let d = baseToUnit.norm().dot(nesw)
+        return (nesw * d).norm()
+      case TlsMapEventIds.building3x1Diag2
+        let nwse = vec2(1.0, -1.0).norm()
+        let d = baseToUnit.norm().dot(nwse)
+        return (nwse * d).norm()
+      default
+        error("Unexpected unit type id " + mapEventUnitTypeId.toRawCode())
+        return ZERO2
+
+// ============================================================================
+
+
+// ============================================================================
+init
+  MapEvent.registerMapEventFactory("RaiderCamp", () -> new RaiderCampMapEvent())
+
+  nullTimer() -> 
+    for i = 0 to Bases.getBaseCount() - 1
+      let _base = Bases.getBase(i)
+      if (_base.getUnitSpawnerCount() > 0)
+        g_raiderCampBases.add(_base)

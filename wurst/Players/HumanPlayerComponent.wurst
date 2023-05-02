@@ -1,6 +1,5 @@
 package HumanPlayerComponent
 import public PlayerMetadata
-import PlayerComponent
 import UnitMetadata
 import HumanPlayers
 import ErrorHandling
@@ -14,10 +13,9 @@ import Math
 import Observable
 import ClosureTimers
 import PlayerProperties
-import UndeadTargetService
 import GroupExtensions
 
-boolexpr g_isFilterUnitAliveHQTentCondition = Condition(function isFilterUnitAliveHQTent)
+boolexpr g_isFilterUnitAliveHeadquartersCondition = Condition(function isFilterUnitAliveHeadquarters)
 group g_tempGroup = getGroup()
 
 // ============================================================================
@@ -39,6 +37,7 @@ public class HumanPlayerComponent extends PlayerComponent
   // --------------------------------------------------------------------------
   public static class Properties
     static constant string cameraDistance = "cameraDistance"
+    static constant string canPathToHeadquartersOrHero = "canPathToHeadquartersOrHero"
 
   // --------------------------------------------------------------------------
   construct(IPlayerMetadata owner)
@@ -80,11 +79,9 @@ public class HumanPlayerComponent extends PlayerComponent
 
   // --------------------------------------------------------------------------
   function setCanPathToHeadquartersOrHero(bool value)
-    m_canPathToHeadquartersOrHero = value
-    
-    let uts = getUndeadTargetProviderForPlayer(getOwnerPlayer())
-    if (uts != null)
-      uts.setPreferOrganicTargets(value)
+    if (m_canPathToHeadquartersOrHero != value)
+      m_canPathToHeadquartersOrHero = value
+      raisePropertyChangedEvent(Properties.canPathToHeadquartersOrHero)
 
   // --------------------------------------------------------------------------
   function getDifficulty() returns real
@@ -137,25 +134,25 @@ public class HumanPlayerComponent extends PlayerComponent
     Log.debug("Hero assigned to player: " + (hero != null).toString())
 
   // --------------------------------------------------------------------------
-  function getHQOrHero() returns unit
-    unit hqOrHero = null
+  function getHeadquartersOrHero() returns unit
+    unit headquartersOrHero = null
     g_tempGroup.enumUnitsOfPlayer(getOwnerPlayer(), null)
     for u in g_tempGroup
     //{
       if (u.isAlive())
       //{
-        if (u.isCampHeadquarters())
-          hqOrHero = u
+        if (u.isHeadquarters())
+          headquartersOrHero = u
           break
         else if (u.isTlsHero())
-          hqOrHero = u
+          headquartersOrHero = u
       //}
     //}
-    return hqOrHero
+    return headquartersOrHero
 
   // --------------------------------------------------------------------------
-  function getHQTent() returns unit
-    g_tempGroup.enumUnitsOfPlayer(getOwnerPlayer(), g_isFilterUnitAliveHQTentCondition)
+  function getHeadquarters() returns unit
+    g_tempGroup.enumUnitsOfPlayer(getOwnerPlayer(), g_isFilterUnitAliveHeadquartersCondition)
     return g_tempGroup.getFirst()
 
   // --------------------------------------------------------------------------
@@ -258,7 +255,7 @@ public class HumanPlayerComponent extends PlayerComponent
       return
     let owningPlayer = getOwnerPlayer()
     owningPlayer.addLumber(lumberRefunded)
-    FX.createFoundMaterialsTag(structure.getPos(), lumberRefunded, owningPlayer)
+    FX.createGainedLumberTag(structure.getPos(), lumberRefunded, owningPlayer)
 
 // ============================================================================
 public function IPlayerMetadata.getHumanPlayerComponent() returns HumanPlayerComponent
@@ -332,14 +329,14 @@ function assignCameraQuickPositions()
   for p in g_PlayingHumanPlayers
     let comp = p.getHumanPlayerComponent()
     if (comp != null)
-      let target = comp.getHQOrHero()
+      let target = comp.getHeadquartersOrHero()
       if (target != null)
         SetCameraQuickPositionForPlayer(p, target.getX(), target.getY())
 
 // ============================================================================
-function isFilterUnitAliveHQTent() returns bool
+function isFilterUnitAliveHeadquarters() returns bool
   let filterUnit = GetFilterUnit()
-  return filterUnit.isAlive() and filterUnit.isCampHeadquarters()
+  return filterUnit.isAlive() and filterUnit.isHeadquarters()
 
 // ============================================================================
 init

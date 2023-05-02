@@ -1,0 +1,53 @@
+package TlsUnitUtility
+import UnitRecycler
+import UnitExtensions
+import Orders
+import ClosureTimers
+import Bounds
+import Range
+import GroupUtils
+
+// ============================================================================
+public function createRecycledUnitAndFadeIn(player owner, int unitTypeId, vec2 pos) returns unit
+  return createRecycledUnitAndFadeIn(owner, unitTypeId, pos, GetRandomDirectionDeg().asAngleDegrees(), UNIT_FADE_DURATION, rangeReal(200, 400))
+
+// ============================================================================
+public function createRecycledUnitAndFadeIn(player owner, int unitTypeId, vec2 pos, angle facingAngle, real fadeDuration, rangeReal moveDist) returns unit
+  
+  let spawnedUnit = createUnitRecycled(owner, unitTypeId, pos, facingAngle)
+  spawnedUnit.setInvulnerable(true)
+  spawnedUnit.fadeIn()
+
+  let moveToPos = pos.polarOffset(GetRandomDirectionDeg().asAngleDegrees(), moveDist.getRandom())
+  spawnedUnit.issuePointOrderById(Orders.move, moveToPos)
+
+  doAfter(fadeDuration, () -> spawnedUnit.setInvulnerable(false))
+
+  return spawnedUnit
+
+// ============================================================================
+function group.fadeOutAndRemoveRecycled(bool releaseGroup)
+
+  for u in this
+    if (u.isAlive())
+      u.setInvulnerable(true)
+      u.issuePointOrder("move", playableBounds.getRandomPoint())
+      u.fadeOut()
+
+  doAfter(UNIT_FADE_DURATION) () ->
+    for u in this
+      if (u.isAlive() and not u.isStocked())
+        u.stock()
+    if (releaseGroup)
+      this.release()
+
+// ============================================================================
+function unit.fadeOutAndRemoveRecycled()
+  if (this.isAlive())
+    this.setInvulnerable(true)
+    this.issuePointOrder("move", playableBounds.getRandomPoint())
+    this.fadeOut()
+
+  doAfter(UNIT_FADE_DURATION) () ->
+    if (this.isAlive() and not this.isStocked())
+      this.stock()

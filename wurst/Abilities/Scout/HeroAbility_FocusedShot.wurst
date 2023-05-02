@@ -1,0 +1,240 @@
+package HeroAbility_FocusedShot
+import ChannelAbilityPreset
+import Math
+import RealExtensions
+import SmartValue
+import DamageEvent
+import Range
+import Icons
+import HeroAbilities
+import SoundUtils
+import TlsAbilityIds
+import RealtimeUpdate
+import ECS
+import Missile
+import Damage
+import StandardTextTags
+import UnitPropertiesComponent
+
+constant int ATTACK_ANIMATION_INDEX = 3
+constant rangeReal ABIL_DAMAGE_DISTANCE_SCALE = rangeReal(1.0, 0.5)
+constant SoundDefinition g_attackSound = new SoundDefinition("units\\human\\rifleman\\riflemanattack1.flac", false, true)
+constant group g_tempGroup = CreateGroup()
+
+// ============================================================================
+class FocusedShot
+  static constant int ABILITY_ID = TlsAbilityIds.Hero.lineshot
+  static constant int ABILITY_LEARN_ID = TlsAbilityIds.Hero.lineshot_learn
+  static constant int SPILL_DAMAGE_ID = 'FSSD'
+
+  // --------------------------------------------------------------------------
+  static function getTooltipNormal(int effectiveAbilityLevel, int learnedAbilityLevel) returns string
+    return "Focused Shot - [{0}]".format("Level {0}".format(
+      effectiveAbilityLevel.toString()).colorizeTooltipForHeroAbility(effectiveAbilityLevel, learnedAbilityLevel))
+
+  // --------------------------------------------------------------------------
+  static function getTooltipNormalExtended(int effectiveAbilityLevel, int learnedAbilityLevel) returns string
+    return "The Scout takes careful aim at an enemy for a few seconds before firing a projectile that deals {0} of your base damage to the target enemy. Deals 25% of that damage to enemies in a line.".format(
+      getDamageScalar01(effectiveAbilityLevel).toPercentageString01().colorizeTooltipForHeroAbility(effectiveAbilityLevel, learnedAbilityLevel))
+
+  // --------------------------------------------------------------------------
+  static function getManaCost(int effectiveAbilityLevel) returns int
+    return 125 + effectiveAbilityLevel * 25
+
+  // --------------------------------------------------------------------------
+  static function getCooldown(int effectiveAbilityLevel) returns real
+    return lerp(16.0, 8.0, parameterize(1, 3, effectiveAbilityLevel))
+
+  // ----------------------------------------------------------------------------
+  /**Must match duration */
+  static function getFollowThroughTime(int effectiveAbilityLevel) returns real
+    return getDuration(effectiveAbilityLevel)
+
+  // ----------------------------------------------------------------------------
+  /**Must match follow through time */
+  static function getDuration(int effectiveAbilityLevel) returns real
+    return lerp(3.0, 1.5, parameterize(1, 3, effectiveAbilityLevel))
+
+  // --------------------------------------------------------------------------
+  static function getDamageScalar01(int effectiveAbilityLevel) returns real
+    return lerp(10.0, 30.0, parameterize(1, 3, effectiveAbilityLevel))
+
+// ============================================================================
+public class FocusedShotComponent extends HeroAbilityComponent implements IRealtimeListener
+  private bool m_completedChannel = false
+  private unit m_targetUnit = null
+
+  SmartValue damageScale01 = new SmartValue(1.0)
+
+  // --------------------------------------------------------------------------
+  construct (IUnitMetadata owner)
+    super(owner, FocusedShot.ABILITY_ID, FocusedShot.ABILITY_LEARN_ID)
+
+  // ----------------------------------------------------------------------------
+  override protected function onDisabled()
+    super.onDisabled()
+
+    this.unregisterForRealtimeUpdate()
+
+  // --------------------------------------------------------------------------
+  override protected function updateAbilityState()
+    super.updateAbilityState()
+  
+    let abilityLevelAdjusted = abilityLevel.getIntValue()
+    damageScale01.setBase(FocusedShot.getDamageScalar01(abilityLevelAdjusted))
+
+  // --------------------------------------------------------------------------
+  protected override function getTooltipNormal(int effectiveAbilityLevel, int learnedAbilityLevel) returns string
+    return FocusedShot.getTooltipNormal(effectiveAbilityLevel, learnedAbilityLevel)
+    
+  // --------------------------------------------------------------------------
+  protected override function getTooltipNormalExtended(int effectiveAbilityLevel, int learnedAbilityLevel) returns string
+    return FocusedShot.getTooltipNormalExtended(effectiveAbilityLevel, learnedAbilityLevel)
+
+  // --------------------------------------------------------------------------
+  override protected function onEffect(int _abilityId)
+    m_targetUnit = EventData.getSpellTargetUnit()
+    m_completedChannel = false
+
+    this.registerForRealtimeUpdate(RealtimeUpdatePriority.Fast)
+
+  // --------------------------------------------------------------------------
+  override protected function onFinishCast(int _abilityId)
+    m_completedChannel = true
+
+  // --------------------------------------------------------------------------
+  override protected function onEndCast(int _abilityId)
+
+    if (m_completedChannel)
+      fireProjectile()
+
+    m_targetUnit = null
+    m_completedChannel = false
+
+    this.unregisterForRealtimeUpdate()
+  
+  // ----------------------------------------------------------------------------
+  private function fireProjectile()
+
+    if (m_targetUnit == null or not m_targetUnit.isAlive())
+      return
+
+    let ownerUnit = getOwnerUnit()
+    let ownerPlayer = ownerUnit.getOwner()
+    let targetUnitCached = m_targetUnit
+
+    ownerUnit.setAnimation(ATTACK_ANIMATION_INDEX)
+    g_attackSound.playOnPoint(ownerUnit.getPos().toVec3())
+
+    let startPos = ownerUnit.getPos()
+    let targetPos = m_targetUnit.getPos()
+
+    let baseDamage = ownerUnit.getBaseDamage(0) + ownerUnit.getBonusDamage()
+    let finalDamage = baseDamage * damageScale01.getValue()
+    let spillDamage = finalDamage * 0.25
+
+    ECS.createEntity() (ECEntity entity) ->
+    //{
+      let effectComp = entity.addComponentAs<ECMissileEffect>(ECMissileEffect.typeId)
+      effectComp.setEffect(addEffect("Abilities\\Weapons\\SearingArrow\\SearingArrowMissile.mdl", startPos))
+
+      let missile = entity.addComponentAs<ECMissile>(ECMissile.typeId)
+      missile.setFiringUnit(ownerUnit)
+      missile.m_projectileLaunchOffset = vec3(60, 0, 60)
+      missile.m_projectileImpactOffset = vec3(0, 0, 60)
+      missile.m_targetPos = targetPos
+      missile.m_speed = 1000
+
+      missile.onArrived().register() (_) ->
+        DamageEvent.setNextDamageFromCode()
+        DamageEvent.setNextDamageId(FocusedShot.ABILITY_ID)
+        DamageEvent.setNextDamageElement(DAMAGE_ELEMENT_ATTACK)
+        ownerUnit.damageTarget(targetUnitCached, finalDamage, true, true, ATTACK_TYPE_PIERCE)
+
+      // Only deal area damage when targetting ground units
+      if (targetUnitCached.getFlyHeight() < 60)
+      //{
+        let lineDamage = entity.addComponentAs<ECMissileAreaDamage>(ECMissileAreaDamage.typeId)
+        lineDamage.m_damage = spillDamage
+        lineDamage.m_startSize = 64
+        lineDamage.m_endSize = 64
+        lineDamage.m_ignoreMissileTarget = true
+
+        lineDamage.setTargetFilter() (unit target) ->
+          return target.isAlive() and target.isEnemyOf(ownerPlayer)
+
+        lineDamage.setDamageCallback() (unit target) ->
+          DamageEvent.setNextDamageFromCode()
+          DamageEvent.setNextDamageId(FocusedShot.SPILL_DAMAGE_ID)
+          DamageEvent.setNextDamageElement(DAMAGE_ELEMENT_ATTACK)
+          ownerUnit.damageTarget(target, spillDamage, false, false, ATTACK_TYPE_PIERCE)
+      //}
+    //}
+
+  // ----------------------------------------------------------------------------
+  override protected function realtimeUpdate(real _dt)
+
+    if (m_targetUnit == null)
+      return
+
+    SetUnitFacingToFaceUnitTimed(getOwnerUnit(), m_targetUnit, _dt)
+
+// ============================================================================
+public function IUnitMetadata.getFocusedShotComponent() returns FocusedShotComponent
+  return this.getComponent(FocusedShotComponent.typeId) castTo FocusedShotComponent
+
+// ============================================================================
+public function IUnitMetadata.getOrAddFocusedShotComponent() returns FocusedShotComponent
+  var component = this.getFocusedShotComponent()
+  if (component == null)
+    component = this.addComponent(new FocusedShotComponent(this)) castTo FocusedShotComponent
+  return component
+
+// ============================================================================
+@compiletime function createObjects()
+
+  new ChannelAbilityPreset(FocusedShot.ABILITY_ID, 10, true)
+    ..setupHeroAbilityGroup(HeroAbilityGroup.R)
+    ..setAnimationNames("stand,ready,looping")
+    ..setIconNormal(Icons.bTNHumanMissileUpTwo)
+    ..setArtTarget("Abilities\\Marked\\Marked.mdl")
+    ..setTargetAttachmentPoint("chest")
+    ..presetArtDuration(lvl -> 0.980) // not sure if needed
+    ..presetDisableOtherAbilities(lvl -> false)
+    ..presetFollowThroughTime(lvl -> FocusedShot.getFollowThroughTime(lvl))
+    ..presetOption(Option.VISIBLE, true)
+    ..presetTargetTypes(Targettype.UNIT)
+    ..presetCastRange(lvl -> 800)
+    ..presetCooldown(lvl -> FocusedShot.getCooldown(lvl))
+    ..presetDurationHero(lvl -> FocusedShot.getDuration(lvl))
+    ..presetDurationNormal(lvl -> FocusedShot.getDuration(lvl))
+    ..setHeroAbility(true)
+    ..presetManaCost(lvl -> FocusedShot.getManaCost(lvl))
+    ..setName("Focused Shot")
+    ..presetTooltipNormal(lvl -> FocusedShot.getTooltipNormal(lvl, lvl))
+    ..presetTooltipNormalExtended(lvl -> FocusedShot.getTooltipNormalExtended(lvl, lvl))
+    ..presetTargetsAllowed(lvl -> "ground,air,enemy,vulnerable,structure")
+
+  new HeroLearnAbilityDefinition(FocusedShot.ABILITY_LEARN_ID, 3)
+    ..setupHeroAbilityGroup(HeroAbilityGroup.R, 0)
+    ..setName("Focused Shot")
+    ..setTooltipLearn("Learn Focused Shot - [|cFFFFCC00 Level %d|r]")
+    ..setTooltipLearnExtended("The Scout takes careful aim at an enemy for a few seconds before firing a projectile that deals high Piercing damage. Deals 25% of that damage to enemies in a line.|n|n|cFFFFCC00Level 1|r - Deals {0} damage|n|cFFFFCC00Level 2|r - Deals {1} damage|n|cFFFFCC00Level 3|r - Deals {2} damage".format(
+      FocusedShot.getDamageScalar01(1).toPercentageString01(),
+      FocusedShot.getDamageScalar01(2).toPercentageString01(),
+      FocusedShot.getDamageScalar01(3).toPercentageString01()))
+    ..setIconResearch(Icons.bTNHumanMissileUpTwo)
+    ..presetCooldown(lvl -> FocusedShot.getCooldown(lvl))
+    ..presetManaCost(lvl -> FocusedShot.getManaCost(lvl))
+
+// ============================================================================
+init
+  registerHeroAbilityComponentType(FocusedShotComponent.typeId, FocusedShot.ABILITY_ID)
+  registerHeroAbilityComponentType(FocusedShotComponent.typeId, FocusedShot.ABILITY_LEARN_ID)
+
+  // Show crit text tag when enemy is hit by focused shot
+  DamageEvent.addListener(DAMAGE_EVENT_PRIO_FINAL) -> 
+    if (DamageEvent.getType() == DamageType.CODE and
+        DamageEvent.getId() == FocusedShot.ABILITY_ID and
+        DamageEvent.getAmount() > 0)
+      createCriticalStrikeTextTag(DamageEvent.getSource(), DamageEvent.getAmount().floor())

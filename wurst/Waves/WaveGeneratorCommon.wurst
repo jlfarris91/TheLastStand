@@ -7,11 +7,20 @@ import WaveSpawning
 import StringBuilder
 import StringExtensions
 import Math
+import TlsUpgradeIds
+import Spawning
 
 public StandardUnitModifiers g_zombieMeleeModifiers
 public StandardUnitModifiers g_eliteMeleeModifiers
 public StandardUnitModifiers g_eliteRangedModifiers
 public StandardUnitModifiers g_eliteAirModifiers
+
+public StandardUnitModifiers g_necromancerSkeletonWarriorModifiers
+public StandardUnitModifiers g_necromancerSkeletonMageModifiers
+public StandardUnitModifiers g_necromancerSkeletonChampionModifiers
+public StandardUnitModifiers g_tombstoneLesserDarkMinionModifiers
+public StandardUnitModifiers g_tombstoneDarkMinionModifiers
+public StandardUnitModifiers g_tombstoneGreaterDarkMinionModifiers
 
 // ============================================================================
 public function getStandardGoldRewardForWave(SpawnWaveContext context) returns int
@@ -25,6 +34,7 @@ public function SpawnWaveDefinition.setupForElite()
 public function SpawnWaveDefinition.setupForBoss()
   this..showMinimapIcon(MINIMAP_ICON_PATH_BOSS, MINIMAP_ICON_COLOR_BOSS)
       ..pingOnGroupSpawn(MINIMAP_ICON_COLOR_BOSS)
+      ..setTechIdToAdvance(TlsUpgradeIds.bossesKilled)
 
 // ============================================================================
 /* Wave starts at 1 */
@@ -33,6 +43,14 @@ public function calculateWaveGoldReward(int wave, real diff) returns int
   // No gold reward on the last night or any boss nights since bosses drop gold coins
   if (wave == TOTAL_NIGHTS or wave % 5 == 0)
     return 0
+
+  // No gold handicap above Hard
+  if (diff > 2.0)
+    return 0
+
+  // Only 1 handicap for Normal and above
+  if (diff >= 1.0)
+    return 1
 
   let bossGoldAmountPerWave = GOLD_PER_BOSS * max(((diff - 0.5) / 2.0).floor() + 1, 1)
   let bossGoldAmountTotal = bossGoldAmountPerWave * BOSS_WAVE_TOTAL_SCALAR
@@ -50,82 +68,137 @@ public function calculateWaveGoldReward(int wave, real diff) returns int
 
 // ============================================================================
 public function calculateGoldDropAmount(SpawnWaveContext context) returns int
-  return calculateGoldDropAmount(context.waveNumber, context.playerDifficulty)
+  return calculateGoldDropAmount(context.waveNumber, context.getDifficultyCoeff())
 
 // ============================================================================
 public function calculateGoldDropAmount(int wave, real diff) returns int
   return ((wave / 5.0) + max(((diff - 0.5) / 2.0).floor() + 1, 1)).floor()
 
 // ============================================================================
-public function calculateMaxAliveCountForZombies(SpawnWaveContext context) returns int
-  return 8 + max(context.playerDifficulty.floor(), 0) * 2
+public function calculateMaxAliveCountForZombies(SpawnContext context) returns int
+  return 8 + max(context.getDifficultyCoeff().floor(), 0) * 2
 
 // ============================================================================
-public function calculateMaxAliveCountForElites(SpawnWaveContext context) returns int
-  return 2 + max(((context.playerDifficulty - 0.5) / 2.0).ceil(), 0)
+public function calculateMaxAliveCountForElites(SpawnContext context) returns int
+  return 2 + max(((context.getDifficultyCoeff() - 0.5) / 2.0).ceil(), 0)
 
 // ============================================================================
-public function calculateMaxSpawnCountForElites(SpawnWaveContext context) returns int
+public function calculateMaxSpawnCountForElites(SpawnContext context) returns int
   return calculateMaxAliveCountForElites(context) * 3
 
 // ============================================================================
-public function calculateSpawnsPerGoldDropForElites(SpawnWaveContext context) returns int
+public function calculateSpawnsPerGoldDropForElites(SpawnContext context) returns int
   return calculateMaxAliveCountForElites(context)
 
 // ============================================================================
-public function calculateGoldDropAmountForElites(SpawnWaveContext context) returns int
-  return max(((context.playerDifficulty - 0.5) / 2.0).floor() + 1, 1)
+public function calculateGoldDropAmountForElites(SpawnContext context) returns int
+  return max(((context.getDifficultyCoeff() - 0.5) / 2.0).floor() + 1, 1)
 
 // ============================================================================
-public function calculateMaxAliveCountForBoss(SpawnWaveContext context) returns int
-  return max(((context.playerDifficulty - 0.5) / 2.0).floor() + 1, 1)
+public function calculateMaxAliveCountForBoss(SpawnContext context) returns int
+  return max(((context.getDifficultyCoeff() - 0.5) / 2.0).floor() + 1, 1)
 
 // ============================================================================
-public function calculateMaxSpawnCountForBoss(SpawnWaveContext context) returns int
+public function calculateMaxSpawnCountForBoss(SpawnContext context) returns int
   return calculateMaxAliveCountForBoss(context)
 
 // ============================================================================
 function initialize()
 
   g_zombieMeleeModifiers = new StandardUnitModifiers()
-  g_zombieMeleeModifiers.healthRange = rangeInt(160, 2000)
-  g_zombieMeleeModifiers.armorRange = rangeReal(1, 4)
-  g_zombieMeleeModifiers.attack1MinDamageRange = rangeInt(8, 12)
-  g_zombieMeleeModifiers.attack1MaxDamageRange = rangeInt(240, 360)
-  g_zombieMeleeModifiers.attack1Cooldown = rangeReal(2.0, 1.5)
+  g_zombieMeleeModifiers.baseHealth = 160
+  g_zombieMeleeModifiers.baseArmor = 1
+  g_zombieMeleeModifiers.baseDamageRange = rangeInt(8, 12)
   g_zombieMeleeModifiers.attack1Range = MELEE_UNIT_ATTACK_RANGE.toReal()
   g_zombieMeleeModifiers.sightRange = ELITE_SIGHT_RANGE
   g_zombieMeleeModifiers.preferOrganicTargets = false
 
   g_eliteMeleeModifiers = new StandardUnitModifiers()
-  g_eliteMeleeModifiers.healthRange = rangeInt(640, 8000)
-  g_eliteMeleeModifiers.armorRange = rangeReal(4, 16)
-  g_eliteMeleeModifiers.attack1MinDamageRange = g_zombieMeleeModifiers.attack1MinDamageRange * 4.0 * ELITE_DAMAGE_SCALAR
-  g_eliteMeleeModifiers.attack1MaxDamageRange = g_zombieMeleeModifiers.attack1MaxDamageRange * 4.0 * ELITE_DAMAGE_SCALAR
-  g_eliteMeleeModifiers.attack1Cooldown = rangeReal(2.0, 1.5)
+  g_eliteMeleeModifiers.baseHealth = 640
+  g_eliteMeleeModifiers.baseArmor = 4
+  g_eliteMeleeModifiers.baseDamageRange = g_zombieMeleeModifiers.baseDamageRange * 3.0 * ELITE_DAMAGE_SCALAR
+  g_eliteMeleeModifiers.attack1Cooldown = 2.0
   g_eliteMeleeModifiers.attack1Range = MELEE_UNIT_ATTACK_RANGE.toReal()
   g_eliteMeleeModifiers.sightRange = ELITE_SIGHT_RANGE
   g_eliteMeleeModifiers.preferOrganicTargets = false
   
   g_eliteRangedModifiers = new StandardUnitModifiers()
-  g_eliteRangedModifiers.healthRange = rangeInt(480, 6000)
-  g_eliteRangedModifiers.armorRange = rangeReal(3, 12)
-  g_eliteRangedModifiers.attack1MinDamageRange = g_zombieMeleeModifiers.attack1MinDamageRange * 3.0 * ELITE_DAMAGE_SCALAR
-  g_eliteRangedModifiers.attack1MaxDamageRange = g_zombieMeleeModifiers.attack1MaxDamageRange * 3.0 * ELITE_DAMAGE_SCALAR
-  g_eliteRangedModifiers.attack1Cooldown = rangeReal(2.0, 1.5)
+  g_eliteRangedModifiers.baseHealth = 480
+  g_eliteRangedModifiers.baseArmor = 3
+  g_eliteRangedModifiers.baseDamageRange = g_zombieMeleeModifiers.baseDamageRange * 2.0 * ELITE_DAMAGE_SCALAR
+  g_eliteRangedModifiers.attack1Cooldown = 2.0
   g_eliteRangedModifiers.attack1Range = RANGED_UNIT_ATTACK_RANGE.toReal()
   g_eliteRangedModifiers.sightRange = ELITE_SIGHT_RANGE
-  g_eliteRangedModifiers.preferOrganicTargets = true
+  g_eliteRangedModifiers.preferOrganicTargets = false
   
   g_eliteAirModifiers = new StandardUnitModifiers()
-  g_eliteAirModifiers.healthRange = rangeInt(320, 4000)
-  g_eliteAirModifiers.armorRange = rangeReal(2, 8)
-  g_eliteAirModifiers.attack1MinDamageRange = g_zombieMeleeModifiers.attack1MinDamageRange * 2.0 * ELITE_DAMAGE_SCALAR
-  g_eliteAirModifiers.attack1MaxDamageRange = g_zombieMeleeModifiers.attack1MaxDamageRange * 2.0 * ELITE_DAMAGE_SCALAR
-  g_eliteAirModifiers.attack1Cooldown = rangeReal(2.0, 1.5)
+  g_eliteAirModifiers.baseHealth = 320
+  g_eliteAirModifiers.baseArmor = 2
+  g_eliteAirModifiers.baseDamageRange = g_zombieMeleeModifiers.baseDamageRange * 1.5 * ELITE_DAMAGE_SCALAR
+  g_eliteAirModifiers.attack1Cooldown = 2.0
   g_eliteAirModifiers.attack1Range = RANGED_UNIT_ATTACK_RANGE.toReal()
   g_eliteAirModifiers.sightRange = ELITE_SIGHT_RANGE
-  g_eliteAirModifiers.preferOrganicTargets = true
+  g_eliteAirModifiers.preferOrganicTargets = false
+
+  // Necromancer - Skeleton Warriors
+  g_necromancerSkeletonWarriorModifiers = new StandardUnitModifiers()
+  g_necromancerSkeletonWarriorModifiers.baseHealth = 200
+  g_necromancerSkeletonWarriorModifiers.baseArmor = 0
+  g_necromancerSkeletonWarriorModifiers.baseDamageRange = g_zombieMeleeModifiers.baseDamageRange * 1.5 * ELITE_DAMAGE_SCALAR
+  g_necromancerSkeletonWarriorModifiers.attack1Cooldown = 2.0
+  g_necromancerSkeletonWarriorModifiers.attack1Range = MELEE_UNIT_ATTACK_RANGE.toReal()
+  g_necromancerSkeletonWarriorModifiers.sightRange = ELITE_SIGHT_RANGE
+  g_necromancerSkeletonWarriorModifiers.preferOrganicTargets = false
+
+  // Necromancer - Skeleton Mage
+  g_necromancerSkeletonMageModifiers = new StandardUnitModifiers()
+  g_necromancerSkeletonMageModifiers.baseHealth = 300
+  g_necromancerSkeletonMageModifiers.baseArmor = 0
+  g_necromancerSkeletonMageModifiers.baseDamageRange = g_zombieMeleeModifiers.baseDamageRange * 1.5 * ELITE_DAMAGE_SCALAR
+  g_necromancerSkeletonMageModifiers.attack1Cooldown = 2.0
+  g_necromancerSkeletonMageModifiers.attack1Range = RANGED_UNIT_ATTACK_RANGE.toReal()
+  g_necromancerSkeletonMageModifiers.sightRange = ELITE_SIGHT_RANGE
+  g_necromancerSkeletonMageModifiers.preferOrganicTargets = false
+
+  // Necromancer - Skeleton Champions
+  g_necromancerSkeletonChampionModifiers = new StandardUnitModifiers()
+  g_necromancerSkeletonChampionModifiers.baseHealth = 400
+  g_necromancerSkeletonChampionModifiers.baseArmor = 2
+  g_necromancerSkeletonChampionModifiers.baseDamageRange = g_zombieMeleeModifiers.baseDamageRange * 2.0 * ELITE_DAMAGE_SCALAR
+  g_necromancerSkeletonChampionModifiers.attack1Cooldown = 2.0
+  g_necromancerSkeletonChampionModifiers.attack1Range = MELEE_UNIT_ATTACK_RANGE.toReal()
+  g_necromancerSkeletonChampionModifiers.sightRange = ELITE_SIGHT_RANGE
+  g_necromancerSkeletonChampionModifiers.preferOrganicTargets = false
+
+  // Tombstones - Lesser Dark Minions
+  g_tombstoneLesserDarkMinionModifiers = new StandardUnitModifiers()
+  g_tombstoneLesserDarkMinionModifiers.baseHealth = 200
+  g_tombstoneLesserDarkMinionModifiers.baseArmor = 0
+  g_tombstoneLesserDarkMinionModifiers.baseDamageRange = g_zombieMeleeModifiers.baseDamageRange * 1.0 * ELITE_DAMAGE_SCALAR
+  g_tombstoneLesserDarkMinionModifiers.attack1Cooldown = 2.0
+  g_tombstoneLesserDarkMinionModifiers.attack1Range = MELEE_UNIT_ATTACK_RANGE.toReal()
+  g_tombstoneLesserDarkMinionModifiers.sightRange = ELITE_SIGHT_RANGE
+  g_tombstoneLesserDarkMinionModifiers.preferOrganicTargets = false
+
+  // Tombstones - Dark Minions
+  g_tombstoneDarkMinionModifiers = new StandardUnitModifiers()
+  g_tombstoneDarkMinionModifiers.baseHealth = 400
+  g_tombstoneDarkMinionModifiers.baseArmor = 2
+  g_tombstoneDarkMinionModifiers.baseDamageRange = g_zombieMeleeModifiers.baseDamageRange * 1.5 * ELITE_DAMAGE_SCALAR
+  g_tombstoneDarkMinionModifiers.attack1Cooldown = 2.0
+  g_tombstoneDarkMinionModifiers.attack1Range = MELEE_UNIT_ATTACK_RANGE.toReal()
+  g_tombstoneDarkMinionModifiers.sightRange = ELITE_SIGHT_RANGE
+  g_tombstoneDarkMinionModifiers.preferOrganicTargets = false
+
+  // Tombstones - Greater Dark Minions
+  g_tombstoneGreaterDarkMinionModifiers = new StandardUnitModifiers()
+  g_tombstoneGreaterDarkMinionModifiers.baseHealth = 600
+  g_tombstoneGreaterDarkMinionModifiers.baseArmor = 4
+  g_tombstoneGreaterDarkMinionModifiers.baseDamageRange = g_zombieMeleeModifiers.baseDamageRange * 2.0 * ELITE_DAMAGE_SCALAR
+  g_tombstoneGreaterDarkMinionModifiers.attack1Cooldown = 2.0
+  g_tombstoneGreaterDarkMinionModifiers.attack1Range = MELEE_UNIT_ATTACK_RANGE.toReal()
+  g_tombstoneGreaterDarkMinionModifiers.sightRange = ELITE_SIGHT_RANGE
+  g_tombstoneGreaterDarkMinionModifiers.preferOrganicTargets = false
 
 // ============================================================================
 init
@@ -171,13 +244,12 @@ init
   for d = 0 to 5
     let diff = d == 0 ? 0.5 : d.toReal()
     for t = 0 to 2
-      context.unitTier = t
-      context.waveTier = t
+      context.setTier(t)
       let sb = new StringBuilder()
       sb.append(d.toString().padLeft(4, " ") + ":  T" + t.toString() + " ")
       for i = 1 to 16
         context.waveNumber = i
-        context.playerDifficulty = diff
+        context.setDifficultyCoeff(diff)
         let value = g_zombieMeleeModifiers.getHealth(context, 1.0)
         sb.append(value.toString().padLeft(4, " ") + " ")
       Log.info(sb.toStringAndDestroy())

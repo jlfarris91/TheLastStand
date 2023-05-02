@@ -1,216 +1,369 @@
 package Unit_Marksman
-import Units
-import Icons
 import Abilities
 import TlsUnitDefinition
-import SurvivorJobHeroDefinition
-import Soundsets
+import SurvivorUnitDefinition
 import TlsUnitDefinitionBuilder
-import ColorUtility
 import Range
 import TlsUpgradeIds
+import AbilityObjEditing
+import RealExtensions
+import TlsUpgradeDefinition
+import Icons
+import BuffObjEditing
+import ObjectIdGenerator
+import PlayerExtensions
+import RegisterEvents
+import HumanPlayers
+import ColorUtility
+import SurvivorJobComponent
+import UnitMetadata
+import SurvivorJobs
+import GroupUtils
+import Handle
+import UnitPropertiesComponent
+import Math
 
-public MarksmanDefinition g_marksmanDefinition
+public SurvivorUnitDefinition g_marksmanDefinition
+constant boolexpr g_filterUnitIsMarksman = Condition(function filterUnitIsMarksman)
+
+constant int STIMSHOT_BUFF_ID = compiletime(BUFF_ID_GEN.next())
 
 // ============================================================================
-public abstract class MarksmanDefinition extends SurvivorJobHeroDefinition
-  construct(int newId)
-    super(newId, UnitIds.paladin)
+function calculateCriticalStrikeChanceToCrit(int level) returns real
+  return 0.10 + (level - 1) * 0.05
 
-  // --------------------------------------------------------------------------
-  protected override function init_abilities()    
-    super.init_abilities()
+// ============================================================================
+function calculateCriticalStrikeDamageMultiplier(int level) returns real
+  return 2.0 + (level - 1) * 0.5
 
-    setNormalAbilities(commaList(
-      TlsAbilityIds.inventory4Slots))
+// ============================================================================
+function calculateCrippleMovementSpeedReduction01(int level) returns real
+  return lerp_hill01_clamped(0.5, 1.0, parameterize(1, 20, level), 1.25)
 
-  // --------------------------------------------------------------------------
-  protected override function init_art()
-    super.init_art()
+// ============================================================================
+function calculateCrippleAttackSpeedReduction01(int level) returns real
+  return lerp_hill01_clamped(0.25, 0.9, parameterize(1, 20, level), 1.25)
 
-    setModelFile(Units.rifleman1)
-    setIconGameInterface(Icons.bTNRifleman)
-    setIconGameInterfaceDisabled(Icons.dISBTNRifleman)
+// ============================================================================
+function calculateCrippleDamageReduction01(int level) returns real
+  return lerp_hill01_clamped(0.25, 0.9, parameterize(1, 20, level), 1.25)
 
-    setSelectionScale(1.0)
-    setAnimationBlendTimeseconds(0.15)
-    setAnimationCastBackswing(0.510)
-    setAnimationCastPoint(0.3)
-    setAnimationRunSpeed(270.0)
-    setAnimationWalkSpeed(270.0)
-    setDeathTimeseconds(1.7)
-    setElevationSamplePoints(0)
-    setElevationSampleRadius(20.0)
-    setOrientationInterpolation(0)
-    setScalingValue(0.8)
+// ============================================================================
+function calculateCrippleDuration01(int level) returns real
+  return 12.5 + (level - 1) * 2.5
 
-    setShadowImageCenterX(40)
-    setShadowImageCenterY(40)
-    setShadowImageWidth(90)
-    setShadowImageHeight(90)
+// ============================================================================
+function calculateStimshotAttackSpeedIncrease(int level) returns real
+  return lerp_hill01_clamped(0.1, 2.0, parameterize(1, 20, level), 1.25)
 
-    setUnitSoundSet(Soundsets.rifleman)
+// ============================================================================
+function calculateStimshotMovementSpeedIncrease(int level) returns real
+  return lerp_hill01_clamped(0.2, 1.0, parameterize(1, 20, level), 1.25)
 
-  // --------------------------------------------------------------------------
-  protected override function init_combat()
-    super.init_combat()
+// ============================================================================
+function calculateStimshotDuration(int level) returns real
+  return 8.0 + (level - 1) * 2.0
 
-    setAcquisitionRange(600.0)
-    setArmorSoundType(ArmorSoundType.Flesh)
+// ============================================================================
+@compiletime function createObjectDefinitions()
 
-    setAttack1AnimationBackswingPoint(0.700)
-    setAttack1AnimationDamagePoint(0.170)
-    setAttack1AreaofEffectFullDamage(0)
-    setAttack1AreaofEffectMediumDamage(0)
-    setAttack1AreaofEffectSmallDamage(0)
-    setAttack1AreaofEffectTargets("_")
-    setAttack1AttackType(AttackType.Pierce)
-    setAttack1CooldownTime(2)
-    setAttack1DamageBase(10)
-    setAttack1DamageFactorMedium(0)
-    setAttack1DamageFactorSmall(0)
-    setAttack1DamageLossFactor(0)
-    setAttack1DamageNumberofDice(2)
-    setAttack1DamageSidesperDie(6)
-    setAttack1DamageSpillDistance(0)
-    setAttack1DamageSpillRadius(0)
-    setAttack1DamageUpgradeAmount(0)
-    setAttack1MaximumNumberofTargets(1)
-    setAttack1ProjectileArc(0)
-    setAttack1ProjectileArt(Abilities.wardenMissile)
-    setAttack1ProjectileHomingEnabled(false)
-    setAttack1ProjectileSpeed(1900)
-    setAttack1Range(600)
-    setAttack1RangeMotionBuffer(250.0)
-    setAttack1ShowUI(true)
-    setAttack1TargetsAllowed(commaList(
-      TargetsAllowed.air,
-      TargetsAllowed.debris,
-      TargetsAllowed.ground,
-      TargetsAllowed.structure,
-      TargetsAllowed.ward))
-    setAttack1WeaponSound(WeaponSound.Nothing)
-    setAttack1WeaponType(WeaponType.Missile)
-    
-    setAttacksEnabled(1)
-    setDeathType(DeathType.CanRaiseDoesDecay)
-    setDefenseBase(0)
-    setArmorType(ArmorType.Small)
-    setDefenseUpgradeBonus(1)
-    setMinimumAttackRange(0)
-    setTargetedAs("ground")
-
-  // --------------------------------------------------------------------------
-  protected override function init_movement()
-    super.init_movement()
-
-    setSpeedBase(250)
-
-  // --------------------------------------------------------------------------
-  protected override function init_stats()
-    super.init_stats()
-
-    setSpeedBase(250)
-
-    setHitPointsMaximumBase(100)
-    setHitPointsRegenerationRate(0.25)
-
-    setManaInitialAmount(100)
-    setManaMaximum(100)
-    setManaRegeneration(0.01)
-
-    setPrimaryAttribute("AGI")
-
-    setStartingStrength(20)
-    setStrengthPerLevel(5)
-
-    setStartingAgility(20)
-    setAgilityPerLevel(4)
-
-    setStartingIntelligence(20)
-    setIntelligencePerLevel(1)
-  
-  // --------------------------------------------------------------------------
-  protected override function init_techtree()
-    super.init_techtree()
-    
-    setUpgradesUsed(commaList(
+  g_marksmanDefinition = new SurvivorUnitDefinition(TlsUnitIds.Survivors.marksman1, UnitIds.rifleman)
+    ..setNormalAbilities(commaList(
+      TlsAbilityIds.inventory4Slots,
+      TlsAbilityIds.marksmanCriticalStrike,
+      TlsAbilityIds.marksmanCripple,
+      TlsAbilityIds.marksmanStimshot))
+    ..setAcquisitionRange(1000.0)
+    ..setAttack1CooldownTime(3)
+    ..setAttack1DamageRange(rangeInt(140, 180))
+    ..setAttack1AttackType(AttackType.Pierce)
+    ..setAttack1ProjectileArt(Abilities.wardenMissile)
+    ..setAttack1ProjectileHomingEnabled(false)
+    ..setAttack1ProjectileSpeed(1900)
+    ..setAttack1Range(1000)
+    ..setAttacksEnabled(1)
+    ..setDeathType(DeathType.CanRaiseDoesDecay)
+    ..setDefenseBase(10)
+    ..setArmorType(ArmorType.Medium)
+    ..setDefenseUpgradeBonus(1)
+    ..setSpeedBase(250)
+    ..setManaInitialAmount(0)
+    ..setManaMaximum(0)
+    ..setManaRegeneration(0.0)
+    ..setUpgradesUsed(commaList(
       TlsUpgradeIds.survivorHpBonus,
-      TlsUpgradeIds.marksmanLongRange,
-      TlsUpgradeIds.marksmanAttackSpeed))
-
-  // --------------------------------------------------------------------------
-  protected override function init_text()
-    super.init_text()
-    setName("Marksman")
-
-// ============================================================================
-public class Marksman1Definition extends MarksmanDefinition
-
-  // --------------------------------------------------------------------------
-  construct(int newId)
-    super(newId)
-
-  // --------------------------------------------------------------------------
-  override protected function init_art()
-    super.init_art()
-    setIconGameInterface(Icons.bTNRifleman)
-    setModelFile(Units.rifleman1)
-
-  // --------------------------------------------------------------------------
-  protected override function init_combat()
-    super.init_combat()
-    setAttack1CooldownTime(2)
-    this.setAttack1DamageRange(rangeInt(200, 220))
-
-  // --------------------------------------------------------------------------
-  protected override function init_techtree()
-    super.init_techtree()
-    setUpgradesTo("")
-
-  // --------------------------------------------------------------------------
-  protected override function init_stats()
-    super.init_stats()
-
-    setHitPointsMaximumBase(100)
-    setHitPointsRegenerationRate(0.25)
-
-    setManaInitialAmount(100)
-    setManaMaximum(100)
-    setManaRegeneration(0.01)
-
-    setPrimaryAttribute("AGI")
-
-    setStartingStrength(20)
-    setStrengthPerLevel(5)
-
-    setStartingAgility(20)
-    setAgilityPerLevel(4)
-
-    setStartingIntelligence(20)
-    setIntelligencePerLevel(1)
-
-  // --------------------------------------------------------------------------
-  protected override function init_text()
-    super.init_text()
-    setName("Marksman")
-
-// ============================================================================
-@compiletime function createSurvivorMarksman()
-  g_marksmanDefinition = new Marksman1Definition(TlsUnitIds.Survivors.marksman1)
+      TlsUpgradeIds.leatherArmor,
+      TlsUpgradeIds.marksmanNoviceTraining,
+      TlsUpgradeIds.marksmanFurtherStudy))
+    ..setName("Marksman")
+    ..setCasterUpgradeNames("Initiate,Novice,Adept,Master")
+    ..setCasterUpgradeTips("- None,- Critical Strike,- Critical Strike|n- Cripple,- Critical Strike|n- Cripple|n- Stimshot")
+    ..setCasterUpgradeArt("UI\\Widgets\\Console\\Human\\infocard-marksman.blp")
     ..addUnitClass(TlsUnitClassification.HUMAN)
     ..addUnitClass(TlsUnitClassification.RANGED)
-    ..build("The Marksman can hit targets at a long range and does extra damage to bosses.",
+    ..build("The Marksman can hit targets at a long range with high crit damage.",
       tooltipBuilder -> begin
         let properties = new TooltipItem("Properties: ")
-        ..addValue("+10% damage to elites".colorize(Colors.green))
-        ..addValue("+20% damage to bosses".colorize(Colors.green))
-        ..addValue("+50% crit chance".colorize(Colors.green))
-        ..addValue("+4x crit damage multiplier".colorize(Colors.green))
+        ..addValue("Increased crit hit chance".colorize(Colors.green))
+        ..addValue("Increased crit dmg multiplier".colorize(Colors.green))
+        ..addValue("Slow attack speed".colorize(Colors.red))
         tooltipBuilder.addItem(properties)
       end)
+
+  new AbilityDefinition(TlsAbilityIds.marksmanCriticalStrike, 'Ahan')
+    ..setLevels(20)
+    ..setIconNormal(Icons.bTNCriticalStrike)
+    ..setButtonPositionNormalX(0)
+    ..setButtonPositionNormalY(2)
+    ..setHotkeyNormal("Q")
+    ..setRequirements(commaList(TlsUpgradeIds.marksmanNoviceTraining))
+    ..setRequirementsLevels("1")
+    ..presetTooltipNormal(lvl -> "Critical Strike [|cffffcc00Level {0}|r]".format(lvl.toString()))
+    ..presetTooltipNormalExtended(lvl -> "Gives a {0} chance to do {1}x damage on an attack.".format(
+      calculateCriticalStrikeChanceToCrit(lvl).toPercentageString01(0),
+      calculateCriticalStrikeDamageMultiplier(lvl).toString(1)))
+
+  new AbilityDefinitionCripple(TlsAbilityIds.marksmanCripple)
+    ..setLevels(20)
+    ..setName("Cripple")
+    ..setButtonPositionNormalX(1)
+    ..setButtonPositionNormalY(2)
+    ..setHotkeyNormal("W")
+    ..setArtTarget("")
+    ..setRequirements(commaList(TlsUpgradeIds.marksmanNoviceTraining))
+    ..setRequirementsLevels("2")
+    ..presetAttackSpeedReduction(lvl -> calculateCrippleAttackSpeedReduction01(lvl))
+    ..presetDamageReduction(lvl -> calculateCrippleDamageReduction01(lvl))
+    ..presetMovementSpeedReduction(lvl -> calculateCrippleMovementSpeedReduction01(lvl))
+    ..presetBuffs(lvl -> "BPSE")
+    ..presetCastRange(lvl -> 800.0)
+    ..presetCooldown(lvl -> 12.0)
+    ..presetManaCost(lvl -> 0)
+    ..presetDurationHero(lvl -> calculateCrippleDuration01(lvl) / 2.0)
+    ..presetDurationNormal(lvl -> calculateCrippleDuration01(lvl))
+    ..presetTargetsAllowed(lvl -> "air,ground,organic,enemy,neutral")
+    ..presetTooltipNormal(lvl -> "Cripple [|cffffcc00Level {0}|r]".format(lvl.toString()))
+    ..presetTooltipNormalExtended(lvl -> "Reduces a target enemy's movement speed by {0}, attack rate by {1} and damage by {2}. Lasts {3} seconds".format(
+      calculateCrippleMovementSpeedReduction01(lvl).toPercentageString01(0),
+      calculateCrippleAttackSpeedReduction01(lvl).toPercentageString01(0),
+      calculateCrippleDamageReduction01(lvl).toPercentageString01(0),
+      calculateCrippleDuration01(lvl).toString(1)))
+
+  new BuffDefinition(STIMSHOT_BUFF_ID, 'Bblo')
+    ..setTooltipNormal("Stimshot")
+    ..setTooltipNormalExtended("This unit is under the effect of Stimshot. It has increased attack and movement speed.")
+    ..setIcon(Icons.bTNBloodLust)
+    ..setArtTarget("Abilities\\Marked\\Marked.mdl")
+    ..setTargetAttachmentPoint0("overhead")
+
+  new AbilityDefinitionBloodlust(TlsAbilityIds.marksmanStimshot)
+    ..setName("Stimshot")
+    ..setLevels(20)
+    ..setButtonPositionNormalX(2)
+    ..setButtonPositionNormalY(2)
+    ..setButtonPositionTurnOffX(2)
+    ..setButtonPositionTurnOffY(2)
+    ..setHotkeyNormal("E")
+    ..setHeroAbility(false)
+    ..setRequirements(commaList(TlsUpgradeIds.marksmanNoviceTraining))
+    ..setRequirementsLevels("3")
+    ..presetAttackSpeedIncrease(lvl -> calculateStimshotAttackSpeedIncrease(lvl))
+    ..presetMovementSpeedIncrease(lvl -> calculateStimshotMovementSpeedIncrease(lvl))
+    ..presetScalingFactor(lvl -> 0.1)
+    ..presetBuffs(lvl -> commaList(STIMSHOT_BUFF_ID))
+    ..presetCastRange(lvl -> 600.0)
+    ..presetCooldown(lvl -> 20.0)
+    ..presetDurationHero(lvl -> calculateStimshotDuration(lvl) / 2)
+    ..presetDurationNormal(lvl -> calculateStimshotDuration(lvl) / 2)
+    ..presetTargetsAllowed(lvl -> "air,friend,ground,neutral")
+    ..presetTooltipNormal((int lvl) -> "Stimshot [|cffffcc00Level {0}|r]".format(lvl.toString()))
+    ..presetTooltipNormalExtended((int lvl) -> "Increases a target friendly unit's attack rate by {0} and movement speed by {1} for {2} seconds.".format(
+      calculateStimshotAttackSpeedIncrease(lvl).toPercentageString01(1),
+      calculateStimshotMovementSpeedIncrease(lvl).toPercentageString01(1),
+      calculateStimshotDuration(lvl).toString(1)))
+    ..presetTooltipTurnOff(lvl ->"|cffc3dbffRight-click to activate auto-casting.|r")
+    ..presetTooltipTurnOffExtended(lvl ->"|cffc3dbffRight-click to deactivate auto-casting.|r")
+  
+  new UpgradeDefinition(TlsUpgradeIds.marksmanNoviceTraining)
+    ..setLevels(3)
+    
+    ..setName(1, "Marksman Novice Training")
+    ..setTooltip(1, "Marksman Novice Training")
+    ..setTooltipExtended(1, "Increases Marksmen attack speed, attack damage and gives them the Critical Strike ability.")
+    ..setIcon(1, Icons.bTNSteelMelee)
+    ..setRequirements(1, "")
+
+    ..setName(2, "Marksman Adept Training")
+    ..setTooltip(2, "Marksman Adept Training")
+    ..setTooltipExtended(2, "Increases Marksmen attack speed, attack damage and gives them the Cripple ability.")
+    ..setIcon(2, Icons.bTNThoriumMelee)
+    ..setRequirements(2, commaList(TlsUnitIds.headquarters2))
+    
+    ..setName(3, "Marksman Master Training")
+    ..setTooltip(3, "Marksman Master Training")
+    ..setTooltipExtended(3, "Increases Marksmen attack speed, attack damage and gives them the Stimshot ability.")
+    ..setIcon(3, Icons.bTNThoriumMelee)
+    ..setRequirements(3, commaList(TlsUnitIds.headquarters3))
+
+    ..setButtonPositionX(0)
+    ..setButtonPositionY(2)
+    ..setGoldCostBase(1)
+    ..setGoldCostIncrement(1)
+    ..setLumberCostBase(600)
+    ..setLumberCostIncrement(600)
+    ..addEffectAttackSpeedBonus(0.1, 0.1)
+    ..addEffectAttackDamageBonus(50, 50)
+    ..setClass(UpgradeClass.Caster)
+    ..setTimeBase(10)
+    ..setTimeIncrement(5)
+
+  new UpgradeDefinition(TlsUpgradeIds.marksmanFurtherStudy)
+    ..setLevels(5)
+
+    ..setName(1, "Marksman Further Study I")
+    ..setTooltip(1, "Marksman Further Study I")
+    ..setTooltipExtended(1, "Further increases Marksmen attack damage and effectiveness of Critical Strike, Cripple and Stimshot.")
+    ..setIcon(1, Icons.bTNTome)
+    ..setRequirements(1, commaList(TlsUpgradeIds.marksmanNoviceTraining))
+    ..setRequirementsLevels(1, "3")
+    
+    ..setName(2, "Marksman Further Study II")
+    ..setTooltip(2, "Marksman Further Study II")
+    ..setTooltipExtended(2, "Further increases Marksmen attack damage and effectiveness of Critical Strike, Cripple and Stimshot.")
+    ..setIcon(2, Icons.bTNTomeBrown)
+    ..setRequirements(2, commaList(TlsUnitIds.headquarters4))
+    
+    ..setName(3, "Marksman Further Study III")
+    ..setTooltip(3, "Marksman Further Study III")
+    ..setTooltipExtended(3, "Further increases Marksmen attack damage and effectiveness of Critical Strike, Cripple and Stimshot.")
+    ..setIcon(3, Icons.bTNTomeRed)
+    ..setRequirements(3, "")
+    
+    ..setName(4, "Marksman Further Study IV")
+    ..setTooltip(4, "Marksman Further Study IV")
+    ..setTooltipExtended(4, "Further increases Marksmen attack damage and effectiveness of Critical Strike, Cripple and Stimshot.")
+    ..setIcon(4, Icons.bTNSorceressAdept)
+    ..setRequirements(4, commaList(TlsUnitIds.headquarters5))
+    
+    ..setName(5, "Marksman Further Study V")
+    ..setTooltip(5, "Marksman Further Study V")
+    ..setTooltipExtended(5, "Further increases Marksmen attack damage and effectiveness of Critical Strike, Cripple and Stimshot.")
+    ..setIcon(5, Icons.bTNSorceressMaster)
+    ..setRequirements(5, "")
+    
+    ..setButtonPositionX(0)
+    ..setButtonPositionY(2)
+    ..setGoldCostBase(2)
+    ..setGoldCostIncrement(0)
+    ..setLumberCostBase(1200)
+    ..setLumberCostIncrement(0)
+    ..addEffectAttackDamageBonus(10, 10)
+    ..addEffectAbilityLevelBonus(1, 1, TlsAbilityIds.marksmanCriticalStrike.toRawCode())
+    ..addEffectAbilityLevelBonus(1, 1, TlsAbilityIds.marksmanCripple.toRawCode())
+    ..addEffectAbilityLevelBonus(1, 1, TlsAbilityIds.marksmanStimshot.toRawCode())
+    ..setClass(UpgradeClass.NONE)
+    ..setTimeBase(10)
+    ..setTimeIncrement(5)
+
+// ============================================================================
+public class MarksmanJobComponent extends SurvivorJobComponent
+  private _handle m_critStrikeChance
+  private _handle m_critDmgMult
+
+  // --------------------------------------------------------------------------
+  construct(IUnitMetadata owner)
+    super(owner)
+
+  // --------------------------------------------------------------------------
+  override function getJobDefinition() returns SurvivorJobDefinition
+    return SurvivorJobs.marksman
+
+  // --------------------------------------------------------------------------
+  protected override function onEnabled()
+    super.onEnabled()
+    update(true)
+
+  // --------------------------------------------------------------------------
+  protected override function onDisabled()
+    super.onDisabled()
+    update(false)
+
+  // --------------------------------------------------------------------------
+  protected function update(bool addAffectors)
+
+    let ownerUnit = getOwnerUnit()
+    let owningPlayer = ownerUnit.getOwner()
+
+    let critChanceProp = ownerUnit.getProperty(UnitProperty.CRIT_CHANCE_01)
+    let critMultProp = ownerUnit.getProperty(UnitProperty.CRIT_DAMAGE_SCALAR)
+
+    if (m_critStrikeChance != INVALID_HANDLE)
+      critChanceProp.removeAffector(m_critStrikeChance)
+
+    if (m_critDmgMult != INVALID_HANDLE)
+      critMultProp.removeAffector(m_critDmgMult)
+
+    if (not addAffectors)
+      return
+
+    let level = min(owningPlayer.getTechResearchLevel(TlsUpgradeIds.marksmanNoviceTraining), 1) +
+                owningPlayer.getTechResearchLevel(TlsUpgradeIds.marksmanFurtherStudy)
+
+    if (level > 0)
+      m_critStrikeChance = critChanceProp.affectAdd(calculateCriticalStrikeChanceToCrit(level))
+
+    if (level > 1)
+      m_critDmgMult = critMultProp.affectAdd(calculateCriticalStrikeDamageMultiplier(level))
+
+// ============================================================================
+public function IUnitMetadata.getMarksmanJobComponent() returns MarksmanJobComponent
+  return this.getComponent(MarksmanJobComponent.typeId) castTo MarksmanJobComponent
+
+// ============================================================================
+public function IUnitMetadata.getOrAddMarksmanJobComponent() returns MarksmanJobComponent
+  var component = this.getMarksmanJobComponent()
+  if (component == null)
+    component = this.addComponent(new MarksmanJobComponent(this), false) castTo MarksmanJobComponent
+  return component
+
+// ============================================================================
+function filterUnitIsMarksman() returns bool
+  let filterUnit = GetFilterUnit()
+  return filterUnit.isAlive() and filterUnit.isMarksman()
+
+// ============================================================================
+public function onResearchFinished()
+  let researchTypeId = GetResearched()
+
+  if (researchTypeId != TlsUpgradeIds.marksmanNoviceTraining and
+      researchTypeId != TlsUpgradeIds.marksmanFurtherStudy)
+    return
+
+  let researchingUnit = GetResearchingUnit() 
+  let owningPlayer = researchingUnit.getOwner()
+  
+  if (owningPlayer.getTechResearchLevel(researchTypeId) == 3)
+    owningPlayer.setTechAvailability(TlsUpgradeIds.marksmanFurtherStudy, true)
+
+  let g = getGroup()
+  g.enumUnitsOfPlayer(owningPlayer, g_filterUnitIsMarksman)
+
+  for u in g
+    let marksmanJobComp = u.getMetadata().getMarksmanJobComponent()
+    if (marksmanJobComp != null)
+      marksmanJobComp.update(true)
+
+  g.release()
 
 // ============================================================================
 init
   if (g_marksmanDefinition == null)
-    createSurvivorMarksman()
+    createObjectDefinitions()
+
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_RESEARCH_FINISH, function onResearchFinished)
+
+  SurvivorJobComponent.registerSurvivorJobComponentGetter(SurvivorJobType.Marksman, MarksmanJobComponent.typeId)
+  SurvivorJobComponent.registerSurvivorJobComponentFactory(SurvivorJobType.Marksman, metadata -> metadata.getOrAddMarksmanJobComponent())
+
+  for p in g_PlayingHumanPlayers
+    p.setTechAvailability(TlsUpgradeIds.marksmanFurtherStudy, false)

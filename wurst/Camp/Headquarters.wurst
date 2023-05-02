@@ -1,13 +1,166 @@
 package Headquarters
-import GroupUtils
-import TlsUnitIds
-import UnitIndexer
-import DisplayTextToPlayer
-import TlsItemIds
+import TlsBuildingDefinition
+import BuildingUndeadTarget
+import TlsUpgradeIds
+import StringBuilder
 import ColorUtility
+import BuildItems
+import TlsItemDefinition
+import ItemBuildUnitDefinition
+import Icons
 import RegisterEvents
 import Preload
+import UnitIndexer
+import GroupUtils
+import DisplayTextToPlayer
 import ItemType
+import ChannelAbilityPreset
+import GameConstants
+import Buildings
+
+public TlsBuildingDefinition g_headquarters1Definition
+public TlsBuildingDefinition g_headquarters2Definition
+public TlsBuildingDefinition g_headquarters3Definition
+public TlsBuildingDefinition g_headquarters4Definition
+public TlsBuildingDefinition g_headquarters5Definition
+
+public TlsItemDefinition g_headquarters1ItemDefinition
+public TlsItemDefinition g_headquarters2ItemDefinition
+public TlsItemDefinition g_headquarters3ItemDefinition
+
+public constant string HEADQUARTERS1_ICON = "ReplaceableTextures\\CommandButtons\\BTNTent2.blp"
+public constant string HEADQUARTERS2_ICON = "ReplaceableTextures\\CommandButtons\\BTNTent3.blp"
+public constant string HEADQUARTERS3_ICON = "ReplaceableTextures\\CommandButtons\\BTNMarketplace.blp"
+public constant string HEADQUARTERS4_ICON = "ReplaceableTextures\\CommandButtons\\BTNGenericHumanBuilding.blp"
+public constant string HEADQUARTERS5_ICON = "ReplaceableTextures\\CommandButtons\\BTNGenericHumanBuilding1.blp"
+
+bool g_hasWisp = false
+
+// ============================================================================
+function createBaseHeadquartersDefinition(int newId) returns TlsBuildingDefinition
+  return new TlsBuildingDefinition(newId, UnitIds.townhall)
+    ..makeBuildingUndeadTarget()
+    ..setSelectionScale(5.0)
+    ..setGroundTexture("HMED")
+    ..setArmorType(ArmorType.Fortified)
+    ..setCollisionSize(128.0)
+    ..setShadowTextureBuilding("ShadowGoblinMerchant")
+    ..setPathingMap("PathTextures\\8x8SimpleSolid.tga")
+    ..setPlacementRequires("unbuildable,unwalkable")
+    ..setUnitSoundSet("ScoutTower")
+    ..setRequiredAnimationNamesAttachments("medium")
+    ..setFoodProduced(0)
+    ..setFoodCost(0)
+    ..setBuildTime(BUILD_TIME_BUILDING_LARGE)
+    ..setRepairTime(REPAIR_TIME_BUILDING_LARGE)
+    ..setRepairGoldCost(0)
+    ..setRepairLumberCost(0)
+    ..setSightRadiusDay(STRUCTURE_LARGE_SIGHT_RANGE_DAY)
+    ..setSightRadiusNight(STRUCTURE_LARGE_SIGHT_RANGE_NIGHT)
+    ..setButtonPositionX(0)
+    ..setButtonPositionY(0)
+    ..setGoldCost(0)
+    ..setLumberCost(0)
+    ..setResearchesAvailable("")
+    ..setHideMinimapDisplay(true)
+    ..setHitPointsMaximumBase(500)
+    ..setArmorType(ArmorType.Fortified)
+    ..setDefenseBase(0)
+    ..setUnitsTrained("")
+    ..setUpgradesTo("")
+    ..setUnitsTrained("")
+    ..setResearchesAvailable("")
+    ..setUnitsTrained("")
+    ..setNormalAbilities(commaList(
+      TlsAbilityIds.callToArms,
+      TlsAbilityIds.backToWork,
+      AbilityIds.blightDispelLarge,
+      AbilityIds.returnGoldLumber))
+    ..setUpgradesUsed(commaList(TlsUpgradeIds.campDefense))
+    ..setRevivesDeadHeros(true)
+    ..setCommonBuildingProperties()
+
+// ============================================================================
+function createBuildHeadquartersAbility(TlsBuildingDefinition def, int abilId, int unitId, string icon)
+  new AbilityDefinitionBuildTinyScoutTower(abilId)
+    ..setDurationNormal(1, BUILD_TIME_BUILDING_LARGE.toReal())
+    ..setUnitCreatedperplayerrace(1, commaList(unitId))
+    ..setIconNormal(icon)
+    ..presetTooltipNormal(lvl -> "Assemble {0}".format(def.getName()))
+    ..presetTooltipNormalExtended(lvl -> "Constructs your {0} at a chosen location.|n|n{1}".format(def.getName(), def.getTooltipExtended()))
+    ..setButtonPositionNormalX(0)
+    ..setButtonPositionNormalY(2)
+
+// ============================================================================
+function createHeadquartersItem(TlsBuildingDefinition def, int itemId, int abilId, string icon) returns TlsItemDefinition
+  return new TlsItemDefinition(itemId, 'tbsm')
+  ..setName(def.getName())
+  ..setDescription("Constructs a {0} at a chosen location.".format(def.getName()))
+  ..setTooltipBasic("Assemble {0}".format(def.getName()))
+  ..setTooltipExtended("Constructs a {0} at a chosen location.|n|n{1}".format(def.getName(), def.getTooltipExtended()))
+  ..setAbilities(commaList(abilId))
+  ..setInterfaceIcon(icon)
+  ..setGoldCost(0)
+  ..setLumberCost(0)
+  ..setCanBeDropped(false)
+  ..setDroppedWhenCarrierDies(false)
+  ..setCanBeSoldByMerchants(false)
+  ..setCanBeSoldToMerchants(false)
+  ..setNumberofCharges(1)
+  ..build()
+
+// ============================================================================
+function createHeadquartersItemBuildUnit(int unitId, TlsItemDefinition itemDef) returns ItemBuildUnitDefinition
+  return new ItemBuildUnitDefinition(unitId)
+  ..setName("Disassemble Headquarters Tent")
+  ..setTooltipBasic("Disassemble Headquarters Tent")
+  ..setTooltipExtended("Disassemble the Headquarters Tent in order to move it to a new location.")
+  ..setDescription(itemDef.getDescription())
+  ..setGoldCost(0)
+  ..setLumberCost(0)
+  ..setIconGameInterface(Icons.bTNPillage)
+  ..setBuildTime(30)
+  ..setButtonPositionX(3)
+  ..setButtonPositionY(2)
+  ..setRequirements("")
+
+// ============================================================================
+function setHeadquartersTooltipExtended(TlsBuildingDefinition def, bool showUpgradeText, bool showWarning, bool showRecycleWarning)
+
+  let sb = new StringBuilder()
+
+  sb.appendLine("The central hub of the camp.")
+
+  if (showUpgradeText)
+    sb.append(" Upgrading to the {0} provides room for additional survivors and unlocks research options in other camp structures.".format(def.getName().colorize(Colors.gold)))
+
+  sb.appendLine()
+
+  if (showWarning)
+    sb.appendLine("Required to build all basic structures in the camp. You can only build one.".colorize(Colors.red))
+    sb.appendLine()
+
+  if (showRecycleWarning)
+    sb.appendLine("Can not be recycled or disassembled.".colorize(Colors.red))
+    sb.appendLine()
+
+  // +1 survivor because of the hero
+  sb.appendLine("A camp with a {0} can support up to {1} survivors.".format(def.getName().colorize(Colors.gold), def.getFoodProduced().toString().colorize(Colors.gold)))
+
+  def.setTooltipExtended(sb.toStringAndDestroy())
+
+// ============================================================================
+function onUnitTrained()
+  let trainedUnit = GetTrainedUnit()
+  let trainingUnit = GetTriggerUnit()
+  let trainedUnitId = trainedUnit.getTypeId()
+
+  // The player is moving the tent so remove it
+  if ((trainedUnitId == TlsUnitIds.BuildItemUnits.headquarters1 or
+      trainedUnitId == TlsUnitIds.BuildItemUnits.headquarters2 or
+      trainedUnitId == TlsUnitIds.BuildItemUnits.headquarters3) and
+      trainingUnit.isHeadquarters())
+    trainingUnit.remove()
 
 // ============================================================================
 function onUnitIndexedDeindexed()
@@ -16,12 +169,12 @@ function onUnitIndexedDeindexed()
     return
 
   let _unit = getIndexingUnit()
-  if (_unit.isCampHeadquarters())
+  if (_unit.isHeadquarters())
     destroyHeadquartersIfPlayerAlreadyHasOne(_unit)
 
 // ============================================================================
 function isEnumUnitHeadquarters() returns bool
-  return GetEnumUnit().isCampHeadquarters()
+  return GetEnumUnit().isHeadquarters()
 
 // ============================================================================
 function countNumberOfHeadquarters(player _player) returns int
@@ -29,33 +182,33 @@ function countNumberOfHeadquarters(player _player) returns int
   let temp = getGroup()
   temp.enumUnitsOfPlayer(_player, null)
   for _unit in temp
-    if (_unit.isCampHeadquarters() and _unit.isAlive())
+    if (_unit.isHeadquarters() and _unit.isAlive())
       count++
   temp.release()
   return count
 
 // ============================================================================
-function destroyHeadquartersIfPlayerAlreadyHasOne(unit headquartersUnit) returns bool
-  if (not headquartersUnit.isCampHeadquarters())
+function destroyHeadquartersIfPlayerAlreadyHasOne(unit _unit) returns bool
+  if (not _unit.isHeadquarters())
     return false
 
   // This is the one and only alive headquarters unit
-  if (countNumberOfHeadquarters(headquartersUnit.getOwner()) <= 1)
+  if (countNumberOfHeadquarters(_unit.getOwner()) <= 1)
     return false
 
   // This unit shouldn't have been created
-  headquartersUnit.remove()
+  _unit.remove()
   
   // Warn the player and create an item on the ground
-  displayMessageToPlayer(headquartersUnit.getOwner(), "You cannot build a second Headquarters Tent".colorize(Colors.red))
+  displayMessageToPlayer(_unit.getOwner(), "You can only build one Headquarters".colorize(Colors.red))
 
   // Convert the unit to it's item form
-  spawnHeadquartersTentItem(headquartersUnit.getTypeId(), headquartersUnit.getPos())
+  spawnHeadquartersItem(_unit.getTypeId(), _unit.getPos())
 
   return true
 
 // ============================================================================
-function spawnHeadquartersTentItem(int unitTypeId, vec2 pos)
+function spawnHeadquartersItem(int unitTypeId, vec2 pos)
   var buildItemId = 0
   switch (unitTypeId)
     case TlsUnitIds.headquarters1
@@ -69,10 +222,156 @@ function spawnHeadquartersTentItem(int unitTypeId, vec2 pos)
 // ============================================================================
 function onConstructCanceled()
   let structure = GetTriggerUnit()
-  if (structure.isCampHeadquarters())
-    spawnHeadquartersTentItem(structure.getTypeId(), structure.getPos())
+  if (not structure.isHeadquarters())
+    return
+
+  g_hasWisp = false
+
+  let owningPlayer = structure.getOwner()
+  let temp = getGroup()
+  temp.enumUnitsOfType(TlsUnitIds.wisp, null)
+  for u in temp
+    if (u.getOwner() == owningPlayer)
+      g_hasWisp = true
+  temp.release()
+
+  if (not g_hasWisp)
+    spawnHeadquartersItem(structure.getTypeId(), structure.getPos())
+
+  // remove so it can't be revived since it's a hero
+  structure.remove()
+
+// ============================================================================
+function onSpellCast()
+  let castingUnit = GetSpellAbilityUnit()
+  if (castingUnit.getTypeId() != TlsUnitIds.wisp)
+    return
+  if (GetSpellAbilityId() == TlsAbilityIds.buildHeadquarters1)
+    castingUnit.removeAbility(TlsAbilityIds.buildHeadquarters1)
+
+// ============================================================================
+@compiletime function createDefinitions()
+
+  g_headquarters1Definition = createBaseHeadquartersDefinition(TlsUnitIds.headquarters1)
+    ..setName("Headquarters")
+    ..setTooltipBasic("Build Headquarters")
+    ..setIconGameInterface(HEADQUARTERS1_ICON)
+    ..setModelFile(Buildings.tent1)
+    ..setScalingValue(1.2)
+    ..setUpgradesTo(commaList(TlsUnitIds.headquarters2))
+    ..setUpgradesUsed(commaList(TlsUpgradeIds.campDefense))
+    ..setUnitsTrained(commaList(TlsUnitIds.BuildItemUnits.headquarters1))
+    ..setResearchesAvailable("")
+    ..setFoodProduced(4)
+    ..setHitPointsMaximumBase(1000)
+  
+  g_headquarters1Definition.setCommonBuildingProperties()
+  setHeadquartersTooltipExtended(g_headquarters1Definition, false, true, false)
+
+  g_headquarters2Definition = createBaseHeadquartersDefinition(TlsUnitIds.headquarters2)
+    ..setName("Headquarters II")
+    ..setTooltipBasic("Headquarters II")
+    ..setIconGameInterface(HEADQUARTERS2_ICON)
+    ..setModelFile("buildings\\other\\Tent2\\Tent2")
+    ..setScalingValue(1.4)
+    ..setHitPointsMaximumBase(2500)
+    ..setUpgradesTo(commaList(TlsUnitIds.headquarters3))
+    ..setUpgradesUsed(commaList(TlsUpgradeIds.campDefense))
+    ..setRequirements(commaList(TlsUnitIds.workbench))
+    ..setUnitsTrained(commaList(TlsUnitIds.BuildItemUnits.headquarters2))
+    ..setResearchesAvailable("")
+    ..setButtonPositionX(0)
+    ..setButtonPositionY(2)
+    ..setFoodProduced(6)
+    ..setGoldCost(0)
+    ..setLumberCost(1000)
+    ..setCommonBuildingProperties(g_headquarters1Definition)
+
+  setHeadquartersTooltipExtended(g_headquarters2Definition, true, false, false)
+
+  g_headquarters3Definition = createBaseHeadquartersDefinition(TlsUnitIds.headquarters3)
+    ..setName("Headquarters III")
+    ..setTooltipBasic("Headquarters III")
+    ..setIconGameInterface(HEADQUARTERS3_ICON)
+    ..setModelFile("Doodads\\Cityscape\\Props\\MarketStallSmall\\MarketStallSmall.mdl")
+    ..setScalingValue(1.6)
+    ..setHitPointsMaximumBase(5000)
+    ..setUpgradesTo(commaList(TlsUnitIds.headquarters4))
+    ..setUpgradesUsed(commaList(TlsUpgradeIds.campDefense))
+    ..setRequirements(commaList(TlsUnitIds.workbench))
+    ..setUnitsTrained(commaList(TlsUnitIds.BuildItemUnits.headquarters3))
+    ..setResearchesAvailable("")
+    ..setButtonPositionX(0)
+    ..setButtonPositionY(2)
+    ..setFoodProduced(8)
+    ..setGoldCost(2)
+    ..setLumberCost(2000)
+    ..setCommonBuildingProperties(g_headquarters2Definition)
+
+  setHeadquartersTooltipExtended(g_headquarters3Definition, true, false, false)
+
+  g_headquarters4Definition = createBaseHeadquartersDefinition(TlsUnitIds.headquarters4)
+    ..setName("Headquarters IV")
+    ..setTooltipBasic("Headquarters IV")
+    ..setIconGameInterface(HEADQUARTERS4_ICON)
+    ..setModelFile("Doodads\\Village\\Structures\\VillageBuilding\\VillageBuilding0.mdl")
+    ..setScalingValue(1.0)
+    ..setHitPointsMaximumBase(10000)
+    ..setUpgradesTo(commaList(TlsUnitIds.headquarters5))
+    ..setUpgradesUsed(commaList(TlsUpgradeIds.campDefense))
+    ..setRequirements(commaList(TlsUnitIds.workbench))
+    ..setResearchesAvailable("")
+    ..setButtonPositionX(0)
+    ..setButtonPositionY(2)
+    ..setFoodProduced(10)
+    ..setGoldCost(4)
+    ..setLumberCost(4000)
+    ..setCommonBuildingProperties(g_headquarters3Definition)
+
+  setHeadquartersTooltipExtended(g_headquarters4Definition, true, false, true)
+
+  g_headquarters5Definition = createBaseHeadquartersDefinition(TlsUnitIds.headquarters5)
+    ..setName("Headquarters V")
+    ..setTooltipBasic("Headquarters V")
+    ..setIconGameInterface(HEADQUARTERS5_ICON)
+    ..setModelFile("Buildings\\Other\\CityBuildingSmall0_2\\CityBuildingSmall0_2.mdl")
+    ..setScalingValue(0.6)
+    ..setHitPointsMaximumBase(20000)
+    ..setUpgradesTo("")
+    ..setUpgradesUsed(commaList(TlsUpgradeIds.campDefense))
+    ..setRequirements(commaList(TlsUnitIds.workbench))
+    ..setResearchesAvailable("")
+    ..setButtonPositionX(0)
+    ..setButtonPositionY(2)
+    ..setFoodProduced(12)
+    ..setGoldCost(8)
+    ..setLumberCost(8000)
+    ..setCommonBuildingProperties(g_headquarters4Definition)
+
+  setHeadquartersTooltipExtended(g_headquarters5Definition, true, false, true)
+
+  createBuildHeadquartersAbility(g_headquarters1Definition, TlsAbilityIds.buildHeadquarters1, TlsUnitIds.headquarters1, HEADQUARTERS1_ICON)
+  createBuildHeadquartersAbility(g_headquarters2Definition, TlsAbilityIds.buildHeadquarters2, TlsUnitIds.headquarters2, HEADQUARTERS2_ICON)
+  createBuildHeadquartersAbility(g_headquarters3Definition, TlsAbilityIds.buildHeadquarters3, TlsUnitIds.headquarters3, HEADQUARTERS3_ICON)
+
+  g_headquarters1ItemDefinition = createHeadquartersItem(g_headquarters1Definition, TlsItemIds.headquarters1, TlsAbilityIds.buildHeadquarters1, HEADQUARTERS1_ICON)
+  g_headquarters2ItemDefinition = createHeadquartersItem(g_headquarters2Definition, TlsItemIds.headquarters2, TlsAbilityIds.buildHeadquarters2, HEADQUARTERS2_ICON)
+  g_headquarters3ItemDefinition = createHeadquartersItem(g_headquarters3Definition, TlsItemIds.headquarters3, TlsAbilityIds.buildHeadquarters3, HEADQUARTERS3_ICON)
+
+  createHeadquartersItemBuildUnit(TlsUnitIds.BuildItemUnits.headquarters1, g_headquarters1ItemDefinition)
+  createHeadquartersItemBuildUnit(TlsUnitIds.BuildItemUnits.headquarters2, g_headquarters2ItemDefinition)
+  createHeadquartersItemBuildUnit(TlsUnitIds.BuildItemUnits.headquarters3, g_headquarters3ItemDefinition)
 
 // ============================================================================
 init
+  if (g_headquarters1Definition == null)
+    createDefinitions()
+
+  BuildItems.register(TlsItemIds.headquarters1, TlsUnitIds.BuildItemUnits.headquarters1)
+  BuildItems.register(TlsItemIds.headquarters2, TlsUnitIds.BuildItemUnits.headquarters2)
+  BuildItems.register(TlsItemIds.headquarters3, TlsUnitIds.BuildItemUnits.headquarters3)
+
   onUnitIndex(function onUnitIndexedDeindexed)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_TRAIN_FINISH, function onUnitTrained)
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_CONSTRUCT_CANCEL, function onConstructCanceled)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_SPELL_CAST, function onSpellCast)

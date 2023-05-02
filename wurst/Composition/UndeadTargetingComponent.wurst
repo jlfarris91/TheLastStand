@@ -1,6 +1,5 @@
 package UndeadTargetingComponent
-import UnitComponent
-import HumanPlayerComponent
+import UnitMetadata
 import Events
 import RegisterEvents
 import HumanPlayers
@@ -11,10 +10,17 @@ import Range
 import TimerUtils
 import GroupExtensions
 import LeashComponent
-import UndeadTargetService
 import Trace
 // import Vector
 import Orders
+import UnitIndexer
+import LinkedList
+import Spawning
+import BuildingUndeadTarget
+import GroupUtils
+import TlsUnitIds
+import HumanPlayerComponent
+import HashList
 
 public bool UTC_ENABLED = true
 
@@ -79,7 +85,8 @@ public class UndeadTargetingComponent extends UnitComponent
   protected int m_numberOfTimesFailedOrder = 0
   protected int m_numberOfTimesAttackTimerExpired = 0
   protected vec2 m_lastPos
-  
+  private bool m_ignoreDOTFate
+
   private UndeadTargetProvider m_targetProvider = null
   private _handle m_targetProviderOrganicTargetsChangedCallback = INVALID_HANDLE
 
@@ -169,15 +176,8 @@ public class UndeadTargetingComponent extends UnitComponent
     return m_preferOrganicTargets
 
   // --------------------------------------------------------------------------
-  function shouldTargetOrganicUnits() returns bool
-    if (m_preferOrganicTargets)
-      return true
-    if (m_targetPlayer == null)
-      return false
-    let metadata = m_targetPlayer.getHumanPlayerComponent()
-    if (metadata == null)
-      return false
-    return metadata.getCanPathToHeadquartersOrHero()
+  function setIgnoreDOTFate(bool value)
+    m_ignoreDOTFate = value
 
   // --------------------------------------------------------------------------
   function setTargetPlayer(player targetPlayer) returns bool
@@ -257,44 +257,70 @@ public class UndeadTargetingComponent extends UnitComponent
 
     //recordNote("iOTP_i", "Order dispatched")
 
+    restartAttackTimer()
+
     if (m_targetUnit == null or not m_targetUnit.isAlive())
+    //{
       //recordNote("iOTP_i", "1 m_targetUnit == null")
 
-      // 1. Try targetting the nearest structure
-      // 2. Try targetting the nearest non-structure
       tryTargetClosestUnit()
 
       // Unable to find a target unit
       if (m_targetUnit == null or not m_targetUnit.isAlive())
+      //{
         //recordNote("iOTP_i", "2 m_targetUnit == null")
-
-        // 3. Try attack-moving to the target player's camp center (the HQ tent or the hero)
-        tryTargetCampCenter()
-        // if (tryTargetCampCenter())
-          //recordNote("iOTP_i", "Could not find target unit, attack-moving to camp center")
         
-        // 4. The target player is either null or considered dead, so start damaging the unit over time
-        if (m_targetUnit == null or not m_targetUnit.isAlive())
+        bool invalidTargetPlayer = m_targetPlayer == null
+        if (m_targetPlayer != null)
+          invalidTargetPlayer = m_targetPlayer.getMetadata().getHasLostGame()
+
+        // The target player is null or has lost the game, so start damaging the unit over time
+        if (invalidTargetPlayer and not m_ignoreDOTFate)
           //recordNote("iOTP_i", "3 m_targetUnit == null")
           startDOT()
           return
+      //}
+    //}
 
-    restartAttackTimer()
+    if (m_targetUnit == null)
+    //{
+      m_orderFailedReason = "Target unit is null"
+      m_numberOfTimesFailedOrder++
+
+      // Unable to issue the order so clear the target unit and try again later
+      clearTargetAndIssueNewOrder()
+      return
+    //}
+
+    if (not m_targetUnit.isAlive())
+    //{
+      m_orderFailedReason = "Target unit is dead"
+      m_numberOfTimesFailedOrder++
+
+      // Unable to issue the order so clear the target unit and try again later
+      clearTargetAndIssueNewOrder()
+      return
+    //}
 
     tryTeleportCloserToTargetUnit()
 
     if (not tryIssueOrder())
+    //{
       m_orderFailedReason = "Failed to issue attack order"
       m_numberOfTimesFailedOrder++
+
       // if (m_numberOfTimesFailedOrder > 3)
         // m_notes.clear()
       //recordNote("iOTP_i", "Unable to issue order ({0}), trying again".format(m_numberOfTimesFailedOrder.toString()))
+
       // Unable to issue the order so clear the target unit and try again later
       clearTargetAndIssueNewOrder()
-    else
-      m_numberOfTimesFailedOrder = 0
-      //recordNote("iOTP_i", "Success!")
-      m_orderFailedReason = "Success"
+      return
+    //}
+    
+    m_numberOfTimesFailedOrder = 0
+    //recordNote("iOTP_i", "Success!")
+    m_orderFailedReason = "Success"
 
   // --------------------------------------------------------------------------
   function clearTargetAndIssueNewOrder()
@@ -310,7 +336,7 @@ public class UndeadTargetingComponent extends UnitComponent
     
     bool issuedOrder
     
-    if (m_targetUnit.isStructure())
+    if (m_targetUnit.isBuilding())
       //recordNote("tIO", "ordering attack on " + m_targetUnit.getName())
       issuedOrder = getOwnerUnit().issueTargetOrderById(OrderIds.attack, m_targetUnit)
     else
@@ -410,25 +436,6 @@ public class UndeadTargetingComponent extends UnitComponent
 
     setTargetUnit_impl(targetUnit)
     return true
-
-  // --------------------------------------------------------------------------
-  protected function tryTargetCampCenter() returns bool    
-    let targetPlayer = getTargetPlayer()
-    if (targetPlayer == null)
-      //recordNote("tTCC", "getTargetPlayer() == null")
-      return false
-
-    let playerMetadata = targetPlayer.getHumanPlayerComponent()
-    if (playerMetadata == null)
-      //recordNote("tTCC", "playerMetadata == null")
-      return false
-
-    let campCenter = playerMetadata.getHQOrHero()
-    if (campCenter == null or not campCenter.isAlive())
-      //recordNote("tTCC", "campCenter == null or campCenter.isAlive()")
-      return false
-
-    return setTargetUnit_impl(campCenter)
 
   // --------------------------------------------------------------------------
   function onTargetUnitNoLongerTargettable()
@@ -531,6 +538,13 @@ public function IUnitMetadata.getUndeadTargetingComponent() returns UndeadTarget
   return this.getComponent(UndeadTargetingComponent.typeId) castTo UndeadTargetingComponent
 
 // ============================================================================
+public function IUnitMetadata.getOrAddUndeadTargetingComponent() returns UndeadTargetingComponent
+  var component = this.getUndeadTargetingComponent()
+  if (component == null)
+    component = this.addComponent(new UndeadTargetingComponent(this)) castTo UndeadTargetingComponent
+  return component
+
+// ============================================================================
 public function unit.getUndeadTargetingComponent() returns UndeadTargetingComponent
   let metadata = this.getMetadata()
   return metadata != null ? metadata.getUndeadTargetingComponent() : null
@@ -628,6 +642,459 @@ function issueOrders()
 
   g_numberOfTimesIssueOrdersEndCalled++
 
+public bool UTS_ENABLED = true
+
+constant real PROCESS_UPDATES_INTERVAL = 1.0
+constant real TARGET_STRUCTURE_SCORE_RANGE = 512.0
+constant real ATTACK_RANGE_SCALAR = 1.0
+constant int UNDEAD_TARGET_PROVIDER_PRI_COUNT = 4
+
+public enum UndeadTargetProviderPriority
+  Organic
+  StructureHigh
+  StructureLow
+  StructureNone
+  Unknown
+
+// ============================================================================
+public function UndeadTargetProviderPriority.toString() returns string
+  switch this
+    case Organic
+      return "Organic"
+    case StructureHigh
+      return "High"
+    case StructureLow
+      return "Low"
+    case StructureNone
+      return "None"
+    default
+      return "unknown"
+
+UndeadTargetProvider array g_playerData
+int g_playerDataUpdateIndex = -1
+group array g_targetedUnitToUTCMap
+// int array g_targetUnitScore
+// texttag array g_targetUnitScoreTags
+LinkedList<UndeadTargetProvider> g_forceTargetCollections = new LinkedList<UndeadTargetProvider>()
+CallbackPeriodic g_processUpdates
+group g_temp = CreateGroup()
+HashList<int> g_targetPriNone = new HashList<int>()
+HashList<int> g_targetPriLow = new HashList<int>()
+
+// group g_targetUnitScoreFilterGroup
+// boolexpr g_targetUnitScoreFilter = Condition(function isUnitStructureInTargetCollection)
+
+// ============================================================================
+public function getUndeadTargetProviderForPlayer(player p) returns UndeadTargetProvider
+  return g_playerData[p.getId()]
+
+// ============================================================================
+public function getNumberOfRegisteredAttackers(unit target) returns int
+  let attackers = g_targetedUnitToUTCMap[target.getIndex()]
+  return attackers == null ? -1 : attackers.size()
+
+// ============================================================================
+public class UndeadTargetProvider extends TargetProvider
+  private force m_players = CreateForce()
+  private group m_structureTargets = CreateGroup()
+  private group m_organicTargets = CreateGroup()
+  private group array[UNDEAD_TARGET_PROVIDER_PRI_COUNT] m_targetsByPriority
+  private bool m_preferOrganicTargets = false
+  private Event m_preferOrganicTargetsChanged = null
+  private _handle array[24] m_hpcPropertyChangedEventHandlers
+
+  // --------------------------------------------------------------------------
+  construct()
+    registerHumanForceTargetCollection(this)
+
+    for i = 0 to UNDEAD_TARGET_PROVIDER_PRI_COUNT - 1
+      m_targetsByPriority[i] = CreateGroup()
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    unregisterHumanForceTargetCollection(this)
+
+    for i = 0 to 23
+    //{
+      if (m_hpcPropertyChangedEventHandlers[i] != INVALID_HANDLE)
+        players[i].getHumanPlayerComponent()
+          .onPropertyChanged()
+          .unregister(m_hpcPropertyChangedEventHandlers[i])
+        m_hpcPropertyChangedEventHandlers[i] = INVALID_HANDLE
+    //}
+
+    if (m_preferOrganicTargetsChanged != null)
+      destroy m_preferOrganicTargetsChanged
+      m_preferOrganicTargetsChanged = null
+
+    m_players.destr()
+    m_structureTargets.destr()
+    m_organicTargets.destr()
+
+    for i = 0 to UNDEAD_TARGET_PROVIDER_PRI_COUNT - 1
+      m_targetsByPriority[i].destr()
+      m_targetsByPriority[i] = null
+
+  // --------------------------------------------------------------------------
+  function addPlayer(player p)
+    m_players.addPlayer(p)
+    g_playerData[p.getId()] = this
+
+    m_hpcPropertyChangedEventHandlers[p.getId()] = p.getHumanPlayerComponent()
+    .onPropertyChanged()
+    .register((HumanPlayerComponent sender, string propertyName) -> onHumanPlayerComponentPropertyChanged(sender, propertyName))
+
+    addPlayerUnitsToGroups(p)
+
+  // --------------------------------------------------------------------------
+  function removePlayer(player p)
+    m_players.removePlayer(p)
+    g_playerData[p.getId()] = null
+
+    removePlayerUnitsFromGroups(p)
+
+    if (m_hpcPropertyChangedEventHandlers[p.getId()] != INVALID_HANDLE)
+      p.getHumanPlayerComponent()
+        .onPropertyChanged()
+        .unregister(m_hpcPropertyChangedEventHandlers[p.getId()])
+      m_hpcPropertyChangedEventHandlers[p.getId()] = INVALID_HANDLE
+
+    if (m_players.count() == 0)
+      release()
+
+  // ----------------------------------------------------------------------------
+  function onHumanPlayerComponentPropertyChanged(HumanPlayerComponent sender, string propertyName)
+    
+    if (propertyName == HumanPlayerComponent.Properties.canPathToHeadquartersOrHero)
+      let uts = getUndeadTargetProviderForPlayer(sender.getOwnerPlayer())
+      if (uts != null)
+        uts.setPreferOrganicTargets(sender.getCanPathToHeadquartersOrHero())
+
+  // --------------------------------------------------------------------------
+  function getPlayers() returns force
+    return m_players
+
+  // --------------------------------------------------------------------------
+  function getStructureTargets() returns group
+    return m_structureTargets
+
+  // --------------------------------------------------------------------------
+  function getOrganicTargets() returns group
+    return m_organicTargets
+
+  // --------------------------------------------------------------------------
+  function getAliveOrganicTargets() returns group
+    return m_targetsByPriority[UndeadTargetProviderPriority.Organic castTo int]
+
+  // --------------------------------------------------------------------------
+  function getAttackPriority(unit u) returns UndeadTargetProviderPriority
+    for i = 0 to UNDEAD_TARGET_PROVIDER_PRI_COUNT - 1
+      if (m_targetsByPriority[i].contains(u))
+        return i castTo UndeadTargetProviderPriority
+    return UndeadTargetProviderPriority.Unknown
+
+  // --------------------------------------------------------------------------
+  function getAttackerCount(unit u) returns int
+    let attackerGroup = g_targetedUnitToUTCMap[u.getIndex()]
+    return attackerGroup != null ? attackerGroup.size() : 0
+
+  // --------------------------------------------------------------------------
+  function setPreferOrganicTargets(bool value)
+    if (m_preferOrganicTargets != value)
+      m_preferOrganicTargets = value
+      preferOrganicTargetsChanged()
+
+  // --------------------------------------------------------------------------
+  function getPreferOrganicTargets() returns bool
+    return m_preferOrganicTargets
+
+  // --------------------------------------------------------------------------
+  function onPreferOrganicTargetsChanged() returns IEvent
+    if (m_preferOrganicTargetsChanged == null)
+      m_preferOrganicTargetsChanged = new Event()
+    return m_preferOrganicTargetsChanged
+
+  // --------------------------------------------------------------------------
+  private function addPlayerUnitsToGroups(player p)
+    g_temp.enumUnitsOfPlayer(p, null)
+    for u in g_temp
+      registerPlayerUnit(u)
+
+  // --------------------------------------------------------------------------
+  private function removePlayerUnitsFromGroups(player p)
+    g_temp.enumUnitsOfPlayer(p, null)
+    for u in g_temp
+      unregisterPlayerUnit(u)
+
+  // ----------------------------------------------------------------------------
+  override function getTargetUnit(SpawnContext context) returns unit
+    return getRandomTargetUnit(false)
+
+  // --------------------------------------------------------------------------
+  function getRandomTargetUnit(bool preferOrganic) returns unit
+
+    let organicTargets = getAliveOrganicTargets()
+
+    if ((preferOrganic or m_preferOrganicTargets) and organicTargets != null and not organicTargets.isEmpty())
+      return organicTargets.getRandomUnit()
+
+    for i = 0 to UNDEAD_TARGET_PROVIDER_PRI_COUNT - 1
+      if (not m_targetsByPriority[i].isEmpty())
+        return m_targetsByPriority[i].getRandomUnit()
+    
+    return null
+
+  // --------------------------------------------------------------------------
+  function getClosestTargetUnit(vec2 pos, bool preferOrganic) returns unit
+    return getClosestTargetUnit(pos, REAL_MAX, preferOrganic)
+
+  // --------------------------------------------------------------------------
+  function getClosestTargetUnit(vec2 pos, real maxRange, bool preferOrganic) returns unit
+
+    let organicTargets = getAliveOrganicTargets()
+
+    if ((preferOrganic or m_preferOrganicTargets) and organicTargets != null and not organicTargets.isEmpty())
+      let target = organicTargets.getClosestUnit(pos, maxRange)
+      if (target != null)
+        return target
+
+    for i = 0 to UNDEAD_TARGET_PROVIDER_PRI_COUNT - 1
+      if (not m_targetsByPriority[i].isEmpty())
+        let target = m_targetsByPriority[i].getClosestUnit(pos)
+        if (target != null)
+          return target
+    
+    return null
+
+  // --------------------------------------------------------------------------
+  function clear()
+
+    for i = 0 to UNDEAD_TARGET_PROVIDER_PRI_COUNT - 1
+      m_targetsByPriority[i].clear()
+    
+    for targetStructure in m_structureTargets
+      unregisterTargetedUnit(targetStructure)
+
+    m_structureTargets.clear()
+    m_organicTargets.clear()
+
+    m_preferOrganicTargets = false
+
+  // --------------------------------------------------------------------------
+  function registerPlayerUnit(unit _unit)
+
+    if (_unit.isBuilding())
+      if (unitIsValidTargetStructure(_unit) and not m_structureTargets.contains(_unit))
+        m_structureTargets.addUnit(_unit)
+        sortStructureTargetUnit(_unit)
+        updateBUTAttackEnabled(_unit, getBUTAttacksEnabled())
+        
+        // enumNearbyStructures(_unit.getPos())
+        // addScore(1)
+        // g_targetUnitScore[_unit.getIndex()] = g_temp.size()
+    else
+      if (unitIsValidTargetNonStructure(_unit))
+        m_organicTargets.addUnit(_unit)
+
+  // --------------------------------------------------------------------------
+  function unregisterPlayerUnit(unit _unit)
+
+    for i = 0 to UNDEAD_TARGET_PROVIDER_PRI_COUNT - 1
+      m_targetsByPriority[i].removeUnit(_unit)
+
+    m_structureTargets.removeUnit(_unit)
+    m_organicTargets.removeUnit(_unit)
+
+  // --------------------------------------------------------------------------
+  protected function sortTargetUnits()
+    // Log.debug(m_player.getId().toString() + " Sorting structure targets")
+
+    m_targetsByPriority[UndeadTargetProviderPriority.StructureHigh castTo int].clear()
+    m_targetsByPriority[UndeadTargetProviderPriority.StructureLow castTo int].clear()
+
+    for structureTarget in m_structureTargets
+      sortStructureTargetUnit(structureTarget)
+
+    let aliveTargets = getAliveOrganicTargets()
+    aliveTargets.clear()
+
+    for organicTarget in m_organicTargets
+      if (organicTarget.isAlive())
+        aliveTargets.addUnit(organicTarget)
+
+  // --------------------------------------------------------------------------
+  private function sortStructureTargetUnit(unit structureTarget)
+
+    var priority = UndeadTargetProviderPriority.StructureHigh
+
+    // Force into None
+    if (g_targetPriNone.has(structureTarget.getTypeId()))
+      priority = UndeadTargetProviderPriority.StructureNone
+
+    // Force into Low
+    else if (g_targetPriLow.has(structureTarget.getTypeId()))
+      priority = UndeadTargetProviderPriority.StructureLow
+
+    // Balance between High and Low based on number of current attackers
+    else
+      let attackerGroup = g_targetedUnitToUTCMap[structureTarget.getIndex()]
+      if (attackerGroup != null and attackerGroup.size() > VALID_HUMAN_STRUCTURE_TARGETS_ATTACKER_COUNT_THRESHOLD)
+        priority = UndeadTargetProviderPriority.StructureLow
+
+    m_targetsByPriority[priority castTo int].addUnit(structureTarget)
+
+  // --------------------------------------------------------------------------
+  private function preferOrganicTargetsChanged()
+    updateAllBUTAttacksEnabled(getBUTAttacksEnabled())
+    if (m_preferOrganicTargetsChanged != null)
+      m_preferOrganicTargetsChanged.call()
+
+  // --------------------------------------------------------------------------
+  private function updateAllBUTAttacksEnabled(bool enabled)
+    for target in m_structureTargets
+      updateBUTAttackEnabled(target, enabled)
+
+  // --------------------------------------------------------------------------
+  private function updateBUTAttackEnabled(unit target, bool enabled)
+    if (target.isBuildingUndeadTargetWithSpecialDamage())
+      target.setFieldWeapon(UNIT_WEAPON_BF_ATTACKS_ENABLED, 0, enabled)
+
+  // --------------------------------------------------------------------------
+  private function getBUTAttacksEnabled() returns bool
+    return not m_preferOrganicTargets
+
+  // --------------------------------------------------------------------------
+  // private function enumNearbyStructures(vec2 pos)
+  //   g_targetUnitScoreFilterGroup = m_structureTargets
+  //   g_temp.enumUnitsInRange(pos, TARGET_STRUCTURE_SCORE_RANGE, g_targetUnitScoreFilter)
+  //   g_targetUnitScoreFilterGroup = null
+
+  // --------------------------------------------------------------------------
+  // private function addScore(int value)
+  //   for structureTarget in g_temp
+  //     g_targetUnitScore[structureTarget.getIndex()] += value
+  //   onScoreChanged(g_temp)
+
+  // --------------------------------------------------------------------------
+  // private function onScoreChanged(group structureTargets)
+  //   for structureTarget in structureTargets
+  //     updateScoreTag(structureTarget)
+      
+  // --------------------------------------------------------------------------
+  // private function updateScoreTag(unit u)
+    // var tag = g_targetUnitScoreTags[u.getIndex()]
+    // let score = g_targetUnitScore[u.getIndex()].toString()
+    // if (tag == null)
+    //   tag = createTTEx(u.getPos().withZ(64.0), score, 10.0)
+    //   g_targetUnitScoreTags[u.getIndex()] = tag
+    // tag.setText(score, 10.0)      
+
+// ============================================================================
+// function isUnitStructureInTargetCollection() returns bool
+//   if (g_targetUnitScoreFilterGroup == null)
+//     return false
+//   return g_targetUnitScoreFilterGroup.contains(GetFilterUnit())
+
+// ============================================================================
+function unitIsValidTargetStructure(unit u) returns bool
+  return u.isAlive() and u.isBuilding() and u.isBuildingUndeadTarget()
+
+// ============================================================================
+function filterUnitIsValidTargetStructure() returns bool
+  return unitIsValidTargetStructure(GetFilterUnit())
+
+// ============================================================================
+function unitIsValidTargetNonStructure(unit u) returns bool
+  return u.isAlive() and not u.isInvulnerable() and (u.isHeadquarters() or not u.isBuilding())
+
+// ============================================================================
+function filterUnitIsValidTargetNonStructure() returns bool
+  return unitIsValidTargetNonStructure(GetFilterUnit())  
+
+// ============================================================================
+public function registerTargetedUnit(unit targetedUnit, unit targetingUnit)
+  let index = targetedUnit.getIndex()
+  var attackerGroup = g_targetedUnitToUTCMap[index]
+  if (attackerGroup == null)
+    attackerGroup = getGroup()
+    g_targetedUnitToUTCMap[index] = attackerGroup
+  attackerGroup.addUnit(targetingUnit)
+
+// ============================================================================
+public function unregisterTargetedUnit(unit targetedUnit, unit targetingUnit)
+  let index = targetedUnit.getIndex()
+  let attackerGroup = g_targetedUnitToUTCMap[index]
+  attackerGroup.removeUnit(targetingUnit)
+  if (attackerGroup.isEmpty())
+    attackerGroup.release()
+  g_targetedUnitToUTCMap[index] = null
+
+// ============================================================================
+public function unregisterTargetedUnit(unit targetedUnit)
+  let index = targetedUnit.getIndex()
+  let attackerGroup = g_targetedUnitToUTCMap[index]
+  g_targetedUnitToUTCMap[index] = null
+  if (attackerGroup != null)
+    for utc in attackerGroup
+      let comp = utc.getUndeadTargetingComponent()
+      if (comp != null)
+        comp.onTargetUnitNoLongerTargettable()
+    attackerGroup.release()
+
+// ============================================================================
+function clearLeavingLosingPlayerData(player leavingLosingPlayer)
+  let playerData = g_playerData[leavingLosingPlayer.getId()]
+  if (playerData != null)
+    playerData.removePlayer(leavingLosingPlayer)
+
+// ============================================================================
+function processUpdates()
+
+  if (not UTS_ENABLED)
+    return
+
+  Trace.trace("UTS.processUpdates")
+  for provider in g_forceTargetCollections
+    provider.sortTargetUnits()
+
+// ============================================================================
+function registerHumanForceTargetCollection(UndeadTargetProvider value)
+  g_forceTargetCollections.add(value)
+  if (g_forceTargetCollections.size() == 1)
+    g_processUpdates = doPeriodically(PROCESS_UPDATES_INTERVAL, cb -> processUpdates())
+
+// ============================================================================
+function unregisterHumanForceTargetCollection(UndeadTargetProvider value)
+  if (not g_forceTargetCollections.remove(value))
+    return
+  if (g_forceTargetCollections.isEmpty() and g_processUpdates != null)
+    destroy g_processUpdates
+    g_processUpdates = null
+
+// ============================================================================
+function getPlayerData(player p) returns UndeadTargetProvider
+  return g_playerData[p.getId()]
+
+// ============================================================================
+function getOrCreatePlayerData(player p) returns UndeadTargetProvider
+  var data = getPlayerData(p)
+  if (data == null)
+    data = new UndeadTargetProvider()..acquire()
+    g_playerData[p.getId()] = data
+  return data
+
+// ============================================================================
+function onUnitDeindexed()
+  let indexingUnit = getIndexingUnit()
+  let owningPlayer = indexingUnit.getOwner()
+  let playerData = getPlayerData(owningPlayer)
+  if (playerData != null)
+    playerData.unregisterPlayerUnit(indexingUnit)
+
+// ============================================================================
+function onPlayerLeave()
+  clearLeavingLosingPlayerData(GetTriggerPlayer())
+
 // ============================================================================
 init
 
@@ -635,3 +1102,41 @@ init
 
   doPeriodically(UPDATE_INTERVAL, (CallbackPeriodic cb) -> issueOrders())
   doPeriodically(DOT_INTERVAL, (CallbackPeriodic cb) -> applyDOT())
+
+  onUnitDeindex(() -> onUnitDeindexed())
+
+  onPlayerLost(() -> clearLeavingLosingPlayerData(getLosingPlayer()))
+  registerPlayerEvent(EVENT_PLAYER_LEAVE, function onPlayerLeave)
+
+  for p in g_PlayingHumanPlayers
+    getOrCreatePlayerData(p)
+
+  g_targetPriNone.add(TlsUnitIds.campFire)
+  g_targetPriNone.add(TlsUnitIds.campFire2)
+  g_targetPriNone.add(TlsUnitIds.campFireBuild)
+  g_targetPriNone.add(TlsUnitIds.lampPowered)
+  g_targetPriNone.add(TlsUnitIds.lampUnpowered)
+  g_targetPriNone.add(TlsUnitIds.postLantern)
+  g_targetPriNone.add(TlsUnitIds.chest)
+  g_targetPriNone.add(TlsUnitIds.foundationLarge)
+  g_targetPriNone.add(TlsUnitIds.foundationMedium)
+  g_targetPriNone.add(TlsUnitIds.foundationTower)
+
+  g_targetPriLow.add(TlsUnitIds.headquarters1)
+  g_targetPriLow.add(TlsUnitIds.headquarters2)
+  g_targetPriLow.add(TlsUnitIds.headquarters3)
+  g_targetPriLow.add(TlsUnitIds.headquarters4)
+  g_targetPriLow.add(TlsUnitIds.headquarters5)
+  g_targetPriLow.add(TlsUnitIds.shelter1)
+  g_targetPriLow.add(TlsUnitIds.shelter2)
+  g_targetPriLow.add(TlsUnitIds.shelter3)
+  g_targetPriLow.add(TlsUnitIds.workbench)
+  g_targetPriLow.add(TlsUnitIds.workshop)
+  g_targetPriLow.add(TlsUnitIds.blacksmith)
+  g_targetPriLow.add(TlsUnitIds.armory)
+  g_targetPriLow.add(TlsUnitIds.chapel)
+  g_targetPriLow.add(TlsUnitIds.forge)
+  g_targetPriLow.add(TlsUnitIds.lumberMill)
+  g_targetPriLow.add(TlsUnitIds.munitionsDepot)
+  g_targetPriLow.add(TlsUnitIds.spearmansTent)
+  g_targetPriLow.add(TlsUnitIds.tannery)

@@ -1,0 +1,171 @@
+package HeroAbility_ThrowSpear
+import ChannelAbilityPreset
+import Math
+import Icons
+import HeroAbilities
+import TlsAbilityIds
+import RealExtensions
+import SmartValue
+import DamageEvent
+import Damage
+import StandardTextTags
+import ECS
+import Missile
+import ClosureTimers
+import UnitPropertiesComponent
+
+// ============================================================================
+class ThrowSpear
+  static constant int ABILITY_ID = TlsAbilityIds.Hero.throwSpear
+  static constant int ABILITY_LEARN_ID = TlsAbilityIds.Hero.throwSpear_learn
+
+  // --------------------------------------------------------------------------
+  static function getTooltipNormal(int effectiveAbilityLevel, int learnedAbilityLevel) returns string
+    return "Throw Spear - [{0}]".format("Level {0}".format(
+      effectiveAbilityLevel.toString()).colorizeTooltipForHeroAbility(effectiveAbilityLevel, learnedAbilityLevel))
+
+  // --------------------------------------------------------------------------
+  static function getTooltipNormalExtended(int effectiveAbilityLevel, int learnedAbilityLevel) returns string
+    return "The Captain throws a spear at a target enemy dealing {0} damage and stunning them for {1}s.|n|n|cffffcc00Can hit air.|r".format(
+      getDamagePercent01(effectiveAbilityLevel).toPercentageString01().colorizeTooltipForHeroAbility(effectiveAbilityLevel, learnedAbilityLevel),
+      getStunDuration(effectiveAbilityLevel).toString(0).colorizeTooltipForHeroAbility(effectiveAbilityLevel, learnedAbilityLevel))
+
+  // ----------------------------------------------------------------------------
+  static function getStunDuration(int level) returns real
+    return lerp(1, 2, parameterize(1, 3, level))
+
+  // ----------------------------------------------------------------------------
+  static function getDamagePercent01(int level) returns real
+    return lerp(10, 30, parameterize(1, 3, level))
+
+  // ----------------------------------------------------------------------------
+  static function getCooldown(int level) returns real
+    return lerp(15, 5, parameterize(1, 3, level))
+
+// ============================================================================
+public class ThrowSpearComponent extends HeroAbilityComponent
+
+  SmartValue damageScale01 = new SmartValue(0.0)
+  SmartValue stunDuration = new SmartValue(0.0)
+
+  // --------------------------------------------------------------------------
+  construct (IUnitMetadata owner)
+    super(owner, ThrowSpear.ABILITY_ID, ThrowSpear.ABILITY_LEARN_ID)
+
+  // ----------------------------------------------------------------------------
+  ondestroy
+    destroy damageScale01
+    destroy stunDuration
+
+  // --------------------------------------------------------------------------
+  protected override function getTooltipNormal(int effectiveAbilityLevel, int learnedAbilityLevel) returns string
+    return ThrowSpear.getTooltipNormal(effectiveAbilityLevel, learnedAbilityLevel)
+    
+  // --------------------------------------------------------------------------
+  protected override function getTooltipNormalExtended(int effectiveAbilityLevel, int learnedAbilityLevel) returns string
+    return ThrowSpear.getTooltipNormalExtended(effectiveAbilityLevel, learnedAbilityLevel)
+
+  // --------------------------------------------------------------------------
+  override protected function updateAbilityState()
+    super.updateAbilityState()
+  
+    let abilityLevelAdjusted = abilityLevel.getIntValue()
+    damageScale01.setBase(ThrowSpear.getDamagePercent01(abilityLevelAdjusted))
+
+  // ----------------------------------------------------------------------------
+  protected override function onCast(int _abilityId)
+
+    let ownerUnit = getOwnerUnit()
+    let targetUnit = GetSpellTargetUnit()
+    let startPos = ownerUnit.getPos()
+    let targetPos = targetUnit.getPos()
+
+    let baseDamage = ownerUnit.getBaseDamage(0) + ownerUnit.getBonusDamage()
+    let finalDamage = baseDamage * damageScale01.getValue()
+
+    doAfter(0.567) () -> 
+    //{
+      ECS.createEntity() (ECEntity entity) ->
+      //{
+        let fx = addEffect("Abilities\\Weapons\\Banditmissile\\Banditmissile.mdl", startPos)
+        fx.setScale(2.0)
+
+        let effectComp = entity.addComponentAs<ECMissileEffect>(ECMissileEffect.typeId)
+        effectComp.setEffect(fx)
+
+        let missile = entity.addComponentAs<ECMissile>(ECMissile.typeId)
+        missile.setFiringUnit(ownerUnit)
+        missile.m_projectileLaunchOffset = vec3(60, 0, 60)
+        missile.m_projectileImpactOffset = vec3(0, 0, 60)
+        missile.m_targetPos = targetPos
+        missile.m_speed = 400
+        missile.m_arc = 0.15
+
+        missile.onArrived().register() (_) ->
+          DamageEvent.setNextDamageFromCode()
+          DamageEvent.setNextDamageId(ThrowSpear.ABILITY_ID)
+          DamageEvent.setNextDamageElement(DAMAGE_ELEMENT_ATTACK)
+          ownerUnit.damageTarget(targetUnit, finalDamage, true, true, ATTACK_TYPE_PIERCE)
+      //}
+    //}
+
+// ============================================================================
+public function IUnitMetadata.getThrowSpearComponent() returns ThrowSpearComponent
+  return this.getComponent(ThrowSpearComponent.typeId) castTo ThrowSpearComponent
+
+// ============================================================================
+public function IUnitMetadata.getOrAddThrowSpearComponent() returns ThrowSpearComponent
+  var component = this.getThrowSpearComponent()
+  if (component == null)
+    component = this.addComponent(new ThrowSpearComponent(this)) castTo ThrowSpearComponent
+  return component
+
+// ============================================================================
+public function unit.getThrowSpearComponent() returns ThrowSpearComponent
+  let metadata = this.getMetadata()
+  return metadata != null ? metadata.getThrowSpearComponent() : null
+
+// ============================================================================
+public function unit.getOrAddThrowSpearComponent() returns ThrowSpearComponent
+  let metadata = this.getMetadata()
+  return metadata != null ? metadata.getOrAddThrowSpearComponent() : null
+
+// ============================================================================
+@compiletime function createObjects()
+
+  new ChannelAbilityPreset(ThrowSpear.ABILITY_ID, 10, true)
+    ..setupHeroAbilityGroup(HeroAbilityGroup.R)
+    ..setAnimationNames("attack,looping")
+    ..setHeroAbility(false)
+    ..setItemAbility(false)
+    ..presetTargetTypes(Targettype.UNIT)
+    ..presetTargetsAllowed(lvl -> "ground,air,enemy,vulnerable")
+    ..setIconNormal(Icons.bTNArcaniteRanged)
+    ..setName("Throw Spear")
+    ..presetTooltipNormal(lvl -> ThrowSpear.getTooltipNormal(lvl, lvl))
+    ..presetTooltipNormalExtended(lvl -> ThrowSpear.getTooltipNormalExtended(lvl, lvl))
+    ..presetCastRange(lvl -> 500.0)
+    ..presetCooldown(lvl -> ThrowSpear.getCooldown(lvl))
+    ..presetManaCost(lvl -> 60)
+
+  new HeroLearnAbilityDefinition(ThrowSpear.ABILITY_LEARN_ID, 3)
+    ..setupHeroAbilityGroup(HeroAbilityGroup.R, 0)
+    ..setName("Throw Spear")
+    ..setTooltipLearn("Learn Throw Spear - [|cFFFFCC00 Level %d|r]")
+    ..setTooltipLearnExtended("The Captain throws a spear at a target enemy dealing damage and stunning them.|n|n|cFFFFCC00Level 1|r - Deals {0} damage, stuns for {1}s.|n|cFFFFCC00Level 2|r - Deals {2} damage, stuns for {3}s.|n|cFFFFCC00Level 3|r - Deals {4} damage, stuns for {5}s.".format(
+      ThrowSpear.getDamagePercent01(1).toPercentageString01(), ThrowSpear.getStunDuration(1).toString(0),
+      ThrowSpear.getDamagePercent01(2).toPercentageString01(), ThrowSpear.getStunDuration(2).toString(0),
+      ThrowSpear.getDamagePercent01(3).toPercentageString01(), ThrowSpear.getStunDuration(3).toString(0)))
+    ..setIconResearch(Icons.bTNArcaniteRanged)
+
+// ============================================================================
+init
+  registerHeroAbilityComponentType(ThrowSpearComponent.typeId, ThrowSpear.ABILITY_ID)
+  registerHeroAbilityComponentType(ThrowSpearComponent.typeId, ThrowSpear.ABILITY_LEARN_ID)
+
+  // Show crit text tag when enemy is hit by throwSpear
+  DamageEvent.addListener(DAMAGE_EVENT_PRIO_FINAL) -> 
+    if (DamageEvent.getType() == DamageType.CODE and
+        DamageEvent.getId() == ThrowSpear.ABILITY_ID and
+        DamageEvent.getAmount() > 0)
+      createCriticalStrikeTextTag(DamageEvent.getSource(), DamageEvent.getAmount().floor())

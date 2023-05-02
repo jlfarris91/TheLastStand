@@ -24,7 +24,7 @@ else
   $War3ArchiveDirPath = [System.IO.Path]::Combine($env:BuildRoot, "war3.wmod")
 }
 
-& $ExeFilePath "$SourceMapDirPath" "$OutputWurstSourceMapFilePath" "$IntermediateDirPath" "$OutputSpawnRegionScriptFile" "$War3ArchiveDirPath" "$OutputListFilePath"
+& $ExeFilePath --sourceMapDir "$SourceMapDirPath" --outputMapFile "$OutputWurstSourceMapFilePath" --intermediateDir "$IntermediateDirPath" --outputSpawnRegionScriptFile "$OutputSpawnRegionScriptFile" --w3modBasePath "$War3ArchiveDirPath" --outputListFilePath "$OutputListFilePath" #--mergeWar3MapSkinFiles --writeRegionsToArchive
 
 if ($LASTEXITCODE -eq 0)
 {

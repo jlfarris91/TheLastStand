@@ -1,0 +1,1341 @@
+package Lootables
+import FullscreenFrame
+import StandardTooltip
+import UnitPropertiesComponent
+import GameConstants
+import ErrorHandling
+import Time
+import FX
+import Vector
+import UnitExtensions
+import UnitIndexer
+import Directors
+import Math
+import LinkedList
+import RealtimeUnitComponent
+import ClosureTimers
+import Orders
+import ColorUtility
+import RegisterEvents
+import Ability_Search
+import RealTime
+import Notifications
+import Icons
+import TlsSounds
+import DisplayTextToPlayer
+import TlsAbilityIds
+import HashList
+import SoundUtils
+import Optional
+import GroupUtils
+import Command
+import GameInstance
+import Jobs
+import Interaction
+import PlayerProperties
+import HeroExperienceComponent
+import TlsItemIds
+
+// Buildings
+public constant int UNIT_ID_LOOTABLE_BARN = 'h01H'
+public constant int UNIT_ID_LOOTABLE_BREWERY = 'h013'
+public constant int UNIT_ID_LOOTABLE_BUILDING_HORIZONTAL_BLUE = 'h017'
+public constant int UNIT_ID_LOOTABLE_BUILDING_HORIZONTAL_GREEN = 'h01X'
+public constant int UNIT_ID_LOOTABLE_BUILDING_HORIZONTAL_RED = 'h01J'
+public constant int UNIT_ID_LOOTABLE_BUILDING_LARGE_HORIZONTAL_GREEN = 'h01M'
+public constant int UNIT_ID_LOOTABLE_BUILDING_LARGE_VERTICAL_PURPLE = 'h01N'
+public constant int UNIT_ID_LOOTABLE_BUILDING_CHAPEL = 'h00A'
+public constant int UNIT_ID_LOOTABLE_BUILDING_GRANARY = 'h000'
+public constant int UNIT_ID_LOOTABLE_HOUSE_LARGE_BLUE = 'h01S'
+public constant int UNIT_ID_LOOTABLE_HOUSE_LARGE_RED = 'h005'
+public constant int UNIT_ID_LOOTABLE_HOUSE_SMALL_GREEN = 'h001'
+public constant int UNIT_ID_LOOTABLE_INN = 'h01L'
+public constant int UNIT_ID_LOOTABLE_CATHEDRAL = 'h00G'
+public constant int UNIT_ID_LOOTABLE_MARKET = 'h009'
+public constant int UNIT_ID_LOOTABLE_MINE = 'h00D'
+public constant int UNIT_ID_LOOTABLE_SHIPYARD = 'h008'
+public constant int UNIT_ID_LOOTABLE_TAVERN = 'h00B'
+public constant int UNIT_ID_LOOTABLE_TENT = 'h01V'
+public constant int UNIT_ID_LOOTABLE_TOWER = 'h00C'
+public constant int UNIT_ID_LOOTABLE_WINDMILL = 'h00F'
+
+// Objects
+public constant int UNIT_ID_LOOTABLE_BARREL = 'h01A'
+public constant int UNIT_ID_LOOTABLE_CART = 'h01K'
+public constant int UNIT_ID_LOOTABLE_CRATES = 'h007'
+public constant int UNIT_ID_LOOTABLE_HAY = 'h002'
+public constant int UNIT_ID_LOOTABLE_JUNK_1 = 'h01U'
+public constant int UNIT_ID_LOOTABLE_JUNK_2 = 'h01T'
+public constant int UNIT_ID_LOOTABLE_MARKET_BAUBLES = 'h006'
+public constant int UNIT_ID_LOOTABLE_MARKET_MINECART = 'h00E'
+public constant int UNIT_ID_LOOTABLE_MARKET_STALL = 'h004'
+public constant int UNIT_ID_LOOTABLE_MARKET_TABLE = 'h003'
+public constant int UNIT_ID_LOOTABLE_CAGE = 'h016'
+
+public constant int UNIT_ID_LOOTABLE_SPAWN_OVERRIDE = 'h00M'
+
+constant string LOOTABLE_CHAR_EMPTY = "¨"
+constant string LOOTABLE_CHAR_UNKNOWN = "©"
+constant string LOOTABLE_CHAR_GOLD = "ª"
+constant string LOOTABLE_CHAR_LUMBER = "«"
+constant string LOOTABLE_CHAR_SURVIVOR = "¬"
+constant string LOOTABLE_CHAR_ITEM = "¶"
+constant string LOOTABLE_CHAR_UNDEAD = "®"
+
+constant colorA LOOTABLE_COLOR = colorA(255, 255, 255, 255)
+constant colorA LOOTED_COLOR = colorA(150, 150, 150, 150)
+constant colorA COUNTDOWN_COLOR = colorA(0, 170, 0, 255)
+constant real LOOTABLE_REFRESH_RANGE = 512.0
+constant real LOOTABLE_CAMP_RANGE = 512.0
+public constant int MAX_LOOT_COUNT = 5
+
+constant int PROGRESS_BAR_LENGTH = 20
+constant colorA PROGRESS_BAR_FOREGROUND = colorA(0, 170, 0, 255)
+constant colorA PROGRESS_BAR_BACKGROUND = colorA(0, 64, 0, 255)
+constant real PROGRESS_BAR_UPDATE_PERIOD = 0.1
+constant real LOOTER_STANDING_POS_THRESHOLD_SQ = 64.0 * 64.0
+
+public constant real LOOT_REWARD_NOTIFICATION_DURATION = 15.0
+
+public constant int ABILITY_ID_SEARCH = TlsAbilityIds.search
+public constant int ABILITY_ID_LOOTABLE = 'A02C'
+
+constant string LUCKY_HORSHOE_TOOLTIP = "Lucky Horseshoe"
+constant string LUCKY_HORSHOE_TOOLTIP_EXTENDED = "This bonus loot was acquired thanks to the Lucky Horseshoe item"
+
+constant string PENDANT_TOOLTIP = "Treasure Hunter's Pendant"
+constant string PENDANT_TOOLTIP_EXTENDED = "This loot is a higher rarity thanks to the Treasure Hunter's Pendant item"
+
+public Vector<LootableComponent> g_lootableUnits = null
+SoundDefinition array[3] g_lootFinishedSound
+
+SoundDefinition g_notEnoughManaSoundDef
+int array g_notEnoughManaLastPlayedTime
+
+HashList<LootDirector> g_lootDirectors = new HashList<LootDirector>()
+int g_lootDirectorsGen = 0
+public UpdateLootDirectorsJob g_lootDirectorJob = new UpdateLootDirectorsJob()..acquire()
+
+Thread g_lootThread = new Thread("loot")
+..setEnabled(true)
+..setMaxWorkPerTick(1)
+..setTickInterval(0.1)
+
+public HashList<int> g_LootableUnitTypes
+
+SoundDefinition g_lootItemRewardSound
+
+CardInstanceComparator g_cardInstanceComparator = new CardInstanceComparator()
+
+// ============================================================================
+public abstract class LootCard extends TieredCard
+
+  static unit s_looter
+  static unit s_lootable
+  static bool s_luckyHorseshoe
+  static bool s_pendant
+
+  // --------------------------------------------------------------------------
+  construct(string id)
+    super(id)
+
+  // ----------------------------------------------------------------------------
+  static function getLooter() returns unit
+    return s_looter
+
+  // ----------------------------------------------------------------------------
+  static function getLootable() returns unit
+    return s_lootable
+
+  // --------------------------------------------------------------------------
+  static function getCausedByHorseshoe() returns bool
+    return s_luckyHorseshoe
+
+  // --------------------------------------------------------------------------
+  static function getAffectedByPendant() returns bool
+    return s_pendant
+
+  // --------------------------------------------------------------------------
+  abstract function activateCard(int tier) returns bool
+
+  // ----------------------------------------------------------------------------
+  function getDiscardOnActivate() returns bool
+    return false
+
+  // ----------------------------------------------------------------------------
+  function getCancelLootOperationOnActivate() returns bool
+    return false
+
+  // --------------------------------------------------------------------------
+  function getCanBeDrawnByLuckyHorseshoe() returns bool
+    return true
+
+  // --------------------------------------------------------------------------
+  function getCanBeAffectedByPendant() returns bool
+    return true
+
+// ============================================================================
+public class LootDirector extends Director
+  private LootableComponent m_lootable
+
+  // --------------------------------------------------------------------------
+  construct(LootableComponent lootable)
+    super("Lootable")
+    m_lootable = lootable
+
+  // ----------------------------------------------------------------------------
+  override protected function onEnabled()
+    super.onEnabled()
+    registerActiveLootDirector(this)
+
+    drawLootCards(m_lootable.getMaxLootCount())
+    tryUpgradeLootCards()
+
+  // ----------------------------------------------------------------------------
+  override protected function onDisabled()
+    super.onDisabled()
+    unregisterActiveLootDirector(this)
+
+  // --------------------------------------------------------------------------
+  override protected function getDifficultyCoefficient() returns real
+    return g_GameInstance.getWorldDifficultyCoeff()
+
+  // --------------------------------------------------------------------------
+  override function getCreditsPerGeneration() returns real
+    return getCreditMultiplier() * (getCreditsOnActivation() / 5) * getDifficultyCoefficient()
+
+  // ----------------------------------------------------------------------------
+  private function drawLootCards(int count)
+
+    let maxLootCount = m_lootable.getMaxLootCount()
+    let currentLootCount = m_lootable.getLootCount()
+
+    let numCards = clamp(count, 0, max(maxLootCount - currentLootCount, 0))
+    if (numCards == 0)
+      return
+
+    let deck = getDeck()
+    if (deck == null)
+      error("Lootable deck is null!")
+      return
+
+    var credits = getCredits()
+    let deckInstance = deck.createInstance()
+
+    // Remove any cards from the deck instance that already exist in the lootable's hand
+    for i = 0 to currentLootCount - 1
+      let lootCardInstance = m_lootable.getLoot(i)
+      let lootCard = lootCardInstance.card castTo LootCard
+      if (lootCard != null and lootCard.getDiscardOnActivate())
+        deckInstance.remove(lootCard)
+
+    var awardsAdded = 0
+    while (not deckInstance.isEmpty() and awardsAdded < numCards)
+      let lootCard = deckInstance.draw() castTo LootCard
+      if (lootCard != null)
+        let cardInstance = lootCard.getHighestAffordableTier(credits)
+        if (cardInstance != null)
+          m_lootable.addLoot(cardInstance)
+          awardsAdded++
+          credits -= cardInstance.cost
+          if (not lootCard.getDiscardOnActivate())
+            deckInstance.add(lootCard)
+
+    destroy deckInstance
+
+    setCredits(credits)
+
+  // ----------------------------------------------------------------------------
+  private function tryUpgradeLootCards()
+
+    if (not m_lootable.hasLoot())
+      return
+
+    var credits = getCredits()
+    if (credits == 0)
+      return
+
+    // Loop through each loot reward and try to upgrade its tier using remaining credits.
+    // Upgrade in reverse order so that the better loot is at the end of the loot operation.
+    // Stop after making a full loop without upgrading any cards.
+
+    // let lootCardCount = m_lootable.getLootCount()
+    // let startIndex = GetRandomInt(0, lootCardCount - 1)
+    // var index = startIndex
+    // var upgradedCard = false
+
+    // while (true)
+    // //{
+    //   let drawnCard = m_lootable.getLoot(index)
+
+    //   let card = drawnCard.card castTo TieredCard
+    //   let currTier = drawnCard.tier
+    //   let nextTier = currTier + 1
+    //   let currTierCost = drawnCard.cost
+
+    //   if (card != null and nextTier < card.getTierCount())
+    //     let nextTierCost = card.getCost(nextTier)
+    //     let costToUpgrade = nextTierCost - currTierCost
+    //     if (credits > costToUpgrade)
+    //       drawnCard.tier = nextTier
+    //       drawnCard.cost = nextTierCost
+    //       credits -= costToUpgrade
+    //       upgradedCard = true
+
+    //   index = wrap(index - 1, 0, lootCardCount - 1)
+
+    //   // Completed a full loop and wrapped around 
+    //   if (index == startIndex)
+    //     // Break if we didn't upgrade a single card
+    //     if (not upgradedCard)
+    //       break
+    //     upgradedCard = false
+    // //}
+
+    // Try to upgrade a random card in the lootable's hand
+    // If the card at the index is null or already at max tier then try to
+    // upgrade the next card in the hand in reverse order.
+
+    let lootCardCount = m_lootable.getLootCount()
+    let startIndex = GetRandomInt(0, lootCardCount - 1)
+    var index = startIndex
+
+    while (true)
+    //{
+      let drawnCard = m_lootable.getLoot(index)
+
+      let card = drawnCard.card castTo TieredCard
+      let currTier = drawnCard.tier
+      let nextTier = currTier + 1
+      let currTierCost = drawnCard.cost
+
+      let isValidCard = card != null and nextTier < card.getTierCount()
+      if (isValidCard)
+        let nextTierCost = card.getCost(nextTier)
+        let costToUpgrade = nextTierCost - currTierCost
+        if (credits > costToUpgrade)
+          drawnCard.tier = nextTier
+          drawnCard.cost = nextTierCost
+          credits -= costToUpgrade
+
+      index = wrap(index - 1, 0, lootCardCount - 1)
+
+      // Completed a full loop and wrapped around 
+      if (index == startIndex or isValidCard)
+        break
+    //}
+
+    setCredits(credits)
+
+  // ----------------------------------------------------------------------------
+  protected function onDayStart()
+    generateCredits()
+
+    if (m_lootable.getLootCount() < m_lootable.getMaxLootCount())
+    //{
+      let deck = getDeck()
+      let leastExpensiveCard = deck.getLeastExpensiveCard()
+      let credits = getCredits()
+
+      // Make sure the lootable has enough credits for at least one card
+      if (credits < leastExpensiveCard.getCost())
+        setCredits(leastExpensiveCard.getCost().toReal())
+    //}
+    
+    drawLootCards(1)
+
+    tryUpgradeLootCards()
+
+// ----------------------------------------------------------------------------
+function registerActiveLootDirector(LootDirector director)
+  g_lootDirectors.add(director)
+  g_lootDirectorsGen++
+
+// ----------------------------------------------------------------------------
+function unregisterActiveLootDirector(LootDirector director)
+  g_lootDirectors.remove(director)
+  g_lootDirectorsGen++
+
+// ============================================================================
+class UpdateLootDirectorsJob extends Job
+  private HLIterator<LootDirector> m_iter = null
+  private int m_lootDirectorsGen = 0
+  private int m_count = 0
+
+  // ----------------------------------------------------------------------------
+  construct()
+    super("uplootdir")
+
+  // ----------------------------------------------------------------------------
+  ondestroy
+    if (m_iter != null)
+      m_iter.close()
+      m_iter = null
+
+  // ----------------------------------------------------------------------------
+  override function reset()
+    super.reset()
+
+    if (m_iter != null)
+      m_iter.close()
+    m_iter = g_lootDirectors.staticItr()
+    m_lootDirectorsGen = g_lootDirectorsGen
+    m_count = 0
+
+  // ----------------------------------------------------------------------------
+  override function hasNext() returns bool
+    return m_iter != null and m_iter.hasNext()
+
+  // ----------------------------------------------------------------------------
+  override function next() returns int
+    let director = m_iter.next()
+    director.onDayStart()
+    m_count++
+    return 1
+
+  // ----------------------------------------------------------------------------
+  override function getDebuggerStateString() returns string
+    return m_count.toString() + "/" + g_lootDirectors.size().toString()
+
+// ============================================================================
+public class CardInstanceComparator implements Comparator<CardInstance>
+
+  // ----------------------------------------------------------------------------
+  override function compare(CardInstance a, CardInstance b) returns int
+    return a.cost - b.cost
+
+// ============================================================================
+public class LootableComponent extends UnitComponent
+  private real m_searchDurationUnscaled
+  private unit m_lootingUnit
+  private int m_dueToLuckyHorseshoe = 0
+  private optionalVec2 m_spawnPosOverride = none_vec2()
+  private bool m_destroyOnLoot = false
+  private LootDirector m_director
+  private int m_maxLootCount = 1
+  private LinkedList<CardInstance> m_lootCards = new LinkedList<CardInstance>()
+  private LootOperation m_lootOperation = null
+  private ubersplat m_ubersplat
+  private string m_ubersplatName
+
+  // --------------------------------------------------------------------------
+  construct(IUnitMetadata owner)
+    super(owner)
+
+    m_searchDurationUnscaled = 3.0
+    m_director = new LootDirector(this)
+
+    if (g_lootableUnits == null)
+      g_lootableUnits = new Vector<LootableComponent>()
+
+    g_lootableUnits.add(this)
+
+    m_lootOperation = new LootOperation()
+
+  // --------------------------------------------------------------------------
+  ondestroy
+
+    for lootCard in m_lootCards
+      destroy lootCard
+
+    destroy m_lootCards
+    m_lootCards = null
+
+    if (m_director != null)
+      destroy m_director
+      m_director = null
+
+    if (m_lootOperation != null)
+      destroy m_lootOperation
+      m_lootOperation = null
+
+  // ----------------------------------------------------------------------------
+  function getUbersplatName() returns string
+    return m_ubersplatName
+  
+  // ----------------------------------------------------------------------------
+  function setUbersplatName(string value)
+    m_ubersplatName = value
+
+  // --------------------------------------------------------------------------
+  override function onEnabled()
+    super.onEnabled()
+    
+    let ownerUnit = getOwnerUnit()
+
+    ownerUnit.setOwner(PLAYER_LOOTABLES, true)
+    m_director.enable()
+
+    if (m_ubersplatName != null)
+      m_ubersplat = CreateUbersplat(ownerUnit.getX(), ownerUnit.getY(), m_ubersplatName, 255, 255, 255, 255, false, true)
+      SetUbersplatRenderAlways(m_ubersplat, true)
+      ShowUbersplat(m_ubersplat, true)
+
+    if (m_lootCards.isEmpty())
+      makeUnlootable()
+    else
+      makeLootable()
+
+  // ----------------------------------------------------------------------------
+  override function onDisabled()
+    super.onDisabled()
+    m_director.disable()
+
+    if (m_ubersplat != null)
+      SetUbersplatRenderAlways(m_ubersplat, false)
+      FinishUbersplat(m_ubersplat)
+      DestroyUbersplat(m_ubersplat)
+      m_ubersplat = null
+
+  // --------------------------------------------------------------------------
+  function canLoot() returns bool
+    return hasLoot() and not getIsBeingLooted()
+
+  // --------------------------------------------------------------------------
+  function getIsBeingLooted() returns bool
+    return m_lootingUnit != null
+
+  // ----------------------------------------------------------------------------
+  function getLootOperation() returns LootOperation
+    return m_lootOperation
+
+  // --------------------------------------------------------------------------
+  function getSearchDurationPerLoot() returns real
+    return m_searchDurationUnscaled
+
+  // --------------------------------------------------------------------------
+  function setSearchDurationPerLoot(real duration)
+    m_searchDurationUnscaled = duration
+
+  // --------------------------------------------------------------------------
+  function getTotalSearchDuration() returns real
+    return m_searchDurationUnscaled * getLootCount()
+
+  // ----------------------------------------------------------------------------
+  function getMaxLootCount() returns int
+    return m_maxLootCount
+  
+  // ----------------------------------------------------------------------------
+  function setMaxLootCount(int value)
+    m_maxLootCount = min(value, MAX_LOOT_COUNT)
+    getOwnerUnit().setMaxMana(value)
+
+  // ----------------------------------------------------------------------------
+  function getLoot(int index) returns CardInstance
+    return m_lootCards.get(index)
+
+  // ----------------------------------------------------------------------------
+  function getLootCount() returns int
+    return m_lootCards.size()
+
+  // ----------------------------------------------------------------------------
+  function addLoot(CardInstance lootCardInstance)
+    m_lootCards.insertSorted(lootCardInstance, g_cardInstanceComparator)
+    if (m_lootCards.size() == 1)
+      makeLootable()
+    getOwnerUnit().setMana(m_lootCards.size().toReal())
+
+  // ----------------------------------------------------------------------------
+  function hasLoot() returns bool
+    return not m_lootCards.isEmpty()
+
+  // ----------------------------------------------------------------------------
+  function getDirector() returns LootDirector
+    return m_director
+
+  // --------------------------------------------------------------------------
+  function getSpawnPosition() returns vec2
+    return m_spawnPosOverride.reduce(getOwnerUnit().getPos())
+
+  // --------------------------------------------------------------------------
+  function setSpawnPosition(vec2 value)
+    m_spawnPosOverride = some(value)
+
+  // --------------------------------------------------------------------------
+  function setDestroyOnLoot(bool value)
+    m_destroyOnLoot = value
+
+  // --------------------------------------------------------------------------
+  function startLooting(unit looter, int lootCount)
+
+    if (not canLoot() or getIsBeingLooted())
+      return
+
+    m_lootingUnit = looter
+
+    let scaledSearchDuration = getUnitSearchDuration(looter, m_searchDurationUnscaled)
+    let totalDuration = scaledSearchDuration * lootCount
+    let manaCost = looter.getAbility(ABILITY_ID_SEARCH).getField(ABILITY_ILF_MANA_COST, 0).toReal()
+
+    m_lootOperation
+    ..setInteractingUnit(looter)
+    ..setLootableUnit(getOwnerUnit())
+    ..setDuration(totalDuration)
+    ..setLootCount(lootCount)
+    ..setManaCost(manaCost)
+    ..start()
+
+    // Stand 4 in HD
+    m_lootingUnit.setAnimation(15)
+
+    // Log.info("Looting started")
+
+  // --------------------------------------------------------------------------
+  protected function onLootingFinished(unit lootingUnit)
+    if (m_lootingUnit == null)
+      error("[onLootingFinished] m_lootingUnit is null")
+      return
+
+    if (lootingUnit == null)
+      error("[onLootingFinished] lootingUnit is null")
+      return
+
+    if (m_lootingUnit != lootingUnit)
+      error("[onLootingFinished] Not the same unit that started looting")
+      return
+
+    m_lootingUnit.setAbilityCooldown(ABILITY_ID_SEARCH, 0, 0.0)
+    m_lootingUnit = null
+
+    m_lootOperation.complete()
+
+    // Log.info("Looting finished")
+
+  // --------------------------------------------------------------------------
+  protected function onLootingCanceled(unit lootingUnit)    
+    if (lootingUnit == null)
+      error("[onLootingCanceled] lootingUnit is null")
+      return
+
+    if (m_lootingUnit == null)
+      error("[onLootingCanceled] m_lootingUnit is null")
+      return
+
+    if (m_lootingUnit != lootingUnit)
+      Log.debug("[onLootingCanceled] Not the same unit that started looting")
+      makeLootable()
+      return
+
+    m_lootingUnit.resetAbilityCooldown(ABILITY_ID_SEARCH)
+
+    FX.createLootingCanceledTag(getOwnerUnit().getPos())
+
+    // reset state so it can be looted again
+    m_lootingUnit = null
+
+    m_lootOperation.cancel()
+
+    // Log.info("Looting canceled")
+
+  // --------------------------------------------------------------------------
+  private function makeUnlootable()
+    getOwnerUnit().removeAbility(ABILITY_ID_LOOTABLE)
+    getOwnerUnit().setVertexColor(LOOTED_COLOR)
+    UnitRemoveType(getOwnerUnit(), UNIT_TYPE_ANCIENT)
+
+    if (m_ubersplat != null)
+      SetUbersplatRenderAlways(m_ubersplat, true)
+
+  // --------------------------------------------------------------------------
+  private function makeLootable()
+    getOwnerUnit().addAbility(ABILITY_ID_LOOTABLE)
+    getOwnerUnit().setVertexColor(LOOTABLE_COLOR)
+    // Makes the unit targettable by the search ability
+    UnitAddType(getOwnerUnit(), UNIT_TYPE_ANCIENT)
+
+    if (m_ubersplat != null)
+      SetUbersplatRenderAlways(m_ubersplat, false)
+
+  // --------------------------------------------------------------------------
+  function showLootRewardNotification(player _player, LootRewardNotification notification)
+
+    let dueToLuckyHorseshoe = m_dueToLuckyHorseshoe > 0
+
+    notification
+    ..setDueToLuckyHorseshoe(dueToLuckyHorseshoe)
+    ..show(_player)
+
+    g_lootFinishedSound[GetRandomInt(0,2)].playForPlayer(_player)
+
+  // ----------------------------------------------------------------------------
+  function awardLoot(unit lootingUnit)
+
+    if (m_lootCards.isEmpty())
+      error("No loot cards available")
+      return
+
+    let lootCardInstance = m_lootCards.dequeue()
+
+    getOwnerUnit().setMana(m_lootCards.size().toReal())
+
+    if (lootCardInstance == null)
+      error("Invalid loot card")
+      return
+
+    let lootCard = lootCardInstance.card castTo LootCard
+
+    if (lootCard != null)
+      activateLootCard(lootCardInstance, lootingUnit, false)
+
+    // Award xp for looting
+    let xpComp = lootingUnit.getHeroExperienceComponent()
+    let lootXpProp = lootingUnit.getOwner().getProperty(PlayerProperty.HERO_XP_PER_LOOT)
+    if (xpComp != null and lootXpProp != null)
+      xpComp.addXp(lootXpProp.getValue(), false)
+
+    destroy lootCardInstance
+
+    doAfter(0.5) ->
+      tryAwardExtraLootFromLuckyHorseshoe(lootingUnit)
+
+    if (m_destroyOnLoot)
+      getOwnerUnit().remove()
+      return
+
+    if (m_lootCards.isEmpty())
+      makeUnlootable()
+      return
+
+    if (lootCard.getCancelLootOperationOnActivate() and m_lootOperation != null)
+      // Delay to avoid tricky double free of LootOperation.m_awardTimer
+      nullTimer(() -> m_lootOperation.interrupt())
+
+  // --------------------------------------------------------------------------
+  function tryAwardExtraLootFromLuckyHorseshoe(unit lootingUnit)
+
+    if (not lootingUnit.isAlive())
+      return
+
+    // Lucky Horseshoe item grants a small chance to immediately loot a second time
+    var chanceToRetriggerWithHoreshoe01 = 0.0
+    let metadata = lootingUnit.getMetadata()
+    if (metadata != null)
+      let comp = metadata.getUnitPropertiesComponent()
+      if (comp != null)
+        chanceToRetriggerWithHoreshoe01 = clamp01(chanceToRetriggerWithHoreshoe01 + comp.getPropertyValue(UnitProperty.LOOT_TWICE_CHANCE_01))
+
+    let roll = GetRandomReal(0, 1)
+    if (not passesChanceCheck(chanceToRetriggerWithHoreshoe01, roll))
+      return
+
+    let deck = m_director.getDeck()
+    if (deck == null)
+      return
+
+    let deckInstance = deck.createInstance()
+
+    // Keep drawing until we draw a card that can be awarded by the lucky horseshoe
+    LootCard drawnCard = null
+    while not deckInstance.isEmpty()
+      drawnCard = deckInstance.draw() castTo LootCard
+      if (drawnCard != null and drawnCard.getCanBeDrawnByLuckyHorseshoe())
+        break
+
+    if (drawnCard == null)
+      return
+
+    let lootCardInstance = drawnCard.getHighestAffordableTier(m_director.getCreditsOnActivation() + m_director.getCredits())
+    if (lootCardInstance == null)
+      return
+    
+    let lootCard = lootCardInstance.card castTo LootCard
+    if (lootCard != null and activateLootCard(lootCardInstance, lootingUnit, true))
+    //{
+      // The chance check would not have passed if it weren't for the effects of lucky horseshoe
+      displayMessageToPlayer(lootingUnit.getOwner(), "Lucky Horseshoe!".colorize(Colors.lightBlue) + " You found even more loot!")
+
+      // Award xp for looting
+      let xpComp = lootingUnit.getHeroExperienceComponent()
+      let lootXpProp = lootingUnit.getOwner().getProperty(PlayerProperty.HERO_XP_PER_LOOT)
+      if (xpComp != null and lootXpProp != null)
+        xpComp.addXp(lootXpProp.getValue(), false)
+    //}
+
+    destroy lootCardInstance
+
+  // --------------------------------------------------------------------------
+  private function activateLootCard(CardInstance lootCardInstance, unit lootingUnit, bool horsehoe) returns bool
+
+    let lootCard = lootCardInstance.card castTo LootCard
+    if (lootCard == null)
+      return false
+
+    let tier = lootCardInstance.tier + getPendantAdjustedCardTier(lootCardInstance, lootingUnit)
+
+    LootCard.s_lootable = getOwnerUnit()
+    LootCard.s_looter = lootingUnit
+    LootCard.s_luckyHorseshoe = horsehoe
+    LootCard.s_pendant = tier > lootCardInstance.tier and lootingUnit.hasItemById(TlsItemIds.treasureHuntersPendant)
+
+    let activatedCard = lootCard.activateCard(tier)
+
+    LootCard.s_lootable = null
+    LootCard.s_looter = null
+    LootCard.s_luckyHorseshoe = false
+    LootCard.s_pendant = false
+
+    return activatedCard
+
+  // --------------------------------------------------------------------------
+  private function getPendantAdjustedCardTier(CardInstance lootCardInstance, unit lootingUnit) returns int
+
+    let lootCard = lootCardInstance.card castTo LootCard
+    if (lootCard == null or
+        not lootCard.getCanBeAffectedByPendant() or
+        lootCardInstance.tier == lootCard.getTierCount() - 1)
+      return 0
+
+    let metadata = lootingUnit.getMetadata()
+    if (metadata == null)
+      return 0
+
+    let comp = metadata.getUnitPropertiesComponent()
+    if (comp == null)
+      return 0
+
+    var chanceToIncreaseTier01 = lootingUnit.getOwner().getPropertyValue(PlayerProperty.LOOT_FIND_QUALITY)
+
+    // Pendant item grants a small chance to increase the tier of loot
+    chanceToIncreaseTier01 += comp.getPropertyValue(UnitProperty.LOOT_FIND_QUALITY)
+    
+    var tiersToAdd = chanceToIncreaseTier01.floor()
+    chanceToIncreaseTier01 -= chanceToIncreaseTier01.floor()
+
+    let roll = GetRandomReal(0, 1)
+    if (passesChanceCheck(chanceToIncreaseTier01, roll))
+      tiersToAdd++
+
+    return tiersToAdd
+
+// ============================================================================
+public function IUnitMetadata.getLootableComponent() returns LootableComponent
+  return this.getComponent(LootableComponent.typeId) castTo LootableComponent
+
+// ============================================================================
+public function IUnitMetadata.getOrAddLootableComponent() returns LootableComponent
+  var component = this.getLootableComponent()
+  if (component == null)
+    component = this.addComponent(new LootableComponent(this)) castTo LootableComponent
+  return component
+
+// ============================================================================
+function onDayStart()
+  if (not g_lootDirectors.isEmpty() and g_lootDirectorJob.getThread() == null)
+    g_lootDirectorJob.reset()
+    g_lootThread.enqueue(g_lootDirectorJob)
+
+// ============================================================================
+function updateLootablesInRange(vec2 pos, real radius)
+  let temp = getGroup()
+  temp.enumUnitsInRange(pos, radius)
+  for _unit in temp
+    if (_unit.isLootable())
+      updateLootablesNearCamps(_unit)
+  temp.release()
+
+// ============================================================================
+function updateLootablesNearCamps(unit lootableUnit)
+
+  let metadata = lootableUnit.getMetadata()
+  if (metadata == null)
+    return
+
+  let comp = metadata.getLootableComponent()
+  if (comp == null)
+    return
+
+  bool foundCooldownAffector = false
+  let temp = getGroup()
+  temp.enumUnitsInRange(lootableUnit.getPos(), LOOTABLE_CAMP_RANGE)
+  for _unit in temp
+    if (unitAffectsLootableCooldown(_unit))
+      foundCooldownAffector = true
+      break
+  temp.release()
+
+  comp.getDirector().setCreditMultiplier(foundCooldownAffector ? 0.5 : 1.0)
+
+// ============================================================================
+function unitAffectsLootableCooldown(unit _unit) returns bool
+  return _unit.isBuilding() and
+         not _unit.isLootable() and
+         _unit.getOwner() != PLAYER_VILLAGERS and
+         _unit.isAllyOf(PLAYER_VILLAGERS)
+
+// ============================================================================
+function onUnitIndexDeindexed()
+  updateLootablesInRange(getIndexingUnit().getPos(), LOOTABLE_REFRESH_RANGE)
+
+// ============================================================================
+public class LootOperation extends Interaction
+  private unit m_lootableUnit = null
+  private int m_lootCount = 1
+  private CallbackCounted m_awardTimer = null
+
+  // ----------------------------------------------------------------------------
+  ondestroy
+
+    if (m_awardTimer != null)
+      destroy m_awardTimer
+      m_awardTimer = null
+
+  // ----------------------------------------------------------------------------
+  function getLootableUnit() returns unit
+    return m_lootableUnit
+  
+  // ----------------------------------------------------------------------------
+  function setLootableUnit(unit value)
+    m_lootableUnit = value
+
+  // ----------------------------------------------------------------------------
+  function getLootCount() returns int
+    return m_lootCount
+  
+  // ----------------------------------------------------------------------------
+  function setLootCount(int value)
+    m_lootCount = value
+  
+  // ----------------------------------------------------------------------------
+  function interrupt()
+    let interatingUnit = getInteractingUnit()
+    if (interatingUnit != null)
+      interatingUnit.issueImmediateOrderById(Orders.stop)
+
+  // ----------------------------------------------------------------------------
+  override protected function onStarted()
+    super.onStarted()
+
+    if (m_lootableUnit == null)
+      error("Lootable unit is null")
+
+    if (m_lootCount < 1)
+      error("Loot count is less than one: " + m_lootCount.toString())
+
+    let id = getId()
+    let lootingUnit = getInteractingUnit()
+
+    if (m_lootCount > 1)
+      let durationPerLoot = getDuration() / m_lootCount
+      m_awardTimer = doPeriodicallyCounted(durationPerLoot, m_lootCount - 1) (cb) ->
+        onAwardLoot(id, lootingUnit, cb.isLast())
+
+  // ----------------------------------------------------------------------------
+  override protected function onCompleted()
+
+    if (failed())
+    //{
+      if (m_awardTimer != null)
+        destroy m_awardTimer
+        m_awardTimer = null
+    //}
+
+    let interactingUnit = getInteractingUnit()
+
+    super.onCompleted()
+
+    let lootable = m_lootableUnit.getMetadata().getLootableComponent()
+    if (lootable != null)
+      if (succeeded())
+        lootable.awardLoot(interactingUnit)
+      lootable.onLootingFinished(interactingUnit)
+
+    m_lootCount = 1
+    m_lootableUnit = null
+
+  // ----------------------------------------------------------------------------
+  private static function onAwardLoot(int id, unit lootingUnit, bool isLast)
+    let interaction = Interaction.getInteraction(lootingUnit) castTo LootOperation
+    if (interaction.getId() == id)
+    //{
+      if (interaction.isRunning())
+        interaction.onAwardLoot()
+
+      if (isLast)
+        // Let the CallbackCounted clean up the award timer
+        interaction.m_awardTimer = null
+    //}
+
+  // --------------------------------------------------------------------------
+  private function onAwardLoot()
+    let lootable = m_lootableUnit.getMetadata().getLootableComponent()
+    if (lootable != null)
+      lootable.awardLoot(getInteractingUnit())
+
+  // ----------------------------------------------------------------------------
+  override protected function createNotification() returns Notification
+    let interactingUnit = getInteractingUnit()
+    let cameraPos = interactingUnit.getPos()
+    let lootingPlayer = interactingUnit.getOwner()
+    return new Notification(getDuration())
+    ..setProgress(this)
+    ..setIconPath(Icons.bTNTelescope)
+    ..setMessage("Looting {0}...".format(m_lootableUnit.getName()))
+    ..setCanClose(false)
+    ..setClickCommand(new RoutedCommand(() -> begin
+      if (localPlayer == lootingPlayer)
+        PanCameraToTimedForPlayer(lootingPlayer, cameraPos.x, cameraPos.y, 0)
+    end))
+    ..show(lootingPlayer)
+
+// ============================================================================
+function onSpellEndCast()
+  if (GetSpellAbilityId() != ABILITY_ID_SEARCH)
+    return
+  
+  let lootingUnit = GetSpellAbilityUnit()
+  let lootOperation = Interaction.getInteraction(lootingUnit)
+  if (lootOperation == null or lootOperation.typeId != LootOperation.typeId)
+    return
+
+  lootingUnit.resetAbilityCooldown(ABILITY_ID_SEARCH)
+
+// ============================================================================
+function resetUnitAnimationAfterRightClickingSameLootable(unit lootingUnit, LootOperation lootOperation)
+  // Stand 4 in HD
+  lootingUnit.setAnimation(15)
+  // Reset the cooldown and other stats since
+  prepareSearchSpell(lootingUnit, lootOperation.getTimeRemaining())
+
+// ============================================================================
+function prepareSearchSpell(unit lootingUnit, unit lootableUnit, int lootCount)
+  let lootableUnitMetadata = lootableUnit.getMetadata()
+  if (lootableUnitMetadata == null)
+    return
+  let lootableComp = lootableUnitMetadata.getLootableComponent()
+  if (lootableComp == null)
+    return
+  let adjustedSearchDurationPerLoot = getUnitSearchDuration(lootingUnit, lootableComp.getSearchDurationPerLoot())
+  let totalSearchDuration = adjustedSearchDurationPerLoot * lootCount
+  prepareSearchSpell(lootingUnit, totalSearchDuration)
+
+// ============================================================================
+function prepareSearchSpell(unit lootingUnit, real searchDuration)
+  let searchAbility = lootingUnit.getAbility(ABILITY_ID_SEARCH)
+  if (searchAbility != null)
+    let lvl = 0
+    lootingUnit.setAbilityLevel(ABILITY_ID_SEARCH, lvl + 1)
+    searchAbility.setField(ABILITY_RLF_DURATION_NORMAL, lvl, searchDuration)
+    searchAbility.setField(ABILITY_RLF_DURATION_HERO, lvl, searchDuration)
+    searchAbility.setField(ABILITY_RLF_ART_DURATION, lvl, searchDuration)
+    searchAbility.setField(ABILITY_RLF_FOLLOW_THROUGH_TIME, lvl, searchDuration)
+    searchAbility.setField(ABILITY_RLF_COOLDOWN, lvl, searchDuration)
+    lootingUnit.setAbilityLevel(ABILITY_ID_SEARCH, lvl)
+
+// ============================================================================
+function onSpellCast()
+  if (GetSpellAbilityId() != ABILITY_ID_SEARCH)
+    return
+
+  let lootingUnit = GetSpellAbilityUnit()
+  let lootableUnit = GetSpellTargetUnit()
+  let lootingPlayer = lootingUnit.getOwner()
+
+  let looterMetadata = lootingUnit.getMetadata()
+  if (looterMetadata == null)
+    Log.debug("Searching unit has no metadata")
+    lootingUnit.issueImmediateOrderById(Orders.stop)
+    lootingUnit.resetAbilityCooldown(TlsAbilityIds.search)
+    return
+  
+  let lootableMetadata = lootableUnit.getMetadata()
+  if (lootableMetadata == null)
+    Log.debug("Search target has no metadata")
+    lootingUnit.issueImmediateOrderById(Orders.stop)
+    lootingUnit.resetAbilityCooldown(TlsAbilityIds.search)
+    return
+
+  let lootable = lootableMetadata.getLootableComponent()
+  if (lootable == null or not lootable.getEnabled())
+    lootingUnit.issueImmediateOrderById(Orders.stop)
+    lootingUnit.resetAbilityCooldown(TlsAbilityIds.search)
+    displayMessageToPlayer(lootingPlayer, "Failed To Search".colorize(Colors.red) + " Must target a lootable unit to search")
+    TlsSounds.errorSoundDef.playForPlayer(lootingPlayer)
+    return
+
+  var scaledSearchDuration = getUnitSearchDuration(lootingUnit, lootable.getSearchDurationPerLoot())
+  scaledSearchDuration = max(scaledSearchDuration, 0.1)
+
+  let startingMana = lootingUnit.getMana()
+  let manaRegenPerSecond = lootingUnit.getField(UNIT_RF_MANA_REGENERATION)
+  let manaCostPerSecond = getUnitSearchManaCostPerSecond(lootingUnit)
+
+  let maxPossibleLootCount = calculateMaxPossibleLootCount(startingMana, manaRegenPerSecond, manaCostPerSecond, scaledSearchDuration)
+  if (maxPossibleLootCount <= 0)
+  //{
+    lootingUnit.issueImmediateOrderById(Orders.stop)
+    lootingUnit.resetAbilityCooldown(TlsAbilityIds.search)
+
+    let manaRequired = calculateManaRequiredToLoot(manaRegenPerSecond, manaCostPerSecond, scaledSearchDuration)
+    
+    displayMessageToPlayer(lootingPlayer, "Failed To Search".colorize(Colors.red) + " You need {0} mana to loot this structure.".format(manaRequired.toString()))
+    TlsSounds.errorSoundDef.playForPlayer(lootingPlayer)
+    
+    if (getRealTimeSeconds() - g_notEnoughManaLastPlayedTime[lootingPlayer.getId()] > 2)
+      g_notEnoughManaLastPlayedTime[lootingPlayer.getId()] = getRealTimeSeconds()
+      doAfter(0.5, () -> g_notEnoughManaSoundDef.playForPlayer(lootingPlayer))
+    return
+  //}
+
+  let lootOperation = lootable.getLootOperation()
+  if (lootOperation != null and lootOperation.isRunning())
+  //{
+    if (lootOperation.getInteractingUnit() != lootingUnit)
+      lootingUnit.issueImmediateOrderById(Orders.stop)
+      lootingUnit.resetAbilityCooldown(TlsAbilityIds.search)
+      displayMessageToPlayer(lootingPlayer, "Failed To Search".colorize(Colors.red) + " Lootable is already being looted")
+      TlsSounds.errorSoundDef.playForPlayer(lootingPlayer)
+      return
+    else
+      let activeLootingOperation = Interaction.getInteraction(lootingUnit) castTo LootOperation
+
+      if (activeLootingOperation == null or
+          activeLootingOperation != lootOperation or
+          activeLootingOperation.typeId != LootOperation.typeId)
+        Log.error("Expected active looting operation to match")
+
+      // Log.info("unit is actively looting -> resetting")
+      resetUnitAnimationAfterRightClickingSameLootable(lootingUnit, activeLootingOperation)
+  //}
+  else
+  //{
+    let lootCountActual = clamp(maxPossibleLootCount, 0, lootable.getLootCount())
+    // Log.info("unit is starting to loot {0} times".format(lootCountActual.toString()))
+    prepareSearchSpell(lootingUnit, lootableUnit, lootCountActual)
+    lootable.startLooting(lootingUnit, lootCountActual)
+  //}
+
+// ============================================================================
+function onUnitIssuedUnitOrder()
+  let orderedUnit = GetOrderedUnit()
+  let targetUnit = GetOrderTargetUnit()
+  let issuedOrder = GetIssuedOrderId()
+
+  let unitCanSearch = orderedUnit.hasAbility(TlsAbilityIds.search)
+
+  // Stop and issue a search order instead
+  if (issuedOrder == Orders.smart and targetUnit.isLootable() and unitCanSearch)
+    // Log.info("ordered to search instead")
+    if (not orderedUnit.issueTargetOrder(ABILITY_SEARCH_ORDER, targetUnit))
+      Log.debug("Could not issue search order")
+    return
+
+  if (issuedOrder == OrderId(ABILITY_SEARCH_ORDER_HEROACTION) and targetUnit.isLootable() and unitCanSearch)
+    if (not orderedUnit.issueTargetOrder(ABILITY_SEARCH_ORDER, targetUnit))
+      Log.debug("Could not issue search order")
+    return
+
+  let lootingOperation = Interaction.getInteraction(orderedUnit) castTo LootOperation
+  if (lootingOperation == null or lootingOperation.typeId != LootOperation.typeId)
+    // Log.info("unit is not currently looting")
+    return
+
+  // If the order issued was search and its the same target lootable dont cancel the operation here.
+  // Instead, we'll resume the loot operation as if nothing happened.
+  if (issuedOrder == OrderId(ABILITY_SEARCH_ORDER) and lootingOperation.getLootableUnit() == targetUnit)
+    // Log.info("ordered to search same lootable")
+    return
+
+  // For any other case cancel the current operation
+  // Log.info("issued target order cancels looting")
+  lootingOperation.cancel()
+
+// ============================================================================
+public class LootRewardNotification extends Notification
+  private player m_player
+  private vec2 m_cameraPos
+  private SoundDefinition m_soundDef
+  private bool m_dueToLuckyHorseshoe
+  private bool m_affectedByLuckyPendant
+
+  // --------------------------------------------------------------------------
+  construct (int id, player p, vec2 cameraPos, SoundDefinition soundDef)
+    super(id, LOOT_REWARD_NOTIFICATION_DURATION)
+
+    m_player = p
+    m_cameraPos = cameraPos
+    m_soundDef = soundDef
+    m_dueToLuckyHorseshoe = false
+    m_affectedByLuckyPendant = false
+
+    setClickCommand(new RoutedCommand(() -> onClick()))
+
+  // --------------------------------------------------------------------------
+  function getDueToLuckyHorseshoe() returns bool
+    return m_dueToLuckyHorseshoe
+
+  // --------------------------------------------------------------------------
+  function setDueToLuckyHorseshoe(bool value)
+    m_dueToLuckyHorseshoe = value
+
+  // --------------------------------------------------------------------------
+  function getAffectedByLuckyPendant() returns bool
+    return m_affectedByLuckyPendant
+
+  // --------------------------------------------------------------------------
+  function setAffectedByLuckyPendant(bool value)
+    m_affectedByLuckyPendant = value
+
+  // --------------------------------------------------------------------------
+  override function onShow()
+    super.onShow()
+
+    if (m_soundDef != null)
+      m_soundDef.playForPlayer(m_player)
+
+  // --------------------------------------------------------------------------
+  private function onClick()
+    if (localPlayer == m_player)
+      PanCameraToTimedForPlayer(m_player, m_cameraPos.x, m_cameraPos.y, 0)
+
+// ============================================================================
+public class LootRewardNotificationFrame extends TextSimpleNotificationFrame
+  private framehandle m_luckyHorseshoeFrame
+  private framehandle m_pendantFrame
+
+  private StandardTooltip m_luckyHorseshoeTooltip
+  private StandardTooltip m_pendantTooltip
+
+  // --------------------------------------------------------------------------
+  construct ()
+    super (createFrame("LootRewardNotification", CONSOLE_UI_BACKDROP, 0, 0))
+
+    m_luckyHorseshoeTooltip = StandardTooltip.get()
+    m_luckyHorseshoeTooltip.setTooltip(LUCKY_HORSHOE_TOOLTIP, LUCKY_HORSHOE_TOOLTIP_EXTENDED)
+
+    m_luckyHorseshoeFrame = getFrame("HorseshoeFrame")
+    ..setTooltip(m_luckyHorseshoeTooltip.getTooltipFrame())
+    ..hide()
+
+    m_pendantTooltip = StandardTooltip.get()
+    m_pendantTooltip.setTooltip(PENDANT_TOOLTIP, PENDANT_TOOLTIP_EXTENDED)
+
+    m_pendantFrame = getFrame("PendantFrame")
+    ..setTooltip(m_pendantTooltip.getTooltipFrame())
+    ..hide()
+
+  // ----------------------------------------------------------------------------
+  ondestroy
+
+    m_luckyHorseshoeFrame.setTooltip(null)
+    m_luckyHorseshoeTooltip.release()
+
+    m_pendantFrame.setTooltip(null)
+    m_pendantTooltip.release()
+
+  // --------------------------------------------------------------------------
+  override protected function updateFrame()
+    super.updateFrame()
+
+    let lootRewardNotification = m_notification castTo LootRewardNotification
+    var offset = vec2(-0.0025, -0.0025)
+
+    let luckyHorseshoeVisible = lootRewardNotification != null and lootRewardNotification.getDueToLuckyHorseshoe()
+    m_luckyHorseshoeFrame.setVisible(luckyHorseshoeVisible)
+    if (luckyHorseshoeVisible)
+      m_luckyHorseshoeFrame.setPoint(FRAMEPOINT_TOPRIGHT, m_frame, FRAMEPOINT_TOPRIGHT, offset.x, offset.y)
+      offset.x -= m_luckyHorseshoeFrame.getWidth() + 0.0025
+
+    let pendantFrameVisible = lootRewardNotification != null and lootRewardNotification.getAffectedByLuckyPendant()
+    m_pendantFrame.setVisible(pendantFrameVisible)
+    if (pendantFrameVisible)
+      m_pendantFrame.setPoint(FRAMEPOINT_TOPRIGHT, m_frame, FRAMEPOINT_TOPRIGHT, offset.x, offset.y)
+
+// ============================================================================
+public function unit.isLootable() returns bool
+  return g_LootableUnitTypes.has(this.getTypeId())
+
+// ============================================================================
+public function getUnitSearchDuration(unit looter, real unscaledSearchDuration) returns real
+  var searchDuration = unscaledSearchDuration
+  // Shapeshifting Key decreases duration by 50%
+  let metadata = looter.getMetadata()
+  if (metadata != null)
+    let comp = metadata.getUnitPropertiesComponent()
+    if (comp != null)
+      searchDuration *= comp.getPropertyValue(UnitProperty.LOOT_DURATION_SCALE)
+  return searchDuration
+
+// ============================================================================
+public function getUnitSearchManaCostPerSecond(unit looter) returns real  
+  var manaCostPerSecond = looter.getAbility(ABILITY_ID_SEARCH).getField(ABILITY_ILF_MANA_COST, 0).toReal()
+  let metadata = looter.getMetadata()
+  if (metadata != null)
+    let comp = metadata.getUnitPropertiesComponent()
+    if (comp != null)
+      manaCostPerSecond *= comp.getPropertyValue(UnitProperty.LOOT_MANA_COST_SCALE)
+  return manaCostPerSecond
+
+// ============================================================================
+public function calculateManaRequiredToLoot(real manaRegenPerSecond, real manaCostPerSecond, real duration) returns int
+  let totalManaRegened = (manaRegenPerSecond * duration).floor()
+  let totalManaDrained = (manaCostPerSecond * duration).round()
+  return (totalManaRegened - totalManaDrained).abs()
+
+// ============================================================================
+function calculateMaxPossibleLootCount(real startingMana, real manaRegenPerSecond, real manaCostPerSecond, real duration) returns int
+  let totalManaRegened = (manaRegenPerSecond * duration).floor()
+  let totalManaDrained = (manaCostPerSecond * duration).round()
+  let totalManaCost = totalManaRegened - totalManaDrained
+  if (totalManaCost >= 0)
+    return INT_MAX
+  return (startingMana / totalManaCost.abs()).floor()
+
+// ============================================================================
+init
+  NotificationManager.notificationFrameFactory.registerFactory(LootRewardNotification.typeId, () -> new LootRewardNotificationFrame())
+
+  g_lootItemRewardSound = new SoundDefinition("sound\\interface\\pickupitem.flac", false, false)
+  g_lootItemRewardSound.volume = 126
+
+  g_LootableUnitTypes = new HashList<int>()
+
+  // Buildings
+  g_LootableUnitTypes.add(UNIT_ID_LOOTABLE_BARN)
+  g_LootableUnitTypes.add(UNIT_ID_LOOTABLE_BREWERY)
+  g_LootableUnitTypes.add(UNIT_ID_LOOTABLE_BUILDING_HORIZONTAL_BLUE)
+  g_LootableUnitTypes.add(UNIT_ID_LOOTABLE_BUILDING_HORIZONTAL_GREEN)
+  g_LootableUnitTypes.add(UNIT_ID_LOOTABLE_BUILDING_HORIZONTAL_RED)
+  g_LootableUnitTypes.add(UNIT_ID_LOOTABLE_BUILDING_LARGE_HORIZONTAL_GREEN)
+  g_LootableUnitTypes.add(UNIT_ID_LOOTABLE_BUILDING_LARGE_VERTICAL_PURPLE)
+  g_LootableUnitTypes.add(UNIT_ID_LOOTABLE_BUILDING_CHAPEL)
+  g_LootableUnitTypes.add(UNIT_ID_LOOTABLE_BUILDING_GRANARY)
+  g_LootableUnitTypes.add(UNIT_ID_LOOTABLE_HOUSE_LARGE_BLUE)
+  g_LootableUnitTypes.add(UNIT_ID_LOOTABLE_HOUSE_LARGE_RED)
+  g_LootableUnitTypes.add(UNIT_ID_LOOTABLE_HOUSE_SMALL_GREEN)
+  g_LootableUnitTypes.add(UNIT_ID_LOOTABLE_INN)
+  g_LootableUnitTypes.add(UNIT_ID_LOOTABLE_CATHEDRAL)
+  g_LootableUnitTypes.add(UNIT_ID_LOOTABLE_MARKET)
+  g_LootableUnitTypes.add(UNIT_ID_LOOTABLE_MINE)
+  g_LootableUnitTypes.add(UNIT_ID_LOOTABLE_SHIPYARD)
+  g_LootableUnitTypes.add(UNIT_ID_LOOTABLE_TAVERN)
+  g_LootableUnitTypes.add(UNIT_ID_LOOTABLE_TENT)
+  g_LootableUnitTypes.add(UNIT_ID_LOOTABLE_TOWER)
+  g_LootableUnitTypes.add(UNIT_ID_LOOTABLE_WINDMILL)
+
+  // Objects
+  g_LootableUnitTypes.add(UNIT_ID_LOOTABLE_BARREL)
+  g_LootableUnitTypes.add(UNIT_ID_LOOTABLE_CART)
+  g_LootableUnitTypes.add(UNIT_ID_LOOTABLE_CRATES)
+  g_LootableUnitTypes.add(UNIT_ID_LOOTABLE_MARKET_BAUBLES)
+  g_LootableUnitTypes.add(UNIT_ID_LOOTABLE_MARKET_STALL)
+  g_LootableUnitTypes.add(UNIT_ID_LOOTABLE_MARKET_TABLE)
+  g_LootableUnitTypes.add(UNIT_ID_LOOTABLE_MARKET_MINECART)
+  g_LootableUnitTypes.add(UNIT_ID_LOOTABLE_HAY)
+  g_LootableUnitTypes.add(UNIT_ID_LOOTABLE_JUNK_1)
+  g_LootableUnitTypes.add(UNIT_ID_LOOTABLE_JUNK_2)
+  g_LootableUnitTypes.add(UNIT_ID_LOOTABLE_CAGE)
+  
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_SPELL_CAST, function onSpellCast)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_SPELL_ENDCAST, function onSpellEndCast)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ISSUED_UNIT_ORDER, function onUnitIssuedUnitOrder)
+
+  g_notEnoughManaSoundDef = new SoundDefinition("sound\\dialogue\\genericwarnings\\genericwarningnomana1.flac")
+
+  registerDayEvent(function onDayStart)
+  onUnitIndex(() -> onUnitIndexDeindexed())
+  onUnitDeindex(() -> onUnitIndexDeindexed())
+  
+  for i = 0 to 2
+    g_lootFinishedSound[i] = new SoundDefinition("sound\\interface\\goodjob.flac", false, false)
+    g_lootFinishedSound[i].volume = 100
+    g_lootFinishedSound[i].pitch += i * 0.1

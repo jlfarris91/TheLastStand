@@ -9,7 +9,7 @@ import Suspend
 import ClosureTimers
 import Vector
 import Math
-import UnitComponent
+import UnitMetadata
 import TimerUtils
 import RefObject
 import CancellationToken
@@ -19,6 +19,8 @@ import GroupExtensions
 import TlsUnitIds
 import TlsAbilityIds
 import Unit_Tunnel
+import FX
+import ColorUtility
 
 LinkedList<TunnelOperation> g_activeTravelOperations = new LinkedList<TunnelOperation>()
 CallbackPeriodic g_updateTunnelOperations
@@ -26,10 +28,11 @@ Vector<BurrowDirtClump> g_activeDirtClumps = new Vector<BurrowDirtClump>(256)
 group g_tunnelEntrances = CreateGroup()
 group g_tunnelWaitingGroup = CreateGroup()
 
-constant real TRAVEL_DURATION = 3.0
+constant real TRAVEL_DURATION = 6.0
 constant real TUNNEL_OPERATION_FX_DURATION_OFFSET = 1.0
 constant real TUNNEL_MIN_DISTANCE = 256.0
-constant real TUNNEL_TRAVEL_TIMER = 0.1
+constant real TUNNEL_DIG_DIST_MAX = 2048 // match dig abil range in Unit_Tunnel.wurst
+constant real TUNNEL_TRAVEL_OP_UPDATE_INTERVAL = 0.1
 
 constant int EFFECT_COUNT = 16
 constant real EFFECT_SCALE = 0.3
@@ -175,9 +178,9 @@ public class TunnelEntranceComponent extends UnitComponent
   protected unit m_connectedTunnelEntrance = null
   private unit m_diggingTunnelTarget = null
   private unit m_diggingUnit = null
-  
   private group m_awaitingTravelGroup = null
   private CallbackPeriodic m_loadTimer = null
+  private effect m_rangeEffect = null
 
   // --------------------------------------------------------------------------
   construct(IUnitMetadata owner)
@@ -275,11 +278,13 @@ public class TunnelEntranceComponent extends UnitComponent
     
     g_tunnelEntrances.removeUnit(getOwnerUnit())
 
+    hideRangeEffect()
+
   // --------------------------------------------------------------------------
   protected function onUnitEnterTunnel(unit enteringUnit)
     // Log.info("onUnitEnterTunnel")
 
-    if (enteringUnit.getTypeId() == TlsUnitIds.Survivors.builder1 and not hasConnectedTunnelEntrance())
+    if (enteringUnit.getTypeId() == TlsUnitIds.Survivors.builder and not hasConnectedTunnelEntrance())
       onDiggingUnitEnterTunnel(enteringUnit)
       return
 
@@ -287,7 +292,7 @@ public class TunnelEntranceComponent extends UnitComponent
   protected function onUnitExitTunnel(unit exitingUnit)
     // Log.info("onUnitExitTunnel")
 
-    if (exitingUnit.getTypeId() == TlsUnitIds.Survivors.builder1 and not hasConnectedTunnelEntrance())
+    if (exitingUnit.getTypeId() == TlsUnitIds.Survivors.builder and not hasConnectedTunnelEntrance())
       onDiggingUnitExitTunnel()
       return
 
@@ -302,7 +307,7 @@ public class TunnelEntranceComponent extends UnitComponent
   private function onDiggingUnitExitTunnel()
 
     if (m_diggingTunnelTarget != null)
-      startDigOperation(m_diggingUnit, getOwnerUnit(), m_diggingTunnelTarget, TUNNEL_ENTRANCE_BUILD_DURATION)
+      startDigOperation(m_diggingUnit, getOwnerUnit(), m_diggingTunnelTarget, TUNNEL_ENTRANCE_BUILD_DURATION.toReal())
     else
       m_diggingUnit = null
 
@@ -324,6 +329,8 @@ public class TunnelEntranceComponent extends UnitComponent
 
     setupLoadForTravel()
 
+    updateRangeEffect()
+
   // --------------------------------------------------------------------------
   protected function onTunnelDigCancel()
     // Log.info("onTunnelDigCancel")
@@ -333,6 +340,8 @@ public class TunnelEntranceComponent extends UnitComponent
     m_diggingUnit = null
 
     setupLoadForBuilder()
+
+    updateRangeEffect()
 
   // --------------------------------------------------------------------------
   private function unloadUnits()
@@ -398,6 +407,29 @@ public class TunnelEntranceComponent extends UnitComponent
     //else
     //  Log.info("TEC", "tryCastLoad", "", "failed to issue load order")
 
+  // --------------------------------------------------------------------------
+  protected function showRangeEffect()
+
+    if (hasConnectedTunnelEntrance())
+      return
+
+    if (m_rangeEffect == null)
+      let ownerUnit = getOwnerUnit()
+      m_rangeEffect = FX.createRangeEffect(ownerUnit.getPos(), TUNNEL_DIG_DIST_MAX, Colors.white, ownerUnit.getOwner())
+
+  // --------------------------------------------------------------------------
+  protected function updateRangeEffect()
+    if (m_rangeEffect != null)
+      hideRangeEffect()
+      showRangeEffect()
+
+  // --------------------------------------------------------------------------
+  protected function hideRangeEffect()
+    
+    if (m_rangeEffect != null)
+      m_rangeEffect.destr()
+      m_rangeEffect = null
+
 // ============================================================================
 public function unit.getTunnelEntranceComponent() returns TunnelEntranceComponent
   if (this == null)
@@ -412,7 +444,7 @@ public function IUnitMetadata.getTunnelEntranceComponent() returns TunnelEntranc
   return this.getComponent(TunnelEntranceComponent.typeId) castTo TunnelEntranceComponent
 
 // ============================================================================
-public function IUnitMetadata.getOrAddTunnelEntranceComponentgetTunnelEntranceComponent() returns TunnelEntranceComponent
+public function IUnitMetadata.getOrAddTunnelEntranceComponent() returns TunnelEntranceComponent
   var component = this.getTunnelEntranceComponent()
   if (component == null)
     component = this.addComponent(new TunnelEntranceComponent(this)) castTo TunnelEntranceComponent
@@ -632,7 +664,7 @@ function updateTunnelOperations()
 function registerTunnelOperation(TunnelOperation op)
   g_activeTravelOperations.add(op)
   if (g_activeTravelOperations.size() == 1 and g_updateTunnelOperations == null)
-    g_updateTunnelOperations = doPeriodically(0.2, (CallbackPeriodic cb) -> updateTunnelOperations())
+    g_updateTunnelOperations = doPeriodically(TUNNEL_TRAVEL_OP_UPDATE_INTERVAL, (CallbackPeriodic cb) -> updateTunnelOperations())
 
 // ============================================================================
 function unregisterTunnelOperation(TunnelOperation op)
@@ -640,6 +672,24 @@ function unregisterTunnelOperation(TunnelOperation op)
   if (g_activeTravelOperations.isEmpty() and g_updateTunnelOperations != null)
     destroy g_updateTunnelOperations
     g_updateTunnelOperations = null
+
+// ============================================================================
+function onUnitSelected()
+  let selectedUnit = GetTriggerUnit()
+  if (selectedUnit.getTypeId() != TlsUnitIds.tunnelEntrance)
+    return
+  let comp = selectedUnit.getMetadata().getTunnelEntranceComponent()
+  if (comp != null)
+    comp.showRangeEffect()
+
+// ============================================================================
+function onUnitDeselected()
+  let selectedUnit = GetTriggerUnit()
+  if (selectedUnit.getTypeId() != TlsUnitIds.tunnelEntrance)
+    return
+  let comp = selectedUnit.getMetadata().getTunnelEntranceComponent()
+  if (comp != null)
+    comp.hideRangeEffect()
 
 // ============================================================================
 init
@@ -654,3 +704,6 @@ init
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ISSUED_ORDER, function onUnitIssuedOrder)
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ISSUED_POINT_ORDER, function onUnitIssuedOrder)
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ISSUED_TARGET_ORDER, function onUnitIssuedTargetOrder)
+
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_SELECTED, function onUnitSelected)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_DESELECTED, function onUnitDeselected)

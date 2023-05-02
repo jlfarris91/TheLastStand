@@ -1,0 +1,1143 @@
+package Unit_Gates
+import CardinalUnitDefinition
+import TlsBuildingDefinition
+import BuildingUndeadTarget
+import HashList
+import HashMap
+import ObjectIdGenerator
+import GameConstants
+import TlsUpgradeIds
+
+// If there are any moveable units in the way when a gate rotates using the old
+// rotate ability (which used ReplaceUnitTLS) the gate had a chance of
+// literally jumping to a new position. This method uses upgrades instead
+// which avoids the jumping bug but adds a ton of complexity as you can see.
+// We create 1 gate unit for each permutation of open/closed and a unit
+// for "rotate" open/closed which is so that the open/closed gate can upgradeT
+// to the rotated equivalent and avoid using replace. After the gate succesfully
+// upgrades to its "rotate" counterpart it is replaced with the regular unit.
+
+// We need one unit each for the open and closed variations since the pathing maps change
+// The gate_build unit is the one the builder can actually build
+
+constant real SCALE_DIAGONAL = 0.36                 // How large the diagonal gate model is
+constant real SCALE_HORIZONTAL = 0.38               // How large the horizonta/vertical gate model is
+
+HashList<int> g_allGateIds = new HashList<int>()
+HashList<int> g_allOpenGateIds = new HashList<int>()
+HashList<int> g_allClosedGateIds = new HashList<int>()
+HashList<int> g_allClosedBuildGateIds = new HashList<int>()
+HashList<int> g_allOpenBuildGateIds = new HashList<int>()
+public HashMap<int, GateCardinalUnitDefinitionHelper> g_unitTypeToGateHelperMap = new HashMap<int, GateCardinalUnitDefinitionHelper>()
+
+public GateCardinalUnitDefinitionHelper g_gate1Helper
+public GateCardinalUnitDefinitionHelper g_gate2Helper
+public GateCardinalUnitDefinitionHelper g_gate3Helper
+public GateCardinalUnitDefinitionHelper g_gate4Helper
+
+// ============================================================================
+// 
+// Wood Gate
+//
+// ============================================================================
+
+constant int GATE1_GOLD_COST = 0
+constant int GATE1_LUMBER_COST = 150
+constant int GATE1_HEALTH = 500
+constant int GATE1_ARMOR = 1
+constant int GATE1_RECYCLE_GOLD_COST = GATE1_GOLD_COST
+constant int GATE1_RECYCLE_LUMBER_COST = GATE1_LUMBER_COST
+
+public HashList<int> g_gate1Ids = new HashList<int>()
+
+public class Gate1Ids
+  static constant int ew_build_closed = compiletime(UNIT_ID_GEN.next())
+  static constant int ew_open = compiletime(UNIT_ID_GEN.next())
+  static constant int ew_closed = compiletime(UNIT_ID_GEN.next())
+  static constant int ew_alive = compiletime(UNIT_ID_GEN.next())
+  static constant int ew_dead = compiletime(UNIT_ID_GEN.next())
+  static constant int nesw_build_closed = compiletime(UNIT_ID_GEN.next())
+  static constant int nesw_open = compiletime(UNIT_ID_GEN.next())
+  static constant int nesw_closed = compiletime(UNIT_ID_GEN.next())
+  static constant int nesw_alive = compiletime(UNIT_ID_GEN.next())
+  static constant int nesw_dead = compiletime(UNIT_ID_GEN.next())
+  static constant int ns_build_closed = compiletime(UNIT_ID_GEN.next())
+  static constant int ns_open = compiletime(UNIT_ID_GEN.next())
+  static constant int ns_closed = compiletime(UNIT_ID_GEN.next())
+  static constant int ns_alive = compiletime(UNIT_ID_GEN.next())
+  static constant int ns_dead = compiletime(UNIT_ID_GEN.next())
+  static constant int nwse_build_closed = compiletime(UNIT_ID_GEN.next())
+  static constant int nwse_open = compiletime(UNIT_ID_GEN.next())
+  static constant int nwse_closed = compiletime(UNIT_ID_GEN.next())
+  static constant int nwse_alive = compiletime(UNIT_ID_GEN.next())
+  static constant int nwse_dead = compiletime(UNIT_ID_GEN.next())
+
+// ============================================================================
+// 
+// Iron Gate
+//
+// ============================================================================
+
+constant int GATE2_GOLD_COST = 0
+constant int GATE2_LUMBER_COST = 550
+constant int GATE2_HEALTH = 1000
+constant int GATE2_ARMOR = 2
+constant int GATE2_RECYCLE_GOLD_COST = GATE1_RECYCLE_GOLD_COST + GATE2_GOLD_COST
+constant int GATE2_RECYCLE_LUMBER_COST = GATE1_RECYCLE_LUMBER_COST + GATE2_LUMBER_COST
+
+public HashList<int> g_gate2Ids = new HashList<int>()
+
+public class Gate2Ids
+  static constant int ew_build_open = compiletime(UNIT_ID_GEN.next())
+  static constant int ew_build_closed = compiletime(UNIT_ID_GEN.next())
+  static constant int ew_open = compiletime(UNIT_ID_GEN.next())
+  static constant int ew_closed = compiletime(UNIT_ID_GEN.next())
+  static constant int ew_alive = compiletime(UNIT_ID_GEN.next())
+  static constant int ew_dead = compiletime(UNIT_ID_GEN.next())
+  static constant int nesw_build_open = compiletime(UNIT_ID_GEN.next())
+  static constant int nesw_build_closed = compiletime(UNIT_ID_GEN.next())
+  static constant int nesw_open = compiletime(UNIT_ID_GEN.next())
+  static constant int nesw_closed = compiletime(UNIT_ID_GEN.next())
+  static constant int nesw_alive = compiletime(UNIT_ID_GEN.next())
+  static constant int nesw_dead = compiletime(UNIT_ID_GEN.next())
+  static constant int ns_build_open = compiletime(UNIT_ID_GEN.next())
+  static constant int ns_build_closed = compiletime(UNIT_ID_GEN.next())
+  static constant int ns_open = compiletime(UNIT_ID_GEN.next())
+  static constant int ns_closed = compiletime(UNIT_ID_GEN.next())
+  static constant int ns_alive = compiletime(UNIT_ID_GEN.next())
+  static constant int ns_dead = compiletime(UNIT_ID_GEN.next())
+  static constant int nwse_build_open = compiletime(UNIT_ID_GEN.next())
+  static constant int nwse_build_closed = compiletime(UNIT_ID_GEN.next())
+  static constant int nwse_open = compiletime(UNIT_ID_GEN.next())
+  static constant int nwse_closed = compiletime(UNIT_ID_GEN.next())
+  static constant int nwse_alive = compiletime(UNIT_ID_GEN.next())
+  static constant int nwse_dead = compiletime(UNIT_ID_GEN.next())
+
+// ============================================================================
+// 
+// Oak Gate
+//
+// ============================================================================
+
+constant int GATE3_GOLD_COST = 3
+constant int GATE3_LUMBER_COST = 1000
+constant int GATE3_HEALTH = 2000
+constant int GATE3_ARMOR = 3
+constant int GATE3_RECYCLE_GOLD_COST = GATE2_RECYCLE_GOLD_COST + GATE3_GOLD_COST
+constant int GATE3_RECYCLE_LUMBER_COST = GATE2_RECYCLE_LUMBER_COST + GATE3_LUMBER_COST
+
+public HashList<int> g_gate3Ids = new HashList<int>()
+
+public class Gate3Ids
+  static constant int ew_build_open = compiletime(UNIT_ID_GEN.next())
+  static constant int ew_build_closed = compiletime(UNIT_ID_GEN.next())
+  static constant int ew_open = compiletime(UNIT_ID_GEN.next())
+  static constant int ew_closed = compiletime(UNIT_ID_GEN.next())
+  static constant int ew_alive = compiletime(UNIT_ID_GEN.next())
+  static constant int ew_dead = compiletime(UNIT_ID_GEN.next())
+  static constant int nesw_build_open = compiletime(UNIT_ID_GEN.next())
+  static constant int nesw_build_closed = compiletime(UNIT_ID_GEN.next())
+  static constant int nesw_open = compiletime(UNIT_ID_GEN.next())
+  static constant int nesw_closed = compiletime(UNIT_ID_GEN.next())
+  static constant int nesw_alive = compiletime(UNIT_ID_GEN.next())
+  static constant int nesw_dead = compiletime(UNIT_ID_GEN.next())
+  static constant int ns_build_open = compiletime(UNIT_ID_GEN.next())
+  static constant int ns_build_closed = compiletime(UNIT_ID_GEN.next())
+  static constant int ns_open = compiletime(UNIT_ID_GEN.next())
+  static constant int ns_closed = compiletime(UNIT_ID_GEN.next())
+  static constant int ns_alive = compiletime(UNIT_ID_GEN.next())
+  static constant int ns_dead = compiletime(UNIT_ID_GEN.next())
+  static constant int nwse_build_open = compiletime(UNIT_ID_GEN.next())
+  static constant int nwse_build_closed = compiletime(UNIT_ID_GEN.next())
+  static constant int nwse_open = compiletime(UNIT_ID_GEN.next())
+  static constant int nwse_closed = compiletime(UNIT_ID_GEN.next())
+  static constant int nwse_alive = compiletime(UNIT_ID_GEN.next())
+  static constant int nwse_dead = compiletime(UNIT_ID_GEN.next())
+
+// ============================================================================
+// 
+// Decorated Gate
+//
+// ============================================================================
+
+constant int GATE4_GOLD_COST = 5
+constant int GATE4_LUMBER_COST = 1900
+constant int GATE4_HEALTH = 4000
+constant int GATE4_ARMOR = 4
+constant int GATE4_RECYCLE_GOLD_COST = GATE3_RECYCLE_GOLD_COST + GATE4_GOLD_COST
+constant int GATE4_RECYCLE_LUMBER_COST = GATE3_RECYCLE_LUMBER_COST + GATE4_LUMBER_COST
+
+public HashList<int> g_gate4Ids = new HashList<int>()
+
+public class Gate4Ids
+  static constant int ew_build_open = compiletime(UNIT_ID_GEN.next())
+  static constant int ew_build_closed = compiletime(UNIT_ID_GEN.next())
+  static constant int ew_open = compiletime(UNIT_ID_GEN.next())
+  static constant int ew_closed = compiletime(UNIT_ID_GEN.next())
+  static constant int ew_alive = compiletime(UNIT_ID_GEN.next())
+  static constant int ew_dead = compiletime(UNIT_ID_GEN.next())
+  static constant int nesw_build_open = compiletime(UNIT_ID_GEN.next())
+  static constant int nesw_build_closed = compiletime(UNIT_ID_GEN.next())
+  static constant int nesw_open = compiletime(UNIT_ID_GEN.next())
+  static constant int nesw_closed = compiletime(UNIT_ID_GEN.next())
+  static constant int nesw_alive = compiletime(UNIT_ID_GEN.next())
+  static constant int nesw_dead = compiletime(UNIT_ID_GEN.next())
+  static constant int ns_build_open = compiletime(UNIT_ID_GEN.next())
+  static constant int ns_build_closed = compiletime(UNIT_ID_GEN.next())
+  static constant int ns_open = compiletime(UNIT_ID_GEN.next())
+  static constant int ns_closed = compiletime(UNIT_ID_GEN.next())
+  static constant int ns_alive = compiletime(UNIT_ID_GEN.next())
+  static constant int ns_dead = compiletime(UNIT_ID_GEN.next())
+  static constant int nwse_build_open = compiletime(UNIT_ID_GEN.next())
+  static constant int nwse_build_closed = compiletime(UNIT_ID_GEN.next())
+  static constant int nwse_open = compiletime(UNIT_ID_GEN.next())
+  static constant int nwse_closed = compiletime(UNIT_ID_GEN.next())
+  static constant int nwse_alive = compiletime(UNIT_ID_GEN.next())
+  static constant int nwse_dead = compiletime(UNIT_ID_GEN.next())
+
+// ============================================================================
+public function removeAllGateAnimationProperties(unit gateUnit)
+  gateUnit.removeAnimationProperties("Alternate")
+  gateUnit.removeAnimationProperties("First")
+  gateUnit.removeAnimationProperties("Second")
+  gateUnit.removeAnimationProperties("Third")
+  gateUnit.removeAnimationProperties("Fourth")
+
+// ============================================================================
+public function getGateAnimationProperties(CardinalUnitAngle angle, bool open) returns string
+
+  string facingDirectionProperty
+
+  switch (angle)
+    case CardinalUnitAngle.EW
+      facingDirectionProperty = "First"
+    case CardinalUnitAngle.NESW
+      facingDirectionProperty = "Second"
+    case CardinalUnitAngle.NS
+      facingDirectionProperty = "Third"
+    case CardinalUnitAngle.NWSE
+      facingDirectionProperty = "Fourth"
+
+  if (open)
+    return "{0} Alternate".format(facingDirectionProperty)
+
+  return facingDirectionProperty
+
+// ============================================================================
+public class GateCardinalUnitDefinitionHelper extends CardinalUnitDefinitionHelper
+  private string m_name
+  private int array[4] m_openIds
+  private int array[4] m_closedIds
+  private int array[4] m_openBuildIds
+  private int array[4] m_aliveIds       // Breakable api
+  private int array[4] m_deadIds        // 
+  private string array[4] m_openPathMaps
+  private string array[4] m_openIconPaths
+  private string array[4] m_closedIconPaths
+
+  // --------------------------------------------------------------------------
+  construct(string name)
+    m_name = name
+
+    setPathMap(CardinalUnitAngle.EW, "PathTextures\\Gate_0_Closed.tga")
+    setPathMap(CardinalUnitAngle.NESW, "PathTextures\\Gate_225_Closed.tga")
+    setPathMap(CardinalUnitAngle.NS, "PathTextures\\Gate_270_Closed.tga")
+    setPathMap(CardinalUnitAngle.NWSE, "PathTextures\\Gate_315_Closed.tga")
+
+    setOpenPathMap(CardinalUnitAngle.EW, "PathTextures\\Gate_0_Open.tga")
+    setOpenPathMap(CardinalUnitAngle.NESW, "PathTextures\\Gate_225_Open.tga")
+    setOpenPathMap(CardinalUnitAngle.NS, "PathTextures\\Gate_270_Open.tga")
+    setOpenPathMap(CardinalUnitAngle.NWSE, "PathTextures\\Gate_315_Open.tga")
+
+  // --------------------------------------------------------------------------
+  override function getAngleForUnitType(int unitType) returns optionalCardinalUnitAngle
+    for i = 0 to 3
+      if (unitType == m_ids[i] or
+          unitType == m_openIds[i] or
+          unitType == m_closedIds[i] or
+          unitType == m_openBuildIds[i] or
+          unitType == m_aliveIds[i] or
+          unitType == m_deadIds[i])
+        return some(i castTo CardinalUnitAngle)
+    return none_CardinalUnitAngle()
+
+  // ----------------------------------------------------------------------------
+  function getName() returns string
+    return m_name
+
+  // --------------------------------------------------------------------------
+  function getOpenId(CardinalUnitAngle angle) returns int
+    return m_openIds[angle castTo int]
+
+  // --------------------------------------------------------------------------
+  function setOpenId(CardinalUnitAngle angle, int unitId)
+    m_openIds[angle castTo int] = unitId
+
+  // --------------------------------------------------------------------------
+  function getClosedId(CardinalUnitAngle angle) returns int
+    return m_closedIds[angle castTo int]
+
+  // --------------------------------------------------------------------------
+  function setClosedId(CardinalUnitAngle angle, int unitId)
+    m_closedIds[angle castTo int] = unitId
+
+  // --------------------------------------------------------------------------
+  function getClosedBuildId(CardinalUnitAngle angle) returns int
+    return getId(angle)
+
+  // --------------------------------------------------------------------------
+  function setClosedBuildId(CardinalUnitAngle angle, int unitId)
+    setId(angle, unitId)
+
+  // --------------------------------------------------------------------------
+  function getOpenBuildId(CardinalUnitAngle angle) returns int
+    return m_openBuildIds[angle castTo int]
+
+  // --------------------------------------------------------------------------
+  function setOpenBuildId(CardinalUnitAngle angle, int unitId)
+    m_openBuildIds[angle castTo int] = unitId
+
+  // ----------------------------------------------------------------------------
+  function getAliveId(CardinalUnitAngle angle) returns int
+    return m_aliveIds[angle castTo int]
+  
+  // ----------------------------------------------------------------------------
+  function setAliveId(CardinalUnitAngle angle, int value)
+    m_aliveIds[angle castTo int] = value
+
+  // ----------------------------------------------------------------------------
+  function getDeadId(CardinalUnitAngle angle) returns int
+    return m_deadIds[angle castTo int]
+  
+  // ----------------------------------------------------------------------------
+  function setDeadId(CardinalUnitAngle angle, int value)
+    m_deadIds[angle castTo int] = value
+
+  // --------------------------------------------------------------------------
+  function getOpenPathMap(CardinalUnitAngle angle) returns string
+    return m_openPathMaps[angle castTo int]
+
+  // --------------------------------------------------------------------------
+  function setOpenPathMap(CardinalUnitAngle angle, string pathMap)
+    m_openPathMaps[angle castTo int] = pathMap
+
+  // --------------------------------------------------------------------------
+  function getClosedPathMap(CardinalUnitAngle angle) returns string
+    return super.getPathMap(angle)
+
+  // --------------------------------------------------------------------------
+  function setClosedPathMap(CardinalUnitAngle angle, string pathMap)
+    super.setPathMap(angle, pathMap)
+
+  // --------------------------------------------------------------------------
+  function getOpenIconPath(CardinalUnitAngle angle) returns string
+    return m_openIconPaths[angle castTo int]
+
+  // --------------------------------------------------------------------------
+  function setOpenIconPath(CardinalUnitAngle angle, string iconPath)
+    m_openIconPaths[angle castTo int] = iconPath
+
+  // --------------------------------------------------------------------------
+  function getClosedIconPath(CardinalUnitAngle angle) returns string
+    return m_closedIconPaths[angle castTo int]
+
+  // --------------------------------------------------------------------------
+  function setClosedIconPath(CardinalUnitAngle angle, string iconPath)
+    m_closedIconPaths[angle castTo int] = iconPath
+
+//=============================================================================
+function createGateUnitVariations()
+
+  createGate1UnitVariations(CardinalUnitAngle.EW, "Vertical (EW)", SCALE_HORIZONTAL)
+  createGate1UnitVariations(CardinalUnitAngle.NESW, "Diagonal (NE SW)", SCALE_DIAGONAL)
+  createGate1UnitVariations(CardinalUnitAngle.NS, "Horizontal (NS)", SCALE_HORIZONTAL)
+  createGate1UnitVariations(CardinalUnitAngle.NWSE, "Diagonal (NW SE)", SCALE_DIAGONAL)
+
+  createGate2UnitVariations(CardinalUnitAngle.EW, "Vertical (EW)", SCALE_HORIZONTAL)
+  createGate2UnitVariations(CardinalUnitAngle.NESW, "Diagonal (NE SW)", SCALE_DIAGONAL)
+  createGate2UnitVariations(CardinalUnitAngle.NS, "Horizontal (NS)", SCALE_HORIZONTAL)
+  createGate2UnitVariations(CardinalUnitAngle.NWSE, "Diagonal (NW SE)", SCALE_DIAGONAL)
+
+  createGate3UnitVariations(CardinalUnitAngle.EW, "Vertical (EW)", SCALE_HORIZONTAL)
+  createGate3UnitVariations(CardinalUnitAngle.NESW, "Diagonal (NE SW)", SCALE_DIAGONAL)
+  createGate3UnitVariations(CardinalUnitAngle.NS, "Horizontal (NS)", SCALE_HORIZONTAL)
+  createGate3UnitVariations(CardinalUnitAngle.NWSE, "Diagonal (NW SE)", SCALE_DIAGONAL)
+
+  createGate4UnitVariations(CardinalUnitAngle.EW, "Vertical (EW)", SCALE_HORIZONTAL)
+  createGate4UnitVariations(CardinalUnitAngle.NESW, "Diagonal (NE SW)", SCALE_DIAGONAL)
+  createGate4UnitVariations(CardinalUnitAngle.NS, "Horizontal (NS)", SCALE_HORIZONTAL)
+  createGate4UnitVariations(CardinalUnitAngle.NWSE, "Diagonal (NW SE)", SCALE_DIAGONAL)
+
+//=============================================================================
+function createGate1UnitVariations(CardinalUnitAngle angle, string name, real scale)
+
+  let gateHelper = g_gate1Helper
+  let upgradesToGateHelper = g_gate2Helper
+  
+  defineOpenGateUnit(gateHelper, gateHelper.getOpenId(angle), angle, upgradesToGateHelper)
+    ..setScalingValue(scale)
+    ..setupGate1Definition()
+
+  defineClosedGateUnit(gateHelper, gateHelper.getClosedId(angle), angle, upgradesToGateHelper)
+    ..setScalingValue(scale)
+    ..setupGate1Definition()
+
+  defineClosedBuildGateUnit(gateHelper, gateHelper.getClosedBuildId(angle), angle, upgradesToGateHelper)
+    ..setScalingValue(scale)
+    ..setTooltipBasic("Build " + gateHelper.getName())
+    ..setTooltipExtendedRotatable("|cffffcc00" + name + "|r|nBuild a weak gate that can be opened and closed to allow or prevent access to your camp.")
+    ..setGoldCost(GATE1_GOLD_COST)
+    ..setLumberCost(GATE1_LUMBER_COST)
+    ..setButtonPositionX(2)
+    ..setButtonPositionY(1)
+    ..setRequirements(commaList(TlsUnitIds.headquarters1))
+    ..setupGate1Definition()
+
+  defineAliveGateUnit(gateHelper, gateHelper.getAliveId(angle), angle, upgradesToGateHelper)
+    ..setScalingValue(scale)
+    ..setupGate1Definition()
+
+  defineDeadGateUnit(gateHelper, gateHelper.getDeadId(angle), angle)
+    ..setScalingValue(scale)
+    ..setRepairGoldCost(0)
+    ..setRepairGoldCost((GATE1_LUMBER_COST * BUILDING_REPAIR_BROKEN_GOLD_SCALAR).floor())
+    ..setRepairLumberCost((GATE1_LUMBER_COST * BUILDING_REPAIR_BROKEN_LUMBER_SCALAR).floor())
+    ..setupGate1Definition()
+
+//=============================================================================
+function BaseGateDefinition.setupGate1Definition()
+  this
+    ..setHitPointsMaximumBase(GATE1_HEALTH)
+    ..setDefenseBase(GATE1_ARMOR)
+    ..setRepairTime(REPAIR_TIME_BUILDING_WALL)
+    ..setRepairGoldCost((GATE1_GOLD_COST * BUILDING_REPAIR_GOLD_SCALAR).floor())
+    ..setRepairLumberCost((GATE1_LUMBER_COST * BUILDING_REPAIR_LUMBER_SCALAR).floor())
+    ..setRecycleGoldRewarded(GATE1_RECYCLE_GOLD_COST)
+    ..setRecycleLumberRewarded(GATE1_RECYCLE_LUMBER_COST)
+
+//=============================================================================
+function createGate2UnitVariations(CardinalUnitAngle angle, string name, real scale)
+
+  let gateHelper = g_gate2Helper
+  let upgradesToGateHelper = g_gate3Helper
+
+  defineOpenGateUnit(gateHelper, gateHelper.getOpenId(angle), angle, upgradesToGateHelper)
+    ..setScalingValue(scale)
+    ..setupGate2Definition()
+
+  defineClosedGateUnit(gateHelper, gateHelper.getClosedId(angle), angle, upgradesToGateHelper)
+    ..setScalingValue(scale)
+    ..setupGate2Definition()
+
+  defineClosedBuildGateUnit(gateHelper, gateHelper.getClosedBuildId(angle), angle, upgradesToGateHelper)
+    ..setScalingValue(scale)
+    ..setTooltipBasic("Upgrade to " + gateHelper.getName())
+    ..setTooltipExtended("|cffffcc00" + name + "|r|nUpgrade to a stronger gate that can be opened and closed to allow or prevent access to your camp.")
+    ..setGoldCost(GATE2_GOLD_COST)
+    ..setLumberCost(GATE2_LUMBER_COST)
+    ..setRequirements(commaList(TlsUnitIds.workbench))
+    ..setupGate2Definition()
+
+  defineOpenBuildGateUnit(gateHelper, gateHelper.getOpenBuildId(angle), angle, upgradesToGateHelper)
+    ..setScalingValue(scale)
+    ..setTooltipBasic("Upgrade to " + gateHelper.getName())
+    ..setTooltipExtended("|cffffcc00" + name + "|r|nUpgrade to a stronger gate that can be opened and closed to allow or prevent access to your camp.")
+    ..setGoldCost(GATE2_GOLD_COST)
+    ..setLumberCost(GATE2_LUMBER_COST)
+    ..setRequirements(commaList(TlsUnitIds.workbench))
+    ..setupGate2Definition()
+
+  defineAliveGateUnit(gateHelper, gateHelper.getAliveId(angle), angle, upgradesToGateHelper)
+    ..setScalingValue(scale)
+    ..setupGate2Definition()
+
+  defineDeadGateUnit(gateHelper, gateHelper.getDeadId(angle), angle)
+    ..setScalingValue(scale)
+    ..setRepairGoldCost((GATE2_LUMBER_COST * BUILDING_REPAIR_BROKEN_GOLD_SCALAR).floor())
+    ..setRepairLumberCost((GATE2_LUMBER_COST * BUILDING_REPAIR_BROKEN_LUMBER_SCALAR).floor())
+    ..setupGate2Definition()
+
+//=============================================================================
+function BaseGateDefinition.setupGate2Definition()
+  this
+    ..setHitPointsMaximumBase(GATE2_HEALTH)
+    ..setDefenseBase(GATE2_ARMOR)
+    ..setRepairTime(REPAIR_TIME_BUILDING_WALL)
+    ..setRepairGoldCost((GATE2_GOLD_COST * BUILDING_REPAIR_GOLD_SCALAR).floor())
+    ..setRepairLumberCost((GATE2_LUMBER_COST * BUILDING_REPAIR_LUMBER_SCALAR).floor())
+    ..setRecycleGoldRewarded(GATE2_RECYCLE_GOLD_COST)
+    ..setRecycleLumberRewarded(GATE2_RECYCLE_LUMBER_COST)
+
+//=============================================================================
+function createGate3UnitVariations(CardinalUnitAngle angle, string name, real scale)
+
+  let gateHelper = g_gate3Helper
+  let upgradesToGateHelper = g_gate4Helper
+
+  defineOpenGateUnit(gateHelper, gateHelper.getOpenId(angle), angle, upgradesToGateHelper)
+    ..setScalingValue(scale)
+    ..setupGate3Definition()
+
+  defineClosedGateUnit(gateHelper, gateHelper.getClosedId(angle), angle, upgradesToGateHelper)
+    ..setScalingValue(scale)
+    ..setupGate3Definition()
+
+  defineClosedBuildGateUnit(gateHelper, gateHelper.getClosedBuildId(angle), angle, upgradesToGateHelper)
+    ..setScalingValue(scale)
+    ..setTooltipBasic("Upgrade to " + gateHelper.getName())
+    ..setTooltipExtended("|cffffcc00" + name + "|r|nUpgrade to an even stronger gate that can be opened and closed to allow or prevent access to your camp.")
+    ..setGoldCost(GATE3_GOLD_COST)
+    ..setLumberCost(GATE3_LUMBER_COST)
+    ..setRequirements(commaList(TlsUnitIds.headquarters1))
+    ..setupGate3Definition()
+
+  defineOpenBuildGateUnit(gateHelper, gateHelper.getOpenBuildId(angle), angle, upgradesToGateHelper)
+    ..setScalingValue(scale)
+    ..setTooltipBasic("Upgrade to " + g_gate3Helper.getName())
+    ..setTooltipExtended("|cffffcc00" + name + "|r|nUpgrade to an even stronger gate that can be opened and closed to allow or prevent access to your camp.")
+    ..setGoldCost(GATE3_GOLD_COST)
+    ..setLumberCost(GATE3_LUMBER_COST)
+    ..setRequirements(commaList(TlsUnitIds.headquarters1))
+    ..setupGate3Definition()
+
+  defineAliveGateUnit(gateHelper, gateHelper.getAliveId(angle), angle, upgradesToGateHelper)
+    ..setScalingValue(scale)
+    ..setupGate3Definition()
+
+  defineDeadGateUnit(gateHelper, gateHelper.getDeadId(angle), angle)
+    ..setScalingValue(scale)
+    ..setRepairGoldCost((GATE3_LUMBER_COST * BUILDING_REPAIR_BROKEN_GOLD_SCALAR).floor())
+    ..setRepairLumberCost((GATE3_LUMBER_COST * BUILDING_REPAIR_BROKEN_LUMBER_SCALAR).floor())
+    ..setupGate3Definition()
+
+//=============================================================================
+function BaseGateDefinition.setupGate3Definition()
+  this
+    ..setHitPointsMaximumBase(GATE3_HEALTH)
+    ..setDefenseBase(GATE3_ARMOR)
+    ..setRepairTime(REPAIR_TIME_BUILDING_WALL)
+    ..setRepairGoldCost((GATE3_GOLD_COST * BUILDING_REPAIR_GOLD_SCALAR).floor())
+    ..setRepairLumberCost((GATE3_LUMBER_COST * BUILDING_REPAIR_LUMBER_SCALAR).floor())
+    ..setRecycleGoldRewarded(GATE3_RECYCLE_GOLD_COST)
+    ..setRecycleLumberRewarded(GATE3_RECYCLE_LUMBER_COST)
+
+//=============================================================================
+function createGate4UnitVariations(CardinalUnitAngle angle, string name, real scale)
+
+  let gateHelper = g_gate4Helper
+
+  defineOpenGateUnit(gateHelper, gateHelper.getOpenId(angle), angle, null)
+    ..setScalingValue(scale)
+    ..setupGate4Definition()
+
+  defineClosedGateUnit(gateHelper, gateHelper.getClosedId(angle), angle, null)
+    ..setScalingValue(scale)
+    ..setupGate4Definition()
+
+  defineClosedBuildGateUnit(gateHelper, gateHelper.getClosedBuildId(angle), angle, null)
+    ..setScalingValue(scale)
+    ..setTooltipBasic("Upgrade to " + gateHelper.getName())
+    ..setTooltipExtended("|cffffcc00" + name + "|r|nUpgrade to the strongest gate that can be opened and closed to allow or prevent access to your camp.")
+    ..setGoldCost(GATE4_GOLD_COST)
+    ..setLumberCost(GATE4_LUMBER_COST)
+    ..setRequirements("")
+    ..setupGate4Definition()
+
+  defineOpenBuildGateUnit(gateHelper, gateHelper.getOpenBuildId(angle), angle, null)
+    ..setScalingValue(scale)
+    ..setTooltipBasic("Upgrade to " + gateHelper.getName())
+    ..setTooltipExtended("|cffffcc00" + name + "|r|nUpgrade to the strongest gate that can be opened and closed to allow or prevent access to your camp.")
+    ..setGoldCost(GATE4_GOLD_COST)
+    ..setLumberCost(GATE4_LUMBER_COST)
+    ..setRequirements("")
+    ..setupGate4Definition()
+
+  defineAliveGateUnit(gateHelper, gateHelper.getAliveId(angle), angle, null)
+    ..setScalingValue(scale)
+    ..setupGate4Definition()
+
+  defineDeadGateUnit(gateHelper, gateHelper.getDeadId(angle), angle)
+    ..setScalingValue(scale)
+    ..setRepairGoldCost((GATE4_LUMBER_COST * BUILDING_REPAIR_BROKEN_GOLD_SCALAR).floor())
+    ..setRepairLumberCost((GATE4_LUMBER_COST * BUILDING_REPAIR_BROKEN_LUMBER_SCALAR).floor())
+    ..setupGate4Definition()
+
+//=============================================================================
+function BaseGateDefinition.setupGate4Definition()
+  this
+    ..setHitPointsMaximumBase(GATE4_HEALTH)
+    ..setDefenseBase(GATE4_ARMOR)
+    ..setRepairTime(REPAIR_TIME_BUILDING_WALL)
+    ..setRepairGoldCost((GATE4_GOLD_COST * BUILDING_REPAIR_GOLD_SCALAR).floor())
+    ..setRepairLumberCost((GATE4_LUMBER_COST * BUILDING_REPAIR_LUMBER_SCALAR).floor())
+    ..setRecycleGoldRewarded(GATE4_RECYCLE_GOLD_COST)
+    ..setRecycleLumberRewarded(GATE4_RECYCLE_LUMBER_COST)
+
+//=============================================================================
+public class BaseGateDefinition extends TlsBuildingDefinition
+  construct(int newId)
+    super(newId, UnitIds.scouttower)
+    setName("Gate")
+    setTintingColorRed(150)
+    setTintingColorGreen(150)
+    setTintingColorBlue(150)
+    setShadowTextureBuilding("")
+    setButtonPositionX(0)
+    setButtonPositionY(0)
+    setDeathTimeseconds(0.83)
+    setGroundTexture("")
+    setRequiredAnimationNamesAttachments("medium")
+    setSelectionScale(4.0)
+    setScalingValue(0.4)
+    setArmorType(ArmorType.Fortified)
+    setDeathType(DeathType.CannotRaiseDoesNotDecay)
+    setCollisionSize(0.0)
+    setPlacementRequires("unbuildable,unwalkable")
+    setBuildTime(1)
+    setCanFlee(false)
+    setHideMinimapDisplay(true)
+    setHitPointsMaximumBase(1000)
+    setBuildTime(BUILD_TIME_BUILDING_WALL)
+    setRepairTime(REPAIR_TIME_BUILDING_WALL)
+    setSightRadiusDay(STRUCTURE_LARGE_SIGHT_RANGE_DAY)
+    setSightRadiusNight(STRUCTURE_LARGE_SIGHT_RANGE_NIGHT)
+    setBuildTime(1) // Most gate variations are only buildable via upgrades
+    setNormalAbilities(commaList(TlsAbilityIds.recycle))
+    setRequirements("")
+    setUpgradesUsed(commaList(TlsUpgradeIds.campDefense))
+
+    setGoldCost(0)
+    setLumberCost(0)
+    setRepairGoldCost(0)
+    setRepairLumberCost(0)
+    setRecycleGoldRewarded(0)
+    setRecycleLumberRewarded(0)
+    setDefenseBase(0)
+
+//=============================================================================
+public function defineOpenGateUnit(
+  GateCardinalUnitDefinitionHelper helper,
+  int newId,
+  CardinalUnitAngle angle,
+  GateCardinalUnitDefinitionHelper upgradesToHelper) returns BaseGateDefinition
+
+  let def = new BaseGateDefinition(newId)
+  ..setName("Open " + helper.getName())
+  ..setTooltipBasic("Open |cffffcc00G|rate")
+  ..setTooltipExtended("Open this gate so that units can pass through it")
+  ..setIconGameInterface(helper.getOpenIconPath(angle))
+  ..setModelFile(helper.getModelPath(angle))
+  ..setPathingMap(helper.getOpenPathMap(angle))
+  ..setButtonPositionX(0)
+  ..setButtonPositionY(0)
+  ..setGoldCost(0)
+  ..setLumberCost(0)
+  ..setBuildTime(1)
+  ..setRequiredAnimationNames(getGateAnimationProperties(angle, true))
+  ..setHotkey("G")
+
+  if (upgradesToHelper != null)
+    let deadId = helper.getDeadId(angle)
+    let closedGateId = helper.getClosedId(angle)
+    let nextLevelGateId = upgradesToHelper.getOpenBuildId(angle)
+    def.setUpgradesTo(commaList(deadId, closedGateId, nextLevelGateId))
+  else
+    let deadId = helper.getDeadId(angle)
+    let closedGateId = helper.getClosedId(angle)
+    def.setUpgradesTo(commaList(deadId, closedGateId))
+
+  g_allGateIds.add(newId)
+  g_allOpenGateIds.add(newId)
+  g_unitTypeToGateHelperMap.put(newId, helper)
+
+  return def
+
+//=============================================================================
+public function defineClosedGateUnit(
+  GateCardinalUnitDefinitionHelper helper,
+  int newId,
+  CardinalUnitAngle angle,
+  GateCardinalUnitDefinitionHelper upgradesToHelper) returns BaseGateDefinition
+
+  let def = new BaseGateDefinition(newId)
+  ..setName("Closed " + helper.getName())
+  ..setTooltipBasic("Close |cffffcc00G|rate")
+  ..setTooltipExtended("Close this gate so that units can no longer pass through it")
+  ..setIconGameInterface(helper.getClosedIconPath(angle))
+  ..setModelFile(helper.getModelPath(angle))
+  ..setPathingMap(helper.getClosedPathMap(angle))
+  ..setButtonPositionX(0)
+  ..setButtonPositionY(0)
+  ..setGoldCost(0)
+  ..setLumberCost(0)
+  ..setBuildTime(1)
+  ..setRequiredAnimationNames(getGateAnimationProperties(angle, false))
+  ..makeBuildingUndeadTarget()
+  ..setHotkey("G")
+
+  if (upgradesToHelper != null)
+    let deadId = helper.getDeadId(angle)
+    let openGateId = helper.getOpenId(angle)
+    let nextLevelGateId = upgradesToHelper.getClosedBuildId(angle)
+    def.setUpgradesTo(commaList(deadId, openGateId, nextLevelGateId))
+  else
+    let deadId = helper.getDeadId(angle)
+    let openGateId = helper.getOpenId(angle)
+    def.setUpgradesTo(commaList(deadId, openGateId))
+
+  g_allGateIds.add(newId)
+  g_allClosedGateIds.add(newId)
+  g_unitTypeToGateHelperMap.put(newId, helper)
+
+  return def
+
+//=============================================================================
+public function defineClosedBuildGateUnit(
+  GateCardinalUnitDefinitionHelper helper,
+  int newId,
+  CardinalUnitAngle angle,
+  GateCardinalUnitDefinitionHelper upgradesToHelper) returns BaseGateDefinition
+
+  let def = new BaseGateDefinition(newId)
+  ..setName("Closed " + helper.getName())
+  ..setIconGameInterface(helper.getClosedIconPath(angle))
+  ..setModelFile(helper.getModelPath(angle))
+  ..setPathingMap(helper.getClosedPathMap(angle))
+  ..setBuildTime(BUILD_TIME_BUILDING_WALL)
+  ..setRepairTime(REPAIR_TIME_BUILDING_WALL)
+  ..setTooltipBasic("Upgrade to |cffffcc00G|rate")
+  ..setTooltipExtended("Upgrade to a stronger gate that can be opened and closed.")
+  ..setButtonPositionX(0)
+  ..setButtonPositionY(2)
+  ..setRequiredAnimationNames(getGateAnimationProperties(angle, false))
+  ..makeBuildingUndeadTarget()
+  ..setHotkey("G")
+
+  if (upgradesToHelper != null)
+    let deadId = helper.getDeadId(angle)
+    let openGateId = helper.getOpenId(angle)
+    let nextLevelGateId = upgradesToHelper.getClosedBuildId(angle)
+    def.setUpgradesTo(commaList(deadId, openGateId, nextLevelGateId))
+  else
+    let deadId = helper.getDeadId(angle)
+    let openGateId = helper.getOpenId(angle)
+    def.setUpgradesTo(commaList(deadId, openGateId))
+
+  g_allGateIds.add(newId)
+  g_allClosedBuildGateIds.add(newId)
+  g_unitTypeToGateHelperMap.put(newId, helper)
+
+  return def
+
+//=============================================================================
+public function defineOpenBuildGateUnit(
+  GateCardinalUnitDefinitionHelper helper,
+  int newId,
+  CardinalUnitAngle angle,
+  GateCardinalUnitDefinitionHelper upgradesToHelper) returns BaseGateDefinition
+
+  let def = new BaseGateDefinition(newId)
+  ..setName(helper.getName())
+  ..setIconGameInterface(helper.getOpenIconPath(angle))
+  ..setModelFile(helper.getModelPath(angle))
+  ..setPathingMap(helper.getOpenPathMap(angle))
+  ..setBuildTime(BUILD_TIME_BUILDING_WALL)
+  ..setRepairTime(REPAIR_TIME_BUILDING_WALL)
+  ..setTooltipBasic("Upgrade to |cffffcc00G|rate")
+  ..setTooltipExtended("Upgrade to a stronger gate that can be opened and closed.")
+  ..setButtonPositionX(0)
+  ..setButtonPositionY(2)
+  ..setRequiredAnimationNames(getGateAnimationProperties(angle, true))
+  ..setHotkey("G")
+
+  if (upgradesToHelper != null)
+    let deadId = helper.getDeadId(angle)
+    let closedGateId = helper.getClosedId(angle)
+    let nextLevelGateId = upgradesToHelper.getOpenBuildId(angle)
+    def.setUpgradesTo(commaList(deadId, closedGateId, nextLevelGateId))
+  else
+    let deadId = helper.getDeadId(angle)
+    let closedGateId = helper.getClosedId(angle)
+    def.setUpgradesTo(commaList(deadId, closedGateId))
+
+  g_allGateIds.add(newId)
+  g_allOpenBuildGateIds.add(newId)
+  g_unitTypeToGateHelperMap.put(newId, helper)
+
+  return def
+
+//=============================================================================
+public function defineAliveGateUnit(
+  GateCardinalUnitDefinitionHelper helper,
+  int newId,
+  CardinalUnitAngle angle,
+  GateCardinalUnitDefinitionHelper upgradesToHelper) returns BaseGateDefinition
+
+  let def = new BaseGateDefinition(newId)
+  ..setName("Closed " + helper.getName())
+  ..setNameEditorSuffix("(Alive)")
+  ..setRequirements("")
+  ..setButtonPositionX(0)
+  ..setButtonPositionY(-11)
+  ..setIconGameInterface(helper.getClosedIconPath(angle))
+  ..setModelFile(helper.getModelPath(angle))
+  ..setPathingMap(helper.getClosedPathMap(angle))
+  ..setGoldCost(0)
+  ..setLumberCost(0)
+  ..setRepairGoldCost(0)
+  ..setRepairLumberCost(0)
+  ..setBuildTime(1)
+  ..setRequiredAnimationNames(getGateAnimationProperties(angle, false))
+  ..makeBuildingUndeadTarget()
+
+  if (upgradesToHelper != null)
+    let deadId = helper.getDeadId(angle)
+    let openGateId = helper.getOpenId(angle)
+    let nextLevelGateId = upgradesToHelper.getClosedBuildId(angle)
+    def.setUpgradesTo(commaList(deadId, openGateId, nextLevelGateId))
+  else
+    let deadId = helper.getDeadId(angle)
+    let openGateId = helper.getOpenId(angle)
+    def.setUpgradesTo(commaList(deadId, openGateId))
+
+  g_allGateIds.add(newId)
+  g_unitTypeToGateHelperMap.put(newId, helper)
+
+  return def
+
+//=============================================================================
+public function defineDeadGateUnit(
+  GateCardinalUnitDefinitionHelper helper,
+  int newId,
+  CardinalUnitAngle angle) returns BaseGateDefinition
+
+  let def = new BaseGateDefinition(newId)
+  ..setName("Broken " + helper.getName())
+  ..setNameEditorSuffix("(Dead)")
+  ..setRequirements("")
+  ..setButtonPositionX(0)
+  ..setButtonPositionY(-11)
+  ..setIconGameInterface(helper.getOpenIconPath(angle))
+  ..setModelFile(helper.getModelPath(angle))
+  ..setPathingMap(helper.getOpenPathMap(angle))
+  ..setGoldCost(0)
+  ..setLumberCost(0)
+  ..setRepairGoldCost(0)
+  ..setRepairLumberCost(0)
+  ..setBuildTime(1)
+  ..setRequiredAnimationNames(getGateAnimationProperties(angle, true))
+  ..setNormalAbilities(commaList(TlsAbilityIds.recycleBroken))
+
+  let aliveGateId = helper.getAliveId(angle)
+  def.setUpgradesTo(commaList(aliveGateId))
+
+  g_allGateIds.add(newId)
+  g_allOpenGateIds.add(newId)
+  g_unitTypeToGateHelperMap.put(newId, helper)
+
+  return def
+
+//=============================================================================
+public function unit.isGate() returns bool
+  return g_allGateIds.has(this.getTypeId())
+
+//=============================================================================
+public function unit.isOpenGate() returns bool
+  return g_allOpenGateIds.has(this.getTypeId()) or g_allOpenBuildGateIds.has(this.getTypeId())
+
+//=============================================================================
+public function unit.isClosedGate() returns bool
+  return g_allClosedGateIds.has(this.getTypeId()) or g_allClosedBuildGateIds.has(this.getTypeId())
+
+//=============================================================================
+public function unit.isBuildGate() returns bool
+  return g_allClosedBuildGateIds.has(this.getTypeId()) or g_allOpenBuildGateIds.has(this.getTypeId())
+
+//=============================================================================
+public function getGateHelperForUnitType(int unitType) returns GateCardinalUnitDefinitionHelper
+  return g_unitTypeToGateHelperMap.get(unitType)
+
+//=============================================================================
+init
+
+  if (g_gate1Helper == null)
+    init_compiletime()
+
+//=============================================================================
+@compiletime
+public function init_compiletime()
+  g_gate1Ids = new HashList<int>()
+  g_gate2Ids = new HashList<int>()
+  g_gate3Ids = new HashList<int>()
+  g_gate4Ids = new HashList<int>()
+
+  g_gate1Ids.clear()
+  g_gate1Ids
+    ..add(Gate1Ids.ew_build_closed)
+    ..add(Gate1Ids.ew_open)
+    ..add(Gate1Ids.ew_closed)
+    ..add(Gate1Ids.ew_alive)
+    ..add(Gate1Ids.ew_dead)
+    ..add(Gate1Ids.nesw_build_closed)
+    ..add(Gate1Ids.nesw_open)
+    ..add(Gate1Ids.nesw_closed)
+    ..add(Gate1Ids.nesw_alive)
+    ..add(Gate1Ids.nesw_dead)
+    ..add(Gate1Ids.ns_build_closed)
+    ..add(Gate1Ids.ns_open)
+    ..add(Gate1Ids.ns_closed)
+    ..add(Gate1Ids.ns_alive)
+    ..add(Gate1Ids.ns_dead)
+    ..add(Gate1Ids.nwse_build_closed)
+    ..add(Gate1Ids.nwse_open)
+    ..add(Gate1Ids.nwse_closed)
+    ..add(Gate1Ids.nwse_alive)
+    ..add(Gate1Ids.nwse_dead)
+
+  g_gate2Ids.clear()
+  g_gate2Ids
+    ..add(Gate2Ids.ew_build_open)
+    ..add(Gate2Ids.ew_build_closed)
+    ..add(Gate2Ids.ew_open)
+    ..add(Gate2Ids.ew_closed)
+    ..add(Gate2Ids.ew_alive)
+    ..add(Gate2Ids.ew_dead)
+    ..add(Gate2Ids.nesw_build_open)
+    ..add(Gate2Ids.nesw_build_closed)
+    ..add(Gate2Ids.nesw_open)
+    ..add(Gate2Ids.nesw_closed)
+    ..add(Gate2Ids.nesw_alive)
+    ..add(Gate2Ids.nesw_dead)
+    ..add(Gate2Ids.ns_build_open)
+    ..add(Gate2Ids.ns_build_closed)
+    ..add(Gate2Ids.ns_open)
+    ..add(Gate2Ids.ns_closed)
+    ..add(Gate2Ids.ns_alive)
+    ..add(Gate2Ids.ns_dead)
+    ..add(Gate2Ids.nwse_build_open)
+    ..add(Gate2Ids.nwse_build_closed)
+    ..add(Gate2Ids.nwse_open)
+    ..add(Gate2Ids.nwse_closed)
+    ..add(Gate2Ids.nwse_alive)
+    ..add(Gate2Ids.nwse_dead)
+
+  g_gate3Ids.clear()
+  g_gate3Ids
+    ..add(Gate3Ids.ew_build_open)
+    ..add(Gate3Ids.ew_build_closed)
+    ..add(Gate3Ids.ew_open)
+    ..add(Gate3Ids.ew_closed)
+    ..add(Gate3Ids.ew_alive)
+    ..add(Gate3Ids.ew_dead)
+    ..add(Gate3Ids.nesw_build_open)
+    ..add(Gate3Ids.nesw_build_closed)
+    ..add(Gate3Ids.nesw_open)
+    ..add(Gate3Ids.nesw_closed)
+    ..add(Gate3Ids.nesw_alive)
+    ..add(Gate3Ids.nesw_dead)
+    ..add(Gate3Ids.ns_build_open)
+    ..add(Gate3Ids.ns_build_closed)
+    ..add(Gate3Ids.ns_open)
+    ..add(Gate3Ids.ns_closed)
+    ..add(Gate3Ids.ns_alive)
+    ..add(Gate3Ids.ns_dead)
+    ..add(Gate3Ids.nwse_build_open)
+    ..add(Gate3Ids.nwse_build_closed)
+    ..add(Gate3Ids.nwse_open)
+    ..add(Gate3Ids.nwse_closed)
+    ..add(Gate3Ids.nwse_alive)
+    ..add(Gate3Ids.nwse_dead)
+
+  g_gate4Ids.clear()
+  g_gate4Ids
+    ..add(Gate4Ids.ew_build_open)
+    ..add(Gate4Ids.ew_build_closed)
+    ..add(Gate4Ids.ew_open)
+    ..add(Gate4Ids.ew_closed)
+    ..add(Gate4Ids.ew_alive)
+    ..add(Gate4Ids.ew_dead)
+    ..add(Gate4Ids.nesw_build_open)
+    ..add(Gate4Ids.nesw_build_closed)
+    ..add(Gate4Ids.nesw_open)
+    ..add(Gate4Ids.nesw_closed)
+    ..add(Gate4Ids.nesw_alive)
+    ..add(Gate4Ids.nesw_dead)
+    ..add(Gate4Ids.ns_build_open)
+    ..add(Gate4Ids.ns_build_closed)
+    ..add(Gate4Ids.ns_open)
+    ..add(Gate4Ids.ns_closed)
+    ..add(Gate4Ids.ns_alive)
+    ..add(Gate4Ids.ns_dead)
+    ..add(Gate4Ids.nwse_build_open)
+    ..add(Gate4Ids.nwse_build_closed)
+    ..add(Gate4Ids.nwse_open)
+    ..add(Gate4Ids.nwse_closed)
+    ..add(Gate4Ids.nwse_alive)
+    ..add(Gate4Ids.nwse_dead)
+  
+  g_gate1Helper = new GateCardinalUnitDefinitionHelper("Rusty Gate")
+    ..setClosedBuildId(CardinalUnitAngle.EW, Gate1Ids.ew_build_closed)
+    ..setClosedBuildId(CardinalUnitAngle.NESW, Gate1Ids.nesw_build_closed)
+    ..setClosedBuildId(CardinalUnitAngle.NS, Gate1Ids.ns_build_closed)
+    ..setClosedBuildId(CardinalUnitAngle.NWSE, Gate1Ids.nwse_build_closed)
+    ..setOpenId(CardinalUnitAngle.EW, Gate1Ids.ew_open)
+    ..setOpenId(CardinalUnitAngle.NESW, Gate1Ids.nesw_open)
+    ..setOpenId(CardinalUnitAngle.NS, Gate1Ids.ns_open)
+    ..setOpenId(CardinalUnitAngle.NWSE, Gate1Ids.nwse_open)
+    ..setClosedId(CardinalUnitAngle.EW, Gate1Ids.ew_closed)
+    ..setClosedId(CardinalUnitAngle.NESW, Gate1Ids.nesw_closed)
+    ..setClosedId(CardinalUnitAngle.NS, Gate1Ids.ns_closed)
+    ..setClosedId(CardinalUnitAngle.NWSE, Gate1Ids.nwse_closed)
+    ..setDeadId(CardinalUnitAngle.EW, Gate1Ids.ew_dead)
+    ..setDeadId(CardinalUnitAngle.NESW, Gate1Ids.nesw_dead)
+    ..setDeadId(CardinalUnitAngle.NS, Gate1Ids.ns_dead)
+    ..setDeadId(CardinalUnitAngle.NWSE, Gate1Ids.nwse_dead)
+    ..setAliveId(CardinalUnitAngle.EW, Gate1Ids.ew_alive)
+    ..setAliveId(CardinalUnitAngle.NESW, Gate1Ids.nesw_alive)
+    ..setAliveId(CardinalUnitAngle.NS, Gate1Ids.ns_alive)
+    ..setAliveId(CardinalUnitAngle.NWSE, Gate1Ids.nwse_alive)
+    ..setModelPath(CardinalUnitAngle.EW, "Units\\DungeonGate4Way\\dungeongate4way.mdx")
+    ..setModelPath(CardinalUnitAngle.NESW, "Units\\DungeonGate4Way\\dungeongate4way.mdx")
+    ..setModelPath(CardinalUnitAngle.NS, "Units\\DungeonGate4Way\\dungeongate4way.mdx")
+    ..setModelPath(CardinalUnitAngle.NWSE, "Units\\DungeonGate4Way\\dungeongate4way.mdx")
+    ..setIconPath(CardinalUnitAngle.EW, "ReplaceableTextures\\CommandButtons\\BTNDungeonGate_Deg0_Closed.TGA")
+    ..setIconPath(CardinalUnitAngle.NESW, "ReplaceableTextures\\CommandButtons\\BTNDungeonGate_Deg225_Closed.TGA")
+    ..setIconPath(CardinalUnitAngle.NS, "ReplaceableTextures\\CommandButtons\\BTNDungeonGate_Deg270_Closed.TGA")
+    ..setIconPath(CardinalUnitAngle.NWSE, "ReplaceableTextures\\CommandButtons\\BTNDungeonGate_Deg315_Closed.TGA")
+    ..setOpenIconPath(CardinalUnitAngle.EW, "ReplaceableTextures\\CommandButtons\\BTNDungeonGate_Deg0_Open.TGA")
+    ..setOpenIconPath(CardinalUnitAngle.NESW, "ReplaceableTextures\\CommandButtons\\BTNDungeonGate_Deg225_Open.TGA")
+    ..setOpenIconPath(CardinalUnitAngle.NS, "ReplaceableTextures\\CommandButtons\\BTNDungeonGate_Deg270_Open.TGA")
+    ..setOpenIconPath(CardinalUnitAngle.NWSE, "ReplaceableTextures\\CommandButtons\\BTNDungeonGate_Deg315_Open.TGA")
+    ..setClosedIconPath(CardinalUnitAngle.EW, "ReplaceableTextures\\CommandButtons\\BTNDungeonGate_Deg0_Closed.TGA")
+    ..setClosedIconPath(CardinalUnitAngle.NESW, "ReplaceableTextures\\CommandButtons\\BTNDungeonGate_Deg225_Closed.TGA")
+    ..setClosedIconPath(CardinalUnitAngle.NS, "ReplaceableTextures\\CommandButtons\\BTNDungeonGate_Deg270_Closed.TGA")
+    ..setClosedIconPath(CardinalUnitAngle.NWSE, "ReplaceableTextures\\CommandButtons\\BTNDungeonGate_Deg315_Closed.TGA")
+
+  g_gate2Helper = new GateCardinalUnitDefinitionHelper("Iron Gate")
+    ..setOpenBuildId(CardinalUnitAngle.EW, Gate2Ids.ew_build_open)
+    ..setOpenBuildId(CardinalUnitAngle.NESW, Gate2Ids.nesw_build_open)
+    ..setOpenBuildId(CardinalUnitAngle.NS, Gate2Ids.ns_build_open)
+    ..setOpenBuildId(CardinalUnitAngle.NWSE, Gate2Ids.nwse_build_open)
+    ..setClosedBuildId(CardinalUnitAngle.EW, Gate2Ids.ew_build_closed)
+    ..setClosedBuildId(CardinalUnitAngle.NESW, Gate2Ids.nesw_build_closed)
+    ..setClosedBuildId(CardinalUnitAngle.NS, Gate2Ids.ns_build_closed)
+    ..setClosedBuildId(CardinalUnitAngle.NWSE, Gate2Ids.nwse_build_closed)
+    ..setOpenId(CardinalUnitAngle.EW, Gate2Ids.ew_open)
+    ..setOpenId(CardinalUnitAngle.NESW, Gate2Ids.nesw_open)
+    ..setOpenId(CardinalUnitAngle.NS, Gate2Ids.ns_open)
+    ..setOpenId(CardinalUnitAngle.NWSE, Gate2Ids.nwse_open)
+    ..setClosedId(CardinalUnitAngle.EW, Gate2Ids.ew_closed)
+    ..setClosedId(CardinalUnitAngle.NESW, Gate2Ids.nesw_closed)
+    ..setClosedId(CardinalUnitAngle.NS, Gate2Ids.ns_closed)
+    ..setClosedId(CardinalUnitAngle.NWSE, Gate2Ids.nwse_closed)
+    ..setDeadId(CardinalUnitAngle.EW, Gate2Ids.ew_dead)
+    ..setDeadId(CardinalUnitAngle.NESW, Gate2Ids.nesw_dead)
+    ..setDeadId(CardinalUnitAngle.NS, Gate2Ids.ns_dead)
+    ..setDeadId(CardinalUnitAngle.NWSE, Gate2Ids.nwse_dead)
+    ..setAliveId(CardinalUnitAngle.EW, Gate2Ids.ew_alive)
+    ..setAliveId(CardinalUnitAngle.NESW, Gate2Ids.nesw_alive)
+    ..setAliveId(CardinalUnitAngle.NS, Gate2Ids.ns_alive)
+    ..setAliveId(CardinalUnitAngle.NWSE, Gate2Ids.nwse_alive)
+    ..setModelPath(CardinalUnitAngle.EW, "Units\\IronGate4Way\\irongate4way.mdx")
+    ..setModelPath(CardinalUnitAngle.NESW, "Units\\IronGate4Way\\irongate4way.mdx")
+    ..setModelPath(CardinalUnitAngle.NS, "Units\\IronGate4Way\\irongate4way.mdx")
+    ..setModelPath(CardinalUnitAngle.NWSE, "Units\\IronGate4Way\\irongate4way.mdx")
+    ..setIconPath(CardinalUnitAngle.EW, "ReplaceableTextures\\CommandButtons\\BTNIronGate_Deg0_Closed.TGA")
+    ..setIconPath(CardinalUnitAngle.NESW, "ReplaceableTextures\\CommandButtons\\BTNIronGate_Deg225_Closed.TGA")
+    ..setIconPath(CardinalUnitAngle.NS, "ReplaceableTextures\\CommandButtons\\BTNIronGate_Deg270_Closed.TGA")
+    ..setIconPath(CardinalUnitAngle.NWSE, "ReplaceableTextures\\CommandButtons\\BTNIronGate_Deg315_Closed.TGA")
+    ..setOpenIconPath(CardinalUnitAngle.EW, "ReplaceableTextures\\CommandButtons\\BTNIronGate_Deg0_Open.TGA")
+    ..setOpenIconPath(CardinalUnitAngle.NESW, "ReplaceableTextures\\CommandButtons\\BTNIronGate_Deg225_Open.TGA")
+    ..setOpenIconPath(CardinalUnitAngle.NS, "ReplaceableTextures\\CommandButtons\\BTNIronGate_Deg270_Open.TGA")
+    ..setOpenIconPath(CardinalUnitAngle.NWSE, "ReplaceableTextures\\CommandButtons\\BTNIronGate_Deg315_Open.TGA")
+    ..setClosedIconPath(CardinalUnitAngle.EW, "ReplaceableTextures\\CommandButtons\\BTNIronGate_Deg0_Closed.TGA")
+    ..setClosedIconPath(CardinalUnitAngle.NESW, "ReplaceableTextures\\CommandButtons\\BTNIronGate_Deg225_Closed.TGA")
+    ..setClosedIconPath(CardinalUnitAngle.NS, "ReplaceableTextures\\CommandButtons\\BTNIronGate_Deg270_Closed.TGA")
+    ..setClosedIconPath(CardinalUnitAngle.NWSE, "ReplaceableTextures\\CommandButtons\\BTNIronGate_Deg315_Closed.TGA")
+
+  g_gate3Helper = new GateCardinalUnitDefinitionHelper("Oak Gate")
+    ..setOpenBuildId(CardinalUnitAngle.EW, Gate3Ids.ew_build_open)
+    ..setOpenBuildId(CardinalUnitAngle.NESW, Gate3Ids.nesw_build_open)
+    ..setOpenBuildId(CardinalUnitAngle.NS, Gate3Ids.ns_build_open)
+    ..setOpenBuildId(CardinalUnitAngle.NWSE, Gate3Ids.nwse_build_open)
+    ..setClosedBuildId(CardinalUnitAngle.EW, Gate3Ids.ew_build_closed)
+    ..setClosedBuildId(CardinalUnitAngle.NESW, Gate3Ids.nesw_build_closed)
+    ..setClosedBuildId(CardinalUnitAngle.NS, Gate3Ids.ns_build_closed)
+    ..setClosedBuildId(CardinalUnitAngle.NWSE, Gate3Ids.nwse_build_closed)
+    ..setOpenId(CardinalUnitAngle.EW, Gate3Ids.ew_open)
+    ..setOpenId(CardinalUnitAngle.NESW, Gate3Ids.nesw_open)
+    ..setOpenId(CardinalUnitAngle.NS, Gate3Ids.ns_open)
+    ..setOpenId(CardinalUnitAngle.NWSE, Gate3Ids.nwse_open)
+    ..setClosedId(CardinalUnitAngle.EW, Gate3Ids.ew_closed)
+    ..setClosedId(CardinalUnitAngle.NESW, Gate3Ids.nesw_closed)
+    ..setClosedId(CardinalUnitAngle.NS, Gate3Ids.ns_closed)
+    ..setClosedId(CardinalUnitAngle.NWSE, Gate3Ids.nwse_closed)
+    ..setDeadId(CardinalUnitAngle.EW, Gate3Ids.ew_dead)
+    ..setDeadId(CardinalUnitAngle.NESW, Gate3Ids.nesw_dead)
+    ..setDeadId(CardinalUnitAngle.NS, Gate3Ids.ns_dead)
+    ..setDeadId(CardinalUnitAngle.NWSE, Gate3Ids.nwse_dead)
+    ..setAliveId(CardinalUnitAngle.EW, Gate3Ids.ew_alive)
+    ..setAliveId(CardinalUnitAngle.NESW, Gate3Ids.nesw_alive)
+    ..setAliveId(CardinalUnitAngle.NS, Gate3Ids.ns_alive)
+    ..setAliveId(CardinalUnitAngle.NWSE, Gate3Ids.nwse_alive)
+    ..setModelPath(CardinalUnitAngle.EW, "Units\\Gate4Way\\gate4way.mdx")
+    ..setModelPath(CardinalUnitAngle.NESW, "Units\\Gate4Way\\gate4way.mdx")
+    ..setModelPath(CardinalUnitAngle.NS, "Units\\Gate4Way\\gate4way.mdx")
+    ..setModelPath(CardinalUnitAngle.NWSE, "Units\\Gate4Way\\gate4way.mdx")
+    ..setIconPath(CardinalUnitAngle.EW, "ReplaceableTextures\\CommandButtons\\BTNGate_Deg0_Closed.TGA")
+    ..setIconPath(CardinalUnitAngle.NESW, "ReplaceableTextures\\CommandButtons\\BTNGate_Deg225_Closed.TGA")
+    ..setIconPath(CardinalUnitAngle.NS, "ReplaceableTextures\\CommandButtons\\BTNGate_Deg270_Closed.TGA")
+    ..setIconPath(CardinalUnitAngle.NWSE, "ReplaceableTextures\\CommandButtons\\BTNGate_Deg315_Closed.TGA")
+    ..setOpenIconPath(CardinalUnitAngle.EW, "ReplaceableTextures\\CommandButtons\\BTNGate_Deg0_Open.TGA")
+    ..setOpenIconPath(CardinalUnitAngle.NESW, "ReplaceableTextures\\CommandButtons\\BTNGate_Deg225_Open.TGA")
+    ..setOpenIconPath(CardinalUnitAngle.NS, "ReplaceableTextures\\CommandButtons\\BTNGate_Deg270_Open.TGA")
+    ..setOpenIconPath(CardinalUnitAngle.NWSE, "ReplaceableTextures\\CommandButtons\\BTNGate_Deg315_Open.TGA")
+    ..setClosedIconPath(CardinalUnitAngle.EW, "ReplaceableTextures\\CommandButtons\\BTNGate_Deg0_Closed.TGA")
+    ..setClosedIconPath(CardinalUnitAngle.NESW, "ReplaceableTextures\\CommandButtons\\BTNGate_Deg225_Closed.TGA")
+    ..setClosedIconPath(CardinalUnitAngle.NS, "ReplaceableTextures\\CommandButtons\\BTNGate_Deg270_Closed.TGA")
+    ..setClosedIconPath(CardinalUnitAngle.NWSE, "ReplaceableTextures\\CommandButtons\\BTNGate_Deg315_Closed.TGA")
+
+  g_gate4Helper = new GateCardinalUnitDefinitionHelper("Decorated Gate")
+    ..setOpenBuildId(CardinalUnitAngle.EW, Gate4Ids.ew_build_open)
+    ..setOpenBuildId(CardinalUnitAngle.NESW, Gate4Ids.nesw_build_open)
+    ..setOpenBuildId(CardinalUnitAngle.NS, Gate4Ids.ns_build_open)
+    ..setOpenBuildId(CardinalUnitAngle.NWSE, Gate4Ids.nwse_build_open)
+    ..setClosedBuildId(CardinalUnitAngle.EW, Gate4Ids.ew_build_closed)
+    ..setClosedBuildId(CardinalUnitAngle.NESW, Gate4Ids.nesw_build_closed)
+    ..setClosedBuildId(CardinalUnitAngle.NS, Gate4Ids.ns_build_closed)
+    ..setClosedBuildId(CardinalUnitAngle.NWSE, Gate4Ids.nwse_build_closed)
+    ..setOpenId(CardinalUnitAngle.EW, Gate4Ids.ew_open)
+    ..setOpenId(CardinalUnitAngle.NESW, Gate4Ids.nesw_open)
+    ..setOpenId(CardinalUnitAngle.NS, Gate4Ids.ns_open)
+    ..setOpenId(CardinalUnitAngle.NWSE, Gate4Ids.nwse_open)
+    ..setClosedId(CardinalUnitAngle.EW, Gate4Ids.ew_closed)
+    ..setClosedId(CardinalUnitAngle.NESW, Gate4Ids.nesw_closed)
+    ..setClosedId(CardinalUnitAngle.NS, Gate4Ids.ns_closed)
+    ..setClosedId(CardinalUnitAngle.NWSE, Gate4Ids.nwse_closed)
+    ..setDeadId(CardinalUnitAngle.EW, Gate4Ids.ew_dead)
+    ..setDeadId(CardinalUnitAngle.NESW, Gate4Ids.nesw_dead)
+    ..setDeadId(CardinalUnitAngle.NS, Gate4Ids.ns_dead)
+    ..setDeadId(CardinalUnitAngle.NWSE, Gate4Ids.nwse_dead)
+    ..setAliveId(CardinalUnitAngle.EW, Gate4Ids.ew_alive)
+    ..setAliveId(CardinalUnitAngle.NESW, Gate4Ids.nesw_alive)
+    ..setAliveId(CardinalUnitAngle.NS, Gate4Ids.ns_alive)
+    ..setAliveId(CardinalUnitAngle.NWSE, Gate4Ids.nwse_alive)
+    ..setModelPath(CardinalUnitAngle.EW, "Units\\ElfGate4Way\\elfgate4way.mdx")
+    ..setModelPath(CardinalUnitAngle.NESW, "Units\\ElfGate4Way\\elfgate4way.mdx")
+    ..setModelPath(CardinalUnitAngle.NS, "Units\\ElfGate4Way\\elfgate4way.mdx")
+    ..setModelPath(CardinalUnitAngle.NWSE, "Units\\ElfGate4Way\\elfgate4way.mdx")
+    ..setIconPath(CardinalUnitAngle.EW, "ReplaceableTextures\\CommandButtons\\BTNElfGate_Deg0_Closed.TGA")
+    ..setIconPath(CardinalUnitAngle.NESW, "ReplaceableTextures\\CommandButtons\\BTNElfGate_Deg225_Closed.TGA")
+    ..setIconPath(CardinalUnitAngle.NS, "ReplaceableTextures\\CommandButtons\\BTNElfGate_Deg270_Closed.TGA")
+    ..setIconPath(CardinalUnitAngle.NWSE, "ReplaceableTextures\\CommandButtons\\BTNElfGate_Deg315_Closed.TGA")
+    ..setOpenIconPath(CardinalUnitAngle.EW, "ReplaceableTextures\\CommandButtons\\BTNElfGate_Deg0_Open.TGA")
+    ..setOpenIconPath(CardinalUnitAngle.NESW, "ReplaceableTextures\\CommandButtons\\BTNElfGate_Deg225_Open.TGA")
+    ..setOpenIconPath(CardinalUnitAngle.NS, "ReplaceableTextures\\CommandButtons\\BTNElfGate_Deg270_Open.TGA")
+    ..setOpenIconPath(CardinalUnitAngle.NWSE, "ReplaceableTextures\\CommandButtons\\BTNElfGate_Deg315_Open.TGA")
+    ..setClosedIconPath(CardinalUnitAngle.EW, "ReplaceableTextures\\CommandButtons\\BTNElfGate_Deg0_Closed.TGA")
+    ..setClosedIconPath(CardinalUnitAngle.NESW, "ReplaceableTextures\\CommandButtons\\BTNElfGate_Deg225_Closed.TGA")
+    ..setClosedIconPath(CardinalUnitAngle.NS, "ReplaceableTextures\\CommandButtons\\BTNElfGate_Deg270_Closed.TGA")
+    ..setClosedIconPath(CardinalUnitAngle.NWSE, "ReplaceableTextures\\CommandButtons\\BTNElfGate_Deg315_Closed.TGA")
+
+  // Create the many gate variations
+  createGateUnitVariations()

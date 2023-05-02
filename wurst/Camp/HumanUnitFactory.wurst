@@ -1,42 +1,60 @@
 package HumanUnitFactory
 import TlsUnitIds
 import UnitMetadata
-import Unit_GateCommon
-import Unit_WoodFence
+import Crafting
+import ItemRecipes
+
+import HumanPlayerComponent
 import GateComponent
 import ChestComponent
 import SpikesComponent
-import RangedTargetComponent
 import CampCenterComponent
-import ExperienceComponent
 import CampFireComponent
 import PersistActiveAbilityComponent
-import AltarComponent
 import SurvivorComponent
 import ManualGeneratorComponent
 import SolarGeneratorComponent
 import BatteryComponent
 import EnableAttackWhenPoweredComponent
-import RangedTargetXpReceieverComponent
 import LooterComponent
 import BuildingUndeadTarget
 import BuildingUndeadTargetComponent
 import WorkstationComponent
 import HeroComponent
 import ScoutTowerComponent
-import Unit_GuardTower
-import Unit_CannonTower
 import TunnelEntranceComponent
 import ShelterComponent
 import UnitPropertiesComponent
-import Crafting
-import ItemRecipes
-import HumanPlayerComponent
 
-import Sprint
-import Blundershot
-import SmokeGrenade
-import LootSpecialist
+import Unit_Gates
+import Unit_Walls
+import Unit_LumberMill
+import Unit_GuardTower
+import Unit_CannonTower
+
+import HeroAbility_Sprint
+import HeroAbility_Blundershot
+import HeroAbility_SmokeGrenade
+import HeroAbility_Procurist
+import HeroAbility_Cleave
+import HeroAbility_Taunt
+// import HeroAbility_DevotionAura
+import HeroAbility_Blink
+// import HeroAbility_HolyLight
+// import HeroAbility_Shockwave
+import HeroAbility_ThrowSpear
+// import HeroAbility_ImmediateRepair
+import HeroAbility_RangedRepair
+import HeroAbility_StructureArmorAura
+import HeroAbility_OperatorBoost
+import HeroAbility_RocketBarrage
+import HeroExperienceComponent
+import HeroAbility_FocusedShot
+import HeroAbility_Outdoorsman
+import HeroAbility_BearTrap
+import BreakableComponent
+import CardinalUnitDefinition
+import Unit_Barricades
 
 // ============================================================================
 public class HumanUnitMetadataFactory implements IUnitMetadataFactory
@@ -61,99 +79,156 @@ public class HumanUnitComponentGenerator implements IUnitComponentGenerator
     let unitTypeId = u.getTypeId()
 
     if (u.isBuildingUndeadTarget())
-      metadata.addComponent(new BuildingUndeadTargetComponent(metadata))
+      metadata.getOrAddBuildingUndeadTargetComponent()
 
-    if (u.isCampHeadquarters())
-      metadata.addComponent(new CampCenterComponent(metadata))
+    if (u.isHeadquarters())
+      metadata.getOrAddCampCenterComponent()
       metadata.getBuildingUndeadTargetComponent().setAffectUTCTargetOrganic(true)
       return true
 
     switch (unitTypeId)
     //{
       case TlsUnitIds.chest
-        metadata.addComponent(new ChestComponent(metadata))
-        return true
-
-      case TlsUnitIds.rangedTarget
-        metadata.addComponent(new RangedTargetComponent(metadata))
-        return true
-
-      case TlsUnitIds.altar
-        metadata.addComponent(new AltarComponent(metadata))
+        metadata.getOrAddChestComponent()
         return true
 
       case TlsUnitIds.manualGenerator
-        metadata.addComponent(new WorkstationComponent(metadata))
-        metadata.addComponent(new ManualGeneratorComponent(metadata))
+        metadata.getOrAddWorkstationComponent()
+        metadata.getOrAddManualGeneratorComponent()
         return true
 
       case TlsUnitIds.solarGenerator
-        metadata.addComponent(new SolarGeneratorComponent(metadata))
+        metadata.getOrAddSolarGeneratorComponent()
         return true
 
       case TlsUnitIds.battery
-        metadata.addComponent(new BatteryComponent(metadata))
+        metadata.getOrAddBatteryComponent()
         return true
 
       case TlsUnitIds.turretPhysical | TlsUnitIds.turretElemental
-        metadata.addComponent(new EnableAttackWhenPoweredComponent(metadata))
+        metadata.getOrAddEnableAttackWhenPoweredComponent()
         return true
 
       case TlsUnitIds.scoutTower
-        metadata.addComponent(new ScoutTowerComponent(metadata))
+        metadata.getOrAddScoutTowerComponent()
         return true
 
       case TlsUnitIds.guardTowers[0] | TlsUnitIds.guardTowers[1] | TlsUnitIds.guardTowers[2]
-        metadata.addComponent(new GuardTowerComponent(metadata))
+        metadata.getOrAddGuardTowerComponent()
         return true
 
       case TlsUnitIds.cannonTowers[0] | TlsUnitIds.cannonTowers[1] | TlsUnitIds.cannonTowers[2]
-        metadata.addComponent(new CannonTowerComponent(metadata))
+        metadata.getOrAddCannonTowerComponent()
+        return true
+
+      case TlsUnitIds.lumberMill
+        metadata.getOrAddLumberMillComponent()
         return true
 
       case TlsUnitIds.tunnelEntrance
-        metadata.addComponent(new TunnelEntranceComponent(metadata))
+        metadata.getOrAddTunnelEntranceComponent()
         return true
 
       case TlsUnitIds.forge
-        metadata.addComponent(new CraftingComponent(metadata)..setRecipeBook(g_forgeRecipeBook))
+        metadata.getOrAddCraftingComponent()..setRecipeBook(g_forgeRecipeBook)
         return true
     //}
 
     if (u.isSpikes())
-      metadata.addComponent(new SpikesComponent(metadata))
-      metadata.addComponent(new ExperienceComponent(metadata)..setGiveXpAreaPercent01(1.0))
+      metadata.getOrAddSpikesComponent()
       return true
 
     if (u.isSurvivor())
-      metadata.addComponent(new SurvivorComponent(metadata))
-      metadata.addComponent(new UnitPropertiesComponent(metadata))
+      metadata.getOrAddSurvivorComponent()
+      metadata.getOrAddUnitPropertiesComponent()
+      metadata.getOrAddBuildingUndeadTargetComponent()
       return true
 
-    if (u.isWoodFence() or u.isGate())
-      metadata.addComponent(new GateComponent(metadata))
+    if (u.isBarricade())
+    //{
+      let breakableComp = metadata.getOrAddBreakableComponent()
+      let helper = g_unitTypeToBarricadeHelperMap.get(unitTypeId)
+      breakableComp.setRepairedStateUnitTypeId(helper.getAliveId())
+      breakableComp.setBrokenStateUnitTypeId(helper.getDeadId())
+      
+      let zoffsets = [180.0, 200.0, 240.0, 260.0 ]
+      let barricadeTier = getBarricadeTier(unitTypeId)
+      breakableComp.setEffectZOffset(zoffsets[barricadeTier])
       return true
+    //}
+
+    if (u.isWall())
+    //{
+      let breakableComp = metadata.getOrAddBreakableComponent()
+      let helper = g_unitTypeToWallHelperMap.get(unitTypeId)
+      let angle = helper.getAngleForUnitType(unitTypeId)
+      if (angle.hasValue)
+        breakableComp.setRepairedStateUnitTypeId(helper.getAliveId(angle.value))
+        breakableComp.setBrokenStateUnitTypeId(helper.getDeadId(angle.value))
+      return true
+    //}
+
+    if (u.isGate())
+    //{
+      metadata.getOrAddGateComponent()
+
+      let breakableComp = metadata.getOrAddBreakableComponent()
+      let helper = g_unitTypeToGateHelperMap.get(unitTypeId)
+      let angle = helper.getAngleForUnitType(unitTypeId)
+      if (angle.hasValue)
+        breakableComp.setRepairedStateUnitTypeId(helper.getAliveId(angle.value))
+        breakableComp.setBrokenStateUnitTypeId(helper.getDeadId(angle.value))
+      
+      return true
+    //}
 
     if (u.isCampFire())
-      metadata.addComponent(new CraftingComponent(metadata)..setRecipeBook(g_campFireRecipeBook))
-      metadata.addComponent(new CampFireComponent(metadata), false)
-      metadata.addComponent(new PersistActiveAbilityComponent(metadata))
+      metadata.getOrAddCraftingComponent()..setRecipeBook(g_campFireRecipeBook)
+      metadata.getOrAddCampFireComponent()
+      metadata.getOrAddPersistActiveAbilityComponent()
       return true
 
     if (u.isShelter())
-      metadata.addComponent(new ShelterComponent(metadata))
+      metadata.getOrAddShelterComponent()
       return true
 
     if (u.isTlsHero())
     //{
-      metadata.addComponent(new HeroComponent(metadata))
-      metadata.addComponent(new ExperienceComponent(metadata))
-      metadata.addComponent(new RangedTargetXpRecieverComponent(metadata)..setXpPerHit(1))
-      metadata.addComponent(new LooterComponent(metadata))
-      metadata.addComponent(new SprintComponent(metadata))
-      metadata.addComponent(new BlundershotComponent(metadata))
-      metadata.addComponent(new SmokeGrenadeComponent(metadata))
-      metadata.addComponent(new LootSpecialistComponent(metadata))
+      metadata.getOrAddHeroComponent()
+      metadata.getOrAddHeroExperienceComponent()
+      metadata.getOrAddLooterComponent()
+      metadata.getOrAddBuildingUndeadTargetComponent()
+
+      // Scout
+      if (u.getTypeId() == TlsUnitIds.heroScout)
+        metadata.getOrAddProcuristComponent()
+        metadata.getOrAddSprintComponent()
+        metadata.getOrAddSmokeGrenadeComponent()
+        metadata.getOrAddFocusedShotComponent()
+      
+      if (u.getTypeId() == TlsUnitIds.heroMountaineer)
+        metadata.getOrAddOutdoorsmanComponent()
+        metadata.getOrAddBearTrapComponent()
+        metadata.getOrAddBlundershotComponent()
+
+      // Captain
+      if (u.getTypeId() == TlsUnitIds.heroCaptain)
+        metadata.getOrAddCleaveComponent()
+        metadata.getOrAddTauntComponent()
+        metadata.getOrAddBlinkComponent()
+        metadata.getOrAddThrowSpearComponent()
+        // metadata.getOrAddDevotionAuraComponent()
+        // metadata.getOrAddHolyLightComponent()
+        // metadata.getOrAddShockwaveComponent()
+
+      // Tinkerer
+      if (u.getTypeId() == TlsUnitIds.heroTinker)
+        metadata.getOrAddStructureArmorAuraComponent()
+        // metadata.getOrAddInstantRepairComponent()
+        metadata.getOrAddRangedRepairComponent()
+        metadata.getOrAddOperatorBoostComponent()
+        metadata.getOrAddRocketBarrageComponent()
+
       return true
     //}
 

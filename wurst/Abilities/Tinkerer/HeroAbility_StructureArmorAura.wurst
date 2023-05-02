@@ -1,0 +1,100 @@
+package HeroAbility_StructureArmorAura
+import ChannelAbilityPreset
+import Math
+import Icons
+import HeroAbilities
+import TlsAbilityIds
+import BuffObjEditing
+
+// ============================================================================
+class StructureArmorAura
+  static constant int ABILITY_ID = TlsAbilityIds.Hero.structureArmorAura
+  static constant int ABILITY_LEARN_ID = TlsAbilityIds.Hero.structureArmorAura_learn
+  static constant int BUFF_ID = compiletime(BUFF_ID_GEN.next())
+
+  // --------------------------------------------------------------------------
+  static function getTooltipNormal(int effectiveAbilityLevel, int learnedAbilityLevel) returns string
+    return "Stronghold Aura - [{0}]".format("Level {0}".format(
+      effectiveAbilityLevel.toString()).colorizeTooltipForHeroAbility(effectiveAbilityLevel, learnedAbilityLevel))
+
+  // --------------------------------------------------------------------------
+  static function getArmorBonus(int effectiveAbilityLevel) returns real
+    return lerp(10.0, 30.0, parameterize(1, 3, effectiveAbilityLevel))
+
+  // --------------------------------------------------------------------------
+  static function getTooltipNormalExtended(int effectiveAbilityLevel, int learnedAbilityLevel) returns string
+    return "Gives {0} additional armor to nearby friendly structures.".format(
+      getArmorBonus(effectiveAbilityLevel).toString().colorizeTooltipForHeroAbility(effectiveAbilityLevel, learnedAbilityLevel))
+
+// ============================================================================
+public class StructureArmorAuraComponent extends HeroAbilityComponent
+
+  // --------------------------------------------------------------------------
+  construct (IUnitMetadata owner)
+    super(owner, StructureArmorAura.ABILITY_ID, StructureArmorAura.ABILITY_LEARN_ID)
+
+  // --------------------------------------------------------------------------
+  protected override function getTooltipNormal(int effectiveAbilityLevel, int learnedAbilityLevel) returns string
+    return StructureArmorAura.getTooltipNormal(effectiveAbilityLevel, learnedAbilityLevel)
+    
+  // --------------------------------------------------------------------------
+  protected override function getTooltipNormalExtended(int effectiveAbilityLevel, int learnedAbilityLevel) returns string
+    return StructureArmorAura.getTooltipNormalExtended(effectiveAbilityLevel, learnedAbilityLevel)
+
+// ============================================================================
+public function IUnitMetadata.getStructureArmorAuraComponent() returns StructureArmorAuraComponent
+  return this.getComponent(StructureArmorAuraComponent.typeId) castTo StructureArmorAuraComponent
+
+// ============================================================================
+public function IUnitMetadata.getOrAddStructureArmorAuraComponent() returns StructureArmorAuraComponent
+  var component = this.getStructureArmorAuraComponent()
+  if (component == null)
+    component = this.addComponent(new StructureArmorAuraComponent(this)) castTo StructureArmorAuraComponent
+  return component
+
+// ============================================================================
+public function unit.getStructureArmorAuraComponent() returns StructureArmorAuraComponent
+  let metadata = this.getMetadata()
+  return metadata != null ? metadata.getStructureArmorAuraComponent() : null
+
+// ============================================================================
+public function unit.getOrAddStructureArmorAuraComponent() returns StructureArmorAuraComponent
+  let metadata = this.getMetadata()
+  return metadata != null ? metadata.getOrAddStructureArmorAuraComponent() : null
+
+// ============================================================================
+@compiletime function createObjects()
+
+  new BuffDefinition(StructureArmorAura.BUFF_ID, 'Basl')
+    ..setName(1, "Stronghold Armor Bonus")
+    ..setTooltipNormal(1, "Stronghold Armor Bonus")
+    ..setTooltipNormalExtended(1, "This structure has increased armor due to a nearby Tinkerer")
+    ..setIcon(Icons.bTNImbuedMasonry)
+    ..setArtTarget(1, "")
+
+  new AbilityDefinitionPaladinDevotionAura(StructureArmorAura.ABILITY_ID)
+    ..setLevels(10)
+    ..setupHeroAbilityGroup(HeroAbilityGroup.Q)
+    ..setName("Stronghold Aura")
+    ..presetTooltipNormal(lvl -> StructureArmorAura.getTooltipNormal(lvl, lvl))
+    ..presetTooltipNormalExtended(lvl -> StructureArmorAura.getTooltipNormalExtended(lvl, lvl))
+    ..presetArmorBonus(lvl -> StructureArmorAura.getArmorBonus(lvl))
+    ..presetTargetsAllowed(lvl -> "structure,friend,vuln,invu")
+    ..setIconNormal(Icons.bTNImbuedMasonry)
+    ..presetAreaofEffect(lvl -> 450.0)
+    ..presetBuffs(lvl -> commaList(StructureArmorAura.BUFF_ID))
+
+  new HeroLearnAbilityDefinition(StructureArmorAura.ABILITY_LEARN_ID, 3)
+    ..setupHeroAbilityGroup(HeroAbilityGroup.Q, 0)
+    ..setName("Stronghold Aura")
+    ..setTooltipLearn("Learn Stronghold Aura - [|cFFFFCC00 Level %d|r]")
+    ..setTooltipLearnExtended("Gives additional armor to nearby friendly structures.|n|n|cFFFFCC00Level 1|r - Increases base armor by {0}.|n|cFFFFCC00Level 2|r - Increases base armor by {1}.|n|cFFFFCC00Level 3|r - Increases base armor by {2}.".format(
+      StructureArmorAura.getArmorBonus(1).toString(),
+      StructureArmorAura.getArmorBonus(2).toString(),
+      StructureArmorAura.getArmorBonus(3).toString()))
+    ..setIconResearch(Icons.bTNImbuedMasonry)
+
+// ============================================================================
+init
+  registerHeroAbilityComponentType(StructureArmorAuraComponent.typeId, StructureArmorAura.ABILITY_ID)
+  registerHeroAbilityComponentType(StructureArmorAuraComponent.typeId, StructureArmorAura.ABILITY_LEARN_ID)

@@ -1,0 +1,275 @@
+package HeroAbility_RocketBarrage
+import ChannelAbilityPreset
+import Math
+import Icons
+import HeroAbilities
+import TlsAbilityIds
+import ClosureTimers
+import GroupUtils
+import SmartValue
+import ECS
+import Missile
+import DamageEvent
+import RealExtensions
+import Orders
+import Damage
+import UnitPropertiesComponent
+import StandardTextTags
+import Elites
+
+constant real ROCKET_FIRE_INTERVAL = 0.5
+
+player g_rocketBarrageOwner = null
+boolexpr g_filterUnitIsRocketBarrageTarget = Condition(function filterUnitIsRocketBarrageTarget)
+
+// ============================================================================
+function filterUnitIsRocketBarrageTarget() returns bool
+  let filterUnit = GetFilterUnit()
+  return filterUnit.isAlive() and filterUnit.isEnemyOf(g_rocketBarrageOwner)
+
+// ============================================================================
+class RocketBarrage
+  static constant int ABILITY_ID = TlsAbilityIds.Hero.rocketBarrage
+  static constant int ABILITY_LEARN_ID = TlsAbilityIds.Hero.rocketBarrage_learn
+
+  // --------------------------------------------------------------------------
+  static function getTooltipNormal(int effectiveAbilityLevel, int learnedAbilityLevel) returns string
+    return "Rocket Barrage - [{0}]".format("Level {0}".format(
+      effectiveAbilityLevel.toString()).colorizeTooltipForHeroAbility(effectiveAbilityLevel, learnedAbilityLevel))
+
+  // --------------------------------------------------------------------------
+  static function getTooltipNormalExtended(int effectiveAbilityLevel, int learnedAbilityLevel) returns string
+    return "Fires {0} rockets at nearby enemies, dealing {1} damage and stunning them for {2} seconds.".format(
+      getRocketCount(effectiveAbilityLevel).toString().colorizeTooltipForHeroAbility(effectiveAbilityLevel, learnedAbilityLevel),
+      getDamagePercent01(effectiveAbilityLevel).toPercentageString01().colorizeTooltipForHeroAbility(effectiveAbilityLevel, learnedAbilityLevel),
+      getStunDuration(effectiveAbilityLevel).toString(0).colorizeTooltipForHeroAbility(effectiveAbilityLevel, learnedAbilityLevel))
+
+  // ----------------------------------------------------------------------------
+  static function getRocketCount(int effectiveAbilityLevel) returns int
+    return lerp(3, 5, parameterize(1, 3, effectiveAbilityLevel)).floor()
+
+  // --------------------------------------------------------------------------
+  static function getDamagePercent01(int effectiveAbilityLevel) returns real
+    return lerp(2, 4, parameterize(1, 3, effectiveAbilityLevel))
+
+  // --------------------------------------------------------------------------
+  static function getStunDuration(int effectiveAbilityLevel) returns real
+    return lerp(1, 3, parameterize(1, 3, effectiveAbilityLevel))
+
+  // ----------------------------------------------------------------------------
+  static function getChannelTime(int _lvl) returns real
+    return 0
+    // return ROCKET_FIRE_INTERVAL * getRocketCount(lvl)
+
+  // ----------------------------------------------------------------------------
+  static function getCooldown(int lvl) returns real
+    return lerp(10, 6, parameterize(1, 3, lvl))
+
+  // ----------------------------------------------------------------------------
+  static function getSplashRadius(int lvl) returns real
+    return lerp(32, 96, parameterize(1, 3, lvl))
+
+// ============================================================================
+public class RocketBarrageComponent extends HeroAbilityComponent
+
+  SmartValue damageScale01 = new SmartValue()
+  SmartValue rocketCount = new SmartValue()
+  SmartValue stunDuration = new SmartValue()
+
+  // --------------------------------------------------------------------------
+  construct (IUnitMetadata owner)
+    super(owner, RocketBarrage.ABILITY_ID, RocketBarrage.ABILITY_LEARN_ID)
+
+  // ----------------------------------------------------------------------------
+  ondestroy
+    destroy damageScale01
+    destroy rocketCount
+    destroy stunDuration
+
+  // --------------------------------------------------------------------------
+  protected override function getTooltipNormal(int effectiveAbilityLevel, int learnedAbilityLevel) returns string
+    return RocketBarrage.getTooltipNormal(effectiveAbilityLevel, learnedAbilityLevel)
+    
+  // --------------------------------------------------------------------------
+  protected override function getTooltipNormalExtended(int effectiveAbilityLevel, int learnedAbilityLevel) returns string
+    return RocketBarrage.getTooltipNormalExtended(effectiveAbilityLevel, learnedAbilityLevel)
+
+  // --------------------------------------------------------------------------
+  override protected function updateAbilityState()
+    super.updateAbilityState()
+  
+    let abilityLevelAdjusted = abilityLevel.getIntValue()
+    damageScale01.setBase(RocketBarrage.getDamagePercent01(abilityLevelAdjusted))
+    rocketCount.setBase(RocketBarrage.getRocketCount(abilityLevelAdjusted))
+    stunDuration.setBase(RocketBarrage.getStunDuration(abilityLevelAdjusted))
+
+  // ----------------------------------------------------------------------------
+  protected override function onEffect(int abilityId)
+    let ownerUnit = getOwnerUnit()
+
+    let rocketBarrageAbil = ownerUnit.getAbility(abilityId)
+    if (rocketBarrageAbil == null)
+      return
+
+    let abilityLevel = ownerUnit.getAbilityLevel(abilityId)
+    let castRange = rocketBarrageAbil.getField(ABILITY_RLF_CAST_RANGE, abilityLevel)
+
+    let targets = getGroup()
+    g_rocketBarrageOwner = ownerUnit.getOwner()
+    targets.enumUnitsInRange(ownerUnit.getPos(), castRange, g_filterUnitIsRocketBarrageTarget)
+    g_rocketBarrageOwner = null
+
+    // No enemies nearby, so don't charge mana
+    if (targets.isEmpty())
+    //{
+      targets.release()
+
+      // Stop before reducing mana
+      ownerUnit.issueImmediateOrderById(Orders.stop)
+      return
+    //}
+
+    let rocketCount = RocketBarrage.getRocketCount(abilityLevel)
+
+    doPeriodicallyCounted(0.1, rocketCount) (cb) ->
+      fireRocketStatic(ownerUnit, targets)
+      if (cb.isLast())
+        targets.release()
+
+  // ----------------------------------------------------------------------------
+  private static function fireRocketStatic(unit ownerUnit, group targets)
+    if (ownerUnit == null or not ownerUnit.isAlive())
+      targets.release()
+      return
+    let comp = ownerUnit.getMetadata().getRocketBarrageComponent()
+    if (comp == null or not comp.getEnabled())
+      targets.release()
+      return
+    comp.fireRocket(targets)
+
+  // ----------------------------------------------------------------------------
+  private function getClosestHighValueTargetUnit(group g, vec2 pos) returns unit
+    var closestDistSq = REAL_MAX
+    var highestValue = -1
+    unit pickedUnit = null
+    for _unit in g
+      let value = _unit.isBoss() ? 2 : (_unit.isElite() ? 1 : 0)
+      let distSq = _unit.getPos().distanceToSq(pos)
+      if (value > highestValue)
+        closestDistSq = distSq
+        highestValue = value
+        pickedUnit = _unit
+      else if (value == highestValue and distSq < closestDistSq)
+        closestDistSq = distSq
+        pickedUnit = _unit
+    return pickedUnit
+
+  // ----------------------------------------------------------------------------
+  private function fireRocket(group targets)
+
+    if (targets.isEmpty())
+      return
+
+    let ownerUnit = getOwnerUnit()
+    let startPos = ownerUnit.getPos()
+    
+    unit targetUnit = null
+    while (not targets.isEmpty())
+      targetUnit = getClosestHighValueTargetUnit(targets, startPos)
+      if (targets.size() > 1)
+        targets.removeUnit(targetUnit)
+      if (targetUnit.isAlive())
+        break
+
+    if (targetUnit == null or not targetUnit.isAlive())
+      return
+  
+    let baseDamage = ownerUnit.getBaseDamage(0) + ownerUnit.getBonusDamage()
+    let finalDamage = baseDamage * damageScale01.getValue()
+
+    doAfter(0.567) () -> 
+    //{
+      ECS.createEntity() (ECEntity entity) ->
+      //{
+        let effectComp = entity.addComponentAs<ECMissileEffect>(ECMissileEffect.typeId)
+        effectComp.setEffect(addEffect("Abilities\\Spells\\Other\\TinkerRocket\\TinkerRocketMissile.mdl", startPos))
+
+        let missile = entity.addComponentAs<ECMissile>(ECMissile.typeId)
+        missile.setFiringUnit(ownerUnit)
+        missile.m_projectileLaunchOffset = vec3(60, 0, 60)
+        missile.m_projectileImpactOffset = vec3(0, 0, 60)
+        missile.m_targetUnit = targetUnit
+        missile.m_speed = 700
+        missile.m_arc = 0.2
+
+        missile.onArrived().register() (_) ->
+        //{
+          DamageEvent.setNextDamageFromCode()
+          DamageEvent.setNextDamageId(RocketBarrage.ABILITY_ID)
+          DamageEvent.setNextDamageElement(DAMAGE_ELEMENT_ATTACK)
+
+          let damageArea = new DamageArea()
+          damageArea.attackType = ATTACK_TYPE_SIEGE
+          damageArea.areaFull = 25
+          damageArea.areaMedium = 50
+          damageArea.areaSmall = 100
+          damageArea.damageFactorFull = 1.0
+          damageArea.damageFactorMedium = 0.4
+          damageArea.damageFactorSmall = 0.1
+          damageArea.targetFilter = g_filterUnitIsRocketBarrageTarget
+          g_rocketBarrageOwner = ownerUnit.getOwner()
+          damageArea.damage(ownerUnit, targetUnit.getPos(), finalDamage)
+          g_rocketBarrageOwner = null
+          destroy damageArea
+
+          createCriticalStrikeTextTag(ownerUnit, finalDamage.floor())
+        //}
+      //}
+    //}
+
+// ============================================================================
+public function IUnitMetadata.getRocketBarrageComponent() returns RocketBarrageComponent
+  return this.getComponent(RocketBarrageComponent.typeId) castTo RocketBarrageComponent
+
+// ============================================================================
+public function IUnitMetadata.getOrAddRocketBarrageComponent() returns RocketBarrageComponent
+  var component = this.getRocketBarrageComponent()
+  if (component == null)
+    component = this.addComponent(new RocketBarrageComponent(this)) castTo RocketBarrageComponent
+  return component
+
+// ============================================================================
+@compiletime function createObjects()
+
+  new ChannelAbilityPreset(RocketBarrage.ABILITY_ID, 10, true)
+    ..setupHeroAbilityGroup(HeroAbilityGroup.R)
+    ..setAnimationNames("spell,one,looping")
+    ..setIconNormal(Icons.bTNClusterRockets)
+    ..presetCastRange(lvl -> 800)
+    ..presetFollowThroughTime(lvl -> RocketBarrage.getChannelTime(lvl))
+    ..presetDurationHero(lvl -> RocketBarrage.getChannelTime(lvl))
+    ..presetDurationNormal(lvl -> RocketBarrage.getChannelTime(lvl))
+    ..presetTargetsAllowed(lvl -> "")
+    ..presetTargetTypes(Targettype.NONE)
+    ..presetDisableOtherAbilities(lvl -> false)
+    ..presetOption(Option.VISIBLE, true)
+    ..presetManaCost(lvl -> 70)
+    ..presetCooldown(lvl -> RocketBarrage.getCooldown(lvl))
+    ..setName("Rocket Barrage")
+    ..presetTooltipNormal(lvl -> RocketBarrage.getTooltipNormal(lvl, lvl))
+    ..presetTooltipNormalExtended(lvl -> RocketBarrage.getTooltipNormalExtended(lvl, lvl))
+
+  new HeroLearnAbilityDefinition(RocketBarrage.ABILITY_LEARN_ID, 3)
+    ..setupHeroAbilityGroup(HeroAbilityGroup.R, 0)
+    ..setName("Rocket Barrage")
+    ..setTooltipLearn("Learn Rocket Barrage - [|cFFFFCC00 Level %d|r]")
+    ..setTooltipLearnExtended("Fires rockets at nearby enemies, dealing damage and stunning them a short time.|n|n|cFFFFCC00Level 1|r - Deals {0} damage, stuns for {1}s.|n|cFFFFCC00Level 2|r - Deals {2} damage, stuns for {3}s.|n|cFFFFCC00Level 3|r - Deals {4} damage, stuns for {5}s.".format(
+      RocketBarrage.getDamagePercent01(1).toPercentageString01(), RocketBarrage.getStunDuration(1).toString(0),
+      RocketBarrage.getDamagePercent01(2).toPercentageString01(), RocketBarrage.getStunDuration(2).toString(0),
+      RocketBarrage.getDamagePercent01(3).toPercentageString01(), RocketBarrage.getStunDuration(3).toString(0)))
+    ..setIconResearch(Icons.bTNClusterRockets)
+
+// ============================================================================
+init
+  registerHeroAbilityComponentType(RocketBarrageComponent.typeId, RocketBarrage.ABILITY_ID)
+  registerHeroAbilityComponentType(RocketBarrageComponent.typeId, RocketBarrage.ABILITY_LEARN_ID)

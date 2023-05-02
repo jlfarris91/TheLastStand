@@ -1,0 +1,469 @@
+package Unit_Barricades
+import Icons
+import TlsBuildingDefinition
+import GameConstants
+import TlsUpgradeIds
+import BuildingUndeadTarget
+import ObjectIdGenerator
+import HashList
+import HashMap
+import Preload
+
+BarricadeUnitDefinitionHelper g_barricade1Helper
+BarricadeUnitDefinitionHelper g_barricade2Helper
+BarricadeUnitDefinitionHelper g_barricade3Helper
+BarricadeUnitDefinitionHelper g_barricade4Helper
+HashList<int> g_allBarricadeIds
+public HashMap<int, BarricadeUnitDefinitionHelper> g_unitTypeToBarricadeHelperMap
+
+// ============================================================================
+//
+// Wood Barricade
+//
+// ============================================================================
+
+public constant int BARRICADE_1_GOLD_COST = 0
+public constant int BARRICADE_1_LUMBER_COST = 20
+public constant int BARRICADE_1_REPAIR_GOLD_COST = R2I(BARRICADE_1_GOLD_COST * BUILDING_REPAIR_GOLD_SCALAR)
+public constant int BARRICADE_1_REPAIR_LUMBER_COST = R2I(BARRICADE_1_LUMBER_COST * BUILDING_REPAIR_LUMBER_SCALAR)
+public constant int BARRICADE_1_RECYCLE_GOLD_COST = BARRICADE_1_GOLD_COST
+public constant int BARRICADE_1_RECYCLE_LUMBER_COST = BARRICADE_1_LUMBER_COST
+
+public class WoodBarricadeIds
+  static constant int build = compiletime(UNIT_ID_GEN.next())
+  static constant int alive = compiletime(UNIT_ID_GEN.next())
+  static constant int dead = compiletime(UNIT_ID_GEN.next())
+
+// ============================================================================
+//
+// Stone Barricade
+//
+// ============================================================================
+
+public constant int BARRICADE_2_GOLD_COST = 0
+public constant int BARRICADE_2_LUMBER_COST = 100
+public constant int BARRICADE_2_REPAIR_GOLD_COST = R2I(BARRICADE_2_GOLD_COST * BUILDING_REPAIR_GOLD_SCALAR)
+public constant int BARRICADE_2_REPAIR_LUMBER_COST = R2I(BARRICADE_2_LUMBER_COST * BUILDING_REPAIR_LUMBER_SCALAR)
+public constant int BARRICADE_2_RECYCLE_GOLD_COST = BARRICADE_1_RECYCLE_GOLD_COST + BARRICADE_2_GOLD_COST
+public constant int BARRICADE_2_RECYCLE_LUMBER_COST = BARRICADE_1_RECYCLE_LUMBER_COST + BARRICADE_2_LUMBER_COST
+
+public class StoneBarricadeIds
+  static constant int build = compiletime(UNIT_ID_GEN.next())
+  static constant int alive = compiletime(UNIT_ID_GEN.next())
+  static constant int dead = compiletime(UNIT_ID_GEN.next())
+
+// ============================================================================
+//
+// Tall Stone
+//
+// ============================================================================
+
+public constant int BARRICADE_3_GOLD_COST = 2
+public constant int BARRICADE_3_LUMBER_COST = 300
+public constant int BARRICADE_3_REPAIR_GOLD_COST = R2I(BARRICADE_3_GOLD_COST * BUILDING_REPAIR_GOLD_SCALAR)
+public constant int BARRICADE_3_REPAIR_LUMBER_COST = R2I(BARRICADE_3_LUMBER_COST * BUILDING_REPAIR_LUMBER_SCALAR)
+public constant int BARRICADE_3_RECYCLE_GOLD_COST = BARRICADE_2_RECYCLE_GOLD_COST + BARRICADE_3_GOLD_COST
+public constant int BARRICADE_3_RECYCLE_LUMBER_COST = BARRICADE_2_RECYCLE_LUMBER_COST + BARRICADE_3_LUMBER_COST
+
+public class TallStoneBarricadeIds
+  static constant int build = compiletime(UNIT_ID_GEN.next())
+  static constant int alive = compiletime(UNIT_ID_GEN.next())
+  static constant int dead = compiletime(UNIT_ID_GEN.next())
+
+// ============================================================================
+//
+// Lantern Barricade
+//
+// ============================================================================
+
+public constant int BARRICADE_4_GOLD_COST = 4
+public constant int BARRICADE_4_LUMBER_COST = 1800
+public constant int BARRICADE_4_REPAIR_GOLD_COST = R2I(BARRICADE_4_GOLD_COST * BUILDING_REPAIR_GOLD_SCALAR)
+public constant int BARRICADE_4_REPAIR_LUMBER_COST = R2I(BARRICADE_4_LUMBER_COST * BUILDING_REPAIR_LUMBER_SCALAR)
+public constant int BARRICADE_4_RECYCLE_GOLD_COST = BARRICADE_3_RECYCLE_GOLD_COST + BARRICADE_4_GOLD_COST
+public constant int BARRICADE_4_RECYCLE_LUMBER_COST = BARRICADE_3_RECYCLE_LUMBER_COST + BARRICADE_4_LUMBER_COST
+
+public class LanternBarricadeIds
+  static constant int build = compiletime(UNIT_ID_GEN.next())
+  static constant int alive = compiletime(UNIT_ID_GEN.next())
+  static constant int dead = compiletime(UNIT_ID_GEN.next())
+
+// ============================================================================
+public class BarricadeUnitDefinitionHelper
+  private string m_name
+  private int m_id
+  private int m_aliveId
+  private int m_deadId
+
+  // ----------------------------------------------------------------------------
+  construct(string name)
+    m_name = name
+
+  // ----------------------------------------------------------------------------
+  function getName() returns string
+    return m_name
+
+  // ----------------------------------------------------------------------------
+  function getBuildId() returns int
+    return m_id
+  
+  // ----------------------------------------------------------------------------
+  function setBuildId(int value)
+    m_id = value
+
+  // ----------------------------------------------------------------------------
+  function getAliveId() returns int
+    return m_aliveId
+  
+  // ----------------------------------------------------------------------------
+  function setAliveId(int value)
+    m_aliveId = value
+
+  // ----------------------------------------------------------------------------
+  function getDeadId() returns int
+    return m_deadId
+  
+  // ----------------------------------------------------------------------------
+  function setDeadId(int value)
+    m_deadId = value
+
+  // ----------------------------------------------------------------------------
+  function registerForPreload()
+    Preload.registerUnitTypeId(m_id)
+    Preload.registerUnitTypeId(m_aliveId)
+    Preload.registerUnitTypeId(m_deadId)
+
+// ============================================================================
+public class BaseBarricadeDefinition extends TlsBuildingDefinition
+  construct(int newId)
+    super(newId, UnitIds.scouttower)
+    setHotkey("A")
+    setDeathTimeseconds(0.83)
+    setGroundTexture("")
+    setSelectionScale(1.5)
+    setShadowTextureBuilding("")
+    setDeathType(DeathType.CannotRaiseDoesNotDecay)
+    setArmorType(ArmorType.Fortified)
+    setCollisionSize(16.0)
+    setPathingMap("PathTextures\\2x2Default.tga")
+    setPlacementRequires("unbuildable,unwalkable")
+    setRequiredAnimationNamesAttachments("small")
+    setCanFlee(false)
+    setHideMinimapDisplay(true)
+    setNormalAbilities(commaList(TlsAbilityIds.recycle))
+    setSightRadiusDay(STRUCTURE_SMALL_SIGHT_RANGE_DAY)
+    setSightRadiusNight(STRUCTURE_SMALL_SIGHT_RANGE_NIGHT)
+    setBuildTime(BUILD_TIME_BUILDING_SMALL)
+    setRepairTime(REPAIR_TIME_BUILDING_SMALL)
+    this.setCommonBuildingProperties()
+
+// ============================================================================
+@compiletime function init_compiletime()
+
+  g_allBarricadeIds = new HashList<int>()
+  g_unitTypeToBarricadeHelperMap = new HashMap<int, BarricadeUnitDefinitionHelper>()
+
+  g_barricade1Helper = new BarricadeUnitDefinitionHelper("Wood Barricade")
+    ..setBuildId(WoodBarricadeIds.build)
+    ..setAliveId(WoodBarricadeIds.alive)
+    ..setDeadId(WoodBarricadeIds.dead)
+    ..registerForPreload()
+  
+  g_barricade2Helper = new BarricadeUnitDefinitionHelper("Stone Barricade")
+    ..setBuildId(StoneBarricadeIds.build)
+    ..setAliveId(StoneBarricadeIds.alive)
+    ..setDeadId(StoneBarricadeIds.dead)
+    ..registerForPreload()
+  
+  g_barricade3Helper = new BarricadeUnitDefinitionHelper("Tall Stone Barricade")
+    ..setBuildId(TallStoneBarricadeIds.build)
+    ..setAliveId(TallStoneBarricadeIds.alive)
+    ..setDeadId(TallStoneBarricadeIds.dead)
+    ..registerForPreload()
+  
+  g_barricade4Helper = new BarricadeUnitDefinitionHelper("Lantern Barricade")
+    ..setBuildId(LanternBarricadeIds.build)
+    ..setAliveId(LanternBarricadeIds.alive)
+    ..setDeadId(LanternBarricadeIds.dead)
+    ..registerForPreload()
+
+  createBarricade1()
+  createBarricade2()
+  createBarricade3()
+  createBarricade4()
+
+// ============================================================================
+function createBarricade1()
+
+  let helper = g_barricade1Helper
+  let upgradesToHelper = g_barricade2Helper
+
+  BaseBarricadeDefinition array[3] barricadeDefs
+
+  barricadeDefs[0] = new BaseBarricadeDefinition(helper.getBuildId())
+  barricadeDefs[1] = new BaseBarricadeDefinition(helper.getAliveId())
+  barricadeDefs[2] = new BaseBarricadeDefinition(helper.getDeadId())
+
+  for i = 0 to 2
+  //{
+    barricadeDefs[i]
+    ..setIconGameInterface(Icons.bTNCrate)
+    ..setModelFile("Units\\Barricade\\crates3.mdl")
+    ..setName(helper.getName())
+    ..setTooltipBasic("Build " + helper.getName())
+    ..setTooltipExtended("Build a small barricade that provides you with a defense against the zombies.")
+    ..setMovementHeight(-25.0)
+    ..setMovementHeightMinimum(-25.0)
+    ..setScalingValue(1.75)
+    ..setUpgradesUsed(commaList(TlsUpgradeIds.campDefense))
+    ..setRequirements(commaList(TlsUnitIds.headquarters1))
+    ..setHitPointsMaximumBase(560)
+    ..setDefenseBase(1)
+
+    g_allBarricadeIds.add(barricadeDefs[i].getNewId())
+    g_unitTypeToBarricadeHelperMap.put(barricadeDefs[i].getNewId(), helper)
+  //}
+
+  barricadeDefs[0]
+  ..setBuildOptions(helper, upgradesToHelper)
+  ..setGoldCost(BARRICADE_1_GOLD_COST)
+  ..setLumberCost(BARRICADE_1_LUMBER_COST)
+  ..setRepairGoldCost(BARRICADE_1_REPAIR_GOLD_COST)
+  ..setRepairLumberCost(BARRICADE_1_REPAIR_LUMBER_COST)
+  ..setRecycleGoldRewarded(BARRICADE_1_RECYCLE_GOLD_COST)
+  ..setRecycleLumberRewarded(BARRICADE_1_RECYCLE_LUMBER_COST)
+  ..setButtonPositionX(0)
+  ..setButtonPositionY(1)
+
+  barricadeDefs[1].setAliveOptions(helper, upgradesToHelper)
+  
+  barricadeDefs[2]
+  ..setDeadOptions(helper)
+  ..setRepairGoldCost((BARRICADE_1_GOLD_COST * BUILDING_REPAIR_BROKEN_GOLD_SCALAR).floor())
+  ..setRepairLumberCost((BARRICADE_1_LUMBER_COST * BUILDING_REPAIR_BROKEN_LUMBER_SCALAR).floor())
+
+// ============================================================================
+function createBarricade2()
+
+  let helper = g_barricade2Helper
+  let upgradesToHelper = g_barricade3Helper
+
+  BaseBarricadeDefinition array[3] barricadeDefs
+
+  barricadeDefs[0] = new BaseBarricadeDefinition(helper.getBuildId())
+  barricadeDefs[1] = new BaseBarricadeDefinition(helper.getAliveId())
+  barricadeDefs[2] = new BaseBarricadeDefinition(helper.getDeadId())
+
+  for i = 0 to 2
+  //{
+    barricadeDefs[i]
+    ..setIconGameInterface(Icons.bTNCrate)
+    ..setModelFile("Doodads\\Cityscape\\Structures\\City_LowWall_ShortEndCap\\City_LowWall_ShortEndCap.mdl")
+    ..setName(helper.getName())
+    ..setTooltipBasic("Upgrade to " + helper.getName())
+    ..setTooltipExtended("Upgrade to a stronger barricade made out of stone.")
+    ..setScalingValue(1.0)
+    ..setUpgradesUsed(commaList(TlsUpgradeIds.campDefense))
+    ..setRequirements(commaList(TlsUnitIds.workbench))
+    ..setHitPointsMaximumBase(1125)
+    ..setDefenseBase(2)
+
+    g_allBarricadeIds.add(barricadeDefs[i].getNewId())
+    g_unitTypeToBarricadeHelperMap.put(barricadeDefs[i].getNewId(), helper)
+  //}
+
+  barricadeDefs[0]
+  ..setBuildOptions(helper, upgradesToHelper)
+  ..setGoldCost(BARRICADE_2_GOLD_COST)
+  ..setLumberCost(BARRICADE_2_LUMBER_COST)
+  ..setRepairGoldCost(BARRICADE_2_REPAIR_GOLD_COST)
+  ..setRepairLumberCost(BARRICADE_2_REPAIR_LUMBER_COST)
+  ..setRecycleGoldRewarded(BARRICADE_2_RECYCLE_GOLD_COST)
+  ..setRecycleLumberRewarded(BARRICADE_2_RECYCLE_LUMBER_COST)
+
+  barricadeDefs[1].setAliveOptions(helper, upgradesToHelper)
+  
+  barricadeDefs[2]
+  ..setDeadOptions(helper)
+  ..setRepairGoldCost((BARRICADE_2_GOLD_COST * BUILDING_REPAIR_BROKEN_GOLD_SCALAR).floor())
+  ..setRepairLumberCost((BARRICADE_2_LUMBER_COST * BUILDING_REPAIR_BROKEN_LUMBER_SCALAR).floor())
+
+// ============================================================================
+function createBarricade3()
+
+  let helper = g_barricade3Helper
+  let upgradesToHelper = g_barricade4Helper
+
+  BaseBarricadeDefinition array[3] barricadeDefs
+
+  barricadeDefs[0] = new BaseBarricadeDefinition(helper.getBuildId())
+  barricadeDefs[1] = new BaseBarricadeDefinition(helper.getAliveId())
+  barricadeDefs[2] = new BaseBarricadeDefinition(helper.getDeadId())
+
+  for i = 0 to 2
+  //{
+    barricadeDefs[i]
+    ..setIconGameInterface(Icons.bTNCrate)
+    ..setModelFile("Doodads\\Cityscape\\Structures\\City_LowWall_TallEndCap\\City_LowWall_TallEndCap.mdl")
+    ..setName(helper.getName())
+    ..setTooltipBasic("Upgrade to " + helper.getName())
+    ..setTooltipExtended("Build a small barricade that provides you with a defense against the zombies.")
+    ..setScalingValue(1.0)
+    ..setUpgradesUsed(commaList(TlsUpgradeIds.campDefense))
+    ..setRequirements(commaList(TlsUnitIds.headquarters1))
+    ..setHitPointsMaximumBase(2250)
+    ..setDefenseBase(3)
+
+    g_allBarricadeIds.add(barricadeDefs[i].getNewId())
+    g_unitTypeToBarricadeHelperMap.put(barricadeDefs[i].getNewId(), helper)
+  //}
+
+  barricadeDefs[0]
+  ..setBuildOptions(helper, upgradesToHelper)
+  ..setGoldCost(BARRICADE_3_GOLD_COST)
+  ..setLumberCost(BARRICADE_3_LUMBER_COST)
+  ..setRepairGoldCost(BARRICADE_3_REPAIR_GOLD_COST)
+  ..setRepairLumberCost(BARRICADE_3_REPAIR_LUMBER_COST)
+  ..setRecycleGoldRewarded(BARRICADE_3_RECYCLE_GOLD_COST)
+  ..setRecycleLumberRewarded(BARRICADE_3_RECYCLE_LUMBER_COST)
+
+  barricadeDefs[1].setAliveOptions(helper, upgradesToHelper)
+  
+  barricadeDefs[2]
+  ..setDeadOptions(helper)
+  ..setRepairGoldCost((BARRICADE_3_GOLD_COST * BUILDING_REPAIR_BROKEN_GOLD_SCALAR).floor())
+  ..setRepairLumberCost((BARRICADE_3_LUMBER_COST * BUILDING_REPAIR_BROKEN_LUMBER_SCALAR).floor())
+
+// ============================================================================
+function createBarricade4()
+
+  let helper = g_barricade4Helper
+
+  BaseBarricadeDefinition array[3] barricadeDefs
+
+  barricadeDefs[0] = new BaseBarricadeDefinition(helper.getBuildId())
+  barricadeDefs[1] = new BaseBarricadeDefinition(helper.getAliveId())
+  barricadeDefs[2] = new BaseBarricadeDefinition(helper.getDeadId())
+
+  for i = 0 to 2
+  //{
+    barricadeDefs[i]
+    ..setIconGameInterface(Icons.bTNCrate)
+    ..setModelFile("Doodads\\Cityscape\\Structures\\City_LowWall_TallEndCapWithLantern\\City_LowWall_TallEndCapWithLantern.mdl")
+    ..setName(helper.getName())
+    ..setTooltipBasic("Upgrade to " + helper.getName())
+    ..setTooltipExtended("Upgrade to the strongest barricade made out of stone that provides sight due to the lantern placed atop.")
+    ..setScalingValue(1.0)
+    ..setUpgradesUsed(commaList(TlsUpgradeIds.campDefense))
+    ..setRequirements(commaList(TlsUnitIds.headquarters1))
+    ..setHitPointsMaximumBase(4500)
+    ..setDefenseBase(4)
+
+    g_allBarricadeIds.add(barricadeDefs[i].getNewId())
+    g_unitTypeToBarricadeHelperMap.put(barricadeDefs[i].getNewId(), helper)
+  //}
+
+  barricadeDefs[0]
+  ..setBuildOptions(helper, null)
+  ..setGoldCost(BARRICADE_4_GOLD_COST)
+  ..setLumberCost(BARRICADE_4_LUMBER_COST)
+  ..setRepairGoldCost(BARRICADE_4_REPAIR_GOLD_COST)
+  ..setRepairLumberCost(BARRICADE_4_REPAIR_LUMBER_COST)
+  ..setRecycleGoldRewarded(BARRICADE_4_RECYCLE_GOLD_COST)
+  ..setRecycleLumberRewarded(BARRICADE_4_RECYCLE_LUMBER_COST)
+  ..setSightRadiusDay(600)
+  ..setSightRadiusNight(600)
+
+  barricadeDefs[1]
+  ..setAliveOptions(helper, null)
+  ..setSightRadiusDay(600)
+  ..setSightRadiusNight(600)
+
+  barricadeDefs[2]
+  ..setDeadOptions(helper)
+  ..setRepairGoldCost((BARRICADE_4_GOLD_COST * BUILDING_REPAIR_BROKEN_GOLD_SCALAR).floor())
+  ..setRepairLumberCost((BARRICADE_4_LUMBER_COST * BUILDING_REPAIR_BROKEN_LUMBER_SCALAR).floor())
+
+// ============================================================================
+function BaseBarricadeDefinition.setBuildOptions(
+  BarricadeUnitDefinitionHelper helper,
+  BarricadeUnitDefinitionHelper upgradesToHelper)
+
+  this
+  ..setName(helper.getName())
+  ..setNameEditorSuffix("(Build)")
+  ..setButtonPositionX(0)
+  ..setButtonPositionY(2)
+  ..makeBuildingUndeadTarget()
+
+  if (upgradesToHelper != null)
+    let deadId = helper.getDeadId()
+    let nextId = upgradesToHelper.getBuildId()
+    this.setUpgradesTo(commaList(deadId, nextId))
+  else
+    let deadId = helper.getDeadId()
+    this.setUpgradesTo(commaList(deadId))
+
+// ============================================================================
+function BaseBarricadeDefinition.setAliveOptions(
+  BarricadeUnitDefinitionHelper helper,
+  BarricadeUnitDefinitionHelper upgradesToHelper)
+
+  this
+  ..setName(helper.getName())
+  ..setNameEditorSuffix("(Alive)")
+  ..setRequirements("")
+  ..setButtonPositionX(0)
+  ..setButtonPositionY(-11)
+  ..setGoldCost(0)
+  ..setLumberCost(0)
+  ..setBuildTime(1)
+  ..makeBuildingUndeadTarget()
+
+  if (upgradesToHelper != null)
+    let deadId = helper.getDeadId()
+    let nextId = upgradesToHelper.getBuildId()
+    this.setUpgradesTo(commaList(deadId, nextId))
+  else
+    let deadId = helper.getDeadId()
+    this.setUpgradesTo(commaList(deadId))
+
+// ============================================================================
+function BaseBarricadeDefinition.setDeadOptions(BarricadeUnitDefinitionHelper helper)
+
+  this
+  ..setName("Broken " + helper.getName())
+  ..setNameEditorSuffix("(Dead)")
+  ..setRequirements("")
+  ..setButtonPositionX(0)
+  ..setButtonPositionY(-11)
+  ..setGoldCost(0)
+  ..setLumberCost(0)
+  ..setBuildTime(1)
+  ..setPathingMap("PathTextures\\2x2Unbuildable.tga")
+  ..setUpgradesTo(commaList(helper.getAliveId()))
+  ..setNormalAbilities(commaList(TlsAbilityIds.recycleBroken))
+
+// ============================================================================
+public function unit.isBarricade() returns bool
+  return g_allBarricadeIds.has(this.getTypeId())
+
+// ============================================================================
+public function getBarricadeTier(int unitTypeId) returns int
+  switch (unitTypeId)
+    case WoodBarricadeIds.build | WoodBarricadeIds.alive | WoodBarricadeIds.dead
+      return 0
+    case StoneBarricadeIds.build | StoneBarricadeIds.alive | StoneBarricadeIds.dead
+      return 1
+    case TallStoneBarricadeIds.build | TallStoneBarricadeIds.alive | TallStoneBarricadeIds.dead
+      return 2
+    case LanternBarricadeIds.build | LanternBarricadeIds.alive | LanternBarricadeIds.dead
+      return 3
+    default
+      return -1
+
+// ============================================================================
+init
+
+  if (g_barricade1Helper == null)
+    init_compiletime()

@@ -1,0 +1,110 @@
+package HeroAbility_Taunt
+import ChannelAbilityPreset
+import Math
+import Icons
+import HeroAbilities
+import TlsAbilityIds
+import Taunt
+import RegisterEvents
+
+// ============================================================================
+class Taunt
+  static constant int ABILITY_ID = TlsAbilityIds.Hero.taunt
+  static constant int ABILITY_LEARN_ID = TlsAbilityIds.Hero.taunt_learn
+
+  // --------------------------------------------------------------------------
+  static function getTooltipNormal(int effectiveAbilityLevel, int learnedAbilityLevel) returns string
+    return "Taunt - [{0}]".format("Level {0}".format(
+      effectiveAbilityLevel.toString()).colorizeTooltipForHeroAbility(effectiveAbilityLevel, learnedAbilityLevel))
+
+  // --------------------------------------------------------------------------
+  static function getAreaOfEffect(int effectiveAbilityLevel) returns real
+    return lerp(400.0, 800.0, parameterize(1, 3, effectiveAbilityLevel))
+
+  // --------------------------------------------------------------------------
+  static function getTooltipNormalExtended(int _effectiveAbilityLevel, int _learnedAbilityLevel) returns string
+    return "The closest 10 enemies are forced to attack the Captain."
+
+// ============================================================================
+public class TauntComponent extends HeroAbilityComponent
+
+  // --------------------------------------------------------------------------
+  construct (IUnitMetadata owner)
+    super(owner, Taunt.ABILITY_ID, Taunt.ABILITY_LEARN_ID)
+
+  // --------------------------------------------------------------------------
+  protected override function getTooltipNormal(int effectiveAbilityLevel, int learnedAbilityLevel) returns string
+    return Taunt.getTooltipNormal(effectiveAbilityLevel, learnedAbilityLevel)
+    
+  // --------------------------------------------------------------------------
+  protected override function getTooltipNormalExtended(int effectiveAbilityLevel, int learnedAbilityLevel) returns string
+    return Taunt.getTooltipNormalExtended(effectiveAbilityLevel, learnedAbilityLevel)
+
+// ============================================================================
+public function IUnitMetadata.getTauntComponent() returns TauntComponent
+  return this.getComponent(TauntComponent.typeId) castTo TauntComponent
+
+// ============================================================================
+public function IUnitMetadata.getOrAddTauntComponent() returns TauntComponent
+  var component = this.getTauntComponent()
+  if (component == null)
+    component = this.addComponent(new TauntComponent(this)) castTo TauntComponent
+  return component
+
+// ============================================================================
+public function unit.getTauntComponent() returns TauntComponent
+  let metadata = this.getMetadata()
+  return metadata != null ? metadata.getTauntComponent() : null
+
+// ============================================================================
+public function unit.getOrAddTauntComponent() returns TauntComponent
+  let metadata = this.getMetadata()
+  return metadata != null ? metadata.getOrAddTauntComponent() : null
+
+// ============================================================================
+function onSpellCast()
+  if (GetSpellAbilityId() == Taunt.ABILITY_ID)
+    g_tauntingUnits.addUnit(GetSpellAbilityUnit())
+
+// ============================================================================
+function onSpellFinishOrEndCast()
+  if (GetSpellAbilityId() == Taunt.ABILITY_ID)
+    g_tauntingUnits.removeUnit(GetSpellAbilityUnit())
+
+// ============================================================================
+function onUnitDeath()
+  let dyingUnit = GetDyingUnit()
+  if (dyingUnit.hasAbility(Taunt.ABILITY_ID))
+    g_tauntingUnits.removeUnit(dyingUnit)
+
+// ============================================================================
+@compiletime function createObjects()
+
+  new AbilityDefinitionTauntCreep(Taunt.ABILITY_ID)
+    ..setLevels(10)
+    ..setupHeroAbilityGroup(HeroAbilityGroup.W)
+    ..setName("Taunt")
+    ..presetTooltipNormal(lvl -> Taunt.getTooltipNormal(lvl, lvl))
+    ..presetTooltipNormalExtended(lvl -> Taunt.getTooltipNormalExtended(lvl, lvl))
+    ..presetAreaofEffect(lvl -> Taunt.getAreaOfEffect(lvl))
+    ..setIconNormal(Icons.bTNTaunt)
+
+  new HeroLearnAbilityDefinition(Taunt.ABILITY_LEARN_ID, 3)
+    ..setupHeroAbilityGroup(HeroAbilityGroup.W, 0)
+    ..setName("Taunt")
+    ..setTooltipLearn("Learn Taunt - [|cFFFFCC00 Level %d|r]")
+    ..setTooltipLearnExtended("The closest 10 enemies are forced to attack the Captain.|n|n|cFFFFCC00Level 1|r - {0} area of effect.|n|cFFFFCC00Level 2|r - {1} area of effect.|n|cFFFFCC00Level 3|r - {2} area of effect.".format(
+      Taunt.getAreaOfEffect(1).toString(),
+      Taunt.getAreaOfEffect(2).toString(),
+      Taunt.getAreaOfEffect(3).toString()))
+    ..setIconResearch(Icons.bTNTaunt)
+
+// ============================================================================
+init
+  registerHeroAbilityComponentType(TauntComponent.typeId, Taunt.ABILITY_ID)
+  registerHeroAbilityComponentType(TauntComponent.typeId, Taunt.ABILITY_LEARN_ID)
+
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_SPELL_CAST, function onSpellCast)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_SPELL_FINISH, function onSpellFinishOrEndCast)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_SPELL_ENDCAST, function onSpellFinishOrEndCast)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_DEATH, function onUnitDeath)

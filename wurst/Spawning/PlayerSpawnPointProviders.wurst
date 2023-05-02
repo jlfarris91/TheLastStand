@@ -1,5 +1,5 @@
 package PlayerSpawnPointProviders
-import ISpawnPointProvider
+import Spawning
 import RandomSpawnPointProvider
 import DynamicSpawnPointProvider
 import GridCachedSpawnManager
@@ -9,6 +9,9 @@ import UnitIndexer
 import Circle
 import ColorUtility
 import Func
+import UnitMetadata
+import CampCenterComponent
+import HumanPlayerComponent
 
 @configurable public constant real FRIENDLY_INVALIDATION_RANGE = 512.0
 @configurable public constant real HOSTILE_INVALIDATION_RANGE = 800.0
@@ -32,55 +35,63 @@ public enum SpawnPointProviderType
   DYNAMIC_FRIENDLY
 
 // ============================================================================
-public function getCachedHostileSpawnPointProvider(player _) returns ISpawnPointProvider
+public function getCachedHostileSpawnPointProvider() returns SpawnPointProvider
   if (g_cachedHostileSpawnPointProvider == null)
-    g_cachedHostileSpawnPointProvider = new GridCachedSpawnManager("Hostile", g_doesUnitInvalidateHostileSpawnPoint, Colors.red)
+    g_cachedHostileSpawnPointProvider = new GridCachedSpawnManager("Hostile", g_doesUnitInvalidateHostileSpawnPoint, Colors.red)..acquire()
   return g_cachedHostileSpawnPointProvider
 
 // ============================================================================
-public function getCachedFriendlySpawnPointProvider(player _) returns ISpawnPointProvider
+public function getCachedFriendlySpawnPointProvider() returns SpawnPointProvider
   if (g_cachedFriendlySpawnPointProvider == null)
-    g_cachedFriendlySpawnPointProvider = new GridCachedSpawnManager("Friendly", g_doesUnitInvalidateFriendlySpawnPoint, Colors.green)
+    g_cachedFriendlySpawnPointProvider = new GridCachedSpawnManager("Friendly", g_doesUnitInvalidateFriendlySpawnPoint, Colors.green)..acquire()
   return g_cachedFriendlySpawnPointProvider
 
 // ============================================================================
-public function getDynamicHostileSpawnPointProvider(player p) returns ISpawnPointProvider
+public function getDynamicHostileSpawnPointProvider(player p) returns SpawnPointProvider
   let playerId = p.getId()
   if (g_dynamicHostileSpawnPointProviders[playerId] == null)
-    g_dynamicHostileSpawnPointProviders[playerId] = new DynamicSpawnPointProvider(p, HOSTILE_INVALIDATION_RANGE, g_doesUnitInvalidateHostileSpawnPoint)
+    g_dynamicHostileSpawnPointProviders[playerId] = new DynamicSpawnPointProvider(
+      p.getHumanPlayerComponent().getCampCenter(),
+      HOSTILE_INVALIDATION_RANGE,
+      g_doesUnitInvalidateHostileSpawnPoint)
+      ..acquire()
   return g_dynamicHostileSpawnPointProviders[playerId]
 
 // ============================================================================
-public function getDynamicFriendlySpawnPointProvider(player p) returns ISpawnPointProvider
+public function getDynamicFriendlySpawnPointProvider(player p) returns SpawnPointProvider
   let playerId = p.getId()
   if (g_dynamicFriendlySpawnPointProviders[playerId] == null)
-    g_dynamicFriendlySpawnPointProviders[playerId] = new DynamicSpawnPointProvider(p, FRIENDLY_INVALIDATION_RANGE, g_doesUnitInvalidateFriendlySpawnPoint)
+    g_dynamicFriendlySpawnPointProviders[playerId] = new DynamicSpawnPointProvider(
+      p.getHumanPlayerComponent().getCampCenter(),
+      FRIENDLY_INVALIDATION_RANGE,
+      g_doesUnitInvalidateFriendlySpawnPoint)
+      ..acquire()
   return g_dynamicFriendlySpawnPointProviders[playerId]
 
 // ============================================================================
-public function getHostileSpawnPointProviderForPlayer(player p) returns ISpawnPointProvider
+public function getHostileSpawnPointProviderForPlayer(player p) returns SpawnPointProvider
   let playerId = p.getId()
   if (g_hostileSpawnPointProviders[playerId] == null)
   //{
-    let spawnManager = getCachedHostileSpawnPointProvider(p)
+    let spawnManager = getCachedHostileSpawnPointProvider()
     let fallbackSpawnManager = getDynamicHostileSpawnPointProvider(p)
-    g_hostileSpawnPointProviders[playerId] = new RandomSpawnPointProvider(spawnManager, fallbackSpawnManager)
+    g_hostileSpawnPointProviders[playerId] = new RandomSpawnPointProvider(spawnManager, fallbackSpawnManager)..acquire()
   //}
   return g_hostileSpawnPointProviders[playerId]
 
 // ============================================================================
-public function getFriendlySpawnPointProviderForPlayer(player p) returns ISpawnPointProvider
+public function getFriendlySpawnPointProviderForPlayer(player p) returns SpawnPointProvider
   let playerId = p.getId()
   if (g_friendlySpawnPointProviders[playerId] == null)
   //{
-    let spawnManager = getCachedFriendlySpawnPointProvider(p)
+    let spawnManager = getCachedFriendlySpawnPointProvider()
     let fallbackSpawnManager = getDynamicFriendlySpawnPointProvider(p)
-    g_friendlySpawnPointProviders[playerId] = new RandomSpawnPointProvider(spawnManager, fallbackSpawnManager)
+    g_friendlySpawnPointProviders[playerId] = new RandomSpawnPointProvider(spawnManager, fallbackSpawnManager)..acquire()
   //}
   return g_friendlySpawnPointProviders[playerId]
 
 // ============================================================================
-public function getSpawnPointProvider(player p, SpawnPointProviderType spawnPointProviderType) returns ISpawnPointProvider
+public function getSpawnPointProviderForPlayer(player p, SpawnPointProviderType spawnPointProviderType) returns SpawnPointProvider
   switch (spawnPointProviderType)
     case CACHED_HOSTILE
       return getHostileSpawnPointProviderForPlayer(p)
@@ -93,14 +104,14 @@ public function getSpawnPointProvider(player p, SpawnPointProviderType spawnPoin
 
 // ============================================================================
 function doesUnitInvalidateFriendlySpawnPoint(unit u) returns bool
-  return u.isStructure()
+  return u.isBuilding()
          and u.isAlive()
          and u.isEnemyOf(PLAYER_VILLAGERS)
          and not u.isInvulnerable()
 
 // ============================================================================
 function doesUnitInvalidateHostileSpawnPoint(unit u) returns bool
-  return u.isStructure()
+  return u.isBuilding()
          and u.isAlive()
          and u.isEnemyOf(PLAYER_UNDEAD)
          and not u.isInvulnerable()
@@ -116,6 +127,19 @@ function onUnitIndexing()
 
   if (g_cachedHostileSpawnPointProvider != null and doesUnitInvalidateHostileSpawnPoint(indexingUnit))
     g_cachedHostileSpawnPointProvider.invalidateSpawnPoints(circle(unitPos, HOSTILE_INVALIDATION_RANGE).getBounds())
+
+  let metadata = indexingUnit.getMetadata()
+  if (metadata != null)
+    let campCenterComp = metadata.getCampCenterComponent()
+    if (campCenterComp != null)
+      updateDynamicSpawnPointProviderCenter(indexingUnit.getOwner())
+
+// ============================================================================
+function updateDynamicSpawnPointProviderCenter(player p)
+  let humanComp = p.getHumanPlayerComponent()
+  let campCenter = humanComp.getCampCenter()
+  g_dynamicFriendlySpawnPointProviders[p.getId()].setCenter(campCenter)
+  g_dynamicHostileSpawnPointProviders[p.getId()].setCenter(campCenter)
 
 // ============================================================================
 init

@@ -1,0 +1,129 @@
+package HeroAbility_Procurist
+import ChannelAbilityPreset
+import RealExtensions
+import SmartValue
+import Range
+import HeroAbilities
+import TlsAbilityIds
+import SoundUtils
+import UnitPropertiesComponent
+import Handle
+import Math
+
+constant rangeReal ABIL_DAMAGE_DISTANCE_SCALE = rangeReal(1.0, 0.5)
+
+constant SoundDefinition g_attackSound = new SoundDefinition("units\\human\\rifleman\\riflemanattack1.flac", false, true)
+
+// ============================================================================
+class Procurist
+
+  // --------------------------------------------------------------------------
+  static function getLootDurationScale01(int effectiveAbilityLevel) returns real
+    return clamp(0.1 + max(effectiveAbilityLevel - 1, 0) * 0.1, 0.1, 0.5)
+
+  // --------------------------------------------------------------------------
+  static function getTooltipNormal(int effectiveAbilityLevel, int learnedAbilityLevel) returns string
+    return "Procurist - [{0}]".format("Level {0}".format(
+      effectiveAbilityLevel.toString()).colorizeTooltipForHeroAbility(effectiveAbilityLevel, learnedAbilityLevel))
+
+  // --------------------------------------------------------------------------
+  static function getTooltipNormalExtended(int effectiveAbilityLevel, int learnedAbilityLevel) returns string
+    return "This survivor is profficient at looting and loots {0} faster.".format(getLootDurationScale01(effectiveAbilityLevel).toPercentageString01().colorizeTooltipForHeroAbility(effectiveAbilityLevel, learnedAbilityLevel))
+
+// ============================================================================
+public class ProcuristComponent extends HeroAbilityComponent
+
+  private _handle m_lootDurPropAffector = INVALID_HANDLE
+
+  // --------------------------------------------------------------------------
+  construct (IUnitMetadata owner)
+    super(owner, TlsAbilityIds.Hero.procurist, TlsAbilityIds.Hero.procurist_learn)
+
+  // --------------------------------------------------------------------------
+  override protected function onDisabled()
+    super.onDisabled()
+
+    if (m_lootDurPropAffector != INVALID_HANDLE)
+    //{
+      let lootDurationProp = getOwnerUnit().getProperty(UnitProperty.LOOT_DURATION_SCALE)
+      if (lootDurationProp != null)
+        lootDurationProp.removeAffector(m_lootDurPropAffector)
+        m_lootDurPropAffector = INVALID_HANDLE
+    //}
+
+  // --------------------------------------------------------------------------
+  override protected function updateAbilityState()
+    super.updateAbilityState()
+
+    let ownerUnit = getOwnerUnit()
+    
+    let abilityLevelAdjusted = abilityLevel.getIntValue()
+
+    let lootDurationProp = ownerUnit.getProperty(UnitProperty.LOOT_DURATION_SCALE)
+    if (lootDurationProp != null)
+    //{
+      if (m_lootDurPropAffector != INVALID_HANDLE)
+        lootDurationProp.removeAffector(m_lootDurPropAffector)
+        m_lootDurPropAffector = INVALID_HANDLE
+
+      if (abilityLevelAdjusted > 0)
+        let lootDurationScale = Procurist.getLootDurationScale01(abilityLevelAdjusted)
+        m_lootDurPropAffector = lootDurationProp.affectSub(lootDurationScale)
+    //}
+
+  // --------------------------------------------------------------------------
+  protected override function getTooltipNormal(int effectiveAbilityLevel, int learnedAbilityLevel) returns string
+    return Procurist.getTooltipNormal(effectiveAbilityLevel, learnedAbilityLevel)
+    
+  // --------------------------------------------------------------------------
+  protected override function getTooltipNormalExtended(int effectiveAbilityLevel, int learnedAbilityLevel) returns string
+    return Procurist.getTooltipNormalExtended(effectiveAbilityLevel, learnedAbilityLevel)
+
+// ============================================================================
+public function IUnitMetadata.getProcuristComponent() returns ProcuristComponent
+  return this.getComponent(ProcuristComponent.typeId) castTo ProcuristComponent
+
+// ============================================================================
+public function IUnitMetadata.getOrAddProcuristComponent() returns ProcuristComponent
+  var component = this.getProcuristComponent()
+  if (component == null)
+    component = this.addComponent(new ProcuristComponent(this)) castTo ProcuristComponent
+  return component
+
+// ============================================================================
+public function unit.getProcuristComponent() returns ProcuristComponent
+  let metadata = this.getMetadata()
+  return metadata != null ? metadata.getProcuristComponent() : null
+
+// ============================================================================
+public function unit.getOrAddProcuristComponent() returns ProcuristComponent
+  let metadata = this.getMetadata()
+  return metadata != null ? metadata.getOrAddProcuristComponent() : null
+
+// ============================================================================
+@compiletime function createObjects()
+
+  new AbilityDefinition(TlsAbilityIds.Hero.procurist, 'Ahan')
+    ..setLevels(10)
+    ..setupHeroAbilityGroup(HeroAbilityGroup.Q)
+    ..setName("Procurist")
+    ..presetTooltipNormal(lvl -> Procurist.getTooltipNormal(lvl, lvl))
+    ..presetTooltipNormalExtended(lvl -> Procurist.getTooltipNormalExtended(lvl, lvl))
+    ..setIconNormal("ReplaceableTextures\\CommandButtons\\BTNLootSpecialist.blp")
+
+  new HeroLearnAbilityDefinition(TlsAbilityIds.Hero.procurist_learn, 3)
+    ..setupHeroAbilityGroup(HeroAbilityGroup.Q, 0)
+    ..setName("Procurist")
+    ..setTooltipLearn("Learn Procurist - [|cFFFFCC00 Level %d|r]")
+    ..setTooltipLearnExtended("The Scout excels at searching for loot and can find what he's looking for faster than others.|n|n|cFFFFCC00Level 1|r - Loot duration decreased by {0}|n|cFFFFCC00Level 2|r - Loot duration decreased by {1}|n|cFFFFCC00Level 3|r - Loot duration decreased by {2}".format(
+      Procurist.getLootDurationScale01(1).toPercentageString01(),
+      Procurist.getLootDurationScale01(2).toPercentageString01(),
+      Procurist.getLootDurationScale01(3).toPercentageString01()))
+    ..setIconResearch("ReplaceableTextures\\CommandButtons\\BTNLootSpecialist.blp")
+    ..presetCooldown(lvl -> 0)
+    ..presetManaCost(lvl -> 0)
+
+// ============================================================================
+init
+  registerHeroAbilityComponentType(ProcuristComponent.typeId, TlsAbilityIds.Hero.procurist)
+  registerHeroAbilityComponentType(ProcuristComponent.typeId, TlsAbilityIds.Hero.procurist_learn)

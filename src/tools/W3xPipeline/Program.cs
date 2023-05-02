@@ -7,15 +7,13 @@
     using StormLibSharp;
     using War3.Net.Assets;
     using War3.Net.Data;
-    using War3.Net.Data.Units;
-    using War3.Net.Doodads;
     using War3.Net.Imaging;
-    using War3.Net.Imaging.Blp;
-    using War3.Net.Imaging.Targa;
-    using War3.Net.IO;
+    using War3.Net.Maps.Doodads;
     using War3.Net.Maps.Pathing;
+    using War3.Net.Maps.Regions;
+    using War3.Net.Maps.Terrain;
+    using War3.Net.Maps.Units;
     using War3.Net.Mpq;
-    using War3.Net.Slk;
 
     class Program
     {
@@ -45,6 +43,12 @@
                 if (args.OutputListFilePath != null)
                     sLogger.Log($"Output List File: {args.OutputListFilePath.FullName}");
 
+                if (args.WriteRegionsToArchive)
+                    sLogger.Log($"Write regions to archive");
+
+                if (args.MergeWar3MapSkinFiles)
+                    sLogger.Log($"Merge custom data files");
+
                 sLogger.Log("------------------------");
             }
             catch (Exception ex)
@@ -55,12 +59,20 @@
 
             // Services
             var fileSystem = new LayeredFileSystem();
-            var entityLibrary = new AggregateEntityLibrary();
             var assetManager = new AssetManager(fileSystem);
             var imageCache = new ImageCache("ImageCache");
-            var imageProvider = new ImageProvider(imageCache, ImageDeserializerProvider);
+            var imageProvider = new ImageProvider(imageCache, PipelineUtility.ImageDeserializerProvider);
             var pathMapFileBinaryDeserializer = new PathMapFileBinaryDeserializer(v => new PathMapBinaryDeserializer());
             var pathMapFileBinarySerializer = new PathMapFileBinarySerializer(v => new PathMapBinarySerializer());
+            var unitPlacementBinaryDeserializer = new UnitPlacementBinaryDeserializer();
+            var unitPlacementFileBinaryDeserializer = new UnitPlacementFileBinaryDeserializer((v, sv) => unitPlacementBinaryDeserializer);
+            var unitPlacementBinarySerializer = new UnitPlacementBinarySerializer();
+            var unitPlacementFileBinarySerializer = new UnitPlacementFileBinarySerializer((v, sv) => unitPlacementBinarySerializer);
+            var doodadPlacementFileBinaryDeserializer = new DoodadPlacementFileBinaryDeserializer();
+            var terrainBinaryDeserializer = new TerrainBinaryDeserializer();
+            var terrainFileBinaryDeserializer = new TerrainFileBinaryDeserializer(v => terrainBinaryDeserializer);
+            var regionsBinaryDeserializer = new RegionsFileBinaryDeserializer();
+            var regionsBinarySerializer = new RegionsFileBinarySerializer();
 
             var referencedFilePaths = new List<string>();
 
@@ -123,8 +135,7 @@
 
                 sLogger.Log($"Creating intermediate archive {intermediateMpqPath}");
 
-                FileInfo[] filesToAdd =
-                    args.SourceMapDirectory.EnumerateFiles("*.*", SearchOption.AllDirectories).ToArray();
+                FileInfo[] filesToAdd = args.SourceMapDirectory.EnumerateFiles("*.*", SearchOption.AllDirectories).ToArray();
 
                 // Create the map file
                 using (MpqArchive newMapArchive = MpqArchive.CreateNew(
@@ -137,36 +148,49 @@
                     // Add each file from the source map dir into the archive
                     foreach (FileInfo fileInfo in filesToAdd)
                     {
-                        string archiveFilePath =
-                            MakeRelativeToDirectory(args.SourceMapDirectory.FullName, fileInfo.FullName);
+                        string archiveFilePath = PipelineUtility.MakeRelativeToDirectory(args.SourceMapDirectory.FullName, fileInfo.FullName);
                         newMapArchive.AddFileFromDisk(fileInfo.FullName, archiveFilePath);
                         sLogger.Log($"Added file {fileInfo.FullName} -> {archiveFilePath}");
                     }
 
                     // Map archive is now done being loaded
                     sLogger.Log($"Mounting archive '{intermediateMpqPath}' at priority {MAP_PRI}");
-                    fileSystem.AddSystem(new MpqFileSystem(newMapArchive), MAP_PRI);
-                    entityLibrary.AddLibrary(ReadDoodadLibrary(fileSystem));
+                    var mapArchiveFileSystem = new MpqArchiveFileSystem(newMapArchive);
+                    fileSystem.AddSystem(mapArchiveFileSystem, MAP_PRI);
 
-                    // Build the entity library
-                    var destructibleLibrary = (DestructibleLibrary) ReadDestructibleLibrary(fileSystem);
-                    entityLibrary.AddLibrary(destructibleLibrary);
+                    sLogger.Log($"Loading base object data...");
+                    var libraries = PipelineUtility.LoadCustomObjectLibraries(fileSystem, sLogger);
 
-                    var unitLibrary = (UnitLibrary) ReadUnitLibrary(fileSystem);
-                    entityLibrary.AddLibrary(unitLibrary);
+                    var objectLibrary = new AggregateEntityLibrary(libraries);
 
-                    var objects = new IPipelineObject[]
+                    var objects = new List<IPipelineObject>
                     {
+                        new BaseBuilder(
+                            mapArchiveFileSystem,
+                            sLogger,
+                            objectLibrary,
+                            unitPlacementFileBinaryDeserializer,
+                            unitPlacementFileBinarySerializer,
+                            regionsBinaryDeserializer,
+                            regionsBinarySerializer),
                         new PathMapBuildabilityModifier(pathMapFileBinaryDeserializer, pathMapFileBinarySerializer),
                         new RegionMapper(sLogger,
                             fileSystem,
-                            entityLibrary,
+                            objectLibrary,
                             imageProvider,
                             assetManager,
                             pathMapFileBinaryDeserializer,
-                            destructibleLibrary,
-                            args.OutputSpawnRegionScriptFile.FullName)
+                            args.OutputSpawnRegionScriptFile.FullName) { WriteRegionsToArchive = args.WriteRegionsToArchive },
+                        new EventMapTemplateBuilder(
+                            sLogger,
+                            objectLibrary,
+                            unitPlacementFileBinaryDeserializer,
+                            doodadPlacementFileBinaryDeserializer,
+                            terrainFileBinaryDeserializer),
                     };
+
+                    if (args.MergeWar3MapSkinFiles)
+                        objects.Add(new War3MapSkinMerger(sLogger, args.IntermediateDirectory.FullName));
 
                     // Run all of the pipeline steps
                     sLogger.Log("Running pipeline...");
@@ -195,7 +219,7 @@
                 if (args.OutputListFilePath != null)
                 {
                     string[] distinctReferencedPaths = referencedFilePaths.Select(absolutePath =>
-                            MakeRelativeToDirectory(args.W3ModBasePath.FullName, absolutePath))
+                            PipelineUtility.MakeRelativeToDirectory(args.W3ModBasePath.FullName, absolutePath))
                         .Distinct().ToArray();
 
                     sLogger.Log(
@@ -221,168 +245,6 @@
             sLogger.Log("Succeeded.");
 
             return 0;
-        }
-
-        private static IDataDeserializer<Stream, IImage> ImageDeserializerProvider(AssetReference arg)
-        {
-            string ext = Path.GetExtension(arg.RelativePath).ToLower().Trim('.');
-
-            switch (ext)
-            {
-                case "blp":
-                    return new BlpImageDeserializer();
-                case "tga":
-                    return new TargaBitmapDeserializer();
-            }
-
-            return null;
-        }
-
-        private static string MakeRelativeToDirectory(string dir, string file)
-        {
-            return file.Replace(dir, string.Empty).Replace('/', '\\').Trim('\\');
-        }
-
-        private static IEntityLibrary ReadDoodadLibrary(IReadOnlyFileSystem fileSystem)
-        {
-            sLogger.Log($"Reading doodad library...");
-            StringDataTable doodadData = ReadSlk(fileSystem, "Doodads/Doodads.slk", "doodID");
-            StringDataTable doodadMetadata = ReadSlk(fileSystem, "Doodads/DoodadMetaData.slk", "ID");
-            var deserializer = new DoodadLibrarySerializer(ObjectSerializationHelper.DeserializeObject);
-            DoodadLibrary library = deserializer.LoadLibrary(doodadData, doodadMetadata);
-
-            var adjustmentFiles = new string[]
-            {
-                "Doodads/DoodadSkins.txt",
-            };
-
-            foreach (string file in adjustmentFiles)
-            {
-                ReadAdjustmentFile(fileSystem, library, file);
-            }
-
-            return library;
-        }
-
-        private static IEntityLibrary ReadDestructibleLibrary(IReadOnlyFileSystem fileSystem)
-        {
-            sLogger.Log($"Reading destructible library...");
-            StringDataTable destructibleData = ReadSlk(fileSystem, "Units/DestructableData.slk", "DestructableID");
-            StringDataTable destructibleMetadata = ReadSlk(fileSystem, "Units/DestructableMetaData.slk", "ID");
-            var deserializer = new DestructibleLibrarySerializer(ObjectSerializationHelper.DeserializeObject);
-            DestructibleLibrary library = deserializer.LoadLibrary(destructibleData, destructibleMetadata);
-
-            var adjustmentFiles = new string[]
-            {
-                "Units/DestructableSkin.txt",
-            };
-
-            foreach (string file in adjustmentFiles)
-            {
-                ReadAdjustmentFile(fileSystem, library, file);
-            }
-
-            return library;
-        }
-
-        private static IEntityLibrary ReadUnitLibrary(IReadOnlyFileSystem fileSystem)
-        {
-            sLogger.Log($"Reading unit library...");
-            StringDataTable unitDataTable = ReadSlk(fileSystem, "Units/UnitData.slk", "unitID");
-            StringDataTable unitWeaponDataTable = ReadSlk(fileSystem, "Units/UnitWeapons.slk", "unitWeaponID");
-            StringDataTable unitBalanceDataTable = ReadSlk(fileSystem, "Units/UnitBalance.slk", "unitBalanceID");
-            StringDataTable unitArtDataTable = ReadSlk(fileSystem, "Units/UnitUI.slk", "unitUIID");
-
-            unitDataTable.Join(unitWeaponDataTable, unitBalanceDataTable, unitArtDataTable);
-
-            StringDataTable unitDataMetadataTable = ReadSlk(fileSystem, "Units/UnitMetaData.slk", "ID");
-
-            var deserializer = new UnitLibrarySerializer(ObjectSerializationHelper.DeserializeObject);
-            UnitLibrary library = deserializer.LoadLibrary(
-                unitDataTable,
-                unitDataMetadataTable,
-                unitWeaponDataTable,
-                unitBalanceDataTable,
-                unitArtDataTable);
-
-            var adjustmentFiles = new[]
-            {
-                "Units/CampaignUnitFunc.txt",
-                "Units/CampaignUnitStrings.txt",
-                "Units/HumanUnitFunc.txt",
-                "Units/HumanUnitStrings.txt",
-                "Units/NeutralUnitFunc.txt",
-                "Units/NeutralUnitStrings.txt",
-                "Units/NightElfUnitFunc.txt",
-                "Units/NightElfUnitStrings.txt",
-                "Units/OrcUnitFunc.txt",
-                "Units/OrcUnitStrings.txt",
-                "Units/UndeadUnitFunc.txt",
-                "Units/UndeadUnitStrings.txt",
-            };
-
-            foreach (string file in adjustmentFiles)
-            {
-                ReadAdjustmentFile(fileSystem, library, file);
-            }
-
-            return library;
-        }
-
-        private static void ReadAdjustmentFile(IReadOnlyFileSystem fileSystem, IEntityLibrary library, string filePath)
-        {
-
-            try
-            {
-                sLogger.Log($"Reading adjustment file {filePath}...");
-                using (Stream file = fileSystem.OpenRead(filePath))
-                using (var reader = new StreamReader(file))
-                {
-                    new ProfileFileDeserializer().ReadProfile(library, reader);
-                }
-            }
-            catch (Exception ex)
-            {
-                sLogger.Log($"Unable to read adjustment file {filePath}: {ex.Message}");
-            }
-        }
-
-        private static StringDataTable ReadSlk(IReadOnlyFileSystem fileSystem, string filePath, string primaryKey)
-        {
-            try
-            {
-                sLogger.Log($"Reading slk file {filePath}...");
-                using (Stream file = fileSystem.OpenRead(filePath))
-                using (var reader = new SlkTextReader(file, SlkRecordDeserializerFactory))
-                {
-                    SlkFile slkFile = new SlkFileDeserializer().Deserialize(reader);
-                    SlkTable slkTable = new SlkTableDeserializer().Deserialize(slkFile);
-                    StringDataTable dataTable = new StringDataTableSlkDeserializer().Deserialize(slkTable);
-                    dataTable.PrimaryKeyColumn = primaryKey;
-                    return dataTable;
-                }
-            }
-            catch (Exception)
-            {
-                throw;
-            }
-        }
-
-        private static IDataDeserializer<SlkTextReader, SlkRecord> SlkRecordDeserializerFactory(string recordType)
-        {
-            switch (recordType)
-            {
-                case "ID":
-                    return new IdRecordDeserializer();
-                case "B":
-                    return new BRecordDeserializer();
-                case "C":
-                    return new CRecordDeserializer();
-                case "F":
-                    return new FRecordDeserializer();
-                default:
-                    return new GenericRecordDeserializer(recordType);
-            }
         }
     }
 }

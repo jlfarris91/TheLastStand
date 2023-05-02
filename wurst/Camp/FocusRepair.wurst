@@ -1,0 +1,85 @@
+package FocusRepair
+import Orders
+import RegisterEvents
+import GameConstants
+import UnitExtensions
+
+group g_tempGroup1 = CreateGroup()
+group g_tempGroup2 = CreateGroup()
+group g_activeRepairers = CreateGroup()
+boolexpr g_isFilterUnitRepairer = Condition(function isFilterUnitRepairer)
+boolexpr g_isFilterUnitDamagedStructure = Condition(function isFilterUnitDamagedStructure)
+
+// ============================================================================
+function isFilterUnitDamagedStructure() returns bool
+  let filterUnit = GetFilterUnit()
+  if (not filterUnit.isBuilding())
+    return false
+  return filterUnit.getHP() < filterUnit.getMaxHP()
+
+// ============================================================================
+function isFilterUnitRepairer() returns bool
+  let filterUnit = GetFilterUnit()
+
+  if (not g_activeRepairers.contains(filterUnit))
+    return false
+
+  let currentOrderId = filterUnit.getCurrentOrder()
+
+  if (currentOrderId != OrderIds.repair and
+      currentOrderId != OrderIds.stop)
+    return false
+
+  return true
+
+// ============================================================================
+function onUnitDamaged()
+  let damagedUnit = GetTriggerUnit()
+  if (not damagedUnit.isBuilding())
+    return
+
+  let damagedOwner = damagedUnit.getOwner()
+
+  g_tempGroup1.enumUnitsInRange(
+    damagedUnit.getPos(),
+    SURVIVOR_ACQUISITION_RANGE,
+    g_isFilterUnitRepairer)
+
+  for u in g_tempGroup1
+    if (u.isAllyOf(damagedOwner))
+      repairNextTarget(u)
+
+// ============================================================================
+function repairNextTarget(unit repairingUnit)
+  let ownerPlayer = repairingUnit.getOwner()
+
+  g_tempGroup2.enumUnitsInRange(
+    repairingUnit.getPos(),
+    SURVIVOR_ACQUISITION_RANGE,
+    g_isFilterUnitDamagedStructure)
+
+  unit targetWithLeastHealth = null
+  real minHealth = REAL_MAX
+
+  for structure in g_tempGroup2
+    if (structure.isAllyOf(ownerPlayer))
+      let hp = structure.getHP()
+      if (hp < minHealth)
+        targetWithLeastHealth = structure
+        minHealth = hp
+
+  repairingUnit.issueTargetOrderById(OrderIds.repair, targetWithLeastHealth)
+
+// ============================================================================
+function onUnitIssuedOrder()
+  let issuedOrder = GetIssuedOrderId()
+  if (issuedOrder == OrderIds.repairon)
+    g_activeRepairers.addUnit(GetOrderedUnit())
+  else if (issuedOrder == OrderIds.repairoff)
+    g_activeRepairers.removeUnit(GetOrderedUnit())
+
+// ============================================================================
+init
+
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_DAMAGED, function onUnitDamaged)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ISSUED_ORDER, function onUnitIssuedOrder)
