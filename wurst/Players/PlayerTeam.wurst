@@ -1,0 +1,233 @@
+package PlayerTeam
+import Bases
+import HumanPlayers
+import HumanPlayerComponent
+import RefObject
+import Observable
+import HashList
+import Events
+import LinkedList
+import ProjectConstants
+import DebuggerDialog
+import Host
+import PlayerExtensions
+import GameConstants
+import HashMap
+
+PlayerTeam array g_playerTeamsByPlayerId
+LinkedList<PlayerTeam> g_playerTeams = new LinkedList<PlayerTeam>()
+HashMap<Base, PlayerTeam> g_playerTeamsByBase = new HashMap<Base, PlayerTeam>()
+int g_teamId = 1
+
+// ============================================================================
+public class PlayerTeam
+  
+  static private Event2<PlayerTeam, player> s_teamPlayerAdded
+  static private Event2<PlayerTeam, player> s_teamPlayerRemoved
+  
+  private int m_id = 0
+  private HashList<Base> m_bases = new HashList<Base>()
+  private force m_players = CreateForce()
+  private Event m_playersChanged = null
+
+  use RefObject
+  use Observable
+
+  // --------------------------------------------------------------------------
+  public static class Properties
+    static constant string preferOrganicTargets = "preferOrganicTargets"
+
+  // --------------------------------------------------------------------------
+  construct()
+    
+    m_id = g_teamId
+    g_teamId++
+
+    g_playerTeams.add(this)
+
+  // --------------------------------------------------------------------------
+  ondestroy
+    g_playerTeams.remove(this)
+
+    destroy m_bases
+    m_bases = null
+
+    m_players.destr()
+    m_players = null
+
+    if (m_playersChanged != null)
+      destroy m_playersChanged
+      m_playersChanged = null
+
+  // --------------------------------------------------------------------------
+  static function getPlayerTeam(player p) returns PlayerTeam
+    return g_playerTeamsByPlayerId[p.getId()]
+
+  // --------------------------------------------------------------------------
+  static function getPlayerTeam(Base b) returns PlayerTeam
+    return g_playerTeamsByBase.get(b)
+
+  // --------------------------------------------------------------------------
+  static function getOrCreatePlayerTeam(player p) returns PlayerTeam
+    var data = getPlayerTeam(p)
+    if (data == null)
+      data = new PlayerTeam()..acquire()..addPlayer(p)
+      g_playerTeamsByPlayerId[p.getId()] = data
+    return data
+
+  // --------------------------------------------------------------------------
+  static function getOrCreatePlayerTeam(Base b) returns PlayerTeam
+    var data = getPlayerTeam(b)
+    if (data == null)
+      data = new PlayerTeam()..acquire()
+      data.m_bases.add(b)
+    return data
+
+  // --------------------------------------------------------------------------
+  static function onTeamPlayerAdded() returns IEvent2<PlayerTeam, player>
+    if (s_teamPlayerAdded == null)
+      s_teamPlayerAdded = new Event2<PlayerTeam, player>()
+    return s_teamPlayerAdded
+
+  // --------------------------------------------------------------------------
+  static function onTeamPlayerRemoved() returns IEvent2<PlayerTeam, player>
+    if (s_teamPlayerRemoved == null)
+      s_teamPlayerRemoved = new Event2<PlayerTeam, player>()
+    return s_teamPlayerRemoved
+
+  // --------------------------------------------------------------------------
+  function getId() returns int
+    return m_id
+
+  // --------------------------------------------------------------------------
+  function getPlayers() returns force
+    return m_players
+
+  // --------------------------------------------------------------------------
+  function getBases() returns HashList<Base>
+    return m_bases
+
+  // --------------------------------------------------------------------------
+  function addPlayer(player p)
+    m_players.addPlayer(p)
+    g_playerTeamsByPlayerId[p.getId()] = this
+
+    updateBases()
+
+    if (m_playersChanged != null)
+      m_playersChanged.call()
+
+    if (s_teamPlayerAdded != null)
+      s_teamPlayerAdded.call(this, p)
+
+  // --------------------------------------------------------------------------
+  function removePlayer(player p)
+    m_players.removePlayer(p)
+    g_playerTeamsByPlayerId[p.getId()] = null
+
+    updateBases()
+
+    if (m_playersChanged != null)
+      m_playersChanged.call()
+
+    if (s_teamPlayerRemoved != null)
+      s_teamPlayerRemoved.call(this, p)
+
+    if (m_players.count() == 0)
+      release()
+      return
+
+  // --------------------------------------------------------------------------
+  function onPlayersChanged() returns IEvent
+    if (m_playersChanged == null)
+      m_playersChanged = new Event()
+    return m_playersChanged
+
+  // --------------------------------------------------------------------------
+  private function updateBases()
+    m_bases.clear()
+    for p in m_players
+      let comp = p.getMetadata().getHumanPlayerComponent()
+      let b = comp.getBase()
+      if (b != null)
+        m_bases.add(b)
+
+// ============================================================================
+class PlayerTeamDebugger extends DebuggerRealtimeUpdateFrame
+
+  // --------------------------------------------------------------------------
+  construct()
+    super(createFrame("TEXTAREA", "TEAM", GAME_UI, "", 0))
+
+  // --------------------------------------------------------------------------
+  override function realtimeUpdate(real _)
+
+    let frameHandle = getFrameHandle()
+
+    let selectedUnit = g_HostPlayer.getFirstSelectedUnit()
+
+    if (selectedUnit == null)
+      BlzFrameSetText(frameHandle, "Select a unit")
+      return
+
+    let selectedPlayer = selectedUnit.getOwner()
+
+    let team = PlayerTeam.getPlayerTeam(selectedPlayer)
+    if (team == null)
+      BlzFrameSetText(frameHandle, "No player team found for " + selectedPlayer.getName())
+      return
+      
+    BlzFrameSetText(frameHandle, "===== Team: {0} =====".format(team.getId().toString()))
+
+    BlzFrameAddText(frameHandle, "Players: ")
+
+    for p in team.getPlayers()
+      let comp = p.getMetadata().getHumanPlayerComponent()
+      BlzFrameAddText(frameHandle, " · {0} ({1})".format(p.getName(), DIFFICULTY_NAMES[comp.getDifficulty().floor()]))
+
+    BlzFrameAddText(frameHandle, "Bases: ")
+
+    for b in team.getBases()
+      let baseName = b.getName()
+      BlzFrameAddText(frameHandle, " · {0} ({1})".format(
+        (baseName.isNotBlank() ? baseName : b.getId()),
+        b.getDifficulty().toString()))
+
+// ============================================================================
+function onHumanPlayerComponentPropertyChanged(HumanPlayerComponent sender, string propertyName)
+      
+  if (propertyName == HumanPlayerComponent.Properties.base)
+  //{
+    let p = sender.getOwnerPlayer()
+    let prevTeam = PlayerTeam.getPlayerTeam(p)
+    PlayerTeam nextTeam = null
+
+    let b = sender.getBase()
+    if (b != null)
+      nextTeam = PlayerTeam.getOrCreatePlayerTeam(b)
+
+    if (nextTeam == null)
+      
+
+    if (nextTeam != prevTeam and prevTeam != null)
+      prevTeam.removePlayer(p)
+
+
+  //}
+
+// ============================================================================
+init
+  
+  if (DEV_ENVIRONMENT)
+    DebuggerDialog.registerFrame("TEAM", () -> new PlayerTeamDebugger())
+
+  for p in g_PlayingHumanPlayers
+  //{
+    // Everyone starts in their own team
+    PlayerTeam.getOrCreatePlayerTeam(p)
+
+    // Listen for changes to the base property to move players to different teams
+    let comp = p.getMetadata().getOrAddHumanPlayerComponent()
+    comp.onPropertyChanged().register() (HumanPlayerComponent sender, string propertyName) ->
+      onHumanPlayerComponentPropertyChanged(sender, propertyName)
+  //}
