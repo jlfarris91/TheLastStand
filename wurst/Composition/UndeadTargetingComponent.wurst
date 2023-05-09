@@ -21,6 +21,7 @@ import GroupUtils
 import TlsUnitIds
 import HumanPlayerComponent
 import HashList
+import HashMap
 import PlayerTeam
 
 public bool UTC_ENABLED = true
@@ -673,6 +674,8 @@ public function UndeadTargetProviderPriority.toString() returns string
       return "unknown"
 
 UndeadTargetProvider array g_playerData
+HashMap<PlayerTeam, UndeadTargetProvider> g_utpByTeam = new HashMap<PlayerTeam, UndeadTargetProvider>()
+LinkedList<UndeadTargetProvider> g_undeadTargetProviders = new LinkedList<UndeadTargetProvider>()
 int g_playerDataUpdateIndex = -1
 group array g_targetedUnitToUTCMap
 // int array g_targetUnitScore
@@ -698,6 +701,7 @@ public function getNumberOfRegisteredAttackers(unit target) returns int
 // ============================================================================
 public class UndeadTargetProvider extends TargetProvider
   private int m_id
+  private PlayerTeam m_playerTeam = null
   private force m_players = CreateForce()
   private group m_structureTargets = CreateGroup()
   private group m_organicTargets = CreateGroup()
@@ -706,10 +710,16 @@ public class UndeadTargetProvider extends TargetProvider
   private Event m_preferOrganicTargetsChanged = null
 
   // --------------------------------------------------------------------------
-  construct()
+  construct(PlayerTeam playerTeam)
+
+    m_playerTeam = playerTeam
 
     m_id = g_utpId
     g_utpId++
+
+    Log.info("Created UTP {0}".format(m_id.toString()))
+
+    g_undeadTargetProviders.add(this)
 
     registerHumanForceTargetCollection(this)
 
@@ -718,6 +728,8 @@ public class UndeadTargetProvider extends TargetProvider
 
   // --------------------------------------------------------------------------
   ondestroy
+    g_undeadTargetProviders.remove(this)
+
     unregisterHumanForceTargetCollection(this)
 
     if (m_preferOrganicTargetsChanged != null)
@@ -732,6 +744,8 @@ public class UndeadTargetProvider extends TargetProvider
       m_targetsByPriority[i].destr()
       m_targetsByPriority[i] = null
 
+    Log.info("Destroyed UTP {0}".format(m_id.toString()))
+
   // --------------------------------------------------------------------------
   function getId() returns int
     return m_id
@@ -741,6 +755,8 @@ public class UndeadTargetProvider extends TargetProvider
     m_players.addPlayer(p)
     g_playerData[p.getId()] = this
 
+    Log.info("Added player {0} to UTP {1}".format(p.getName(), m_id.toString()))
+
     updatePreferOrganicTargets()
 
     addPlayerUnitsToGroups(p)
@@ -749,6 +765,8 @@ public class UndeadTargetProvider extends TargetProvider
   function removePlayer(player p)
     m_players.removePlayer(p)
     g_playerData[p.getId()] = null
+
+    Log.info("Removed player {0} from UTP {1}".format(p.getName(), m_id.toString()))
 
     updatePreferOrganicTargets()
 
@@ -1067,22 +1085,26 @@ function unregisterHumanForceTargetCollection(UndeadTargetProvider value)
     g_processUpdates = null
 
 // ============================================================================
-function getPlayerData(player p) returns UndeadTargetProvider
+function getPlayerUTP(player p) returns UndeadTargetProvider
   return g_playerData[p.getId()]
 
 // ============================================================================
-function getOrCreatePlayerData(player p) returns UndeadTargetProvider
-  var data = getPlayerData(p)
-  if (data == null)
-    data = new UndeadTargetProvider()..acquire()..addPlayer(p)
-    g_playerData[p.getId()] = data
-  return data
+function getTeamUTP(PlayerTeam team) returns UndeadTargetProvider
+  return g_utpByTeam.get(team)
+
+// ============================================================================
+function getOrCreateUTPForTeam(PlayerTeam team) returns UndeadTargetProvider
+  var utp = getTeamUTP(team)
+  if (utp == null)
+    utp = new UndeadTargetProvider(team)..acquire()
+    g_utpByTeam.put(team, utp)
+  return utp
 
 // ============================================================================
 function onUnitDeindexed()
   let indexingUnit = getIndexingUnit()
   let owningPlayer = indexingUnit.getOwner()
-  let playerData = getPlayerData(owningPlayer)
+  let playerData = getPlayerUTP(owningPlayer)
   if (playerData != null)
     playerData.unregisterPlayerUnit(indexingUnit)
 
@@ -1113,22 +1135,26 @@ init
 
   for p in g_PlayingHumanPlayers
   //{
-    // Every player starts out with their own UndeadTargetProvider
-    getOrCreatePlayerData(p)
-
     // Listen for changes to the 
     let comp = p.getMetadata().getHumanPlayerComponent()
     if (comp != null)
       comp.onPropertyChanged().register((s,a) -> onHumanPlayerComponentPropertyChanged(s,a))
   //}
 
+  // Create an initial UTP for each team
+  for team in PlayerTeam.getTeams()
+    let utp = getOrCreateUTPForTeam(team)
+    if (utp != null)
+      for p in team.getPlayers()
+        utp.addPlayer(p)
+
   PlayerTeam.onTeamPlayerAdded().register() (PlayerTeam team, player p) ->
-    let utp = getOrCreatePlayerData(p)
+    let utp = getOrCreateUTPForTeam(team)
     if (utp != null)
       utp.addPlayer(p)
 
   PlayerTeam.onTeamPlayerRemoved().register() (PlayerTeam team, player p) ->
-    let utp = getPlayerData(p)
+    let utp = getTeamUTP(team)
     if (utp != null)
       utp.removePlayer(p)
 

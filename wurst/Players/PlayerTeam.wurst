@@ -4,7 +4,6 @@ import HumanPlayers
 import HumanPlayerComponent
 import RefObject
 import Observable
-import HashList
 import Events
 import LinkedList
 import ProjectConstants
@@ -13,6 +12,7 @@ import Host
 import PlayerExtensions
 import GameConstants
 import HashMap
+import RegisterEvents
 
 PlayerTeam array g_playerTeamsByPlayerId
 LinkedList<PlayerTeam> g_playerTeams = new LinkedList<PlayerTeam>()
@@ -26,9 +26,8 @@ public class PlayerTeam
   static private Event2<PlayerTeam, player> s_teamPlayerRemoved
   
   private int m_id = 0
-  private HashList<Base> m_bases = new HashList<Base>()
+  private Base m_base = null
   private force m_players = CreateForce()
-  private Event m_playersChanged = null
 
   use RefObject
   use Observable
@@ -38,10 +37,17 @@ public class PlayerTeam
     static constant string preferOrganicTargets = "preferOrganicTargets"
 
   // --------------------------------------------------------------------------
-  construct()
+  construct(Base _base)
     
+    m_base = _base
+
+    if (m_base != null)
+      g_playerTeamsByBase.put(m_base, this)
+
     m_id = g_teamId
     g_teamId++
+
+    Log.info("Created team {0}".format(m_id.toString()))
 
     g_playerTeams.add(this)
 
@@ -49,15 +55,17 @@ public class PlayerTeam
   ondestroy
     g_playerTeams.remove(this)
 
-    destroy m_bases
-    m_bases = null
+    if (m_base != null and g_playerTeamsByBase.get(m_base) == this)
+      g_playerTeamsByBase.remove(m_base)
 
     m_players.destr()
     m_players = null
 
-    if (m_playersChanged != null)
-      destroy m_playersChanged
-      m_playersChanged = null
+    Log.info("Destroyed team {0}".format(m_id.toString()))
+
+  // --------------------------------------------------------------------------
+  static function getTeams() returns LinkedList<PlayerTeam>
+    return g_playerTeams
 
   // --------------------------------------------------------------------------
   static function getPlayerTeam(player p) returns PlayerTeam
@@ -69,19 +77,19 @@ public class PlayerTeam
 
   // --------------------------------------------------------------------------
   static function getOrCreatePlayerTeam(player p) returns PlayerTeam
-    var data = getPlayerTeam(p)
-    if (data == null)
-      data = new PlayerTeam()..acquire()..addPlayer(p)
-      g_playerTeamsByPlayerId[p.getId()] = data
-    return data
+    var team = getPlayerTeam(p)
+    if (team == null)
+      team = new PlayerTeam(null)..acquire()
+      Log.info("Created new player team {0} for {1}".format(team.getId().toString(), p.getName()))
+    return team
 
   // --------------------------------------------------------------------------
   static function getOrCreatePlayerTeam(Base b) returns PlayerTeam
-    var data = getPlayerTeam(b)
-    if (data == null)
-      data = new PlayerTeam()..acquire()
-      data.m_bases.add(b)
-    return data
+    var team = getPlayerTeam(b)
+    if (team == null)
+      team = new PlayerTeam(b)..acquire()
+      Log.info("Created new base team {0} for {1}".format(team.getId().toString(), b.getId()))
+    return team
 
   // --------------------------------------------------------------------------
   static function onTeamPlayerAdded() returns IEvent2<PlayerTeam, player>
@@ -104,18 +112,15 @@ public class PlayerTeam
     return m_players
 
   // --------------------------------------------------------------------------
-  function getBases() returns HashList<Base>
-    return m_bases
+  function getBase() returns Base
+    return m_base
 
   // --------------------------------------------------------------------------
   function addPlayer(player p)
     m_players.addPlayer(p)
     g_playerTeamsByPlayerId[p.getId()] = this
 
-    updateBases()
-
-    if (m_playersChanged != null)
-      m_playersChanged.call()
+    Log.info("Added player {0} to base team {1}".format(p.getName(), m_id.toString()))
 
     if (s_teamPlayerAdded != null)
       s_teamPlayerAdded.call(this, p)
@@ -123,12 +128,11 @@ public class PlayerTeam
   // --------------------------------------------------------------------------
   function removePlayer(player p)
     m_players.removePlayer(p)
-    g_playerTeamsByPlayerId[p.getId()] = null
 
-    updateBases()
+    Log.info("Removed player {0} from team {1}".format(p.getName(), m_id.toString()))
 
-    if (m_playersChanged != null)
-      m_playersChanged.call()
+    if (g_playerTeamsByPlayerId[p.getId()] == this)
+      g_playerTeamsByPlayerId[p.getId()] = null
 
     if (s_teamPlayerRemoved != null)
       s_teamPlayerRemoved.call(this, p)
@@ -136,21 +140,6 @@ public class PlayerTeam
     if (m_players.count() == 0)
       release()
       return
-
-  // --------------------------------------------------------------------------
-  function onPlayersChanged() returns IEvent
-    if (m_playersChanged == null)
-      m_playersChanged = new Event()
-    return m_playersChanged
-
-  // --------------------------------------------------------------------------
-  private function updateBases()
-    m_bases.clear()
-    for p in m_players
-      let comp = p.getMetadata().getHumanPlayerComponent()
-      let b = comp.getBase()
-      if (b != null)
-        m_bases.add(b)
 
 // ============================================================================
 class PlayerTeamDebugger extends DebuggerRealtimeUpdateFrame
@@ -179,19 +168,20 @@ class PlayerTeamDebugger extends DebuggerRealtimeUpdateFrame
       
     BlzFrameSetText(frameHandle, "===== Team: {0} =====".format(team.getId().toString()))
 
+    let b = team.getBase()
+    if (b != null)
+      let baseName = b.getName()
+      BlzFrameAddText(frameHandle, "Base: {0} ({1})".format(
+        (baseName.isNotBlank() ? baseName : b.getId()),
+        b.getDifficulty().toString()))
+    else
+      BlzFrameAddText(frameHandle, "No base")
+
     BlzFrameAddText(frameHandle, "Players: ")
 
     for p in team.getPlayers()
       let comp = p.getMetadata().getHumanPlayerComponent()
       BlzFrameAddText(frameHandle, " · {0} ({1})".format(p.getName(), DIFFICULTY_NAMES[comp.getDifficulty().floor()]))
-
-    BlzFrameAddText(frameHandle, "Bases: ")
-
-    for b in team.getBases()
-      let baseName = b.getName()
-      BlzFrameAddText(frameHandle, " · {0} ({1})".format(
-        (baseName.isNotBlank() ? baseName : b.getId()),
-        b.getDifficulty().toString()))
 
 // ============================================================================
 function onHumanPlayerComponentPropertyChanged(HumanPlayerComponent sender, string propertyName)
@@ -207,13 +197,24 @@ function onHumanPlayerComponentPropertyChanged(HumanPlayerComponent sender, stri
       nextTeam = PlayerTeam.getOrCreatePlayerTeam(b)
 
     if (nextTeam == null)
-      
+      nextTeam = PlayerTeam.getOrCreatePlayerTeam(p)
 
-    if (nextTeam != prevTeam and prevTeam != null)
-      prevTeam.removePlayer(p)
+    if (nextTeam != prevTeam)
+    //{
+      if (prevTeam != null)
+        prevTeam.removePlayer(p)
 
-
+      if (nextTeam != null)
+        nextTeam.addPlayer(p)
+    //}
   //}
+
+// ============================================================================
+function onPlayerLeave()
+  let p = GetTriggerPlayer()
+  let team = PlayerTeam.getPlayerTeam(p)
+  if (team != null)
+    team.removePlayer(p)
 
 // ============================================================================
 init
@@ -221,10 +222,12 @@ init
   if (DEV_ENVIRONMENT)
     DebuggerDialog.registerFrame("TEAM", () -> new PlayerTeamDebugger())
 
+  registerPlayerEvent(EVENT_PLAYER_LEAVE, function onPlayerLeave)
+
   for p in g_PlayingHumanPlayers
   //{
     // Everyone starts in their own team
-    PlayerTeam.getOrCreatePlayerTeam(p)
+    PlayerTeam.getOrCreatePlayerTeam(p)..addPlayer(p)
 
     // Listen for changes to the base property to move players to different teams
     let comp = p.getMetadata().getOrAddHumanPlayerComponent()
