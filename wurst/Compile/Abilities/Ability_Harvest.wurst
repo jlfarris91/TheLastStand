@@ -1,25 +1,157 @@
 package Ability_Harvest
 import AbilityObjEditing
-import TlsAbilityIds
 import ColorUtility
+import ObjectIdGenerator
+import RegisterEvents
+import TlsUpgradeDefinition
+import TlsUpgradeIds
+import Icons
+import GroupUtils
+import TlsUnitIds
+import PlayerExtensions
+import UnitIndexer
+import Orders
+
+constant int array harvest = [
+  compiletime(ABIL_ID_GEN.next()),
+  compiletime(ABIL_ID_GEN.next()),
+  compiletime(ABIL_ID_GEN.next()),
+  compiletime(ABIL_ID_GEN.next()),
+  compiletime(ABIL_ID_GEN.next()),
+  compiletime(ABIL_ID_GEN.next()),
+  compiletime(ABIL_ID_GEN.next()),
+  compiletime(ABIL_ID_GEN.next()),
+  compiletime(ABIL_ID_GEN.next()),
+  compiletime(ABIL_ID_GEN.next())]
+
+boolexpr g_filterUnitIsHarvester = Condition(function filterUnitIsHarvester)
+destructable array g_targettedTrees
 
 // ============================================================================
 @compiletime function createObjectDefinitions()
   
-  new AbilityDefinitionHarvestLumber(TlsAbilityIds.harvest)
-  ..setLevels(1)
-  ..setName("Gather")
-  ..setTooltipNormal(1, "Gather")
-  ..setTooltipNormalExtended(1, "Harvest lumber from trees.|n|n{0}".format("Trees are not cut down by harvesting.".gold()))
-  ..setTooltipTurnOff(1, "Return Resources")
-  ..setTooltipTurnOffExtended(1, "Return the carried lumber to the nearest Headquarters building or Lumber Mill.")
-  ..setLumberCapacity(1, 10)
-  ..setDamagetoTree(1, 1)
-  ..setButtonPositionNormalX(3)
-  ..setButtonPositionNormalY(1)
-  ..setButtonPositionTurnOffX(3)
-  ..setButtonPositionTurnOffY(1)
-  ..setTargetsAllowed(1, "tree,alive,dead")
-  ..setDurationNormal(1, 0.0)
-  ..setCastRange(1, 116.0)
-  ..setAreaofEffect(1, 900.0)
+  for i = 1 to 10
+    new AbilityDefinitionHarvestLumber(harvest[i - 1])
+    ..setLevels(1)
+    ..setName("Gather")
+    ..presetTooltipNormal(lvl -> "Gather [Level {0}]".format(i.toString()))
+    ..setTooltipNormalExtended(1, "Harvest lumber from trees.|n|n{0}".format("Trees are not cut down by harvesting.".gold()))
+    ..presetTooltipTurnOff(lvl -> "Return Resources [Level {0}]".format(i.toString()))
+    ..setTooltipTurnOffExtended(1, "Return the carried lumber to the nearest Headquarters building or Lumber Mill.")
+    ..presetLumberCapacity(lvl -> i * 10)
+    ..presetDamagetoTree(lvl -> i)
+    ..setButtonPositionNormalX(3)
+    ..setButtonPositionNormalY(1)
+    ..setButtonPositionTurnOffX(3)
+    ..setButtonPositionTurnOffY(1)
+    ..presetTargetsAllowed(lvl -> "tree,alive,dead")
+    ..presetDurationNormal(lvl -> 0.0)
+    ..presetCastRange(lvl -> 116.0)
+    ..presetAreaofEffect(lvl -> 900.0)
+
+  new TlsUpgradeDefinition(TlsUpgradeIds.lumberHarvest, 3)
+  ..setButtonPositionX(0)
+  ..setButtonPositionY(0)
+  ..setLumberCostBase(0)
+  ..setLumberCostIncrement(0)
+  ..setGoldCostBase(6)
+  ..setGoldCostIncrement(2)
+  ..setTimeBase(30)
+  ..setTimeIncrement(5)
+  ..presetName((int lvl) -> "Upgrade Lumber Harvesting")
+  ..presetTooltip((int lvl) -> "Upgrade Lumber Harvesting")
+  ..presetTooltipExtended((int lvl) -> "Increases the amount of lumber harvested with each hit by 1.")
+  ..setRequirements(1, "")
+  ..setRequirements(2, "")
+  ..setRequirements(3, "")
+  ..setIcon(1, Icons.bTNHumanLumberUpgrade1)
+  ..setIcon(2, Icons.bTNHumanLumberUpgrade2)
+  ..setIcon(3, Icons.bTNHumanLumberUpgrade2)
+
+// ============================================================================
+function unit.isHarvesterTypeUnit() returns bool
+  let unitTypeId = this.getTypeId()
+  return unitTypeId == TlsUnitIds.Survivors.survivorMale or 
+         unitTypeId == TlsUnitIds.Survivors.builder
+
+// ============================================================================
+function filterUnitIsHarvester() returns bool
+  return GetFilterUnit().isHarvesterTypeUnit()
+
+// ============================================================================
+function onResearchFinished()
+  if (GetResearched() != TlsUpgradeIds.lumberHarvest)
+    return
+
+  let owningPlayer = GetResearchingUnit().getOwner()
+  let harvestIndex = owningPlayer.getTechResearchLevel(TlsUpgradeIds.lumberHarvest)
+
+  if (harvestIndex < 1)
+    return
+
+  let g = getGroup()
+  g.enumUnitsOfPlayer(owningPlayer, g_filterUnitIsHarvester)
+  for u in g
+  //{
+    for i = 0 to 9
+      u.removeAbility(harvest[i])
+    u.addAbility(harvest[harvestIndex])
+
+    if (g_targettedTrees[u.getIndex()] != null)
+      reissueHarvestOrder(u)
+  //}
+  g.release()
+
+// ============================================================================
+function reissueHarvestOrder(unit u)
+  let index = u.getIndex()
+  let tree = g_targettedTrees[index]  
+  if (tree != null and not u.issueTargetOrderById(Orders.harvest, tree))
+    Log.debug("failed to issue harvest tree order")
+
+// ============================================================================
+function onUnitIndexed()
+
+  let indexingUnit = getIndexingUnit()
+  if (not indexingUnit.isHarvesterTypeUnit())
+    return
+
+  let owningPlayer = indexingUnit.getOwner()
+  let harvestIndex = owningPlayer.getTechResearchLevel(TlsUpgradeIds.lumberHarvest)
+  indexingUnit.addAbility(harvest[harvestIndex])
+
+// ============================================================================
+function onUnitDeindexed()
+  let indexingUnit = getIndexingUnit()
+  if (indexingUnit.isHarvesterTypeUnit())
+    g_targettedTrees[indexingUnit.getIndex()] = null
+
+// ============================================================================
+function onIssuedTargetOrder()
+
+  let orderedUnit = GetOrderedUnit()
+  if (not orderedUnit.isHarvesterTypeUnit())
+    return
+
+  let tree = GetOrderTargetDestructable()
+
+  let index = orderedUnit.getIndex()
+  g_targettedTrees[index] = tree
+
+// ============================================================================
+function onIssuedOrder()
+  
+  let orderedUnit = GetOrderedUnit()
+  if (not orderedUnit.isHarvesterTypeUnit())
+    return
+
+  let index = orderedUnit.getIndex()
+  g_targettedTrees[index] = null
+
+// ============================================================================
+init
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_RESEARCH_FINISH, function onResearchFinished)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ISSUED_TARGET_ORDER, function onIssuedTargetOrder)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ISSUED_ORDER, function onIssuedOrder)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_ISSUED_POINT_ORDER, function onIssuedOrder)
+  onUnitIndex(function onUnitIndexed)
