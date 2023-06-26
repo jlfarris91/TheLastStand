@@ -9,14 +9,13 @@ import TlsItemDefinition
 import ItemBuildUnitDefinition
 import Icons
 import RegisterEvents
-import Preload
-import UnitIndexer
 import GroupUtils
 import DisplayTextToPlayer
 import ItemType
 import ChannelAbilityPreset
 import GameConstants
 import Buildings
+import UnitMetadata
 
 public TlsBuildingDefinition g_headquarters1Definition
 public TlsBuildingDefinition g_headquarters2Definition
@@ -163,16 +162,6 @@ function onUnitTrained()
     trainingUnit.remove()
 
 // ============================================================================
-function onUnitIndexedDeindexed()
-
-  if (Preload.isPreloading())
-    return
-
-  let _unit = getIndexingUnit()
-  if (_unit.isHeadquarters())
-    destroyHeadquartersIfPlayerAlreadyHasOne(_unit)
-
-// ============================================================================
 function isEnumUnitHeadquarters() returns bool
   return GetEnumUnit().isHeadquarters()
 
@@ -220,6 +209,12 @@ function spawnHeadquartersItem(int unitTypeId, vec2 pos)
   ItemType.createItem(buildItemId, pos)
 
 // ============================================================================
+function onConstructStarted()
+  let _unit = GetConstructingStructure()
+  if (_unit.isHeadquarters())
+    destroyHeadquartersIfPlayerAlreadyHasOne(_unit)
+
+// ============================================================================
 function onConstructCanceled()
   let structure = GetTriggerUnit()
   if (not structure.isHeadquarters())
@@ -240,6 +235,15 @@ function onConstructCanceled()
 
   // remove so it can't be revived since it's a hero
   structure.remove()
+
+// ============================================================================
+function onUpgradeFinished()
+  let structure = GetTriggerUnit()
+  if (not structure.isHeadquarters())
+    return
+
+  // This addresses a bug where upgrading the HQ to 4/5 makes it so that heroes can't be revived
+  replaceUnitTLS(structure, structure.getTypeId(), bj_UNIT_STATE_METHOD_ABSOLUTE)
 
 // ============================================================================
 function onSpellCast()
@@ -371,7 +375,8 @@ init
   BuildItems.register(TlsItemIds.headquarters2, TlsUnitIds.BuildItemUnits.headquarters2)
   BuildItems.register(TlsItemIds.headquarters3, TlsUnitIds.BuildItemUnits.headquarters3)
 
-  onUnitIndex(function onUnitIndexedDeindexed)
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_TRAIN_FINISH, function onUnitTrained)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_CONSTRUCT_START, function onConstructStarted)
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_CONSTRUCT_CANCEL, function onConstructCanceled)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_UPGRADE_FINISH, function onUpgradeFinished)
   registerPlayerUnitEvent(EVENT_PLAYER_UNIT_SPELL_CAST, function onSpellCast)
