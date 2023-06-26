@@ -15,6 +15,7 @@ import UnitRecycler
 import Suspend
 import Preload
 import Trace
+import RealTime
 
 public bool PATHCHECKER_ENABLED = true
 
@@ -27,10 +28,19 @@ constant real ARRIVAL_DISTANCE = 64.0
 constant real UPDATE_INTERVAL = 0.5
 constant real PATH_CHECKER_COLLISION_SIZE = 0
 
+// When target is moving apply this to the threshold to make catching up easier
+constant real THRESHOLD_RANGE_MOTION_BUFFER = 2
+
 HashList<unit> g_activePathCheckers = new HashList<unit>()
 CallbackPeriodic g_updatePathCheckerTimer
 
 UnitRecycler g_pathCheckerRecycler = new UnitRecycler(PATH_CHECKER_OWNER, PATH_CHECKER_UNIT_ID)
+
+public enum PathCheckerStatus
+  UNDETERMINED
+  TIMEDOUT
+  NOT_FOUND
+  FOUND
 
 // ============================================================================
 @compiletime function createUnitDef()
@@ -53,17 +63,20 @@ UnitRecycler g_pathCheckerRecycler = new UnitRecycler(PATH_CHECKER_OWNER, PATH_C
 
     // Debugging
     //..setModelFile("units\\human\\Footman\\Footman")
-    //..setScalingValue(0.5)
+    //..setScalingValue(1.0)
+    //..setHideMinimapDisplay(false)
 
 // ============================================================================
 public class PathCheckerComponent extends UnitComponent
   private unit m_targetUnit = null
   private vec2 m_lastPos = ZERO2
+  private vec2 m_targetLastPos = ZERO2
   private Action1<PathCheckerComponent> m_callback = null
-  private bool m_foundPath = false
-  private real m_arrivalDistanceSq = 0.
+  private PathCheckerStatus m_status = PathCheckerStatus.UNDETERMINED
+  private real m_actualThresholdSq = 0.0
   private bool m_autoRelease = true
-  private bool m_hasMovedBeyondThreshold = false
+  private real m_timeout = 15.0
+  private real m_timeoutStartTime = 0.0
 
   // --------------------------------------------------------------------------
   construct(IUnitMetadata owner)
@@ -88,12 +101,12 @@ public class PathCheckerComponent extends UnitComponent
     m_targetUnit = targetUnit
     
     let combinedCollisionSize = PATH_CHECKER_COLLISION_SIZE + m_targetUnit.getCollisionSize()
-    let distance = combinedCollisionSize + ARRIVAL_DISTANCE + MELEE_UNIT_ATTACK_RANGE
-    m_arrivalDistanceSq = distance * distance
+    let collisionSize = combinedCollisionSize + MELEE_UNIT_ATTACK_RANGE
+    m_actualThresholdSq = collisionSize * collisionSize
 
   // --------------------------------------------------------------------------
-  function getFoundPath() returns bool
-    return m_foundPath
+  function getStatus() returns PathCheckerStatus
+    return m_status
 
   // --------------------------------------------------------------------------
   function getAutoDestroy() returns bool
@@ -102,6 +115,14 @@ public class PathCheckerComponent extends UnitComponent
   // --------------------------------------------------------------------------
   function setAutoDestroy(bool autoDestroy)
     m_autoRelease = autoDestroy
+
+  // --------------------------------------------------------------------------
+  function getTimeout() returns real
+    return m_timeout
+  
+  // --------------------------------------------------------------------------
+  function setTimeout(real value)
+    m_timeout = value
 
   // --------------------------------------------------------------------------
   override function onEnabled()
@@ -117,8 +138,7 @@ public class PathCheckerComponent extends UnitComponent
     unregisterActivePathChecker(ownerUnit)
 
     m_targetUnit = null
-    m_foundPath = false
-    m_hasMovedBeyondThreshold = false
+    m_status = PathCheckerStatus.UNDETERMINED
 
     releaseCallback()
 
@@ -131,43 +151,88 @@ public class PathCheckerComponent extends UnitComponent
 
   // --------------------------------------------------------------------------
   function update()
-    if (m_targetUnit == null or m_targetUnit.isAlive() == false)
+
+    let timedOut = getRealTimeSeconds() > m_timeoutStartTime + m_timeout
+    if (timedOut)
+      onTimedOut()
+      deactivate()
+      return
+
+    if (m_targetUnit == null or m_targetUnit.isAliveTrick() == false)
       onPathNotFound()
       deactivate()
       return
 
     let ownerUnit = getOwnerUnit()
     let currentPos = ownerUnit.getPos()
+    let targetPos = m_targetUnit.getPos()
+
+    // For moving units we increase the distance threshold to make catching up easier
+    var distTargetMovedFromLastPos = targetPos.distanceTo(m_targetLastPos)
+
+    // If the unit moved faster than sim-possible then it likely teleported, just ignore the movement
+    if (distTargetMovedFromLastPos > 512)
+      distTargetMovedFromLastPos = 0
+
+    m_targetLastPos = targetPos
+
+    let targetIsMoving = distTargetMovedFromLastPos > MIN_DISTANCE_MOVED_THRESHOLD
+
+    // If the target is moving then reissue the move order to follow them
+    if (targetIsMoving)
+    //{
+      // Try to anticipate where the unit will move next
+      let moveToPos = targetPos.polarOffset(m_targetUnit.getFacingAngle(), distTargetMovedFromLastPos)
+      ownerUnit.issuePointOrderById(OrderIds.move, moveToPos)
+    //}
+
     let distMovedFromLastPosSq = currentPos.distanceToSq(m_lastPos)
     m_lastPos = currentPos
-    
-    if (distMovedFromLastPosSq < MIN_DISTANCE_MOVED_THRESHOLD_SQ)
-      if (m_hasMovedBeyondThreshold and getOwnerUnit().getCurrentOrder() != OrderIds.move)
-        onPathCheckerStuck()
-    else
-      m_hasMovedBeyondThreshold = true
 
-  // --------------------------------------------------------------------------
-  function onPathCheckerStuck()
-    let ownerUnit = getOwnerUnit()
-    let dist = ownerUnit.getPos().distanceToSq(m_targetUnit.getPos())
+    let distSq = currentPos.distanceToSq(targetPos)
+
+    // Log.info("tm: {0} td: {1} pd: {2} dist: {3} th: {4}".format(
+    //   targetIsMoving.toString(),
+    //   distTargetMovedFromLastPos.toString(),
+    //   SquareRoot(distMovedFromLastPosSq).toString(),
+    //   SquareRoot(distSq).toString(),
+    //   SquareRoot(m_actualThresholdSq).toString()))
     
-    // Standing within attack range of the target, it's pathable
-    if (dist < m_arrivalDistanceSq)
+    // Reached target
+    if (distSq < m_actualThresholdSq)
       onPathFound()
-    else
-      onPathNotFound()
+      deactivate()
+      return
 
-    deactivate()
+    // Got stuck...
+    if (distMovedFromLastPosSq < MIN_DISTANCE_MOVED_THRESHOLD_SQ and
+        ownerUnit.getCurrentOrder() != OrderIds.move)
+    //{
+      // Standing within attack range of the target, it's pathable
+      if (distSq < m_actualThresholdSq)
+        onPathFound()
+      else
+        onPathNotFound()
+
+      deactivate()
+    //}    
 
   // --------------------------------------------------------------------------
   function onPathFound()
-    m_foundPath = true
+    // Log.info("found path to {0}!".format(m_targetUnit.getName()))
+    m_status = PathCheckerStatus.FOUND
     raiseCallback()
 
   // --------------------------------------------------------------------------
   function onPathNotFound()
-    m_foundPath = false
+    // Log.info("no path found to {0}".format(m_targetUnit.getName()))
+    m_status = PathCheckerStatus.NOT_FOUND
+    raiseCallback()
+
+  // --------------------------------------------------------------------------
+  function onTimedOut()
+    // Log.info("timed out finding path to {0}".format(m_targetUnit.getName()))
+    m_status = PathCheckerStatus.TIMEDOUT
     raiseCallback()
 
   // --------------------------------------------------------------------------
@@ -185,10 +250,11 @@ public class PathCheckerComponent extends UnitComponent
     ownerUnit.unsuspend()
 
     m_lastPos = ownerUnit.getPos()
-    m_foundPath = false
-    m_hasMovedBeyondThreshold = false
+    m_status = PathCheckerStatus.UNDETERMINED
+    m_timeoutStartTime = getRealTimeSeconds()
 
     let targetPos = m_targetUnit.getPos()
+    m_targetLastPos = targetPos
     getOwnerUnit().issuePointOrderById(OrderIds.move, targetPos)
     // if (getOwnerUnit().issuePointOrderById(OrderIds.move, targetPos))
     //   Log.debug("Started path check for unit " + m_targetUnit.getName())
