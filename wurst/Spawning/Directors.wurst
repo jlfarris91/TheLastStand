@@ -19,6 +19,7 @@ LinkedList<Director> g_directors = new LinkedList<Director>()
 Thread s_directorWorkerThread = new Thread("director")
   ..setTickInterval(0.3)
   ..setMaxWorkPerTick(1)
+  ..setEnabled(true)
 
 // ============================================================================
 public class CardInstance
@@ -31,6 +32,17 @@ public class CardInstance
     this.card = card
     this.tier = tier
     this.cost = cost
+
+// ============================================================================
+public tuple optionalCardInstance(bool hasValue, CardInstance value, string errorMessage)
+
+// ============================================================================
+public function some(CardInstance value) returns optionalCardInstance
+  return optionalCardInstance(true, value, null)
+
+// ============================================================================
+public function none_CardInstance(string errorMessage) returns optionalCardInstance
+  return optionalCardInstance(false, null, errorMessage)
 
 // ============================================================================
 public abstract class TieredCard extends Card
@@ -56,7 +68,7 @@ public abstract class TieredCard extends Card
     return (getTierValueMultiplier(tier) * getCost()).floor()
 
   // ----------------------------------------------------------------------------
-  function getHighestAffordableTier(real credits) returns CardInstance
+  function tryGetHighestAffordableTier(real credits) returns optionalCardInstance
 
     var selectedTier = 0
     var selectedCost = 0
@@ -76,9 +88,10 @@ public abstract class TieredCard extends Card
     //}
 
     if (not foundValidTier)
-      return null
+      let tier0Cost = (getTierValueMultiplier(0) * baseCost).floor()
+      return none_CardInstance("Can't afford tier 0/{0}: {1}/{2}".format(tier0Cost.toString(), credits.toInt().toString(), (_tierCount - 1).toString()))
 
-    return new CardInstance(this, selectedTier, selectedCost)
+    return some(new CardInstance(this, selectedTier, selectedCost))
 
 // ============================================================================
 public class PerSecondCreditGenerator
@@ -308,16 +321,12 @@ public abstract class Director
 
     setCredits(getCreditsOnActivation())
 
-    m_workerThread.setEnabled(true)
-
   // --------------------------------------------------------------------------
   protected function onDisabled()
 
     if (m_ct != null)
       m_ct.cancelAndRelease()
       m_ct = null
-
-    m_workerThread.setEnabled(false)
 
   // --------------------------------------------------------------------------
   protected function getDifficultyCoefficient() returns real
@@ -391,11 +400,7 @@ public abstract class ContinuousDirector extends Director
       m_job = null
 
   // --------------------------------------------------------------------------
-  function canDrawCard() returns bool
-    return true
-
-  // --------------------------------------------------------------------------
-  abstract function drawCard() returns CardInstance
+  abstract function tryDrawCard() returns optionalCardInstance
 
   // --------------------------------------------------------------------------
   abstract function activateCard(CardInstance card) returns bool
@@ -514,20 +519,25 @@ class ContinuousDirectorJob extends Job
       m_lastActivationFailedReason = "canceled"
       return 0
 
-    if (not m_director.canDrawCard())
-      restartTimerBetweenWaves()
-      m_lastActivationFailedReason = "can't draw card"
-      return 0
+    optionalCardInstance drawCardResult = none_CardInstance("failed")
 
     if (not m_lastActivationSucceeded or m_alwaysDrawNewCard)
     //{
       if (m_selectedCard != null)
         destroy m_selectedCard
+        m_selectedCard = null
 
-      m_selectedCard = m_director.drawCard()
+      drawCardResult = m_director.tryDrawCard()
     //}
 
-    if (m_selectedCard.card == null)
+    if (not drawCardResult.hasValue)
+      restartTimerBetweenWaves()
+      m_lastActivationFailedReason = drawCardResult.errorMessage
+      return 0
+
+    m_selectedCard = drawCardResult.value
+
+    if (m_selectedCard == null or m_selectedCard.card == null)
       restartTimerBetweenWaves()
       m_lastActivationFailedReason = "selected null card"
       return 0
