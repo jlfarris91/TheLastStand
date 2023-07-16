@@ -102,7 +102,6 @@ namespace W3xPipeline
             const string indentStr2 = "    ";
 
             sb.AppendLine("// This file is generated. Any changes will be lost.");
-            sb.AppendLine($"// Last generated {DateTime.Now}");
             sb.AppendLine($"package MapEventsInit");
             sb.AppendLine($"import MapEvents");
             sb.AppendLine();
@@ -156,7 +155,7 @@ namespace W3xPipeline
                         suffix = $" // {entityName}";
                     }
 
-                    sb.AppendLine($"{indentStr2}..registerUnitSpawner('{unitPlacement.Id}', vec2({localPos.X}, {localPos.Y}), angle({localYaw})) {suffix}");
+                    sb.AppendLine($"{indentStr2}..registerUnitSpawner('{unitPlacement.Id}', vec2({localPos.X:F}, {localPos.Y:F}), angle({localYaw:F})) {suffix}");
                 }
 
                 foreach (var destPlacement in mapEventTemplate.DoodadPlacementFile.Placements.Destructables)
@@ -172,7 +171,7 @@ namespace W3xPipeline
                         suffix = $" // {entityName}";
                     }
 
-                    sb.AppendLine($"{indentStr2}..registerDestSpawner('{destPlacement.Id}', {destPlacement.Variation}, vec3({localPos.X}, {localPos.Y}, {localPos.Z}), angle({localYaw}), {localScale.X}){suffix}");
+                    sb.AppendLine($"{indentStr2}..registerDestSpawner('{destPlacement.Id}', {destPlacement.Variation}, vec3({localPos.X:F}, {localPos.Y:F}, {localPos.Z:F}), angle({localYaw:F}), {localScale.X:F}){suffix}");
                 }
 
                 int centerTileX = (int)Math.Floor(mapEventTemplate.TerrainFile.Terrain.Width / 2.0f);
