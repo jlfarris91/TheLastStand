@@ -13,15 +13,15 @@ import TlsMapEventIds
 import Runnable
 import Func
 import Jobs
+import UnitRecycler
+import UnitExtensions
 import ErrorHandling
+import Bounds
 import CancellationToken
 import ObjectIds
 import DestructableUtility
 import Events
 import Lootables
-import WorldObject
-import UnitSpawner
-import DestructableSpawner
 
 import initlater MapEventsInit
 
@@ -687,6 +687,174 @@ public class MapEventInstance extends WorldObject
     return "{0}:{1}:{2}".format(m_template.getId(), m_instanceId.toString(), id)
 
 // ============================================================================
+public abstract class WorldObject
+  protected Transform m_transform = new Transform()
+
+  // ----------------------------------------------------------------------------
+  ondestroy
+    destroy m_transform
+    m_transform = null
+
+  // --------------------------------------------------------------------------
+  function getTransform() returns Transform
+    return m_transform
+
+// ============================================================================
+public class UnitSpawner extends WorldObject
+  private int m_unitTypeId
+  private real m_fadeInDuration
+  private real m_fadeOutDuration
+  private int m_fadeOutMove
+  private vec2 m_fadeOutMoveToPos
+  private bool m_useRecycler
+  private int m_userData
+
+  // --------------------------------------------------------------------------
+  construct(int unitTypeId)
+    m_unitTypeId = unitTypeId
+
+  // --------------------------------------------------------------------------
+  function getUserData() returns int
+    return m_userData
+  
+  // --------------------------------------------------------------------------
+  function setUserData(int value)
+    m_userData = value
+
+  // --------------------------------------------------------------------------
+  function getFadeInDuration() returns real
+    return m_fadeInDuration
+
+  // --------------------------------------------------------------------------
+  function setFadeInDuration(real value)
+    m_fadeInDuration = value
+
+  // --------------------------------------------------------------------------
+  function getFadeOutDuration() returns real
+    return m_fadeOutDuration
+
+  // --------------------------------------------------------------------------
+  function setFadeOutDuration(real value)
+    m_fadeOutDuration = value
+    m_fadeOutMove = 0
+
+  // --------------------------------------------------------------------------
+  function setFadeOutToPos(real duration, vec2 moveToPos)
+    m_fadeOutDuration = duration
+    m_fadeOutMove = 1
+    m_fadeOutMoveToPos = moveToPos
+
+  // --------------------------------------------------------------------------
+  function setFadeOutToRandomPos(real duration)
+    m_fadeOutDuration = duration
+    m_fadeOutMove = 2
+
+  // --------------------------------------------------------------------------
+  function getUseRecycler() returns bool
+    return m_useRecycler
+
+  // --------------------------------------------------------------------------
+  function setUseRecycler(bool value)
+    m_useRecycler = value
+
+  // --------------------------------------------------------------------------
+  function getUnitTypeId() returns int
+    return m_unitTypeId
+
+  // --------------------------------------------------------------------------
+  function spawn(player owner, Transform parentTransform) returns unit
+    m_transform.setParent(parentTransform)
+    let spawnedUnit = spawnUnit(owner, m_unitTypeId, m_transform)
+    m_transform.setParent(null)
+    return spawnedUnit
+
+  // --------------------------------------------------------------------------
+  function spawn(player owner, int unitTypeIdOverride, Transform parentTransform) returns unit
+    m_transform.setParent(parentTransform)
+    let spawnedUnit = spawnUnit(owner, unitTypeIdOverride, m_transform)
+    m_transform.setParent(null)
+    return spawnedUnit
+
+  // --------------------------------------------------------------------------
+  private function spawnUnit(player owner, int unitTypeId, Transform worldTransform) returns unit
+    let pos = worldTransform.getWorldPosition().toVec2()
+    let facingAngle = worldTransform.getWorldYaw()
+    
+    unit spawnedUnit
+    if (m_useRecycler)
+      spawnedUnit = createUnitRecycled(owner, unitTypeId, pos, facingAngle)
+    else
+      spawnedUnit = createUnit(owner, unitTypeId, pos, facingAngle)
+
+    if (m_fadeInDuration > 0.0)
+      spawnedUnit.setInvulnerable(true)
+      spawnedUnit.fadeIn(m_fadeInDuration)
+      doAfter(m_fadeInDuration, () -> spawnedUnit.setInvulnerable(false))
+
+    return spawnedUnit
+
+  // --------------------------------------------------------------------------
+  function unspawnUnit(unit spawnedUnit)
+
+    if (m_fadeOutDuration == 0.0 or not spawnedUnit.isAlive())
+      removeOrRecycleUnit(spawnedUnit)
+      return
+
+    spawnedUnit.setInvulnerable(true)
+    spawnedUnit.fadeOut()
+    
+    if (m_fadeOutMove == 1)
+      spawnedUnit.issuePointOrder("move", m_fadeOutMoveToPos)
+    else if (m_fadeOutMove == 2)
+      spawnedUnit.issuePointOrder("move", playableBounds.getRandomPoint())
+
+    doAfter(m_fadeOutDuration) () ->
+      removeOrRecycleUnit(spawnedUnit)
+      if (m_useRecycler)
+        if (not spawnedUnit.isStocked())
+          spawnedUnit.stock()
+      else
+        spawnedUnit.remove()
+
+  // --------------------------------------------------------------------------
+  private function removeOrRecycleUnit(unit spawnedUnit)
+    if (m_useRecycler)
+      if (spawnedUnit.isAlive() and not spawnedUnit.isStocked())
+        spawnedUnit.stock()
+    else
+      spawnedUnit.remove()
+
+// ============================================================================
+class DestructableSpawner extends WorldObject
+  private int m_destructableTypeId
+  private int m_variation
+
+  // --------------------------------------------------------------------------
+  construct(int destructableTypeId, int variation)
+    m_destructableTypeId = destructableTypeId
+    m_variation = variation
+
+  // --------------------------------------------------------------------------
+  function getDestructableTypeId() returns int
+    return m_destructableTypeId
+
+  // --------------------------------------------------------------------------
+  function getVariation() returns int
+    return m_variation
+
+  // --------------------------------------------------------------------------
+  function spawn(Transform parentTransform) returns destructable
+    m_transform.setParent(parentTransform)
+    let spawnedDest = createDestructable(m_destructableTypeId, m_variation, m_transform)
+    m_transform.setParent(null)
+    return spawnedDest
+
+// ============================================================================
+function filterUnitIsLootable() returns bool
+  let filterUnit = GetFilterUnit()
+  return filterUnit.isLootable()
+
+// ============================================================================
 class MapEventAreaCleanerSpawner extends WorldObject
   private real m_radius
 
@@ -856,11 +1024,6 @@ public class MapEvent extends Runnable
   // --------------------------------------------------------------------------
   override protected function onCompleted()
     g_runningMapEvents.remove(this)
-
-// ============================================================================
-function filterUnitIsLootable() returns bool
-  let filterUnit = GetFilterUnit()
-  return filterUnit.isLootable()
 
 // ============================================================================
 init
