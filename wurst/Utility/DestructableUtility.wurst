@@ -1,5 +1,6 @@
 package DestructableUtility
 import Action
+import TlsDestructableIds
 
 rect g_enumRect = Rect(0,0,0,0)
 vec2 g_enumPos = ZERO2
@@ -7,6 +8,12 @@ destructable array g_enumDestructables
 int g_enumDestructablesCount
 code g_enumDestructablesFunc = function enumDestructablesInCircleFunc
 boolexpr g_enumDestructablesFilter = Filter(function enumDestructablesInCircleFilter)
+
+// Finding the nearest tree
+boolexpr g_filterDestructableIsTree = Condition(function filterDestructableIsTree)
+rect g_nearestTreeRect = Rect(-256, -256, 256, 256)
+real g_nearestTreeMinDistSq
+destructable g_nearestTree
 
 // ============================================================================
 public function enumDestructablesInCircle(vec2 pos, real radius, Action1<destructable> callback)
@@ -34,3 +41,25 @@ function populateDestructablesInCircle(vec2 pos, real radius)
   g_enumPos = pos
   bj_enumDestructableRadius = radius*radius
   EnumDestructablesInRect(g_enumRect, g_enumDestructablesFilter, g_enumDestructablesFunc)
+
+// ============================================================================
+public function getNearestTree(vec2 pos) returns destructable
+  g_nearestTreeRect.moveTo(pos)
+  g_nearestTreeMinDistSq = REAL_MAX
+  g_nearestTree = null
+  EnumDestructablesInRect(g_nearestTreeRect, g_filterDestructableIsTree, function getNearestTree_enum)
+  return g_nearestTree
+
+// ============================================================================
+function getNearestTree_enum()
+  let dest = GetEnumDestructable()
+  let dist = dest.getPos().distanceToSq(g_nearestTreeRect.getCenter())
+  if (dist < g_nearestTreeMinDistSq)
+    g_nearestTreeMinDistSq = dist
+    g_nearestTree = dest
+
+// ============================================================================
+function filterDestructableIsTree() returns bool
+  let destTypeId = GetFilterDestructable().getTypeId()
+  return destTypeId == TlsDestructableIds.tree or
+         destTypeId == TlsDestructableIds.treePlanter
