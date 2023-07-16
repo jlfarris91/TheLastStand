@@ -110,7 +110,7 @@ public Vector<LootableComponent> g_lootableUnits = null
 SoundDefinition array[3] g_lootFinishedSound
 
 SoundDefinition g_notEnoughManaSoundDef
-int array g_notEnoughManaLastPlayedTime
+real array g_notEnoughManaLastPlayedTime
 
 HashList<LootDirector> g_lootDirectors = new HashList<LootDirector>()
 int g_lootDirectorsGen = 0
@@ -233,11 +233,11 @@ public class LootDirector extends Director
     while (not deckInstance.isEmpty() and awardsAdded < numCards)
       let lootCard = deckInstance.draw() castTo LootCard
       if (lootCard != null)
-        let cardInstance = lootCard.getHighestAffordableTier(credits)
-        if (cardInstance != null)
-          m_lootable.addLoot(cardInstance)
+        let cardInstance = lootCard.tryGetHighestAffordableTier(credits)
+        if (cardInstance.hasValue)
+          m_lootable.addLoot(cardInstance.value)
           awardsAdded++
-          credits -= cardInstance.cost
+          credits -= cardInstance.value.cost
           if (not lootCard.getDiscardOnActivate())
             deckInstance.add(lootCard)
 
@@ -734,12 +734,12 @@ public class LootableComponent extends UnitComponent
     if (drawnCard == null)
       return
 
-    let lootCardInstance = drawnCard.getHighestAffordableTier(m_director.getCreditsOnActivation() + m_director.getCredits())
-    if (lootCardInstance == null)
+    let lootCardInstance = drawnCard.tryGetHighestAffordableTier(m_director.getCreditsOnActivation() + m_director.getCredits())
+    if (not lootCardInstance.hasValue)
       return
     
-    let lootCard = lootCardInstance.card castTo LootCard
-    if (lootCard != null and activateLootCard(lootCardInstance, lootingUnit, true))
+    let lootCard = lootCardInstance.value.card castTo LootCard
+    if (lootCard != null and activateLootCard(lootCardInstance.value, lootingUnit, true))
     //{
       // The chance check would not have passed if it weren't for the effects of lucky horseshoe
       displayMessageToPlayer(lootingUnit.getOwner(), "Lucky Horseshoe!".colorize(Colors.lightBlue) + " You found even more loot!")
@@ -751,7 +751,7 @@ public class LootableComponent extends UnitComponent
         xpComp.addXp(lootXpProp.getValue(), false)
     //}
 
-    destroy lootCardInstance
+    destroy lootCardInstance.value
 
   // --------------------------------------------------------------------------
   private function activateLootCard(CardInstance lootCardInstance, unit lootingUnit, bool horsehoe) returns bool
