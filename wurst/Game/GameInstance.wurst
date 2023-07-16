@@ -26,6 +26,7 @@ import PlayerSetup
 import ItemType
 import PlayerSpawnPointProviders
 import Difficulties
+import Events
 
 public GameInstance g_GameInstance = new GameInstance()
 
@@ -41,9 +42,20 @@ public class GameInstance
   private bool m_hasStarted = false
   private bool m_spawnPedestals = false
 
+  private Event m_gameStarted
+  private Event m_gameFinished
+
   // --------------------------------------------------------------------------
   ondestroy
     destroy m_weatherPlayer
+
+    if (m_gameStarted != null)
+      destroy m_gameStarted
+      m_gameStarted = null
+
+    if (m_gameFinished != null)
+      destroy m_gameFinished
+      m_gameFinished = null
 
   // --------------------------------------------------------------------------
   function now() returns time
@@ -230,6 +242,9 @@ public class GameInstance
     for p in g_PlayingHumanPlayers
       initializePlayer(p)
 
+    if (m_gameStarted != null)
+      m_gameStarted.call()
+
   // --------------------------------------------------------------------------
   private function initializePlayer(player p)
     
@@ -292,14 +307,31 @@ public class GameInstance
       doAfter(30.0) () ->
         for p in g_PlayingHumanPlayers
         //{
+          let pmet = p.getMetadata()
+
+          if (not pmet.getHasLostGame())
+            pmet.setVictoryState(VictoryState.Won)
+
           PlayerSaveData.save(p, true)
           
           let d = DialogCreate()
-          d.setMessage(p.getMetadata().getHasLostGame() ? "You lose. Better luck next time!" : "You win!")
+          d.setMessage(pmet.getHasLostGame() ? "You lose. Better luck next time!" : "You win!")
           d.addButton("OK")
           d.display(p, true)
         //}
     //}
+
+  // --------------------------------------------------------------------------
+  function onGameStarted() returns IEvent
+    if (m_gameStarted == null)
+      m_gameStarted = new Event()
+    return m_gameStarted
+
+  // --------------------------------------------------------------------------
+  function onGameFinished() returns IEvent
+    if (m_gameFinished == null)
+      m_gameFinished = new Event()
+    return m_gameFinished
 
   // --------------------------------------------------------------------------
   function startNight()
