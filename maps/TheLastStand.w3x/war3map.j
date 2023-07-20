@@ -124,18 +124,6 @@ endfunction
 //***************************************************************************
 
 //===========================================================================
-function CreateUnitsForPlayer0 takes nothing returns nothing
-    local player p = Player(0)
-    local unit u
-    local integer unitID
-    local trigger t
-    local real life
-
-    set u = BlzCreateUnitWithSkin( p, 'h00J', -7584.8, -4725.3, -46.946, 'h00J' )
-    call SetUnitColor( u, ConvertPlayerColor(4) )
-endfunction
-
-//===========================================================================
 function CreateBuildingsForPlayer10 takes nothing returns nothing
     local player p = Player(10)
     local unit u
@@ -427,6 +415,8 @@ function CreateUnitsForPlayer10 takes nothing returns nothing
     set u = BlzCreateUnitWithSkin( p, 'h00H', -8059.8, -7977.8, 85.159, 'h00H' )
     call SetUnitColor( u, ConvertPlayerColor(6) )
     set u = BlzCreateUnitWithSkin( p, 'h00J', -10170.9, -3013.1, 42.970, 'h00J' )
+    call SetUnitColor( u, ConvertPlayerColor(4) )
+    set u = BlzCreateUnitWithSkin( p, 'h00J', -7584.8, -4725.3, 313.050, 'h00J' )
     call SetUnitColor( u, ConvertPlayerColor(4) )
     set u = BlzCreateUnitWithSkin( p, 'h00K', -5772.4, -2985.9, 275.943, 'h00K' )
     call SetUnitColor( u, ConvertPlayerColor(0) )
@@ -904,7 +894,7 @@ function CreateNeutralPassive takes nothing returns nothing
     set u = BlzCreateUnitWithSkin( p, 'h00L', 54.0, 7506.4, 223.703, 'h00L' )
     set u = BlzCreateUnitWithSkin( p, 'h00L', 642.3, 7203.3, 347.646, 'h00L' )
     set u = BlzCreateUnitWithSkin( p, 'h00L', 2543.2, 8839.5, 254.341, 'h00L' )
-    set u = BlzCreateUnitWithSkin( p, 'h00L', -8552.8, -5394.5, -60.302, 'h00L' )
+    set u = BlzCreateUnitWithSkin( p, 'h00L', -8552.8, -5394.5, 299.698, 'h00L' )
     set u = BlzCreateUnitWithSkin( p, 'h00L', -9396.4, -6072.0, 95.525, 'h00L' )
     set u = BlzCreateUnitWithSkin( p, 'h00L', -11188.4, -5658.3, 305.434, 'h00L' )
     set u = BlzCreateUnitWithSkin( p, 'h00L', -8824.5, -8623.6, 237.396, 'h00L' )
@@ -942,7 +932,6 @@ endfunction
 
 //===========================================================================
 function CreatePlayerUnits takes nothing returns nothing
-    call CreateUnitsForPlayer0(  )
     call CreateUnitsForPlayer10(  )
     call CreateUnitsForPlayer20(  )
 endfunction
