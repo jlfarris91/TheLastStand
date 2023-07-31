@@ -27,6 +27,7 @@ import ItemType
 import PlayerSpawnPointProviders
 import Difficulties
 import Events
+import RegisterEvents
 
 public GameInstance g_GameInstance = new GameInstance()
 
@@ -248,7 +249,7 @@ public class GameInstance
   // --------------------------------------------------------------------------
   private function initializePlayer(player p)
     
-    spawnInitialPlayerUnitsAtRandomPoint(p, true)
+    spawnWispForPlayer(p)
 
     // Create a visible region around the base units
     createVision(p, getBaseUnitsRect(), false)
@@ -348,7 +349,7 @@ public class GameInstance
   private function respawnDeadPlayers()
     for p in g_PlayingHumanPlayers
       if (p.getHumanPlayerComponent().getIsHeroDead())
-        spawnInitialPlayerUnitsAtRandomPoint(p, false)
+        respawnHeroForPlayer(p)
 
   // --------------------------------------------------------------------------
   private function initializeGeneral()
@@ -454,23 +455,56 @@ public function spawnHeroForPlayer(player p, vec2 pos, bool firstTime) returns u
   return hero
 
 // ============================================================================
-public function spawnInitialPlayerUnitsAtRandomPoint(player p, bool _firstTime)
+public function respawnHeroForPlayer(player p)
   let sp = getDynamicFriendlySpawnPointProvider(p).getRandomSpawnPointInPlayableMap()
   if (not sp.succeeded)
     error("Could not find a safe spawn point to spawn hero for player " + p.getName())
     return
 
-  // let hero = spawnHeroForPlayer(p, sp.spawnPoint, firstTime)
-  
-  // Create survivors for the player to start with
-  // spawnInitialSurvivorsForPlayer(p, hero)
+  respawnHeroForPlayer(p, sp.spawnPoint)
 
-  let wisp = createUnitTLS(p, TlsUnitIds.wisp, sp.spawnPoint, 270.0.asAngleDegrees())
+// ============================================================================
+public function respawnHeroForPlayer(player p, vec2 pos)
+  let playerMetadata = p.getMetadata()
+  let playerComp = playerMetadata.getHumanPlayerComponent()
+
+  let hero = playerComp.getHero()
+  if (hero == null or hero.isAlive())
+    // hero hasn't been spawned yet or is still alive
+    return
+
+  hero.revive(pos, false)
+
+  // Reset player's camera to look at new hero
+  if (p == localPlayer)
+    PanCameraToTimedForPlayer(p, pos.x, pos.y, 0)
+  
+  SelectUnitForPlayerSingle(hero, p)
+
+  // Set player name back to normal if they were deceased
+  playerMetadata.resetDisplayName()
+
+  // Make hero invulnerable for a short period of time
+  hero.makeInvulnerable(HERO_RESPAWN_INVULNERABLE_DURATION)
+
+// ============================================================================
+function spawnWispForPlayer(player p)
+  let sp = getDynamicFriendlySpawnPointProvider(p).getRandomSpawnPointInPlayableMap()
+  if (not sp.succeeded)
+    error("Could not find a safe spawn point to spawn hero for player " + p.getName())
+    return
+
+  spawnWispForPlayer(p, sp.spawnPoint)
+
+// ============================================================================
+function spawnWispForPlayer(player p, vec2 pos)
+
+  let wisp = createUnitTLS(p, TlsUnitIds.wisp, pos, 270.0.asAngleDegrees())
   SelectUnitForPlayerSingle(wisp, p)
 
   // Reset player's camera to look at new hero
   if (p == localPlayer)
-    PanCameraToTimedForPlayer(p, sp.spawnPoint.x, sp.spawnPoint.y, 0)
+    PanCameraToTimedForPlayer(p, pos.x, pos.y, 0)
 
 // ============================================================================
 function spawnInitialSurvivorsForPlayer(player p, unit hero)
@@ -490,6 +524,13 @@ function onNightStart()
   nullTimer(() -> g_GameInstance.startNight())
 
 // ============================================================================
+function onUnitKilled()
+  let dyingUnit = GetDyingUnit()
+  if (dyingUnit.isTlsHero() and g_GameInstance.isGracePeriodActive())
+    displayMessageToPlayer(dyingUnit.getOwner(), "Your hero died during the grace period. Don't worry. They will respawn tomorrow morning.")
+
+// ============================================================================
 init
   registerDayEvent(function onDayStart)
   registerNightEvent(function onNightStart)
+  registerPlayerUnitEvent(EVENT_PLAYER_UNIT_DEATH, function onUnitKilled)
