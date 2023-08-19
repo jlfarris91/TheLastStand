@@ -21,6 +21,9 @@ import RegisterEvents
 import HumanPlayers
 import DamageEvent
 import Damage
+import GroupUtils
+import PersistActiveAbilityComponent
+import UnitMetadata
 
 public SurvivorUnitDefinition g_builderDefinition
 
@@ -356,12 +359,34 @@ public function onResearchFinished()
 
   let techLevel = owningPlayer.getTechResearchLevel(researchTypeId)
   
-  if (techLevel >= 1)
+  if (techLevel == 1)
     owningPlayer.setAbilityAvailable(TlsAbilityIds.builderBasicRepair, false)
     owningPlayer.setAbilityAvailable(TlsAbilityIds.builderSkilledRepair, true)
+    updateBuilderPersistActiveAbilityComponents(owningPlayer)
 
   if (techLevel >= 3)
     owningPlayer.setTechAvailability(TlsUpgradeIds.builderFurtherStudy, true)
+
+// ============================================================================
+// Since the Basic Repair ability is replaced with the Skilled Repair ability
+// when the player researches Builder Novice Training, we need to update the
+// PersistActiveAbilityComponent on each Builder to track the new Skilled Repair
+// ability active state instead of the Basic Repair ability active state.
+function updateBuilderPersistActiveAbilityComponents(player owningPlayer)
+  let g = getGroup()
+  g.enumUnitsOfPlayer(owningPlayer, null)
+
+  for u in g
+    if u.getTypeId() == TlsUnitIds.Survivors.builder
+      let metadata = u.getMetadata()
+      if (metadata != null)
+        let comp = metadata.getPersistActiveAbilityComponent()
+        if (comp != null)
+          let basicRepairWasActive = comp.getAbilityActiveState(TlsAbilityIds.builderBasicRepair)
+          comp.setAbilityActiveState(TlsAbilityIds.builderSkilledRepair, basicRepairWasActive)
+          comp.updateAbilityStates()
+
+  g.release()
 
 // ============================================================================
 function unit.getThornsLevel() returns int
