@@ -294,7 +294,6 @@ namespace W3xPipeline
             const string indentStr2 = "    ";
 
             sb.AppendLine("// This file is generated. Any changes will be lost.");
-            sb.AppendLine($"// Last generated {DateTime.Now}");
             sb.AppendLine($"package BasesInit");
             sb.AppendLine($"import Bases");
             sb.AppendLine();
@@ -323,7 +322,7 @@ namespace W3xPipeline
                 }
 
                 sb.AppendLine($"{indentStr}");
-                sb.AppendLine($"{indentStr}Bases.registerBase(\"{baseDef.Id}\", {baseDifficulty}, vec2({pos.X}, {pos.Y}), angle({rot}), \"{baseDef.DisplayName}\")");
+                sb.AppendLine($"{indentStr}Bases.registerBase(\"{baseDef.Id}\", {baseDifficulty}, vec2({pos.X:F}, {pos.Y:F}), angle({rot:F}), \"{baseDef.DisplayName}\")");
 
                 foreach (var unitPlacement in baseDef.UnitPlacements)
                 {                    
@@ -334,12 +333,12 @@ namespace W3xPipeline
                         suffix = $" // {entityName}";
                     }
 
-                    sb.AppendLine($"{indentStr2}..registerUnitSpawner('{unitPlacement.Id}', vec2({unitPlacement.Position.X}, {unitPlacement.Position.Y}), angle({unitPlacement.RotationInRadians})) {suffix}");
+                    sb.AppendLine($"{indentStr2}..registerUnitSpawner('{unitPlacement.Id}', vec2({unitPlacement.Position.X:F}, {unitPlacement.Position.Y:F}), angle({unitPlacement.RotationInRadians:F})) {suffix}");
                 }
 
                 foreach (var region in baseDef.Regions)
                 {
-                    sb.AppendLine($"{indentStr2}..addRect({region.Bounds.Left}, {region.Bounds.Bottom}, {region.Bounds.Right}, {region.Bounds.Top})");
+                    sb.AppendLine($"{indentStr2}..addRect({region.Bounds.Left:F}, {region.Bounds.Bottom:F}, {region.Bounds.Right:F}, {region.Bounds.Top:F})");
                 }
             }
 

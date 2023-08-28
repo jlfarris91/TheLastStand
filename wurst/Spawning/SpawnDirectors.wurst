@@ -25,6 +25,7 @@ import MinimapIconComponent
 import LoadToc
 import UnitAdmin
 import Events
+import Gradient
 
 bool g_enableAutoKillEnemies = false
 
@@ -50,28 +51,38 @@ function onNightStart()
     let night = g_GameInstance.getNight()
     let diff = g_GameInstance.getPlayerDifficultyCoeff(p)
     let creditsOnActivation = 25 + ((night / 5).floor() + 1) * 25.0 * diff
+    let adminKey = "night{0}".format(night.toString())
 
-    g_zombieDirectors[p.getId()]
-    ..setCreditsOnActivation(creditsOnActivation)
-    ..enable()
+    let zombieDirector = g_zombieDirectors[p.getId()]
+    if (zombieDirector != null)
+      zombieDirector.setAdminKey(adminKey)
+      zombieDirector.setCreditsOnActivation(creditsOnActivation)
+      zombieDirector.enable()
 
     if (night > 1)
     //{
       if (night == 16)
-        g_bossDirectors[p.getId()]
-        ..setDeck(g_bossDecks.get(3))
-        ..setCreditsOnActivation(creditsOnActivation)
-        ..enable()
+        let bossDirector = g_bossDirectors[p.getId()]
+        if (bossDirector != null)
+          bossDirector.setAdminKey(adminKey)
+          bossDirector.setDeck(g_bossDecks.get(3))
+          bossDirector.setMaxAliveCount(context -> 1) // Always only 1 Archimonde
+          bossDirector.enable()
+
       else if (night mod 5 == 0)
-        g_bossDirectors[p.getId()]
-        ..setDeck(g_bossDecks.get((night / 5).floor() - 1))
-        ..setCreditsOnActivation(creditsOnActivation)
-        ..enable()
+        let bossDirector = g_bossDirectors[p.getId()]
+        if (bossDirector != null)
+          bossDirector.setAdminKey(adminKey)
+          bossDirector.setDeck(g_bossDecks.get((night / 5).floor() - 1))
+          bossDirector.enable()
+
       else
-        g_eliteDirectors[p.getId()]
-        ..setDeck(g_eliteDecks.get(night - 2))
-        ..setCreditsOnActivation(creditsOnActivation)
-        ..enable()
+        let eliteDirector = g_eliteDirectors[p.getId()]
+        if (eliteDirector != null)
+          eliteDirector.setAdminKey(adminKey)
+          eliteDirector.setDeck(g_eliteDecks.get(night - 2))
+          eliteDirector.setCreditsOnActivation(creditsOnActivation)
+          eliteDirector.enable()
     //}
   //}
 
@@ -143,6 +154,88 @@ function rewardGold(player p, int goldReward)
   ..show(p)
 
 // ============================================================================
+function createSpawnDirectors()
+
+  let zombieKillTimerRange = rangeReal(10.0, 20.0)
+  let eliteKillTimerRange = rangeReal(15.0, 30.0)
+  let bossKillTimerRange = rangeReal(45.0, 60.0)
+
+  Event2Callback<UnitAdmin, unit> onUnitSpawned = (UnitAdmin admin, unit u) -> 
+    if (g_enableAutoKillEnemies)
+      real killTime
+      if (u.isBoss())
+        killTime = bossKillTimerRange.getRandom()
+      else if (u.isElite())
+        killTime = eliteKillTimerRange.getRandom()
+      else
+        killTime = zombieKillTimerRange.getRandom()
+      doAfter(killTime, () -> u.kill())
+
+  // Credit values for bosses are fixed and don't change with game progression
+  let bossCreditsOnActivationList = new GradientList<real, real>(0, (real a, real b, real t) -> lerp(a, b, t))
+  bossCreditsOnActivationList.addEntry(0, 100)  // 1x tier 1 boss
+  bossCreditsOnActivationList.addEntry(1, 100)  // 1x tier 1 boss
+  bossCreditsOnActivationList.addEntry(2, 200)  // 2x tier 1 boss
+  bossCreditsOnActivationList.addEntry(3, 600)  // 1x tier 2 boss
+  bossCreditsOnActivationList.addEntry(4, 1200) // 2x tier 2 boss
+  bossCreditsOnActivationList.addEntry(5, 3600) // 1x tier 3 boss
+
+  for p in g_PlayingHumanPlayers
+  //{
+    let playerDifficulty = g_GameInstance.getPlayerDifficulty(p)
+    let goldDropAmountProp = p.getProperty(PlayerProperty.GOLD_DROP_AMOUNT)
+
+    let zombieCreditsOnActivation = 10 * Pow(playerDifficulty + 1, 2.275)
+
+    let zombieDirector = new SpawnUndeadUnitDirector(p.getId().toString() + ":Basic", p)
+    zombieDirector.setCreditMultiplier(playerDifficulty + 1)
+    zombieDirector.setCreditsOnActivation(zombieCreditsOnActivation)
+    zombieDirector.setIntervalBetweenWaves(rangeReal(2.0, 5.0))
+    zombieDirector.setIntervalDuringWaves(rangeReal(0.1, 1.0))
+    zombieDirector.setSpawnsPerGoldDrop(context -> 25)
+    zombieDirector.setGoldDropAmount(context -> goldDropAmountProp.getIntValue(1))
+    zombieDirector.setMaxSpawnCount(context -> UNLIMITED)
+    zombieDirector.setMaxAliveCount(context -> 10)
+    zombieDirector.setDeck(g_zombieDeck)
+    zombieDirector.getAdmin().onUnitRegistered().register(onUnitSpawned)
+    g_zombieDirectors[p.getId()] = zombieDirector
+    
+    let eliteCreditsOnActivation = 10 * Pow(playerDifficulty + 1, 2.275)
+    let eliteMaxAliveCount = 1 + max(playerDifficulty.floor() + 1, 1)
+
+    let eliteDirector = new SpawnUndeadUnitDirector(p.getId().toString() + ":Elite", p)
+    eliteDirector.setCreditMultiplier(playerDifficulty)
+    eliteDirector.setCreditsOnActivation(eliteCreditsOnActivation)
+    eliteDirector.setIntervalBetweenWaves(rangeReal(3.0, 10.0))
+    eliteDirector.setIntervalDuringWaves(rangeReal(0.1, 1.0))
+    eliteDirector.setSpawnsPerGoldDrop(context -> eliteMaxAliveCount)
+    eliteDirector.setGoldDropAmount(context -> goldDropAmountProp.getIntValue(1))
+    eliteDirector.setMaxSpawnCount(context -> eliteMaxAliveCount * 3)
+    eliteDirector.setMaxAliveCount(context -> eliteMaxAliveCount)
+    eliteDirector.setDeck(g_eliteDecks.get(0))
+    eliteDirector.getAdmin().onUnitRegistered().register(onUnitSpawned)
+    g_eliteDirectors[p.getId()] = eliteDirector
+
+    let bossDirector = new SpawnUndeadUnitDirector(p.getId().toString() + ":Boss", p)
+    bossDirector.setCreditMultiplier(playerDifficulty)
+    bossDirector.setCreditsOnActivation(bossCreditsOnActivationList.sample(playerDifficulty))
+    bossDirector.setIntervalBetweenWaves(rangeReal(3.0, 10.0))
+    bossDirector.setIntervalDuringWaves(rangeReal(0.1, 1.0))
+    bossDirector.setSpawnsPerGoldDrop(context -> 1)
+    bossDirector.setGoldDropAmount(context -> goldDropAmountProp.getIntValue(GOLD_PER_BOSS))
+    bossDirector.setMaxSpawnCount(context -> max(playerDifficulty, 1).floor())
+    bossDirector.setMaxAliveCount(context -> max(playerDifficulty, 1).floor())
+    bossDirector.setDeck(g_bossDecks.get(0))
+    bossDirector.getAdmin().onUnitRegistered().register(onUnitSpawned)
+    g_bossDirectors[p.getId()] = bossDirector
+  //}
+
+  if (DEV_ENVIRONMENT)
+    DirectorDebugger.registerDirector(g_zombieDirectors[0])
+    DirectorDebugger.registerDirector(g_eliteDirectors[0])
+    DirectorDebugger.registerDirector(g_bossDirectors[0])
+
+// ============================================================================
 init
   ensureTocIsLoaded()
 
@@ -191,82 +284,9 @@ init
   g_zombieDeck.addCategory("Zombies", 1.0)
   ..addCard(SpawnCards.zombies)
 
-  let zombieKillTimerRange = rangeReal(10.0, 20.0)
-  let eliteKillTimerRange = rangeReal(15.0, 30.0)
-  let bossKillTimerRange = rangeReal(45.0, 60.0)
-
-  Event2Callback<UnitAdmin, unit> onUnitSpawned = (UnitAdmin admin, unit u) -> 
-    if (g_enableAutoKillEnemies)
-      real killTime
-      if (u.isBoss())
-        killTime = bossKillTimerRange.getRandom()
-      else if (u.isElite())
-        killTime = eliteKillTimerRange.getRandom()
-      else
-        killTime = zombieKillTimerRange.getRandom()
-      doAfter(killTime, () -> u.kill())
-
-  nullTimer() () ->
-  //{
-
-    for p in g_PlayingHumanPlayers
-    //{
-      let playerDifficulty = g_GameInstance.getPlayerDifficulty(p)
-      let goldDropAmountProp = p.getProperty(PlayerProperty.GOLD_DROP_AMOUNT)
-
-      let zombieCreditsOnActivation = 10 * Pow(playerDifficulty + 1, 2.275)
-
-      let zombieDirector = new SpawnUndeadUnitDirector(p.getId().toString() + ":Basic", p)
-      zombieDirector.setCreditMultiplier(playerDifficulty + 1)
-      zombieDirector.setCreditsOnActivation(zombieCreditsOnActivation)
-      zombieDirector.setIntervalBetweenWaves(rangeReal(2.0, 5.0))
-      zombieDirector.setIntervalDuringWaves(rangeReal(0.1, 1.0))
-      zombieDirector.setSpawnsPerGoldDrop(context -> 25)
-      zombieDirector.setGoldDropAmount(context -> goldDropAmountProp.getIntValue(1))
-      zombieDirector.setMaxSpawnCount(context -> UNLIMITED)
-      zombieDirector.setMaxAliveCount(context -> 10)
-      zombieDirector.setDeck(g_zombieDeck)
-      zombieDirector.getAdmin().onUnitRegistered().register(onUnitSpawned)
-      g_zombieDirectors[p.getId()] = zombieDirector
-      
-      let eliteCreditsOnActivation = 10 * Pow(playerDifficulty + 1, 2.275)
-      let eliteMaxAliveCount = 1 + max(playerDifficulty.floor() + 1, 1)
-
-      let eliteDirector = new SpawnUndeadUnitDirector(p.getId().toString() + ":Elite", p)
-      eliteDirector.setCreditMultiplier(playerDifficulty)
-      eliteDirector.setCreditsOnActivation(eliteCreditsOnActivation)
-      eliteDirector.setIntervalBetweenWaves(rangeReal(3.0, 10.0))
-      eliteDirector.setIntervalDuringWaves(rangeReal(0.1, 1.0))
-      eliteDirector.setSpawnsPerGoldDrop(context -> eliteMaxAliveCount)
-      eliteDirector.setGoldDropAmount(context -> goldDropAmountProp.getIntValue(1))
-      eliteDirector.setMaxSpawnCount(context -> eliteMaxAliveCount * 3)
-      eliteDirector.setMaxAliveCount(context -> eliteMaxAliveCount)
-      eliteDirector.setDeck(g_eliteDecks.get(0))
-      eliteDirector.getAdmin().onUnitRegistered().register(onUnitSpawned)
-      g_eliteDirectors[p.getId()] = eliteDirector
-      
-      let bossCreditsOnActivation = 70 + 12 * Pow(playerDifficulty + 1, 3)
-
-      let bossDirector = new SpawnUndeadUnitDirector(p.getId().toString() + ":Boss", p)
-      bossDirector.setCreditMultiplier(playerDifficulty)
-      bossDirector.setCreditsOnActivation(bossCreditsOnActivation)
-      bossDirector.setIntervalBetweenWaves(rangeReal(3.0, 10.0))
-      bossDirector.setIntervalDuringWaves(rangeReal(0.1, 1.0))
-      bossDirector.setSpawnsPerGoldDrop(context -> 1)
-      bossDirector.setGoldDropAmount(context -> goldDropAmountProp.getIntValue(GOLD_PER_BOSS))
-      bossDirector.setMaxSpawnCount(context -> max(playerDifficulty.floor(), 1))
-      bossDirector.setMaxAliveCount(context -> max(playerDifficulty.floor(), 1))
-      bossDirector.setDeck(g_bossDecks.get(0))
-      bossDirector.getAdmin().onUnitRegistered().register(onUnitSpawned)
-      g_bossDirectors[p.getId()] = bossDirector
-    //}
-
-    if (DEV_ENVIRONMENT)
-      DirectorDebugger.registerDirector(g_zombieDirectors[0])
-      DirectorDebugger.registerDirector(g_eliteDirectors[0])
-      DirectorDebugger.registerDirector(g_bossDirectors[0])
-  //}
-
   registerNightEvent(function onNightStart)
   registerDayEvent(function onDayStart)
   registerTimeOfDayEvent(TIME_OF_SPAWNS_END, function onTimeOfSpawnsEnd)
+
+  g_GameInstance.onGameStarted().register() -> 
+    createSpawnDirectors()

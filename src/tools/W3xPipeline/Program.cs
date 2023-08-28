@@ -34,6 +34,7 @@
                 args = ProgramArgs.Parse(rawArgs);
 
                 sLogger.Log("----- Program Args -----");
+                sLogger.Log($"Args: {string.Join(" ", rawArgs)}");
                 sLogger.Log($"Source Map directory: {args.SourceMapDirectory.FullName}");
                 sLogger.Log($"Output file path: {args.OutputMapFile.FullName}");
                 sLogger.Log($"Intermediate dir: {args.IntermediateDirectory.FullName}");

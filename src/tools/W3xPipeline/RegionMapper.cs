@@ -1,4 +1,6 @@
-﻿namespace W3xPipeline
+﻿using System.Diagnostics;
+
+namespace W3xPipeline
 {
     using System;
     using System.Collections.Generic;

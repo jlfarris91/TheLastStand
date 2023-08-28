@@ -50,20 +50,59 @@ public class SummonerComponent extends UnitComponent
     m_abilityId = abilityId
 
   // --------------------------------------------------------------------------
+  function modifySummonedUnit(unit summonedUnit)
+
+    if (m_spawnContext == null)
+      return
+    
+    let summonedMetadata = summonedUnit.getMetadata()
+    if (summonedMetadata == null)
+      return
+
+    let definition = m_spawnContext.getSpawnDefinition()
+    if (definition == null)
+      error("No spawn definition exists for spawn context")
+      return
+
+    let summonedTypeId = summonedUnit.getTypeId()
+
+    let modifier = definition.getUnitModifier(summonedTypeId)
+    if (modifier == null)
+      error("No modifier for unit summoned of type " + summonedTypeId.toRawCode())
+      return
+
+    modifier.call(summonedUnit, m_spawnContext)
+
+    let admin = m_spawnContext.getAdmin()
+    if (admin != null)
+      admin.registerOwnedUnit(summonedUnit)
+
+    let summonerUTC = getOwnerUnit().getUndeadTargetingComponent()
+    if (summonerUTC == null)
+      return
+
+    let summonedUTC = summonedMetadata.getUndeadTargetingComponent()
+    if (summonedUTC != null)
+      summonedUTC.setTargetPlayer(summonerUTC.getTargetPlayer())
+
+  // --------------------------------------------------------------------------
   override function onEnabled()
     super.onEnabled()
 
-    let ownerUnit = getOwnerUnit()
-    if (not ownerUnit.hasAbility(m_abilityId))
-      ownerUnit.addAbility(m_abilityId)
-    
-    let unitTypeId = ownerUnit.getTypeId()
-    if (unitTypeId == m_summonerUnitTypes[1])
-      ownerUnit.setAbilityLevel(m_abilityId, 2)
-    else if (unitTypeId == m_summonerUnitTypes[2])
-      ownerUnit.setAbilityLevel(m_abilityId, 3)
-    else
-      ownerUnit.setAbilityLevel(m_abilityId, 1)
+    if (m_abilityId != 0)
+    //{
+      let ownerUnit = getOwnerUnit()
+      if (not ownerUnit.hasAbility(m_abilityId))
+        ownerUnit.addAbility(m_abilityId)
+      
+      let unitTypeId = ownerUnit.getTypeId()
+      if (unitTypeId == m_summonerUnitTypes[1])
+        ownerUnit.setAbilityLevel(m_abilityId, 2)
+      else if (unitTypeId == m_summonerUnitTypes[2])
+        ownerUnit.setAbilityLevel(m_abilityId, 3)
+      else
+        ownerUnit.setAbilityLevel(m_abilityId, 1)
+    //}
 
 // ============================================================================
 public function IUnitMetadata.getSummonerComponent() returns SummonerComponent
@@ -98,41 +137,7 @@ function onUnitSummoned()
   if (comp == null)
     return
 
-  let spawnContext = comp.getSpawnContext()
-  if (spawnContext == null)
-    error("Summoner was spawned with no spawn context!")
-    return
-
-  let summoned = GetSummonedUnit()
-  let summonedTypeId = summoned.getTypeId()
-
-  let definition = spawnContext.getSpawnDefinition()
-  if (definition == null)
-    error("No spawn definition exists for spawn context")
-    return
-
-  let modifier = definition.getUnitModifier(summonedTypeId)
-  if (modifier == null)
-    error("No modifier for unit summoned of type " + summonedTypeId.toRawCode())
-    return
-
-  modifier.call(summoned, spawnContext)
-
-  let admin = spawnContext.getAdmin()
-  if (admin != null)
-    admin.registerOwnedUnit(summoned)
-
-  let summonerUTC = metadata.getUndeadTargetingComponent()
-  if (summonerUTC == null)
-    return
-  
-  let summonedMetadata = summoned.getMetadata()
-  if (summonedMetadata == null)
-    return
-
-  let summonedUTC = summonedMetadata.getUndeadTargetingComponent()
-  if (summonedUTC != null)
-    summonedUTC.setTargetPlayer(summonerUTC.getTargetPlayer())
+  comp.modifySummonedUnit(GetSummonedUnit())  
 
 // ============================================================================
 init
