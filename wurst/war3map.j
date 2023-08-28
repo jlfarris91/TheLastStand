@@ -91,18 +91,6 @@ endfunction
 //***************************************************************************
 
 //===========================================================================
-function CreateUnitsForPlayer0 takes nothing returns nothing
-    local player p = Player(0)
-    local unit u
-    local integer unitID
-    local trigger t
-    local real life
-
-    set u = BlzCreateUnitWithSkin( p, 'h00J', -7584.8, -4725.3, -46.946, 'h00J' )
-    call SetUnitColor( u, ConvertPlayerColor(4) )
-endfunction
-
-//===========================================================================
 
 //===========================================================================
 
@@ -430,6 +418,9 @@ function CreateUnitsForPlayer20 takes nothing returns nothing
     call SetUnitColor( u, ConvertPlayerColor(6) )
     set u = BlzCreateUnitWithSkin( p, 'h00O', -10703.6, -8343.3, 276.867, 'h00O' )
     call SetUnitColor( u, ConvertPlayerColor(6) )
+    set u = BlzCreateUnitWithSkin( p, 'h004', -7208.7, -2762.7, 126.367, 'h004' )
+    set u = BlzCreateUnitWithSkin( p, 'h007', -7520.2, -3081.6, 266.215, 'h007' )
+    set u = BlzCreateUnitWithSkin( p, 'h01K', -7612.8, -3071.4, 36.476, 'h01K' )
 endfunction
 
 //===========================================================================
@@ -495,7 +486,7 @@ function CreateNeutralPassive takes nothing returns nothing
     set u = BlzCreateUnitWithSkin( p, 'h00L', 54.0, 7506.4, 223.703, 'h00L' )
     set u = BlzCreateUnitWithSkin( p, 'h00L', 642.3, 7203.3, 347.646, 'h00L' )
     set u = BlzCreateUnitWithSkin( p, 'h00L', 2543.2, 8839.5, 254.341, 'h00L' )
-    set u = BlzCreateUnitWithSkin( p, 'h00L', -8552.8, -5394.5, -60.302, 'h00L' )
+    set u = BlzCreateUnitWithSkin( p, 'h00L', -8552.8, -5394.5, 299.698, 'h00L' )
     set u = BlzCreateUnitWithSkin( p, 'h00L', -9396.4, -6072.0, 95.525, 'h00L' )
     set u = BlzCreateUnitWithSkin( p, 'h00L', -11188.4, -5658.3, 305.434, 'h00L' )
     set u = BlzCreateUnitWithSkin( p, 'h00L', -8824.5, -8623.6, 237.396, 'h00L' )
@@ -532,7 +523,6 @@ endfunction
 
 //===========================================================================
 function CreatePlayerUnits takes nothing returns nothing
-    call CreateUnitsForPlayer0(  )
     call CreateUnitsForPlayer20(  )
 endfunction
 

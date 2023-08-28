@@ -2,14 +2,17 @@ package ForgottenOneComponent
 import UnitMetadata
 import Trace
 import UndeadTargetingComponent
-import TlsAbilityIds
 import HashMap
-import Orders
 import World
 import CancellationToken
 import Jobs
+import Elites
+import TlsUnitIds
+import SummonerComponent
+import GameConstants
+import Range
+import Math
 
-constant int SUMMON_ORDER_ID = OrderIds.ward
 HashMap<unit, unit> g_summonedToSummonerMap = new HashMap<unit, unit>()
 
 // ============================================================================
@@ -24,9 +27,13 @@ public class ForgottenOneComponent extends UnitComponent
   override function onEnabled()
     super.onEnabled()
 
-    m_ct = new CancellationToken()
+    m_ct = new CancellationToken()..acquire()
 
-    let tentacleSpawnJob = new TentacleSpawnRequest(getOwnerUnit())
+    let ownerUnit = getOwnerUnit()
+    let tier = getTier(ownerUnit.getTypeId())
+    let cooldown = lerp(15.0, 10.0, parameterize01(0, MAX_ELITE_TIER - 1, tier))
+
+    let tentacleSpawnJob = new TentacleSpawnRequest(ownerUnit, TlsUnitIds.Undead.tentacles[tier], cooldown)
     World.unitSpawnThread.enqueue(m_ct, tentacleSpawnJob)
 
   // --------------------------------------------------------------------------
@@ -40,12 +47,16 @@ public class ForgottenOneComponent extends UnitComponent
 class TentacleSpawnRequest extends Job
   private unit m_owner
   private timer m_timer
+  private int m_summonUnitTypeId
+  private real m_cooldown
 
   // --------------------------------------------------------------------------
-  construct(unit owner)
+  construct(unit owner, int summonUnitTypeId, real cooldown)
     super("Tentacle", 300.0)
     m_owner = owner
     m_timer = CreateTimer()
+    m_summonUnitTypeId = summonUnitTypeId
+    m_cooldown = cooldown
 
   // --------------------------------------------------------------------------
   ondestroy
@@ -73,18 +84,37 @@ class TentacleSpawnRequest extends Job
     if (utp == null)
       return 0
 
-    let targetUnit = utp.getRandomTargetUnit(true)
+    // Find a target unit even if that unit is unreachable
+    var targetUnit = utp.getRandomOrganicTargetIncludingUnreachable(m_owner.getPos(), rangeReal(0, SPAWN_RANGE_FAR.max))
+    if (targetUnit == null)
+      targetUnit = utp.getRandomStructureTargetIncludingUnreachable(m_owner.getPos(), rangeReal(0, SPAWN_RANGE_FAR.max))
+      
+    if (targetUnit == null)
+      // Try again after a random number of seconds
+      m_timer.start(GetRandomReal(1.0, 5.0), null)
+      return 0
 
-    if (m_owner.issuePointOrderById(SUMMON_ORDER_ID, targetUnit.getPos()))
-      Trace.trace("ForgottenOne.summon")
-      let abilLvl = m_owner.getAbilityLevel(TlsAbilityIds.spawnTentacles)
-      let cooldown = m_owner.getAbilityCooldown(TlsAbilityIds.spawnTentacles, abilLvl)
-      m_timer.start(cooldown, null)
-      return 1
+    // Pick a random spawn point around the target unit within attack range
+    let pos = targetUnit.getPos().polarOffset(GetRandomDirectionDeg().asAngleDegrees(), MELEE_UNIT_ATTACK_RANGE.toReal())
 
-    // Try again after a random number of seconds
-    m_timer.start(GetRandomReal(1.0, 5.0), null)
-    return 0
+    let summonedUnit = createUnitTLS(m_owner.getOwner(), m_summonUnitTypeId, pos, angle(0))
+    if (summonedUnit == null)
+      return 0
+
+    let tier = getTier(summonedUnit.getTypeId())
+    summonedUnit.setTimedLife(30.0 + tier * 10.0)
+
+    let summonerComponent = m_owner.getSummonerComponent()
+    if (summonerComponent == null)
+      return 0
+      
+    summonerComponent.modifySummonedUnit(summonedUnit)
+
+    Trace.trace("ForgottenOne.summon")
+
+    m_timer.start(m_cooldown, null)
+
+    return 1
 
   // --------------------------------------------------------------------------
   override function hasNext() returns bool
